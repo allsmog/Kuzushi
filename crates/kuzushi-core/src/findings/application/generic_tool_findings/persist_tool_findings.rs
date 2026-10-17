@@ -37,16 +37,31 @@ pub(crate) fn persist_tool_findings_to(
     target: &Path,
     findings: &[Finding],
 ) -> Result<Option<GenericPersistedRun>> {
+    persist_tool_findings_to_with_status(
+        sink,
+        target,
+        findings,
+        crate::run_lifecycle::RunItemStatus::Completed,
+    )
+}
+
+pub(crate) fn persist_tool_findings_to_with_status(
+    sink: ToolFindingsSink<'_>,
+    target: &Path,
+    findings: &[Finding],
+    status: crate::run_lifecycle::RunItemStatus,
+) -> Result<Option<GenericPersistedRun>> {
     let (Some(workspace), Some(store)) = (sink.workspace, sink.store) else {
         return Ok(None);
     };
     workspace.ensure_state_dir()?;
-    crate::findings::commit_observed_findings(
+    crate::findings::commit_observed_findings_with_status(
         store,
         sink.observation.as_ref(),
         &sink.run_id,
         target,
         findings,
+        status,
     )?;
     Ok(Some(GenericPersistedRun {
         run_id: sink.run_id,
@@ -88,7 +103,13 @@ mod tests {
         let target = tempfile::tempdir().unwrap();
         let (workspace, store) = open_store(target.path());
         let known = test_finding("secret-scan/known");
-        persist_observed(target.path(), &workspace, &store, "run-first", &[known.clone()]);
+        persist_observed(
+            target.path(),
+            &workspace,
+            &store,
+            "run-first",
+            &[known.clone()],
+        );
 
         let fresh = [known, test_finding("secret-scan/fresh")];
         persist_observed(target.path(), &workspace, &store, "run-second", &fresh);
@@ -172,10 +193,9 @@ mod tests {
     ) -> GenericPersistedRun {
         let config = crate::V2Config::default();
         // Dropping the trace joins the run-item writer so projections see it.
-        let trace = TraceHandle::observed_jsonl_with_delivery_subscribers(
-            target, run_id, None, None, None,
-        )
-        .unwrap();
+        let trace =
+            TraceHandle::observed_jsonl_with_delivery_subscribers(target, run_id, None, None, None)
+                .unwrap();
         let ctx = ToolExecutionContext {
             config: &config,
             workspace: Some(workspace),

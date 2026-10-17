@@ -2,8 +2,6 @@ use kuzushi_core::{ExecutionAuthorization, PreparedToolInput};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
-const TAINT_IRIS_NEXT_CATALOG_ARTIFACT: &str = "taint-iris-next-catalog.json";
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrereqStep {
     pub tool: String,
@@ -253,7 +251,6 @@ pub fn prereq_steps_for(tool: &str, target: &Path) -> Vec<PrereqStep> {
     match prereq_chain_kind_for_tool(tool) {
         PrereqChainKind::ThreatModel => vec![context_step(target), threat_model_step(target)],
         PrereqChainKind::Context => vec![context_step(target)],
-        PrereqChainKind::TaintCatalog => vec![context_step(target), taint_catalog_step(target)],
         PrereqChainKind::None => Vec::new(),
     }
 }
@@ -262,7 +259,6 @@ pub fn prereq_steps_for(tool: &str, target: &Path) -> Vec<PrereqStep> {
 enum PrereqChainKind {
     ThreatModel,
     Context,
-    TaintCatalog,
     None,
 }
 
@@ -277,7 +273,7 @@ fn prereq_chain_kind_for_tool(tool: &str) -> PrereqChainKind {
         return PrereqChainKind::Context;
     }
     if tool == "taint-iris-next:hunt" {
-        return PrereqChainKind::TaintCatalog;
+        return PrereqChainKind::Context;
     }
     PrereqChainKind::None
 }
@@ -285,11 +281,7 @@ fn prereq_chain_kind_for_tool(tool: &str) -> PrereqChainKind {
 fn context_only_prereq_tool(tool: &str) -> bool {
     matches!(
         tool,
-        "threat-model:build"
-            | "taint-iris-next:catalog"
-            | "taint-iris:hunt"
-            | "agentic-sast:scan"
-            | "sast:scan"
+        "threat-model:build" | "taint-iris:hunt" | "agentic-sast:scan" | "sast:scan"
     )
 }
 
@@ -302,22 +294,6 @@ fn context_step(target: &Path) -> PrereqStep {
         false,
         "local repository indexing; filesystem read plus .kuzushi artifact write",
         "no model cost expected",
-    )
-}
-
-fn prereq_workspace_root(target: &Path) -> PathBuf {
-    kuzushi_core::workspace_state_root(target)
-}
-
-fn taint_catalog_step(target: &Path) -> PrereqStep {
-    PrereqStep::new(
-        "taint-iris-next:catalog",
-        prereq_workspace_root(target).join(TAINT_IRIS_NEXT_CATALOG_ARTIFACT),
-        "taint-iris-next catalog",
-        true,
-        true,
-        "model-backed catalog generation; writes a target-specific taint catalog artifact",
-        "token cost unknown until the provider returns usage",
     )
 }
 
@@ -366,17 +342,11 @@ mod tests {
     }
 
     #[test]
-    fn taint_iris_next_hunt_chain_is_context_then_per_target_catalog() {
+    fn taint_hunt_never_generates_or_accepts_a_catalog_as_a_prerequisite() {
         let steps = prereq_steps_for("taint-iris-next:hunt", Path::new("/tmp/repo"));
-        assert_eq!(steps.len(), 2);
+        assert_eq!(steps.len(), 1);
         assert_eq!(steps[0].tool, "context:build");
-        assert!(steps[0]
-            .artifact_path
-            .ends_with(".kuzushi/context-snapshot.json"));
-        assert_eq!(steps[1].tool, "taint-iris-next:catalog");
-        assert!(steps[1]
-            .artifact_path
-            .ends_with(".kuzushi/taint-iris-next-catalog.json"));
+        assert!(!steps[0].model_backed);
     }
 
     #[test]
@@ -391,17 +361,17 @@ mod tests {
             threat_model_step(target).artifact_path,
             kuzushi_core::capabilities::persistent_threat_model_path(target)
         );
-        assert_eq!(
-            taint_catalog_step(target).artifact_path,
-            kuzushi_core::workspace_state_root(target).join(TAINT_IRIS_NEXT_CATALOG_ARTIFACT)
-        );
     }
 
     #[test]
-    fn taint_iris_next_catalog_chain_includes_context() {
-        let steps = prereq_steps_for("taint-iris-next:catalog", Path::new("/tmp/repo"));
-        assert_eq!(steps.len(), 1);
-        assert_eq!(steps[0].tool, "context:build");
+    fn catalog_actions_do_not_invent_context_or_model_prerequisite_jobs() {
+        for tool in [
+            "taint-iris-next:catalog",
+            "taint-iris-next:catalog-read",
+            "taint-iris-next:catalog-accept",
+        ] {
+            assert!(prereq_steps_for(tool, Path::new("/tmp/repo")).is_empty());
+        }
     }
 
     #[test]

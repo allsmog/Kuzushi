@@ -9,6 +9,8 @@ use std::collections::BTreeMap;
 
 mod model;
 mod scene;
+mod selection;
+use selection::{finding_context_is_visible, selected_runs};
 
 pub(crate) use model::{
     ScreenContext, ScreenCount, ScreenCursor, ScreenEvidenceContext, ScreenFindingSummary,
@@ -28,13 +30,19 @@ const SCREEN_CONTEXT_LIST_LIMIT: usize = 12;
 const SCREEN_CONTEXT_TEXT_LIMIT: usize = 4000;
 
 pub(crate) fn screen_context_model(app: &ShellApp) -> ScreenContext {
+    let runs = selected_runs(app);
+    let selected_run = selection::single_run_label(app, &runs);
+    let selected_run_count = runs.len();
     ScreenContext {
         view: shell_view_label(app),
         focused_pane: focused_pane_label(app),
         selected_item: selected_item(app),
-        selected_run: selected_run(app),
+        selected_run,
+        selected_runs: runs.into_iter().take(SCREEN_CONTEXT_LIST_LIMIT).collect(),
+        selected_run_count,
         selected_revision: selected_revision(app),
         active_phase: active_phase(app),
+        displayed_phase: selection::displayed_phase(app),
         active_filters: active_filters(app),
         selected_scope: selected_scope(app),
         finding_summary: finding_summary(app),
@@ -170,6 +178,9 @@ fn pane_focus_label(pane: PaneFocus) -> &'static str {
 }
 
 fn selected_item(app: &ShellApp) -> Option<ScreenSelectedItem> {
+    if !finding_context_is_visible(app) {
+        return None;
+    }
     let (alias, finding) = super::current_finding_for_detail(app)?;
     Some(selected_item_from_finding(&finding, alias))
 }
@@ -294,21 +305,11 @@ fn runtime_verification_state(finding: &Finding) -> String {
         .unwrap_or_else(|| "not_verified".to_string())
 }
 
-fn selected_run(app: &ShellApp) -> Option<String> {
-    match &app.shell_view() {
-        ShellView::Replay => Some(app.router.replay().run_id_owned()),
-        ShellView::Trace => Some(app.router.trace().run_id_owned()),
-        ShellView::RunDiff => Some(app.router.run_diff().label()),
-        _ => app
-            .active_tool_run_id()
-            .map(str::to_string)
-            .or_else(|| app.scan().and_then(|scan| scan.run_id.clone()))
-            .or_else(|| app.activity().map(|activity| activity.run_id.clone()))
-            .or_else(|| app.agent_chat().and_then(|agent| agent.run_id.clone())),
-    }
-}
-
 fn selected_revision(app: &ShellApp) -> Option<ScreenRevision> {
+    // Report names recorded source in its body. Checkout metadata is not its source identity.
+    if app.shell_view() == ShellView::Report {
+        return None;
+    }
     match app
         .workbench_cache()
         .borrow()
@@ -347,7 +348,7 @@ fn selected_scope(app: &ShellApp) -> Option<String> {
 }
 
 fn finding_summary(app: &ShellApp) -> Option<ScreenFindingSummary> {
-    if !matches!(app.shell_view(), ShellView::Workbench) || app.findings().is_empty() {
+    if !finding_context_is_visible(app) || app.findings().is_empty() {
         return None;
     }
     let findings = projected_visible_findings(app)
@@ -430,8 +431,15 @@ fn visible_rows(app: &ShellApp) -> Vec<String> {
         ),
         ShellView::Activity => visible_activity_rows(app),
         ShellView::StrategyQueue => visible_strategy_rows(app),
-        _ => visible_finding_rows(app),
+        _ => visible_rows_for_finding_context(app),
     }
+}
+
+fn visible_rows_for_finding_context(app: &ShellApp) -> Vec<String> {
+    if finding_context_is_visible(app) {
+        return visible_finding_rows(app);
+    }
+    Vec::new()
 }
 
 fn visible_finding_rows(app: &ShellApp) -> Vec<String> {

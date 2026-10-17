@@ -166,6 +166,7 @@ fn sast_scan_options() -> Vec<OptionSpec> {
     options.extend(sast_agent_policy_options());
     options.extend(sast_agent_runtime_options());
     options.extend(sast_taint_backend_options());
+    options.push(super::carlini_threat_hunt_module::taint_catalog_digest_option());
     options.extend(sast_taint_cwe_limit_options());
     options.extend(sast_taint_output_limit_options());
     options.push(mcps_option());
@@ -709,11 +710,11 @@ fn agentic_sast_scan_options() -> Vec<OptionSpec> {
     options.extend(agentic_sast_filter_options());
     options.extend(agentic_inventory_options());
     options.extend(agentic_sast_chunk_options());
-    options.extend(agentic_sast_auto_triage_options());
     options.push(max_model_turns_option(
         crate::capabilities::agentic_sast::DEFAULT_AGENTIC_MODEL_TURNS,
     ));
     options.push(model_option());
+    super::agentic_sast::describe_strategy_options(&mut options);
     options
 }
 
@@ -759,10 +760,17 @@ fn agentic_sast_filter_options() -> Vec<OptionSpec> {
 
 fn agentic_sast_chunk_options() -> Vec<OptionSpec> {
     let mut options = vec![
-        opt("strategy", OptionType::Enum, "Agentic SAST strategy.")
+        opt("strategy", OptionType::Enum, "Standard owns accepted context, prompts, filters and limits. Chunked is experimental legacy analysis using its language prompt and separate chunk controls.")
             .choices(&["standard", "chunked"])
             .default(json!("standard"))
             .advanced(),
+    ];
+    options.extend(agentic_sast_chunk_only_options());
+    options
+}
+
+pub(in crate::modules) fn agentic_sast_chunk_only_options() -> Vec<OptionSpec> {
+    let mut options = vec![
         opt(
             "language",
             OptionType::Enum,
@@ -773,8 +781,9 @@ fn agentic_sast_chunk_options() -> Vec<OptionSpec> {
         opt(
             "maxTokensPerChunk",
             OptionType::Int,
-            "Chunked strategy token budget per chunk.",
+            "Chunked strategy approximate input tokens per chunk.",
         )
+        .integer_range(1, i64::MAX)
         .advanced(),
         opt(
             "depositUsdPerChunk",
@@ -784,6 +793,7 @@ fn agentic_sast_chunk_options() -> Vec<OptionSpec> {
         .advanced(),
     ];
     options.extend(agentic_sast_chunk_execution_options());
+    options.extend(agentic_sast_auto_triage_options());
     options
 }
 
@@ -792,7 +802,7 @@ fn agentic_sast_chunk_execution_options() -> Vec<OptionSpec> {
         opt(
             "dryRun",
             OptionType::Bool,
-            "Plan chunked strategy cost without model calls.",
+            "Plan chunked work with bounded inventory and source limits (100000 entries/files, 512 MiB source). Partial plans grant no execution; primary Scan still requires its investigation allowance.",
         )
         .advanced(),
         opt(
@@ -802,17 +812,12 @@ fn agentic_sast_chunk_execution_options() -> Vec<OptionSpec> {
         )
         .workspace_read()
         .advanced(),
-        opt(
-            "failedChunkIds",
-            OptionType::String,
-            "Chunked strategy retry filter.",
-        )
-        .advanced(),
+        full_mode_failed_chunk_ids_option().advanced(),
+        chunked_cache_option(),
         opt(
             "budgetUsd",
             OptionType::Float,
-            "Chunked strategy per-run USD ceiling; stops dispatching new \
-             chunks gracefully and keeps completed-chunk findings.",
+            "Chunked observed-cost stop. A request can exceed this amount and charges may be unknown. Approved call limits remain required.",
         )
         .advanced(),
     ]

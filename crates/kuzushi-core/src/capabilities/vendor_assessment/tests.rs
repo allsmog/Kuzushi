@@ -55,19 +55,11 @@ mod tests {
                 |path| path.ends_with(".kuzushi/vendor-assessment/runs/run-prompts/prompts")
             ));
 
-        let report = assess(temp.path(), update, None, None, || {
-            Ok("openai:gpt-test".to_string())
+        let error = assess(temp.path(), update, None, None, || {
+            panic!("Missing parsed evidence must not resolve a model")
         })
-        .expect("fallback assessment");
-        assert_completed_envelope(&report, "Vendor assessment complete");
-        assert!(report
-            .get("artifacts")
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|artifacts| artifacts.len() == 4));
-        assert!(report
-            .pointer("/artifacts/0/path")
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(|path| path.ends_with("report.md")));
+        .unwrap_err();
+        assert!(error.to_string().contains("Attach parsed text evidence"));
     }
 
     #[test]
@@ -158,3 +150,6 @@ mod tests {
             .is_some_and(Vec::is_empty));
     }
 }
+
+#[path = "tests/contracts.rs"]
+mod contracts;

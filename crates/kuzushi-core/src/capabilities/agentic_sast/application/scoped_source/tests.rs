@@ -1,4 +1,6 @@
 use super::*;
+use crate::allowance::InvestigationWork;
+use crate::runtime::scripted_fixture::account_scripted_runtime;
 use crate::runtime::{AgentToolPolicyReceipt, READ_ONLY_ASK_TOOLS};
 use crate::workspace::{
     accept_scan_scope_proposal, create_scan_scope_proposal, ProposedScanScope, ScanScopeDraft,
@@ -142,12 +144,13 @@ fn exact_scope_inherits_context_but_does_not_import_context_or_unapproved_findin
     let store = crate::findings::FindingStore::open(workspace.findings_db_path()).unwrap();
     let mut ctx = context(&workspace, &config);
     ctx.findings_store = Some(&store);
+    let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Discovery, 1);
     let result = crate::ModuleRegistry::with_v2_builtins()
         .execute_tool_with_runtime(
             "agentic-sast:scan",
             json!({"scanScopeRef":reference,"threatModelRef":null,"scanContextRef":null}),
             &ctx,
-            Some(&runtime),
+            Some(&accounted),
         )
         .unwrap();
     assert_eq!(result["data"]["count"], 1);
@@ -172,6 +175,20 @@ fn exact_scope_inherits_context_but_does_not_import_context_or_unapproved_findin
             "OWNED_CONTEXT"
         )));
     assert!(!requests[0].prompt.contains("UNAPPROVED%5FSOURCE"));
+    assert_eq!(store.list_findings(10).unwrap().len(), 1);
+    let receipt = crate::SpendLimiter::open(workspace.findings_db_path())
+        .unwrap()
+        .allowance_snapshot(
+            &accounted
+                .allowance_binding()
+                .unwrap()
+                .work()
+                .investigation_id,
+        )
+        .unwrap();
+    assert_eq!(receipt.committed_calls, 1);
+    assert_eq!(receipt.unresolved_calls, 0);
+    assert!(!receipt.cost.is_complete());
 }
 
 #[test]
@@ -188,16 +205,35 @@ fn unsupported_scoped_runtime_starts_no_model_query() {
         requests: Mutex::new(Vec::new()),
         acknowledges: false,
     };
-    let error = run_agentic_sast_report(
-        &json!({"scanScopeRef":reference,"threatModelRef":null,"scanContextRef":null}),
-        &context(&workspace, &config),
-        Some(&runtime),
-    )
-    .unwrap_err();
-    assert!(error
-        .to_string()
-        .contains("no scoped model request started"));
+    let store = crate::findings::FindingStore::open(workspace.findings_db_path()).unwrap();
+    let mut ctx = context(&workspace, &config);
+    ctx.findings_store = Some(&store);
+    let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Discovery, 1);
+    let error = crate::ModuleRegistry::with_v2_builtins()
+        .execute_tool_with_runtime(
+            "agentic-sast:scan",
+            json!({"scanScopeRef":reference,"threatModelRef":null,"scanContextRef":null}),
+            &ctx,
+            Some(&accounted),
+        )
+        .unwrap_err();
+    assert!(
+        format!("{error:#}").contains("no scoped model request started"),
+        "{error:#}"
+    );
     assert!(runtime.requests.lock().unwrap().is_empty());
+    let receipt = crate::SpendLimiter::open(workspace.findings_db_path())
+        .unwrap()
+        .allowance_snapshot(
+            &accounted
+                .allowance_binding()
+                .unwrap()
+                .work()
+                .investigation_id,
+        )
+        .unwrap();
+    assert_eq!(receipt.committed_calls, 0);
+    assert_eq!(receipt.unresolved_calls, 0);
 }
 
 #[test]

@@ -234,3 +234,122 @@ fn missing_or_unlinked_diagrams_never_offer_implicit_generation() {
         .unwrap()
         .contains("Context preview unavailable"));
 }
+
+#[test]
+fn finding_link_uses_the_inactive_revision_and_back_restores_its_entire_draft() {
+    let (root, mut app, selected, active) = graph_fixture();
+    app.set_input("unsent\ncontext draft");
+    app.set_cursor(4);
+    app.set_active_findings_filter(Some("severity:high".into()));
+    key(&mut app, KeyCode::Char('v'));
+    key(&mut app, KeyCode::Down);
+    key(&mut app, KeyCode::Enter);
+    key(&mut app, KeyCode::PageDown);
+    let previous = app.router.campaign().batch_scan_config.clone().unwrap();
+    let update = app.reduce_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE));
+    let [ShellEffect::RefreshFindings(request)] = update.effects.as_slice() else {
+        panic!("Finding links must only request a ledger read");
+    };
+    let filter =
+        kuzushi_core::FindingListFilter::from_filter_expression(request.filter.as_deref().unwrap())
+            .unwrap();
+    assert_eq!(filter.file_paths, ["main.rs"]);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
+    assert!(app.router.campaign().batch_scan_config.is_none());
+    assert_eq!(
+        load_active_threat_model(root.path())
+            .unwrap()
+            .unwrap()
+            .model_ref,
+        active
+    );
+    app.go_back();
+    assert_eq!(
+        app.router.campaign().batch_scan_config.as_ref(),
+        Some(&previous)
+    );
+    assert_eq!(
+        app.study_context_picker().unwrap().selected.as_ref(),
+        Some(&selected)
+    );
+    assert_eq!(
+        app.active_findings_filter().as_deref(),
+        Some("severity:high")
+    );
+    assert_eq!((app.input(), app.cursor()), ("unsent\ncontext draft", 4));
+    assert!(screen(&mut app, 40, 12).contains("f findings"));
+    assert_eq!(
+        load_active_threat_model(root.path())
+            .unwrap()
+            .unwrap()
+            .model_ref,
+        active
+    );
+}
+
+#[test]
+fn finding_link_without_paths_keeps_the_preview_and_shows_its_reason() {
+    let (root, mut app, selected, active) = graph_fixture();
+    key(&mut app, KeyCode::Char('v'));
+    key(&mut app, KeyCode::Char('f'));
+    let rendered = screen(&mut app, 40, 12);
+    assert!(
+        rendered.contains("Select a component") && rendered.contains("Esc context"),
+        "{rendered}"
+    );
+    key(&mut app, KeyCode::Enter);
+    assert!(diagram_detail_lines(&app, 80)
+        .join("\n")
+        .contains("repository file evidence"));
+    assert_eq!(
+        app.study_context_picker().unwrap().selected.as_ref(),
+        Some(&selected)
+    );
+    key(&mut app, KeyCode::Down);
+    assert!(app
+        .study_context_picker()
+        .unwrap()
+        .diagram
+        .as_ref()
+        .unwrap()
+        .notice
+        .is_none());
+    assert_eq!(
+        load_active_threat_model(root.path())
+            .unwrap()
+            .unwrap()
+            .model_ref,
+        active
+    );
+}
+
+#[test]
+fn unlinked_preview_finding_query_never_reads_the_active_context_instead() {
+    let (root, mut app, first, _) = graph_fixture();
+    let mut result = inspect(&app, root.path(), &first);
+    result["data"]["document"] = graph();
+    result["data"]["document"]["attackSurface"]["entryPoints"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("targetElementIds");
+    app.cache_tool_snapshot("threat-model:read", &result);
+    key(&mut app, KeyCode::Char('v'));
+    key(&mut app, KeyCode::Down);
+    key(&mut app, KeyCode::Char('f'));
+    assert!(diagram_detail_lines(&app, 100)
+        .join("\n")
+        .contains("Inspect or rebuild linked context"));
+    assert!(app.study_context_picker().unwrap().diagram_visible);
+}
+
+#[test]
+fn diagram_evidence_wrapping_keeps_literal_filename_whitespace() {
+    let (root, mut app, selected, _) = graph_fixture();
+    let mut result = inspect(&app, root.path(), &selected);
+    result["data"]["document"]["attackSurface"]["entryPoints"][0]["path"] = json!("app/a  b.rs#L7");
+    app.cache_tool_snapshot("threat-model:read", &result);
+    key(&mut app, KeyCode::Char('v'));
+    key(&mut app, KeyCode::Down);
+    let lines = diagram_detail_lines(&app, 120).join("\n");
+    assert!(lines.contains("Source: app/a  b.rs#L7"), "{lines}");
+}

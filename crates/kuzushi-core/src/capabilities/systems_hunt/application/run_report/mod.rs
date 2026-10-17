@@ -1,9 +1,9 @@
 use super::*;
 
+#[cfg(test)]
 mod invariant_extract;
 #[cfg(test)]
 pub(crate) use invariant_extract::run_systems_invariant_extract;
-pub(crate) use invariant_extract::run_systems_invariant_extract_with_cost;
 
 pub fn run_systems_hunt_report(
     input: &Value,
@@ -226,7 +226,10 @@ fn apply_systems_hunt_whitebox_profile(
     Ok(())
 }
 
-fn emit_systems_hunt_start(ctx: &ToolExecutionContext<'_>, target: &Path) -> Option<crate::run_lifecycle::RunItemId> {
+fn emit_systems_hunt_start(
+    ctx: &ToolExecutionContext<'_>,
+    target: &Path,
+) -> Option<crate::run_lifecycle::RunItemId> {
     ctx.trace.map(|trace| {
         trace
             .step(

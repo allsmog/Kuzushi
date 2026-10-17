@@ -97,6 +97,7 @@ impl SastTaskSelection {
         tasks: Vec<String>,
         source: SastTaskSelectionSource,
     ) -> Result<Self> {
+        crate::capabilities::agentic_sast::validate_sast_stage_aliases(&tasks)?;
         let (native_tasks, run_agentic, run_carlini, run_taint_iris_next, run_systems_hunt) =
             split_agentic_sast_tasks(tasks);
         let explicit_native_selection =
@@ -919,5 +920,26 @@ mod canonical_report_cost_tests {
         let error = validate_sast_scan_engine_result("agentic-sast:scan", &output).unwrap_err();
 
         assert!(error.to_string().contains("runtime disconnected"));
+    }
+}
+
+#[cfg(test)]
+mod catalog_pin_forwarding_tests {
+    use super::*;
+    #[test]
+    fn umbrella_option_preparation_and_real_child_filter_keep_the_exact_catalog_pin() {
+        let registry = ModuleRegistry::with_v2_builtins_without_optional_adapters();
+        let pin = "a".repeat(64);
+        let parent = registry
+            .prepare_tool_input("sast:scan", json!({"catalog_digest_ref":pin}), None)
+            .unwrap();
+        let input = taint_iris_next_hunt_input(&parent);
+        let child = descriptor_filtered_input(&registry, "taint-iris-next:hunt", &input).unwrap();
+        let prepared = registry
+            .prepare_tool_input("taint-iris-next:hunt", child, None)
+            .unwrap();
+        assert_eq!(prepared["catalogDigestRef"], pin);
+        assert_eq!(prepared["mode"], "hunt");
+        assert!(prepared.get("tasks").is_none());
     }
 }

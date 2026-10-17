@@ -111,11 +111,7 @@ fn threat_run_shell_view_lines(
         ShellView::Relationships => super::relationships::relationship_lines(app, area),
         ShellView::Lessons => super::lessons::lesson_lines(app, area),
         ShellView::RunDiff => run_diff_view_lines(app, area),
-        ShellView::Replay => default_scrolled_lines(
-            app,
-            area,
-            replay_lines(app, area, app.router.replay().run_id()),
-        ),
+        ShellView::Replay => replay_view_lines(app, area),
         ShellView::Trace => default_scrolled_lines(
             app,
             area,

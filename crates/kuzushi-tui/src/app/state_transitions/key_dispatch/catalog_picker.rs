@@ -14,7 +14,11 @@ impl ShellApp {
             return false;
         }
         if let Some(delta) = catalog_cursor_delta(key.code, self.catalog_visible_rows()) {
-            self.move_catalog_cursor(delta);
+            if matches!(key.code, KeyCode::PageUp | KeyCode::PageDown) {
+                self.page_catalog_cursor(delta);
+            } else {
+                self.move_catalog_cursor(delta);
+            }
             return true;
         }
         self.handle_catalog_action_key(key)
@@ -107,11 +111,37 @@ mod tests {
         let page = app.catalog_visible_rows();
         let page_down = KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE);
         assert!(app.reduce_key(page_down).handled);
-        assert_eq!(app.router.catalog().cursor(), page);
+        assert_eq!(
+            app.router.catalog().cursor(),
+            page.min(app.catalog_module_count().saturating_sub(1))
+        );
+        for _ in 0..app.catalog_module_count() {
+            assert!(app.reduce_key(page_down).handled);
+        }
+        assert_eq!(
+            app.router.catalog().cursor(),
+            app.catalog_module_count().saturating_sub(1)
+        );
         let page_up = KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE);
-        assert!(app.reduce_key(page_up).handled);
+        for _ in 0..app.catalog_module_count() {
+            assert!(app.reduce_key(page_up).handled);
+        }
         assert_eq!(app.router.catalog().cursor(), 0);
         assert!(app.input().is_empty());
+    }
+
+    #[test]
+    fn catalog_page_handles_empty_lists_and_large_steps_without_wrapping() {
+        let mut route = crate::CatalogRouteState::default();
+        for count in [0, 1, 5, 17] {
+            route.page_cursor(i32::MAX, count);
+            assert_eq!(route.cursor(), count.saturating_sub(1));
+            route.page_cursor(i32::MIN, count);
+            assert_eq!(route.cursor(), 0);
+        }
+        route.jump_end(usize::MAX);
+        route.page_cursor(7, 3);
+        assert_eq!(route.cursor(), 2);
     }
 
     #[test]

@@ -32,6 +32,16 @@ pub(crate) async fn compile_commands_response(
     let repo = tool
         .read_capability
         .authorize_directory(Path::new(require_str(args, "repoPath")?))?;
+    if let Some(selected) = compile_db::selected_snapshot(args, &repo, &tool.read_capability)? {
+        let receipt = selected.receipt();
+        let mut result = serde_json::to_value(compile_db::CompileDb {
+            path: receipt.source_path.clone(),
+            generator: compile_db::Generator::PreExisting,
+            entries: receipt.entries,
+        })?;
+        result["configuration"] = serde_json::to_value(receipt)?;
+        return Ok(result);
+    }
     let database = compile_db::resolve(&repo).await?;
     Ok(serde_json::to_value(database)?)
 }
@@ -40,7 +50,10 @@ fn validate_compile_arguments(args: &Value) -> Result<()> {
     let object = args
         .as_object()
         .context("clang.compile_commands arguments must be an object")?;
-    if let Some(name) = object.keys().find(|name| name.as_str() != "repoPath") {
+    if let Some(name) = object
+        .keys()
+        .find(|name| !matches!(name.as_str(), "repoPath" | "compileCommandsPath"))
+    {
         anyhow::bail!("unknown clang.compile_commands argument: {name}");
     }
     Ok(())

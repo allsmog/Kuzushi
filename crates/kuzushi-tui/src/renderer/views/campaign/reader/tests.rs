@@ -2,6 +2,7 @@ use super::*;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use kuzushi_core::V2Config;
 use ratatui::{backend::TestBackend, Terminal};
+mod budget_choices;
 mod job_detail;
 mod progress;
 

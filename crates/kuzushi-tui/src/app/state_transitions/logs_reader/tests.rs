@@ -73,11 +73,49 @@ fn logs_reader_uses_the_actual_expanded_page_at_every_supported_size() {
         assert!(text.contains("Ctrl+G palette"));
         assert!(!text.contains("z expand"));
         let reader = crate::renderer::logs_reader_scroll(&app).unwrap();
-        assert!(reader.page_rows >= 7);
+        assert!(reader.page_rows >= 6);
+        assert!(text.contains("c read commands"));
         key(&mut app, KeyCode::PageUp);
         assert!(app.router.logs().scroll() <= reader.max_offset);
         key(&mut app, KeyCode::Esc);
     }
+}
+
+#[test]
+fn command_disclosure_preserves_both_scrolls_follow_state_and_composer() {
+    let mut app = fixture();
+    app.router.logs_mut().set_scroll(7);
+    app.router.logs_mut().scroll_up(0);
+    key(&mut app, KeyCode::Char('z'));
+    key(&mut app, KeyCode::Char('c'));
+    assert!(app.router.logs().command_text_expanded());
+    assert_eq!(app.router.logs().scroll(), 0);
+    app.router.logs_mut().set_scroll(23);
+    app.editor_mut().set_input("held α\noperator draft");
+    let cursor = app.cursor();
+    key(&mut app, KeyCode::Char('c'));
+    assert!(!app.router.logs().command_text_expanded());
+    assert_eq!(app.router.logs().scroll(), 7);
+    key(&mut app, KeyCode::Char('c'));
+    assert_eq!(app.router.logs().scroll(), 23);
+    key(&mut app, KeyCode::Esc);
+    assert!(!app.router.logs().command_text_expanded());
+    assert_eq!(app.router.logs().scroll(), 7);
+    assert!(!app.router.logs().is_following());
+    assert_eq!(app.input(), "held α\noperator draft");
+    assert_eq!(app.cursor(), cursor);
+    assert!(!app.has_running_work());
+}
+
+#[test]
+fn command_disclosure_does_not_own_normal_typing_or_submit_work() {
+    let mut app = fixture();
+    let update = key(&mut app, KeyCode::Char('c'));
+    assert_eq!(app.input(), "c");
+    assert!(!app.router.logs().reader_open());
+    assert!(!app.router.logs().command_text_expanded());
+    assert!(update.effects.is_empty());
+    assert!(!app.has_running_work());
 }
 
 #[test]

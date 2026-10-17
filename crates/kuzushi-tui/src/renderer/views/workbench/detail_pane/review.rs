@@ -101,6 +101,7 @@ fn push_decision_source_provenance(
 
 fn push_review_actions(lines: &mut Vec<Line<'static>>, detail: &FindingDetailModel, width: usize) {
     push_section_header(lines, "REVIEW ACTIONS");
+    push_observation_reference(lines, detail, width);
     push_wrapped(
         lines,
         "Record a verdict with a reason; earlier decisions remain in history.",
@@ -127,6 +128,30 @@ fn push_review_actions(lines: &mut Vec<Line<'static>>, detail: &FindingDetailMod
     );
 }
 
+fn push_observation_reference(
+    lines: &mut Vec<Line<'static>>,
+    detail: &FindingDetailModel,
+    width: usize,
+) {
+    let Some(reference) = &detail.observation_reference else {
+        return;
+    };
+    push_wrapped(
+        lines,
+        &format!("Reopen this observation: open {reference}"),
+        width,
+        "  ",
+        theme::accent(),
+    );
+    push_wrapped(
+        lines,
+        "This reference belongs to this workspace. List aliases can change as findings arrive.",
+        width,
+        "  ",
+        theme::muted(),
+    );
+}
+
 fn push_review_history(lines: &mut Vec<Line<'static>>, detail: &FindingDetailModel, width: usize) {
     let others = detail
         .decision_history_rows
@@ -145,6 +170,40 @@ fn push_review_history(lines: &mut Vec<Line<'static>>, detail: &FindingDetailMod
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exact_observation_command_is_readable_at_every_supported_width() {
+        let mut detail = super::super::tests::detail();
+        detail.observation_reference = Some("generation:9223372036854775807".into());
+        for width in [36, 56, 76, 92, 116, 156] {
+            let lines = review_detail_lines(&detail, width);
+            assert!(lines.iter().all(|line| line.width() <= width));
+            let text = lines
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n");
+            let words = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            assert!(
+                words.contains("open generation:9223372036854775807"),
+                "{width}: {text}"
+            );
+            assert!(words.contains("This reference belongs to this workspace."));
+            assert!(words.contains("List aliases can change as findings arrive."));
+        }
+    }
+
+    #[test]
+    fn unpersisted_observation_has_no_reopen_promise() {
+        let detail = super::super::tests::detail();
+        let text = review_detail_lines(&detail, 116)
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!text.contains("Reopen this observation"));
+        assert!(!text.contains("This reference belongs"));
+    }
 
     #[test]
     fn review_leads_with_evidence_and_records_a_decision_once() {

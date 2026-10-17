@@ -52,6 +52,7 @@ pub(super) fn fixture_proof(stale: bool) -> ProofReplayModel {
 pub(super) fn fixture_review_queue(populated: bool) -> ReviewQueueModel {
     let count = usize::from(populated);
     ReviewQueueModel {
+        path_history: false,
         navigation_active: false,
         refresh_status: None,
         decision_save_label: None,

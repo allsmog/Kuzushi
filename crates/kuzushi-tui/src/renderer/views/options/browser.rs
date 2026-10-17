@@ -210,6 +210,11 @@ fn detail_lines(app: &ShellApp, row: &OptionsTableRow, width: usize) -> Vec<Line
         format!("Aliases: {}", row.cells[5]),
         "Tool defaults only. Approved run inputs are frozen separately.".into(),
     ]);
+    if let Some(description) =
+        crate::ui_view_models::options_tool_description(app, app.router.options())
+    {
+        lines.extend([String::new(), format!("Tool purpose: {description}")]);
+    }
     lines
         .into_iter()
         .flat_map(|text| {

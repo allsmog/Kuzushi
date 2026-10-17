@@ -369,8 +369,7 @@ mod tests {
         }
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
-        let scanners: Vec<Box<dyn ScanEngine>> =
-            vec![Box::new(crate::scan::SecretScanScanner)];
+        let scanners: Vec<Box<dyn ScanEngine>> = vec![Box::new(crate::scan::SecretScanScanner)];
         let options = ScanRunOptions {
             run_id: Some("scan-exact-paths".into()),
             paths: vec!["config/changed.env".into()],
@@ -531,6 +530,8 @@ mod tests {
                 "--metrics",
                 "off",
                 "--json",
+                "--exclude",
+                "**/.kuzushi/**",
                 "--config",
                 "auto",
                 "--config",

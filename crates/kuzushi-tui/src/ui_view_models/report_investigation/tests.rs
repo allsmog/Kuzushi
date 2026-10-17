@@ -1,6 +1,59 @@
 use super::*;
 
 #[test]
+fn reassessment_explains_retained_decisions_and_leaves_zero_uncluttered() {
+    assert!(reassessment_lines(0).is_empty());
+    assert_eq!(
+        reassessment_lines(1),
+        vec!["Review: 1 finding needs source reassessment. Earlier decisions remain recorded."]
+    );
+    assert_eq!(
+        reassessment_lines(2),
+        vec!["Review: 2 findings need source reassessment. Earlier decisions remain recorded."]
+    );
+}
+
+#[test]
+fn workspace_history_explains_unverified_source_decisions_without_creating_a_verdict() {
+    use kuzushi_core::workspace::WorkspaceReviewSourceApplicability;
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    app.set_target(Some(std::path::PathBuf::from("/owned-report-history")));
+    app.domain_mut()
+        .set_review_source_applicabilities(std::collections::BTreeMap::from([
+            (
+                "recorded-marker".into(),
+                WorkspaceReviewSourceApplicability::LaterSourceUnverified,
+            ),
+            (
+                "current-marker".into(),
+                WorkspaceReviewSourceApplicability::LatestObservation,
+            ),
+        ]));
+    let key = crate::app::ViewHydrationKey::WorkspaceReportReview {
+        findings_watermark: app.findings_read_watermark(),
+    };
+    app.workbench_cache()
+        .borrow_mut()
+        .apply_view_hydration(crate::app::ViewHydrationResult {
+            target: app.target_owned().unwrap(),
+            key,
+            value: crate::app::ViewHydrationValue::WorkspaceReportReview(Ok(
+                kuzushi_core::workspace::WorkspaceReviewSummary {
+                    finding_count: 2,
+                    reassessment_required: 1,
+                    ..Default::default()
+                },
+            )),
+        });
+    let lines = history_lines(&app);
+    assert_eq!(
+        lines[0],
+        "Review: 1 finding needs source reassessment. Earlier decisions remain recorded."
+    );
+    assert!(app.review_decisions().is_empty());
+}
+
+#[test]
 fn explicit_workspace_report_discloses_lesson_preservation_and_format_omission() {
     let root = tempfile::tempdir().unwrap();
     let workspace = kuzushi_core::WorkspaceTarget::new(root.path()).unwrap();
@@ -9,7 +62,9 @@ fn explicit_workspace_report_discloses_lesson_preservation_and_format_omission()
     let lines = report_investigation_lines(&app);
     assert!(lines
         .iter()
-        .any(|line| line.contains("Lessons: exports preserve")));
+        .any(|line| line.contains("Lessons: linked records preserved")));
+    app.router.report_mut().toggle_provenance();
+    let lines = report_investigation_lines(&app);
     assert!(lines
         .iter()
         .any(|line| line.contains("another source revision")));

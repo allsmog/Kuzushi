@@ -9,6 +9,9 @@ pub fn coerce_option_text(spec: &OptionSpec, raw: &str) -> Result<Value> {
 
 fn operator_text_value(spec: &OptionSpec, raw: &str) -> Result<Value> {
     let text = raw.trim();
+    if spec.option_type == OptionType::Json && spec.editable_json {
+        return serde_json::from_str(text).context("setting requires a complete JSON value");
+    }
     if spec.option_type == OptionType::StringList {
         return operator_string_list_value(text);
     }
@@ -37,6 +40,26 @@ fn operator_string_list_value(text: &str) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn editable_json_requires_complete_text_and_preserves_typed_values() {
+        let spec = opt("pairs", OptionType::Json, "operator JSON").editable_json();
+        for value in [
+            serde_json::json!([{"alloc":"owned", "free":"release"}]),
+            serde_json::json!("[1]"),
+            serde_json::json!(true),
+            serde_json::json!(null),
+        ] {
+            assert_eq!(
+                coerce_option_text(&spec, &value.to_string()).unwrap(),
+                value
+            );
+            assert_eq!(coerce_option_value(&spec, value.clone()).unwrap(), value);
+        }
+        for invalid in ["[{ unfinished", "unquoted text", "[1] trailing"] {
+            assert!(coerce_option_text(&spec, invalid).is_err());
+        }
+    }
 
     #[test]
     fn quoted_operator_paths_preserve_spaces_and_escape_sequences() {

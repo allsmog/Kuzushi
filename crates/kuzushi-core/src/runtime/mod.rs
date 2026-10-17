@@ -11,6 +11,8 @@ pub mod domain;
 pub mod mcp_probe;
 pub mod policy;
 #[cfg(test)]
+pub(crate) mod scripted_fixture;
+#[cfg(test)]
 mod tests;
 mod traced_runtime;
 

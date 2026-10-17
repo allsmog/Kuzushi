@@ -166,3 +166,32 @@ fn methodology_listing_produces_a_readable_catalog_without_workspace_artifacts()
         .is_some_and(|output| !output.trim().is_empty()));
     assert!(!result["data"].is_null());
 }
+
+#[test]
+fn experimental_go_action_reaches_the_native_executor_before_dependency_loading() {
+    let registry = ModuleRegistry::with_v2_builtins_without_optional_adapters();
+    let config = V2Config::default();
+    let ctx = ToolExecutionContext {
+        config: &config,
+        workspace: None,
+        findings_store: None,
+        trace: None,
+        cancellation: None,
+        authorization: Default::default(),
+    };
+    let dispatched = super::dispatch_catalog_tool::dispatch_native_security_tool(
+        &registry,
+        "govulncheck:scan",
+        &json!({}),
+        &ctx,
+        None,
+    )
+    .expect("The registered Go action must have a shared executor route");
+    let error = dispatched.unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("explicit target or active workspace"),
+        "{error:#}"
+    );
+}

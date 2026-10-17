@@ -7,6 +7,10 @@ pub(crate) use model_store::{
     apply_threat_model_patch_to_active, commit_checked_threat_model_revision,
     commit_threat_model_revision_cancellable, ThreatModelReadLease,
 };
+pub(crate) use randori_artifact_reads::{
+    inspect_randori_artifacts, RandoriArtifactInspection, RandoriArtifactReadReceipt,
+};
+pub(crate) use randori_outputs::preflight_randori_outputs;
 #[cfg(test)]
 pub(crate) use selection::tests::commit_test_model;
 pub(crate) use selection::{
@@ -16,6 +20,8 @@ pub(crate) use store::*;
 
 pub(crate) mod lesson_selection;
 mod model_store;
+mod randori_artifact_reads;
+mod randori_outputs;
 mod registry;
 mod selection;
 mod store;

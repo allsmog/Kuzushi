@@ -523,21 +523,9 @@ fn legacy_summary_is_accepted_scan(
         status.as_str(),
         "completed" | "complete" | "succeeded" | "success"
     );
-    completed && legacy_scan_summary_has_result(summary) && legacy_scan_is_fresh(summary, current)
-}
-
-fn legacy_scan_summary_has_result(summary: &RunSummary) -> bool {
-    let policy = summary.tool.as_deref().map(|tool| {
-        (
-            kuzushi_core::modules::autonomy::tool_has_phase_result(tool),
-            kuzushi_core::modules::tool_phase(tool),
-        )
-    });
-    match policy {
-        Some((Some(false), _)) => false,
-        Some((_, Some(WorkflowPhase::Scan))) => true,
-        _ => summary.kind.eq_ignore_ascii_case("scan"),
-    }
+    completed
+        && super::scan_summary::has_scan_phase_result(summary)
+        && legacy_scan_is_fresh(summary, current)
 }
 
 fn legacy_scan_is_fresh(
@@ -1091,10 +1079,12 @@ mod tests {
         )
         .complete();
         assert!(legacy_summary_is_accepted_scan(&summary, None));
-        assert!(!legacy_scan_summary_has_result(&RunSummary {
-            kind: "tool".into(),
-            ..summary
-        }));
+        assert!(!crate::ui_view_models::scan_summary::has_scan_phase_result(
+            &RunSummary {
+                kind: "tool".into(),
+                ..summary
+            }
+        ));
     }
     use crate::ViewHydrationKey;
     use kuzushi_core::workflow_attempts::{

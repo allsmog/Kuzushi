@@ -24,6 +24,9 @@ pub struct RepositoryInventory {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InventoryInspection {
+    /// None on legacy receipts. Content prefix limits do not make enumeration incomplete.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enumeration_complete: Option<bool>,
     /// Enumerated regular files, including non-source files and uninspected content.
     #[serde(default)]
     pub files: Vec<String>,

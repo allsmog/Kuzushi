@@ -181,7 +181,7 @@ pub(crate) fn phase_presentation_plan(
 ) -> PhasePresentationPlan {
     let specs = phase_surface_specs(body);
     let primary = specs[0].id;
-    let zoomed = zoomed.or_else(|| compact_review_detail(&specs, area, stored_focus));
+    let zoomed = zoomed.or_else(|| compact_reading_focus(&specs, area, stored_focus));
     let (density, visible) = visible_specs(&specs, area, zoomed, attention);
     let planned_area = guided_phase_area(body, density, area, attention);
     let composition = screen_composition(body, density, &visible, planned_area);
@@ -201,18 +201,24 @@ pub(crate) fn phase_presentation_plan(
     }
 }
 
-fn compact_review_detail(
+/// Keep the selected reading pane when automatic layout would hide it.
+fn compact_reading_focus(
     specs: &[PhaseSurfaceSpec],
     area: Rect,
     stored_focus: Option<PhaseSurfaceId>,
 ) -> Option<PhaseSurfaceId> {
-    if stored_focus != Some(PhaseSurfaceId::ReviewDetail) {
-        return None;
-    }
-    let (density, _) = automatic_specs(specs, area);
-    (density == LayoutDensity::Sparse)
-        .then_some(PhaseSurfaceId::ReviewDetail)
-        .filter(|id| specs.iter().any(|spec| spec.id == *id))
+    let focus = stored_focus.filter(|id| {
+        matches!(
+            id,
+            PhaseSurfaceId::ReviewDetail | PhaseSurfaceId::ScanReceipt | PhaseSurfaceId::ScanDelta
+        )
+    })?;
+    let (_, visible) = automatic_specs(specs, area);
+    specs
+        .iter()
+        .any(|spec| spec.id == focus)
+        .then_some(focus)
+        .filter(|id| !visible.iter().any(|spec| spec.id == *id))
 }
 
 fn guided_phase_area(

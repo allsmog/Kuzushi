@@ -43,6 +43,7 @@ impl ShellApp {
             KeyCode::Down | KeyCode::Char('j') => self.router.report_mut().move_format(1),
             KeyCode::Char('c') => self.router.report_mut().cycle_completeness(),
             KeyCode::Char('s') => self.router.report_mut().toggle_scope(),
+            KeyCode::Char('r') => self.open_report_from_current_origin(),
             KeyCode::Char('p') => self.router.report_mut().toggle_provenance(),
             KeyCode::Char('e') => self.router.report_mut().set_editing_path(true),
             KeyCode::Char('q') => self.close_report_to_origin(),
@@ -64,6 +65,7 @@ impl ShellApp {
             Ok(campaign) => campaign,
             Err(error) => {
                 self.router.report_mut().set_reveal_error(Some(error));
+                self.router.report_mut().mark_export_read_error();
                 return InputUpdate::handled();
             }
         };

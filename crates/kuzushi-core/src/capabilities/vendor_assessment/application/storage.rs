@@ -17,7 +17,7 @@ pub(super) fn runs_dir(root: &Path) -> PathBuf {
     root.join(".kuzushi").join("vendor-assessment").join("runs")
 }
 
-fn load_scope(root: &Path) -> Result<Value> {
+pub(super) fn load_scope(root: &Path) -> Result<Value> {
     let path = scope_path(root);
     let raw = match std::fs::symlink_metadata(&path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(empty_scope()),
@@ -34,23 +34,90 @@ fn load_scope(root: &Path) -> Result<Value> {
                 format!("Could not read vendor assessment scope {}", path.display())
             })?,
     };
-    serde_json::from_str(&raw)
-        .with_context(|| format!("Could not parse vendor assessment scope {}", path.display()))
+    let scope = serde_json::from_str(&raw)
+        .with_context(|| format!("Could not parse vendor assessment scope {}", path.display()))?;
+    validate_scope(&scope)?;
+    Ok(scope)
 }
 
 pub(super) fn save_scope(root: &Path, scope: &Value) -> Result<PathBuf> {
+    validate_scope(scope)?;
     let path = scope_path(root);
     write_json_pretty(root, &path, scope)
 }
 
 pub(super) fn load_updated_scope(root: &Path, update: &ScopeUpdate) -> Result<Value> {
-    load_scope(root)
-        .map(|scope| merge_scope_inputs(scope, update))
-        .and_then(|scope| save_scope(root, &scope).map(|_| scope))
+    let scope = proposed_scope(root, update)?;
+    if !update.is_empty() {
+        save_scope(root, &scope)?;
+    }
+    Ok(scope)
+}
+
+pub(super) fn proposed_scope(root: &Path, update: &ScopeUpdate) -> Result<Value> {
+    merge_scope_inputs(load_scope(root)?, update)
+}
+
+fn validate_scope(scope: &Value) -> Result<()> {
+    anyhow::ensure!(
+        scope.is_object(),
+        "vendor scope must be a JSON object; existing state was preserved"
+    );
+    for key in [
+        "vendorName",
+        "productName",
+        "primaryDomain",
+        "useCase",
+        "profile",
+    ] {
+        anyhow::ensure!(
+            scope.get(key).is_none_or(Value::is_string),
+            "vendor scope field {key} must be text; existing state was preserved"
+        );
+    }
+    for key in ["dataClasses", "integrations"] {
+        validate_string_list(scope.get(key), key)?;
+    }
+    validate_documents(scope.get("documents"))
+}
+
+fn validate_string_list(value: Option<&Value>, key: &str) -> Result<()> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    let array = value
+        .as_array()
+        .with_context(|| format!("vendor scope field {key} must be an array"))?;
+    anyhow::ensure!(
+        array.iter().all(Value::is_string),
+        "vendor scope field {key} must contain text"
+    );
+    Ok(())
+}
+
+fn validate_documents(value: Option<&Value>) -> Result<()> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    let docs = value
+        .as_array()
+        .context("vendor scope documents must be an array; existing state was preserved")?;
+    for doc in docs {
+        anyhow::ensure!(
+            doc.is_object(),
+            "vendor scope documents must contain objects"
+        );
+        anyhow::ensure!(
+            doc.get("text").is_none_or(Value::is_string),
+            "vendor document text must be a string"
+        );
+    }
+    Ok(())
 }
 
 fn write_json_pretty(root: &Path, path: &Path, value: &Value) -> Result<PathBuf> {
     let body = format!("{}\n", serde_json::to_string_pretty(value)?);
+    anyhow::ensure!(body.len() <= MAX_VENDOR_SCOPE_BYTES, "vendor scope exceeds the 8 MiB storage limit; reduce attached evidence. Existing state was preserved.");
     write_state_path(root, path, body.as_bytes())
 }
 

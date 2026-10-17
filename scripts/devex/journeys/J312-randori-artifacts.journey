@@ -1,0 +1,121 @@
+name: Bounded draft artifacts preserve edits and remain separate from accepted context
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_AGENT_MCPS
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/randori_contracts.py @TMP_TARGET @ART prepare @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: options randori:pasta
+require-live-snap: 25 Experimental | draft-readiness
+submit: logs
+paste-file: @ART/unbound-command.txt
+keys: Enter
+require-live-snap: 25 approved investigation allowance | unbound-refused
+require-shell: python3 -B @REPO/scripts/devex/fixtures/randori_contracts.py @TMP_TARGET @ART unbound
+paste-file: @ART/approve-command.txt
+keys: Enter
+require-live-snap: 25 REVIEW ALLOWANCE | allowance
+expect: Total provider calls: 4
+expect: Protected review calls: 2
+keys: y
+require-live-snap: 25 Allowance approved | approved
+paste-file: @ART/draft-command.txt
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/randori_contracts.py @TMP_TARGET @ART draft
+paste-file: @ART/draft-replay.txt
+keys: Enter
+require-live-snap: 25 PASTA draft ready; context unchanged | draft-result
+resize: 160x48
+live-snap: draft-160x48
+resize: 96x89
+live-snap: draft-96x89
+resize: 80x24
+live-snap: draft-80x24
+resize: 60x20
+live-snap: draft-60x20
+resize: 40x12
+live-snap: draft-40x12
+expect: PASTA draft ready
+ask: Does the draft clearly remain separate from accepted context at all six sizes, with its artifact and next import action reachable by paging?
+resize: 120x36
+keys: Escape
+submit: logs
+paste-file: @ART/preserve-command.txt
+keys: Enter
+require-live-snap: 25 Draft preserved | edits-preserved
+require-shell: python3 -B @REPO/scripts/devex/fixtures/randori_contracts.py @TMP_TARGET @ART preserve
+paste-file: @ART/replace-command.txt
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/randori_contracts.py @TMP_TARGET @ART replaced
+paste-file: @ART/read-command.txt
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/randori_contracts.py @TMP_TARGET @ART read
+paste-file: @ART/canonical-command.txt
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/randori_contracts.py @TMP_TARGET @ART canonical
+paste-file: @ART/partial-command.txt
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/randori_contracts.py @TMP_TARGET @ART partial
+paste-file: @ART/partial-replay.txt
+keys: Enter
+require-live-snap: 25 Partial model artifact | partial-result
+expect: Outcome · partial
+resize: 160x48
+live-snap: partial-160x48
+resize: 96x89
+live-snap: partial-96x89
+resize: 80x24
+live-snap: partial-80x24
+resize: 60x20
+live-snap: partial-60x20
+resize: 40x12
+live-snap: partial-40x12
+keys: Tab
+live-snap: partial-full-40x12
+keys: NPage
+live-snap: partial-read-40x12-1
+keys: NPage
+live-snap: partial-read-40x12-2
+keys: NPage
+live-snap: partial-read-40x12-3
+keys: NPage
+live-snap: partial-read-40x12-4
+ask: Are the malformed stage, source revision uncertainty and unchanged context understandable, with the complete read receipt reachable at 40 columns?
+resize: 120x36
+keys: Escape
+submit: logs
+paste-file: @ART/bad-command.txt
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/randori_contracts.py @TMP_TARGET @ART bad
+paste-file: @ART/empty-command.txt
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/randori_contracts.py @TMP_TARGET @ART empty
+paste-file: @ART/import-command.txt
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/randori_contracts.py @TMP_TARGET @ART imported
+keys: Escape
+submit: logs
+paste-file: @ART/exact-command.txt
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/randori_contracts.py @TMP_TARGET @ART exact
+paste-file: @ART/status-command.txt
+keys: Enter
+submit: logs
+require-live-snap: 25 Calls committed: 2/4 | retained-accounting
+keys: C-c
+require-exit: 10
+env: NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/status-command.txt
+keys: Enter
+submit: logs
+require-live-snap: 25 Calls committed: 2/4 | recovered-accounting
+require-shell: python3 -B @REPO/scripts/devex/fixtures/randori_contracts.py @TMP_TARGET @ART restarted
+ask: Does restart retain the inactive imported revision and two settled Context requests without starting scans, creating findings or using protected Review calls?
+keys: C-c
+require-exit: 10

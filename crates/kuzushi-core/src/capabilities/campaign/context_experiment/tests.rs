@@ -139,6 +139,7 @@ fn write_labeled_baseline(root: &Path, receipt: &StudyPlanReceipt) {
         run_refs: vec!["baseline-run".into()],
         scan: Some(ScanStageData {
             scope: ScanStageScope {
+                inspected_files: None,
                 target: root.display().to_string(),
                 paths: Vec::new(),
             },
@@ -149,6 +150,7 @@ fn write_labeled_baseline(root: &Path, receipt: &StudyPlanReceipt) {
             engines: vec![ScanStageEngine {
                 engine: "secret-scan".into(),
                 outcome: ScanEngineStageOutcome::Complete,
+                rule_ids: None,
                 run_ref: Some("baseline-run".into()),
                 detail: Some("Labeled offline receipt, no source execution".into()),
             }],

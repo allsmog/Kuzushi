@@ -1,6 +1,9 @@
+use super::command::clangd_command;
 use anyhow::{Context, Result};
+use kuzushi_mcp_common::compile_database::CompileDatabaseSnapshot;
 use serde_json::Value;
 use std::sync::atomic::{AtomicI64, AtomicU32, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout};
@@ -8,8 +11,8 @@ use tokio::sync::{Mutex, MutexGuard};
 use tokio::time::Instant;
 
 use super::protocol::{
-    clangd_command, framed_lsp_message, initialize_params, notification_body, read_content_length,
-    read_json_body, request_body, response_matches_id, response_result,
+    framed_lsp_message, initialize_params, notification_body, read_content_length, read_json_body,
+    request_body, response_matches_id, response_result,
 };
 
 const CLANGD_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -27,15 +30,20 @@ pub struct ClangdClient {
     pub(crate) process_group_id: AtomicU32,
     pub(crate) _process_group: Option<kuzushi_mcp_common::process::ParentDeathProcessGroup>,
     pub(crate) _sandbox_scratch: Option<tempfile::TempDir>,
+    compile_database: Option<Arc<CompileDatabaseSnapshot>>,
 }
 
 impl ClangdClient {
-    pub async fn spawn(repo: kuzushi_mcp_common::AuthorizedDirectory) -> Result<Self> {
-        let (mut child, scratch, process_group) = spawn_clangd(repo).await?;
+    pub async fn spawn(
+        repo: kuzushi_mcp_common::AuthorizedDirectory,
+        database: Option<Arc<CompileDatabaseSnapshot>>,
+    ) -> Result<Self> {
+        let (mut child, scratch, process_group) = spawn_clangd(repo, database.as_deref()).await?;
         let (stdin, stdout) = take_child_io(&mut child)?;
         let mut client = Self::from_child_io(child, stdin, stdout);
         client._process_group = Some(process_group);
         client._sandbox_scratch = Some(scratch);
+        client.compile_database = database;
         Ok(client)
     }
 
@@ -51,7 +59,15 @@ impl ClangdClient {
             process_group_id: AtomicU32::new(process_group_id.unwrap_or(0)),
             _process_group: None,
             _sandbox_scratch: None,
+            compile_database: None,
         }
+    }
+
+    pub(crate) fn uses_database(&self, database: Option<&CompileDatabaseSnapshot>) -> bool {
+        self.compile_database
+            .as_deref()
+            .map(CompileDatabaseSnapshot::receipt)
+            == database.map(CompileDatabaseSnapshot::receipt)
     }
 
     pub async fn initialize(&self, root: &std::path::Path) -> Result<()> {
@@ -289,12 +305,13 @@ fn kill_process_group(_group_id: u32) {}
 
 pub(crate) async fn spawn_clangd(
     repo: kuzushi_mcp_common::AuthorizedDirectory,
+    database: Option<&CompileDatabaseSnapshot>,
 ) -> Result<(
     Child,
     tempfile::TempDir,
     kuzushi_mcp_common::process::ParentDeathProcessGroup,
 )> {
-    clangd_command(repo)
+    clangd_command(repo, database)
         .await?
         .spawn("clangd")
         .context("could not spawn clangd")

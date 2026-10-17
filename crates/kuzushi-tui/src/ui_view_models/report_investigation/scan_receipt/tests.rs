@@ -24,11 +24,11 @@ fn canceled_scan_receipt_keeps_source_disposition_and_unstarted_scope_visible() 
 fn report_bounds_engine_preview_and_discloses_remaining_outcomes() {
     let mut scan = scan(Some("partial"));
     scan.engine_outcomes = vec![engine("skipped", "not started"); 5];
-    let lines = incomplete_engine_lines(&scan);
+    let lines = engine_disclosure_lines(&scan);
     assert_eq!(lines.len(), 4);
     assert!(lines[3].contains("2 more engine outcomes in Scan"));
     scan.engine_outcomes = vec![engine("complete", "")];
-    assert!(incomplete_engine_lines(&scan).is_empty());
+    assert!(engine_disclosure_lines(&scan).is_empty());
 }
 
 #[test]
@@ -82,4 +82,18 @@ fn engine(outcome: &str, detail: &str) -> ScanEngineOutcomeModel {
         run_ref: Some("stopped-run".into()),
         detail: Some(detail.into()),
     }
+}
+
+#[test]
+fn completed_scan_keeps_unknown_policy_visible_in_report() {
+    let mut scan = scan(Some("completed"));
+    let mut outcome = engine(
+        "complete",
+        "Advisory policy was not recorded; absence cannot establish reassessment.",
+    );
+    outcome.engine = "Cargo audit".into();
+    scan.engine_outcomes = vec![outcome];
+    assert!(receipt_lines(&scan)
+        .join("\n")
+        .contains("Advisory policy was not recorded"));
 }

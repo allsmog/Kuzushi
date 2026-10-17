@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
+use kuzushi_mcp_common::compile_database::MAX_COMPILE_DATABASE_BYTES;
 use kuzushi_mcp_common::{AuthorizedDirectory, BoundedReadFile};
 use std::path::{Path, PathBuf};
 
 use super::{CompileDb, Generator};
 
-const MAX_COMPILE_DATABASE_BYTES: usize = 8 * 1024 * 1024;
 const COMPILE_DATABASE_CANDIDATES: &[&str] = &[
     "compile_commands.json",
     "build/compile_commands.json",

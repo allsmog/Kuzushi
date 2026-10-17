@@ -15,6 +15,7 @@ struct InventoryBudget<'p> {
     max_inspected_bytes: usize,
     truncation: Option<String>,
     canceled: bool,
+    enumeration_incomplete: bool,
     truncated_files: Vec<String>,
     /// Walked-entry observer: monorepo walks run for minutes, and a silent
     /// walk reads as a hung run — callers surface these counts as heartbeat
@@ -168,6 +169,7 @@ impl<'p> InventoryBudget<'p> {
             max_inspected_bytes,
             truncation: None,
             canceled: false,
+            enumeration_incomplete: false,
             truncated_files: Vec::new(),
             progress: Some(progress),
             cancel: None,
@@ -176,6 +178,7 @@ impl<'p> InventoryBudget<'p> {
 
     fn receipt(&self, enumeration: &str) -> InventoryInspection {
         InventoryInspection {
+            enumeration_complete: Some(!self.enumeration_incomplete && !self.canceled),
             files: Vec::new(),
             enumeration: enumeration.into(),
             entries: self.entries,
@@ -248,6 +251,7 @@ impl<'p> InventoryBudget<'p> {
             return Ok(None);
         };
         if self.entries_exhausted() {
+            self.enumeration_incomplete = true;
             self.mark_truncated(format!(
                 "entry cap of {} reached at {}; inventory covers the enumerated prefix only",
                 self.max_entries,
@@ -314,6 +318,7 @@ fn walk_git_index(
 }
 
 fn mark_enumeration_cap(budget: &mut InventoryBudget<'_>, relative: &str) {
+    budget.enumeration_incomplete = true;
     if !budget.canceled {
         budget.mark_truncated(format!(
             "entry cap of {} reached at {relative}; inventory covers the enumerated prefix only",
@@ -432,6 +437,7 @@ fn repository_directory_entries(
     budget: &mut InventoryBudget<'_>,
 ) -> Result<Vec<InventoryEntry>> {
     if budget.halted(dir) {
+        budget.enumeration_incomplete = true;
         if !budget.canceled {
             budget.mark_truncated(format!(
                 "entry cap reached before walking {}; inventory covers the walked prefix only",
@@ -443,6 +449,7 @@ fn repository_directory_entries(
     let read_dir = match reader.read_directory(dir) {
         Ok(entries) => entries,
         Err(error) => {
+            budget.enumeration_incomplete = true;
             builder.omit_path(&repo_relative(root, dir), &format!("directory could not be opened within the repository without following symlinks: {error}"));
             budget.mark_truncated(format!(
                 "directory unavailable or unsafe at {}; inventory excludes this boundary",
@@ -545,6 +552,7 @@ fn open_inventory_file(
     match reader.open_file(path) {
         Ok(file) => Some(file),
         Err(error) => {
+            budget.enumeration_incomplete = true;
             builder.omit_path(relative, &format!("file could not be opened within the repository without following symlinks: {error}"));
             budget.mark_truncated(format!(
                 "file unavailable or unsafe at {relative}; inventory excludes this path"
@@ -609,6 +617,64 @@ fn record_source_file(path: &Path, relative: &str, text: &str, builder: &mut Inv
 #[cfg(test)]
 mod coverage_limit_tests {
     use super::*;
+
+    #[test]
+    fn prefix_inspection_does_not_hide_a_later_enumeration_limit() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(
+            root.path().join("a.c"),
+            vec![b' '; MAX_FILE_INSPECTION_BYTES + 1],
+        )
+        .unwrap();
+        fs::write(root.path().join("b.c"), "// inert\n").unwrap();
+        fs::write(root.path().join("c.c"), "// inert\n").unwrap();
+        let inventory = build_with_enumeration(
+            root.path(),
+            2,
+            MAX_REPOSITORY_INSPECTED_BYTES,
+            &mut |_| {},
+            &|| false,
+            Some(crate::workspace::GitIndexEnumeration::Tracked {
+                paths: vec!["a.c".into(), "b.c".into(), "c.c".into()],
+                fingerprint: "owned-test-enumeration".into(),
+            }),
+        )
+        .unwrap();
+        assert!(inventory
+            .truncation
+            .unwrap()
+            .reason
+            .contains("per-file inspection cap"));
+        assert_eq!(
+            inventory.inspection.unwrap().enumeration_complete,
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn complete_enumeration_and_legacy_unknown_are_distinct_from_content_prefixes() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(
+            root.path().join("a.c"),
+            vec![b' '; MAX_FILE_INSPECTION_BYTES + 1],
+        )
+        .unwrap();
+        let inventory = build_repository_inventory(root.path()).unwrap();
+        assert!(inventory.truncation.is_some());
+        let inspection = inventory.inspection.unwrap();
+        assert_eq!(inspection.enumeration_complete, Some(true));
+        let mut legacy = serde_json::to_value(inspection).unwrap();
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("enumeration_complete");
+        assert_eq!(
+            serde_json::from_value::<InventoryInspection>(legacy)
+                .unwrap()
+                .enumeration_complete,
+            None
+        );
+    }
 
     #[test]
     fn inspection_receipt_discloses_omissions_and_per_file_prefixes() {

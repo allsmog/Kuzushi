@@ -323,7 +323,7 @@ Additional operator guidance:
     )
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct RandoriArtifacts {
     pub(crate) state: Option<Value>,
     pub(crate) s1_objectives: Option<Value>,

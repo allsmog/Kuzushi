@@ -17,11 +17,12 @@ pub(crate) struct RailSection {
 pub(crate) fn rail_sections(app: &ShellApp, width: usize) -> Vec<RailSection> {
     [
         Some(engagement_section(app, width)),
+        recorded_request_section(app, width),
         attention_section(app, width),
         journey_section(app),
         in_flight_section(app, width),
         findings_section(app, width),
-        cost_section_unless_shown(app),
+        cost_section_unless_shown(app, width),
     ]
     .into_iter()
     .flatten()
@@ -30,10 +31,16 @@ pub(crate) fn rail_sections(app: &ShellApp, width: usize) -> Vec<RailSection> {
 
 /// Run Focus and Report own their accounting projection. Session cost would
 /// confuse Report's durable investigation allowance with this shell process.
-fn cost_section_unless_shown(app: &ShellApp) -> Option<RailSection> {
+fn cost_section_unless_shown(app: &ShellApp, width: usize) -> Option<RailSection> {
+    if let Some(model) = super::investigation_allowance::investigation_allowance_model(app) {
+        return Some(RailSection {
+            title: "INVESTIGATION ALLOWANCE",
+            rows: model.rows.iter().map(|row| muted_row(row, width)).collect(),
+        });
+    }
     (!matches!(
         app.shell_view(),
-        crate::ShellView::Activity | crate::ShellView::Report
+        crate::ShellView::Activity | crate::ShellView::Report | crate::ShellView::Replay
     ))
     .then(|| cost_section(app))
 }
@@ -51,7 +58,10 @@ fn engagement_section(app: &ShellApp, width: usize) -> RailSection {
         truncate_left(&target, width),
         theme::primary(),
     )];
-    if let Some(chip) = super::screen_context_model(app).scope_chip() {
+    if let Some(chip) = super::screen_context_model(app)
+        .scope_chip()
+        .filter(|_| app.shell_view() != crate::ShellView::Replay)
+    {
         rows.push(muted_row(&chip, width));
     }
     RailSection {
@@ -62,6 +72,17 @@ fn engagement_section(app: &ShellApp, width: usize) -> RailSection {
         },
         rows,
     }
+}
+
+fn recorded_request_section(app: &ShellApp, width: usize) -> Option<RailSection> {
+    if app.shell_view() != crate::ShellView::Replay {
+        return None;
+    }
+    let model = super::replay_request_context(app, app.router.replay().run_id());
+    Some(RailSection {
+        title: "RECORDED REQUEST",
+        rows: model.rail.iter().map(|row| muted_row(row, width)).collect(),
+    })
 }
 
 /// Every attention item, not the footer's collapsed single segment. Hidden

@@ -67,6 +67,7 @@ impl ShellApp {
                     ViewHotkeyAction::RunDiffToggleSources,
                 ),
             ],
+            ShellView::Replay => self.replay_view_keybindings(),
             ShellView::Catalog => catalog_keybindings(self.router.catalog().is_expanded()),
             ShellView::Home => home_keybindings(),
             ShellView::Workbench => workbench_keybindings(self),
@@ -92,6 +93,32 @@ impl ShellApp {
         }
         if self.can_resume_scan_hotkey() {
             bindings.extend(resume_scan_keybindings());
+        }
+        bindings
+    }
+
+    fn replay_view_keybindings(&self) -> Vec<ViewKeybinding> {
+        let mut bindings = [
+            (HotkeyTrigger::Tab, "Tab", ViewHotkeyAction::ReplayNextPage),
+            (
+                HotkeyTrigger::BackTab,
+                "Shift+Tab",
+                ViewHotkeyAction::ReplayPreviousPage,
+            ),
+        ]
+        .into_iter()
+        .map(|(trigger, hint, action)| {
+            bind(trigger, hint, "result / available inputs / receipt", action)
+        })
+        .filter(|_| crate::ui_view_models::replay_has_summary(self))
+        .collect::<Vec<_>>();
+        if crate::ui_view_models::replay_switch_owns_input(self) {
+            bindings.push(bind(
+                HotkeyTrigger::Char('r'),
+                "r",
+                "refresh recorded request and limits",
+                ViewHotkeyAction::ReplayRefreshContext,
+            ));
         }
         bindings
     }

@@ -19,6 +19,7 @@ pub(super) fn query_binding(
     order: FindingPageOrder,
     report: &FindingListReport,
     runs: &BTreeMap<String, RunSummary>,
+    membership: Option<&BatchPageMembership>,
 ) -> Result<String> {
     // Run bookkeeping advances the projection without changing this query.
     // Bind materialized finding facts and decisions, preserving actual drift
@@ -29,6 +30,9 @@ pub(super) fn query_binding(
     );
     let mut digest = Sha256::new();
     digest.update(signature.as_bytes());
+    if let Some(membership) = membership {
+        digest.update(&membership.signature);
+    }
     digest.update(serde_json::to_vec(&report.aliases)?);
     digest.update(serde_json::to_vec(&report.review_decisions)?);
     for finding in &report.findings {

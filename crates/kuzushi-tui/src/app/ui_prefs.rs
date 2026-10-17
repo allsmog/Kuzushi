@@ -4,6 +4,23 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+/// A logical text position retained while a gallery row reflows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct GalleryTextAnchor {
+    pub(crate) row: usize,
+    pub(crate) characters: usize,
+    pub(crate) identity: u64,
+    pub(crate) tail: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct GalleryReadingPosition {
+    pub(crate) embedded: bool,
+    pub(crate) page: crate::scene3d::VizPage,
+    pub(crate) offset: u16,
+    pub(crate) anchor: GalleryTextAnchor,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct UiPrefs {
     advisory: AdvisoryState,
@@ -26,6 +43,7 @@ pub(crate) struct UiPrefs {
     force_full_redraw: bool,
     should_quit: bool,
     viewport: TerminalViewport,
+    gallery_reading: Option<GalleryReadingPosition>,
     runtime_keymap: RuntimeKeymap,
     pending_key_chord: Option<PendingKeyChord>,
     phase_result_cursor: Option<PhaseResultCursor>,
@@ -77,6 +95,7 @@ impl UiPrefs {
             force_full_redraw: false,
             should_quit: false,
             viewport: TerminalViewport::default(),
+            gallery_reading: None,
             runtime_keymap,
             pending_key_chord: None,
             phase_result_cursor: None,
@@ -395,6 +414,14 @@ impl UiPrefs {
 
     pub(crate) fn set_viewport(&mut self, viewport: TerminalViewport) {
         self.viewport = viewport;
+    }
+
+    pub(crate) fn gallery_reading(&self) -> Option<GalleryReadingPosition> {
+        self.gallery_reading
+    }
+
+    pub(crate) fn set_gallery_reading(&mut self, position: Option<GalleryReadingPosition>) {
+        self.gallery_reading = position;
     }
 }
 

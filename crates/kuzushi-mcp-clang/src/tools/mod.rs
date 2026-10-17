@@ -10,6 +10,8 @@ mod tool_types;
 mod type_ast_handlers;
 
 #[cfg(test)]
+mod selection_tests;
+#[cfg(test)]
 mod tests;
 pub use build_registry::build_registry;
 #[cfg(test)]

@@ -28,7 +28,7 @@ fn receipt_lines(scan: &ScanPhaseModel) -> Vec<String> {
         ),
         "Scan receipt does not establish complete repository coverage.".into(),
     ];
-    lines.extend(incomplete_engine_lines(scan));
+    lines.extend(engine_disclosure_lines(scan));
     lines
 }
 
@@ -40,11 +40,17 @@ fn additional_runs_label(run_count: usize) -> String {
     }
 }
 
-fn incomplete_engine_lines(scan: &ScanPhaseModel) -> Vec<String> {
+fn engine_disclosure_lines(scan: &ScanPhaseModel) -> Vec<String> {
     let engines = scan
         .engine_outcomes
         .iter()
-        .filter(|engine| !matches!(engine.outcome.as_str(), "complete" | "completed"))
+        .filter(|engine| {
+            engine
+                .detail
+                .as_deref()
+                .is_some_and(|detail| !detail.is_empty())
+                || !matches!(engine.outcome.as_str(), "complete" | "completed")
+        })
         .collect::<Vec<_>>();
     let mut lines = engines
         .iter()

@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { decodedThreatContext } from "./untrusted_context.mjs";
 
 const evidence = dirname(fileURLToPath(import.meta.url));
 const callsPath = join(evidence, "investigation-calls.jsonl");
@@ -177,24 +178,7 @@ function requireSavedContext(body) {
   return preview.sha256;
 }
 
-export function decodedThreatContext(body) {
-  const text = body.input
-    .flatMap((message) => message.content ?? [])
-    .map((part) => (typeof part === "string" ? part : (part.text ?? "")))
-    .join("\n");
-  const records = text.matchAll(
-    /UNTRUSTED_DERIVED_BEGIN\nrecord_version=1\nkind=derived\nencoding=percent-v1\nlabel_bytes=(\d+)\ncontent_bytes=(\d+)\nlabel=([^\n]*)\ncontent=([^\n]*)\nUNTRUSTED_DERIVED_END/g,
-  );
-  const record = [...records].find(
-    (match) => decodeURIComponent(match[3]) === "threat-model-digest",
-  );
-  assert.ok(record, "The actual request must include the framed threat-model digest");
-  const label = decodeURIComponent(record[3]);
-  const content = decodeURIComponent(record[4]);
-  assert.equal(Buffer.byteLength(label), Number(record[1]));
-  assert.equal(Buffer.byteLength(content), Number(record[2]));
-  return content;
-}
+export { decodedThreatContext } from "./untrusted_context.mjs";
 
 function responseValue(count) {
   if (count === 0) return contextDocument();

@@ -484,6 +484,32 @@ mod tests {
         assert_eq!(result.findings.len(), 1);
         assert_eq!(result.review_candidates.len(), 1);
         assert_eq!(result.cost_usd, 0.25);
+        let status = taint_iris_next_hunt_status(&result);
+        let data = taint_iris_next_hunt_data(&plan, &evidence, status, "owned prompt", &result);
+        let output = taint_iris_next_hunt_report(
+            &plan,
+            &result,
+            status,
+            None,
+            render_taint_iris_next_output(&plan, &evidence, Some(&result)),
+            data,
+        )
+        .to_tool_json();
+        assert_eq!(
+            output["ok"], false,
+            "fallback candidates cannot complete a failed model request"
+        );
+        assert_eq!(output["status"], "failed");
+        assert_eq!(output["costUsd"], 0.25);
+        assert_eq!(
+            output["data"]["reviewCandidates"].as_array().unwrap().len(),
+            1
+        );
+        assert!(output["output"]
+            .as_str()
+            .unwrap()
+            .starts_with("Model review failed. Scan is incomplete."));
+        assert!(!output["output"].as_str().unwrap().contains("hunt complete"));
         assert!(result
             .warnings
             .iter()
@@ -547,8 +573,8 @@ mod tests {
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let config = V2Config::default();
-        let trace = TraceHandle::jsonl(temp.path(), "taint-plan-trace")
-            .for_tool("taint-iris-next:hunt");
+        let trace =
+            TraceHandle::jsonl(temp.path(), "taint-plan-trace").for_tool("taint-iris-next:hunt");
         let ctx = ToolExecutionContext {
             config: &config,
             workspace: Some(&workspace),
@@ -574,24 +600,39 @@ mod tests {
         assert!(labels.iter().any(|label| label.contains("agent · compose")));
         assert!(labels.iter().any(|label| label.contains("planned")));
         let start_step = read.items[0].item_id;
-        assert!(read.items
+        assert!(read
+            .items
             .iter()
             .skip(1)
-            .filter(|item| matches!(item.item, crate::run_lifecycle::RunItemV1::SafeReasoningSummary { .. }))
+            .filter(|item| matches!(
+                item.item,
+                crate::run_lifecycle::RunItemV1::SafeReasoningSummary { .. }
+            ))
             .all(|item| item.parent_item_id == Some(start_step)));
         assert!(read.items.last().is_some_and(|item| {
-            matches!(item.item, crate::run_lifecycle::RunItemV1::DiagnosticNotice { .. })
-                && item.parent_item_id.is_none()
+            matches!(
+                item.item,
+                crate::run_lifecycle::RunItemV1::DiagnosticNotice { .. }
+            ) && item.parent_item_id.is_none()
         }));
     }
 
     fn lifecycle_messages(items: &[crate::run_lifecycle::RunItemEnvelopeV1]) -> Vec<&str> {
-        items.iter().filter_map(|item| match &item.item {
-            crate::run_lifecycle::RunItemV1::DiagnosticNotice { message, .. } => Some(message.as_str()),
-            crate::run_lifecycle::RunItemV1::SafeReasoningSummary { text, .. } => Some(text.as_str()),
-            crate::run_lifecycle::RunItemV1::ToolCallProgress { message, .. } => Some(message.as_str()),
-            _ => None,
-        }).collect()
+        items
+            .iter()
+            .filter_map(|item| match &item.item {
+                crate::run_lifecycle::RunItemV1::DiagnosticNotice { message, .. } => {
+                    Some(message.as_str())
+                }
+                crate::run_lifecycle::RunItemV1::SafeReasoningSummary { text, .. } => {
+                    Some(text.as_str())
+                }
+                crate::run_lifecycle::RunItemV1::ToolCallProgress { message, .. } => {
+                    Some(message.as_str())
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     #[test]

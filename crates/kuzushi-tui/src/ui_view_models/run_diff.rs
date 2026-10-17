@@ -38,6 +38,7 @@ pub(crate) struct RunDiffFindingRow {
     pub(crate) state: RunDiffFindingState,
     pub(crate) location: String,
     pub(crate) file_path: String,
+    pub(crate) rule_id: String,
     pub(crate) reassessment_block: Option<String>,
     pub(crate) tool: String,
     pub(crate) match_key: Option<String>,
@@ -429,6 +430,9 @@ fn run_diff_finding_row(value: &serde_json::Value) -> Option<RunDiffFindingRow> 
         state: run_diff_finding_state(value),
         location: location_label(file, line),
         file_path: file.to_string(),
+        rule_id: string_field(value, &["ruleId", "rule_id"])
+            .unwrap_or("")
+            .to_string(),
         reassessment_block: None,
         tool: string_field(value, &["tool", "source"])
             .unwrap_or("-")

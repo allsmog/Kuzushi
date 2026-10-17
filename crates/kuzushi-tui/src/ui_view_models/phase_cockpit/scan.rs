@@ -123,10 +123,7 @@ fn durable_projection(
     }
     let summaries = summaries_for_refs(entries, &record.completed.run_refs);
     ScanProjection {
-        scope: app
-            .target()
-            .map(|_| scoped_target_path_label(app))
-            .unwrap_or_else(|| "no target selected".to_string()),
+        scope: "not recorded".into(),
         plan: scanner_plan(&summaries),
         engine_outcomes: scanner_outcomes(&summaries, record.completed.outcome),
         attempt: scan_attempt_from_record(app, record, disposition, &summaries),
@@ -136,10 +133,7 @@ fn durable_projection(
 fn legacy_projection(app: &ShellApp, entries: &[RunSummaryEntry]) -> Option<ScanProjection> {
     let summary = entries.iter().find_map(terminal_scan_summary)?;
     Some(ScanProjection {
-        scope: app
-            .target()
-            .map(|_| scoped_target_path_label(app))
-            .unwrap_or_else(|| "no target selected".to_string()),
+        scope: "not recorded".into(),
         plan: summary
             .tool
             .as_ref()

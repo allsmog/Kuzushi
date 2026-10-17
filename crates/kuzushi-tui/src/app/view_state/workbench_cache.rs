@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::view_hydration::RunResultDocumentRead;
 use crate::ui_view_models::{DfdModel, EntryPointBreakdown, RiskByModule, WorklistViewModel};
 use audit_dataflow::FindingAuditDataflowCache;
 use cache_entries::{
@@ -39,7 +40,7 @@ const MAX_STATUS_CACHE_ENTRIES: usize = 32;
 
 type MapRunContextRead = Result<Option<kuzushi_core::workflow_attempts::MapRunContext>, String>;
 type InvestigationReportRead =
-    Result<Option<kuzushi_core::workspace::InvestigationReportDocument>, String>;
+    Result<Option<Arc<kuzushi_core::workspace::InvestigationReportDocument>>, String>;
 
 mod audit_dataflow;
 mod cache_entries;
@@ -50,11 +51,15 @@ mod finding_alias_cache;
 mod groups;
 mod hydrated_reads;
 mod hydration_state;
+mod investigation_allowance;
 mod map_artifacts_cache;
 mod prompt_override_cache;
 mod relationships;
 mod remediation_projection;
+mod report_reads;
 mod review_source;
+use report_reads::ReportReadCache;
+mod run_request_context;
 mod scanned_snippet;
 mod study_history;
 mod study_usage;
@@ -103,7 +108,9 @@ pub(crate) struct WorkbenchCache {
     scope_tree: Option<ScopeTreeCache>,
     threat_model_store: Option<(PathBuf, ThreatModelStoreState)>,
     map_run_context: BTreeMap<(PathBuf, Vec<String>), MapRunContextRead>,
-    investigation_report: Option<(PathBuf, ViewHydrationKey, InvestigationReportRead)>,
+    investigation_report:
+        ReportReadCache<Option<Arc<kuzushi_core::workspace::InvestigationReportDocument>>>,
+    workspace_report_review: ReportReadCache<Arc<kuzushi_core::workspace::WorkspaceReviewSummary>>,
     project_model_document: Option<ProjectModelDocumentCache>,
     strategy_queue: Option<StrategyQueueCache>,
     prompt_mutations: Option<PromptMutationsCache>,
@@ -113,6 +120,9 @@ pub(crate) struct WorkbenchCache {
     path_states: BTreeMap<PathBuf, PathStateCache>,
     directory_listings: BTreeMap<PathBuf, DirectoryListingCache>,
     run_projections: BTreeMap<(PathBuf, String), RunProjectionCache>,
+    run_result_document: Option<(PathBuf, ViewHydrationKey, RunResultDocumentRead)>,
+    run_request_context: Option<(PathBuf, String, crate::app::RunRequestContextRead)>,
+    investigation_allowance: Option<investigation_allowance::InvestigationAllowanceCache>,
     phase_receipt_outcomes: BTreeMap<
         (PathBuf, String),
         Result<Option<kuzushi_core::workflow_attempts::PhaseAttemptOutcome>, String>,
@@ -240,6 +250,21 @@ impl WorkbenchCache {
                 run_id: run_id.to_string(),
             },
         )
+    }
+
+    pub(crate) fn cached_run_result_document(
+        &self,
+        target: &Path,
+        key: &ViewHydrationKey,
+    ) -> ViewDataState<RunResultDocumentRead> {
+        if let Some((_, _, state)) = self
+            .run_result_document
+            .as_ref()
+            .filter(|(saved_target, saved_key, _)| saved_target == target && saved_key == key)
+        {
+            return ViewDataState::Ready(state.clone());
+        }
+        self.loading_state(target, key)
     }
 
     pub(crate) fn cached_phase_receipt_outcome(
@@ -467,7 +492,8 @@ impl WorkbenchCache {
 
     pub(crate) fn invalidate_workspace_files(&mut self) {
         self.lesson_pages.clear();
-        self.investigation_report = None;
+        self.investigation_report.invalidate();
+        self.workspace_report_review.invalidate();
         self.source_file = None;
         self.mark_git_metadata_stale();
         self.revision_relationships.clear();
@@ -484,6 +510,7 @@ impl WorkbenchCache {
         self.file_completion_values = None;
         self.bump_completion_generation();
         self.run_projections.clear();
+        self.run_result_document = None;
         self.phase_receipt_outcomes.clear();
         self.run_artifact_texts.clear();
         drop_unsettled_scan_stage_receipts(&mut self.scan_stage_receipts);
@@ -610,7 +637,8 @@ impl WorkbenchCache {
         self.study_usage_catalogue = None;
         self.study_history = None;
         self.study_usage_runs.clear();
-        self.investigation_report = None;
+        self.investigation_report.invalidate();
+        self.workspace_report_review.invalidate();
         self.invalidate_legacy_run_summary_index();
         self.map_run_context.clear();
         self.view_models.invalidate_visible_findings();
@@ -688,6 +716,7 @@ impl WorkbenchCache {
     }
 
     fn invalidate_target_run_caches(&mut self, target: &Path) {
+        self.clear_matching_result_document(target, None);
         self.run_projections
             .retain(|(cached_target, _), _| cached_target != target);
         self.run_artifact_texts
@@ -698,7 +727,8 @@ impl WorkbenchCache {
             });
     }
 
-    fn invalidate_one_run_cache(&mut self, target: &Path, run_id: &str) {
+    pub(crate) fn invalidate_one_run_cache(&mut self, target: &Path, run_id: &str) {
+        self.clear_matching_result_document(target, Some(run_id));
         let key = (target.to_path_buf(), run_id.to_string());
         self.run_projections.remove(&key);
         self.run_artifact_texts
@@ -711,6 +741,24 @@ impl WorkbenchCache {
             .is_some_and(|state| !scan_stage_receipt_is_settled(state))
         {
             self.scan_stage_receipts.remove(&key);
+        }
+    }
+
+    fn clear_matching_result_document(&mut self, target: &Path, run_id: Option<&str>) {
+        let matches = self
+            .run_result_document
+            .as_ref()
+            .is_some_and(|(cached_target, key, _)| {
+                let ViewHydrationKey::RunResultDocument {
+                    run_id: cached_run, ..
+                } = key
+                else {
+                    return false;
+                };
+                cached_target == target && run_id.is_none_or(|run| cached_run == run)
+            });
+        if matches {
+            self.run_result_document = None;
         }
     }
 

@@ -71,14 +71,10 @@ fn stopped_engines(
     error: &anyhow::Error,
 ) -> Vec<ScanStageEngine> {
     let Some(failure) = failure else {
-        return vec![ScanStageEngine {
-            engine: "sast:scan".into(),
-            outcome: ScanEngineStageOutcome::Failed,
-            run_ref: None,
-            detail: Some(format!(
-                "pipeline stopped before complete engine outcomes were available: {error}"
-            )),
-        }];
+        return vec![stopped_pipeline_engine(
+            format!("pipeline stopped before complete engine outcomes were available: {error}"),
+            None,
+        )];
     };
     let mut engines = selected
         .planned_engine_ids()
@@ -92,17 +88,25 @@ fn stopped_engines(
         .iter()
         .all(|job| job.disposition == NativeEngineDisposition::Complete)
     {
-        engines.push(ScanStageEngine {
-            engine: "sast:scan".into(),
-            outcome: ScanEngineStageOutcome::Failed,
-            run_ref: Some(failure.report.run.id.clone()),
-            detail: Some(format!(
+        engines.push(stopped_pipeline_engine(
+            format!(
                 "Discovery observations retained; later scan processing stopped: {}",
                 failure.cause
-            )),
-        });
+            ),
+            Some(failure.report.run.id.clone()),
+        ));
     }
     engines
+}
+
+fn stopped_pipeline_engine(detail: String, run_ref: Option<String>) -> ScanStageEngine {
+    ScanStageEngine {
+        engine: "sast:scan".into(),
+        outcome: ScanEngineStageOutcome::Failed,
+        rule_ids: None,
+        run_ref,
+        detail: Some(detail),
+    }
 }
 
 fn stopped_engine(engine: &str, failure: &NativeScanFailure) -> ScanStageEngine {
@@ -123,6 +127,7 @@ fn stopped_engine(engine: &str, failure: &NativeScanFailure) -> ScanStageEngine 
     ScanStageEngine {
         engine: engine.into(),
         outcome,
+        rule_ids: super::scan_engine_rule_ids(engine),
         run_ref: (!jobs.is_empty()).then(|| failure.report.run.id.clone()),
         detail,
     }

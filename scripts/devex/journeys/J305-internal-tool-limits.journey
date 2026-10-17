@@ -1,0 +1,110 @@
+name: Internal settings and capped heuristic preserve honest partial work
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/internal_tool_limits.py @TMP_TARGET @ART prepare @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: options uaf-hunt:hunt
+nav-mode:
+keys: a
+require-live-snap: 25 Alloc free pairs | structured-option
+keys: Enter C-u
+require-live-snap: 25 EDIT Alloc free pairs | opened-structured-editor
+paste-file: @ART/pairs.txt
+require-live-snap: 25 owned_alloc | structured-editor
+resize: 160x48
+live-snap: editor-160x48
+resize: 96x89
+live-snap: editor-96x89
+resize: 80x24
+live-snap: editor-80x24
+resize: 60x20
+live-snap: editor-60x20
+resize: 40x12
+live-snap: editor-40x12
+expect: save session
+ask: Is the advanced JSON draft readable and editable across six sizes, with clear session and global save controls and no work starting?
+resize: 120x36
+keys: C-g
+require-live-snap: 25 Saved globally. | stored-option
+require-shell: python3 -B @REPO/scripts/devex/fixtures/internal_tool_limits.py @TMP_TARGET @ART options
+submit: options chrome-rce:scan
+require-live-snap: 25 Experimental | experimental-scan
+submit: logs
+submit: run chrome-rce:scan {"maxFindings":1}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/internal_tool_limits.py @TMP_TARGET @ART partial
+paste-file: @ART/partial-replay.txt
+keys: Enter
+require-live-snap: 25 Outcome · partial | capped-receipt
+expect: Finding limit 1 reached
+resize: 160x48
+live-snap: partial-160x48
+resize: 96x89
+live-snap: partial-96x89
+resize: 80x24
+live-snap: partial-80x24
+resize: 60x20
+live-snap: partial-60x20
+resize: 40x12
+live-snap: partial-40x12
+expect: partial
+keys: NPage
+live-snap: partial-cause-40x12
+expect: inspected
+ask: Across six sizes, can the operator read the partial outcome and reach the finding-limit cause without interpreting the comment-only signal as a verified vulnerability?
+resize: 120x36
+keys: Escape
+submit: open F-0001
+require-live-snap: 25 Viewing Review | review-signal
+expect: broker/owned.cc
+submit: decision deferred Owned inert heuristic signal needs owner review
+require-live-snap: 25 recorded: deferred | retained-decision
+require-shell: python3 -B @REPO/scripts/devex/fixtures/internal_tool_limits.py @TMP_TARGET @ART deferred
+submit: report
+require-live-snap: 25 Finding review completeness does not describe repository coverage. | report-limits
+expect: REPORT
+expect: 1 finding
+resize: 160x48
+live-snap: report-160x48
+resize: 96x89
+live-snap: report-96x89
+resize: 80x24
+live-snap: report-80x24
+resize: 60x20
+live-snap: report-60x20
+resize: 40x12
+live-snap: report-40x12
+keys: NPage
+live-snap: report-reading-40x12
+ask: Across six sizes, does Report keep the recorded deferral separate from repository coverage without treating a reached finding limit as complete inspection?
+resize: 120x36
+keys: Home
+keys: j j j
+require-live-snap: 20 format json (4/6) | json-format
+keys: Enter
+require-live-snap: 25 EXPORTED | exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/internal_tool_limits.py @TMP_TARGET @ART exported
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: show advanced uaf-hunt:hunt
+require-live-snap: 25 owned_alloc | recovered-option
+submit: logs
+paste-file: @ART/partial-replay.txt
+keys: Enter
+require-live-snap: 25 Outcome · partial | recovered-partial
+expect: Finding limit 1 reached
+keys: Escape
+submit: open F-0001
+require-live-snap: 25 recorded: deferred | recovered-decision
+require-shell: python3 -B @REPO/scripts/devex/fixtures/internal_tool_limits.py @TMP_TARGET @ART restarted
+ask: Does no-color restart retain the structured setting, one partial heuristic observation and its deferral with no UAF scan, model request or target execution?
+keys: C-c
+require-exit: 10

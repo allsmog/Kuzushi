@@ -50,6 +50,8 @@ const AUDITED_ENV_READ_FILES: &[&str] = &[
     "run_lifecycle/persistence/writer_characterization.rs", // ignored-test baseline input
     // Test-only fault-injection hooks (KUZUSHI_TEST_* names; inert unless set).
     "storage_v3/writer_actor/test_hooks.rs", // pause-after-append hook for writer-crash tests
+    // Test-only native-fixture adapter.
+    "fleet/native_fixture.rs", // cfg(test)-only owned fixture root for native history journeys
     // Env reads confined to the file's inline test module.
     "scan/subprocess/scan_cancellation.rs", // owner-process re-exec test hook
     "test_env.rs", // shared cfg(test) ScopedEnv guard (reads to save/restore)

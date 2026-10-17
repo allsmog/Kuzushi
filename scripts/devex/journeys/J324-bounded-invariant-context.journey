@@ -1,0 +1,169 @@
+name: Bounded invariant context drafts with supplied source and protected Review
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_AGENT_MCPS
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_invariants.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+paste-file: @ART/unbound-command.txt
+keys: Enter
+require-live-snap: 25 approved investigation allowance | unbound-refused
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_invariants.py @TMP_TARGET @ART unbound
+paste-file: @ART/approval-command.txt
+keys: Enter
+require-live-snap: 25 REVIEW ALLOWANCE | allowance
+expect: Total provider calls: 3
+expect: Protected review calls: 1
+resize: 40x12
+keys: End
+require-live-snap: 20 y approve | allowance-40x12
+keys: y
+resize: 120x36
+require-live-snap: 25 Allowance approved | approved
+paste-file: @ART/invalid-command.txt
+keys: Enter
+require-live-snap: 30 Invariant context draft failed | invalid-output
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_invariants.py @TMP_TARGET @ART invalid
+paste-file: @ART/generate-command.txt
+keys: Enter
+require-live-snap: 30 Invariant context drafts: 1; partial | draft
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_invariants.py @TMP_TARGET @ART generated
+keys: Escape
+paste-file: @ART/replay-command.txt
+keys: Enter
+require-live-snap: 25 SAVED OUTPUT | draft-result
+expect: Review the owned guard assumption
+expect: Unverified safety assumptions
+expect: Source: owned café.c:1
+expect: 1 included, 1 omitted
+expect: No findings, scan jobs, accepted context or phase completion
+keys: Tab
+require-live-snap: 20 REPLAY · Inputs | supplied-inputs
+expect: FROZEN MODEL INPUT
+expect: Model supplied:
+keys: Tab
+require-live-snap: 20 Full receipt | receipt
+keys: Tab
+require-live-snap: 20 SAVED OUTPUT | result-restored
+resize: 160x48
+live-snap: result-160x48
+resize: 96x89
+live-snap: result-96x89
+resize: 80x24
+live-snap: result-80x24
+resize: 60x20
+live-snap: result-60x20
+resize: 40x12
+require-live-snap: 20 REPLAY · Result | result-40x12
+keys: NPage
+live-snap: result-reading-01-40x12
+keys: NPage
+live-snap: result-reading-02-40x12
+keys: NPage
+live-snap: result-reading-03-40x12
+keys: NPage
+live-snap: result-reading-04-40x12
+keys: NPage
+live-snap: result-reading-05-40x12
+keys: NPage
+live-snap: result-reading-06-40x12
+keys: NPage
+live-snap: result-reading-07-40x12
+keys: NPage
+live-snap: result-reading-08-40x12
+keys: NPage
+live-snap: result-reading-09-40x12
+keys: NPage
+live-snap: result-reading-10-40x12
+keys: End
+require-live-snap: 20 Safe terminal display | result-tail-40x12
+expect: REPLAY · Result
+expect: Tab inputs
+ask: Are these visibly unverified context drafts with partial source, explicit omissions, no accepted context and separate approval for further work at all six sizes?
+keys: Tab
+require-live-snap: 20 REPLAY · Inputs | inputs-40x12
+keys: Home
+live-snap: inputs-start-40x12
+expect: Source: owned café.c
+keys: NPage
+live-snap: inputs-reading-01-40x12
+keys: NPage
+live-snap: inputs-reading-02-40x12
+keys: NPage
+live-snap: inputs-reading-03-40x12
+keys: NPage
+live-snap: inputs-reading-04-40x12
+keys: NPage
+live-snap: inputs-reading-05-40x12
+keys: NPage
+live-snap: inputs-reading-06-40x12
+keys: NPage
+live-snap: inputs-reading-07-40x12
+keys: NPage
+live-snap: inputs-reading-08-40x12
+keys: NPage
+live-snap: inputs-reading-09-40x12
+keys: NPage
+live-snap: inputs-reading-10-40x12
+keys: NPage
+live-snap: inputs-reading-11-40x12
+keys: NPage
+live-snap: inputs-reading-12-40x12
+keys: NPage
+live-snap: inputs-reading-13-40x12
+keys: NPage
+live-snap: inputs-reading-14-40x12
+keys: NPage
+live-snap: inputs-reading-15-40x12
+keys: NPage
+live-snap: inputs-reading-16-40x12
+keys: NPage
+live-snap: inputs-reading-17-40x12
+keys: NPage
+live-snap: inputs-reading-18-40x12
+keys: NPage
+live-snap: inputs-reading-19-40x12
+keys: NPage
+live-snap: inputs-reading-20-40x12
+keys: End
+require-live-snap: 20 Safe terminal display | inputs-tail-40x12
+expect: REPLAY · Inputs
+expect: rows
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_invariants.py @TMP_TARGET @ART narrow
+ask: Can the operator inspect historical supplied source, unverified anchors, omitted annotations, reasoning and system instructions without another request or a global context change?
+resize: 120x36
+submit: logs
+paste-file: @ART/exhausted-command.txt
+keys: Enter
+require-live-snap: 25 allowance exhausted: 2 calls committed | exhausted
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_invariants.py @TMP_TARGET @ART exhausted
+keys: C-c
+require-exit: 15
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: logs
+paste-file: @ART/status-command.txt
+keys: Enter
+require-live-snap: 25 Calls committed: 2/3 | restarted-accounting
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_invariants.py @TMP_TARGET @ART restarted
+paste-file: @ART/replay-command.txt
+keys: Enter
+require-live-snap: 25 SAVED OUTPUT | restarted-result
+resize: 40x12
+require-live-snap: 20 REPLAY · Result | restarted-result-40x12
+keys: End
+require-live-snap: 20 Safe terminal display | no-color-result-tail-40x12
+keys: Tab
+require-live-snap: 20 REPLAY · Inputs | no-color-inputs-40x12
+expect: Source: owned café.c
+keys: End
+require-live-snap: 20 Safe terminal display | no-color-inputs-tail-40x12
+ask: Does restart preserve exact supplied input, two settled Context calls and protected Review without misleading Scan completion, repair, fallback or extra jobs?
+keys: C-c
+require-exit: 15

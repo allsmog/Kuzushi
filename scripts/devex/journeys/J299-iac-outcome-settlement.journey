@@ -1,0 +1,68 @@
+name: Selected configuration inspection retains partial coverage and decisions
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/iac_outcome_settlement.py @TMP_TARGET @ART prepare
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+paste-file: @ART/scan-command.txt
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/iac_outcome_settlement.py @TMP_TARGET @ART partial
+require-live-snap: 30 coverage is incomplete | partial-inspection
+expect: Dockerfile.oversized
+submit: open F-0001
+require-live-snap: 25 selected/Dockerfile | selected-observation
+submit: decision deferred Owned configuration signal needs owner review
+require-live-snap: 25 recorded: deferred | deferred-observation
+require-shell: python3 -B @REPO/scripts/devex/fixtures/iac_outcome_settlement.py @TMP_TARGET @ART deferred
+resize: 160x48
+live-snap: review-160x48
+resize: 96x89
+live-snap: review-96x89
+resize: 80x24
+live-snap: review-80x24
+resize: 60x20
+live-snap: review-60x20
+nav-mode:
+keys: Enter
+require-live-snap: 25 F-0001 · FINDING | finding-reader
+resize: 40x12
+live-snap: review-40x12
+expect: F-0001
+expect: PgUp/PgDn read
+ask: Are the selected configuration signal, scripted decision and reading controls usable at six sizes without claiming a verified vulnerability or inspecting the excluded parent?
+keys: q
+resize: 120x36
+submit: report
+require-live-snap: 25 Displayed Scan: partial | partial-report
+expect: Scope: workspace history
+expect: paths selected
+expect: 1 inspected file
+expect: Scan receipt does not establish complete repository coverage.
+require-shell: python3 -B @REPO/scripts/devex/fixtures/iac_outcome_settlement.py @TMP_TARGET @ART report
+ask: Does Report distinguish incomplete inspection from review completeness and avoid implying whole-repository coverage for a selected-directory scan?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/iac_outcome_settlement.py @TMP_TARGET @ART repair
+submit: logs
+paste-file: @ART/scan-command.txt
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/iac_outcome_settlement.py @TMP_TARGET @ART complete
+require-live-snap: 30 run receipt · completed · 1 run | repaired-inspection
+submit: open F-0001
+require-live-snap: 25 recorded: deferred | retained-decision
+ask: Does an explicit repeat after removing the oversized inert fixture preserve both observations and the earlier decision without claiming a fix or silently expanding scope?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: open F-0001
+require-live-snap: 25 recorded: deferred | restarted-review
+require-shell: python3 -B @REPO/scripts/devex/fixtures/iac_outcome_settlement.py @TMP_TARGET @ART restarted
+ask: After no-color restart, are both direct outcomes and the retained decision readable with no new scan, source execution or model request?
+keys: C-c
+require-exit: 10

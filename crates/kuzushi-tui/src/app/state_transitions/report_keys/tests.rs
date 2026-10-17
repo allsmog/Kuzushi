@@ -41,6 +41,23 @@ fn press(app: &mut ShellApp, code: KeyCode, modifiers: KeyModifiers) {
     assert!(!app.has_running_work());
 }
 
+fn hydrate_workspace_report(app: &ShellApp) {
+    let workspace = kuzushi_core::WorkspaceTarget::new(app.target().unwrap()).unwrap();
+    let _store = kuzushi_core::FindingStore::open(workspace.findings_db_path()).unwrap();
+    let watermark = app.findings_read_watermark();
+    let summary =
+        kuzushi_core::workspace::load_workspace_review_summary(&workspace, watermark).unwrap();
+    app.workbench_cache()
+        .borrow_mut()
+        .apply_view_hydration(ViewHydrationResult {
+            target: app.target_owned().unwrap(),
+            key: ViewHydrationKey::WorkspaceReportReview {
+                findings_watermark: watermark,
+            },
+            value: ViewHydrationValue::WorkspaceReportReview(Ok(summary)),
+        });
+}
+
 #[test]
 fn report_hydration_keys_follow_durable_review_watermark() {
     let root = tempfile::tempdir().unwrap();
@@ -109,7 +126,7 @@ fn report_scope_and_provenance_preserve_composer_and_saved_destination() {
 }
 
 #[test]
-fn report_loading_refuses_implicit_workspace_export_but_explicit_history_can_export() {
+fn report_loading_refuses_export_until_explicit_history_has_a_current_read() {
     let target = tempfile::tempdir().unwrap();
     let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), Some(&workspace));
@@ -124,6 +141,9 @@ fn report_loading_refuses_implicit_workspace_export_but_explicit_history_can_exp
         .contains("loading"));
     app.reduce_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
     let update = app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(update.effects.is_empty());
+    hydrate_workspace_report(&app);
+    let update = app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(matches!(
         update.effects.as_slice(),
         [ShellEffect::ExportReport(ReportExport {
@@ -134,7 +154,7 @@ fn report_loading_refuses_implicit_workspace_export_but_explicit_history_can_exp
 }
 
 #[test]
-fn damaged_scope_evidence_blocks_study_export_until_history_is_chosen() {
+fn damaged_scope_evidence_blocks_export_until_chosen_history_has_a_current_read() {
     let target = tempfile::tempdir().unwrap();
     let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), Some(&workspace));
@@ -161,6 +181,9 @@ fn damaged_scope_evidence_blocks_study_export_until_history_is_chosen() {
     assert!(refusal.contains(error) && refusal.contains("Press s"));
     assert_eq!(app.router.report().path_draft(), path);
     app.reduce_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
+    let update = app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(update.effects.is_empty());
+    hydrate_workspace_report(&app);
     let update = app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(matches!(
         update.effects.as_slice(),
@@ -256,4 +279,33 @@ fn report_destination_quit_and_stay_preserve_the_unsaved_field() {
     assert_eq!(app.shell_view(), ShellView::Report);
     assert_eq!(app.router.report().path_edit(), Some(&field));
     assert!(!app.should_quit());
+}
+
+#[test]
+fn report_refresh_keeps_scope_reading_choices_and_composer_without_starting_work() {
+    let mut app = editor();
+    press(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    press(&mut app, KeyCode::Char('s'), KeyModifiers::NONE);
+    press(&mut app, KeyCode::Down, KeyModifiers::NONE);
+    app.router.default_scroll_mut().scroll_down(5);
+    let format = app.router.report().format();
+    let path = app.router.report().path_draft().to_owned();
+    let cursor = app.cursor();
+    press(&mut app, KeyCode::Char('r'), KeyModifiers::NONE);
+    assert!(app.router.report().workspace_history());
+    assert_eq!(app.router.report().format(), format);
+    assert_eq!(app.router.report().path_draft(), path);
+    assert_eq!(app.router.default_scroll().offset(), 5);
+    assert_eq!(app.cursor(), cursor);
+    assert_eq!(app.shell_view(), ShellView::Report);
+}
+
+#[test]
+fn report_destination_editor_owns_refresh_letters() {
+    let mut app = editor();
+    let update = app.reduce_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
+    assert!(update.handled && update.effects.is_empty());
+    assert!(app.router.report().editing_path());
+    assert_eq!(app.input(), "retained composer");
+    assert!(!app.has_running_work());
 }

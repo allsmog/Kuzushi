@@ -55,8 +55,21 @@ fn regular_workbench_keybindings(
         apply_map_gallery_controls(&mut bindings, app);
     }
     prioritize_phase_controls(&mut bindings, plan);
+    prioritize_diagram_return(&mut bindings, app);
     append_workbench_commands(&mut bindings, app);
     bindings
+}
+
+fn prioritize_diagram_return(bindings: &mut [FooterKeybinding], app: &ShellApp) {
+    if !app.dfd_review_return_is_available() {
+        return;
+    }
+    let Some(key) = app.view_back_key(ShellView::Workbench) else {
+        return;
+    };
+    if let Some(index) = bindings.iter().position(|binding| binding.key == key) {
+        bindings[..=index].rotate_right(1);
+    }
 }
 
 /// The footer names the gallery's controls exactly while the gallery is the

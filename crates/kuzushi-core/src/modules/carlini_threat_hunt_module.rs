@@ -1,4 +1,9 @@
 use super::*;
+mod bounded_context;
+mod cwe_proposal;
+mod deep_discovery;
+mod invariant_draft;
+mod taint_catalog;
 
 pub(crate) fn carlini_threat_hunt_module() -> BuiltinModule {
     builtin_module(
@@ -214,7 +219,7 @@ pub(crate) fn taint_iris_next_module() -> BuiltinModule {
         taint_iris_next_tools(),
         vec![
             dag("taint-iris-next:hunt", "findings", &["context:build"]),
-            dag("taint-iris-next:catalog", "catalog", &["context:build"]),
+            dag("taint-iris-next:catalog", "catalog", &[]),
             dag("taint-iris-next:codeql-db", "codeql-db", &["context:build"]),
         ],
     )
@@ -248,6 +253,8 @@ fn taint_iris_next_tools() -> Vec<ToolDescriptor> {
             FindingStoreRequirement::Optional,
         ),
         taint_catalog_tool_with_policy(),
+        taint_catalog::read_tool(),
+        taint_catalog::accept_tool(),
         taint_codeql_db_tool_with_policy(),
     ]
 }
@@ -261,21 +268,19 @@ fn with_taint_workspace_policy(
 }
 
 fn taint_catalog_tool_with_policy() -> ToolDescriptor {
-    taint_iris_next_catalog_tool().with_policy(ToolPolicy::new(
-        ToolPhase::Scan,
-        RuntimeRequirement::Always,
-        ToolEffect::Read,
-        WorkspaceRequirement::Required,
-        FindingStoreRequirement::Optional,
-    ))
+    taint_catalog::generation_tool()
 }
 
 fn taint_codeql_db_tool_with_policy() -> ToolDescriptor {
-    taint_iris_next_codeql_db_tool().with_policy(repository_execute_policy(
-        ToolPhase::Scan,
-        RuntimeRequirement::Always,
-        FindingStoreRequirement::Optional,
-    ))
+    taint_iris_next_codeql_db_tool()
+        .with_policy(repository_execute_policy(
+            ToolPhase::Map,
+            RuntimeRequirement::Always,
+            FindingStoreRequirement::Optional,
+        ))
+        .with_allowance_category(AllowanceCategory::Context)
+        .with_discovery_maturity(ModuleMaturity::Labs)
+        .without_phase_result()
 }
 
 fn taint_iris_next_hunt_tool() -> ToolDescriptor {
@@ -287,7 +292,7 @@ fn taint_iris_next_hunt_tool() -> ToolDescriptor {
     );
     hidden_tool_with_options(
         "taint-iris-next:hunt",
-        "Run the bundled plan-or-hunt taint evidence pipeline.",
+        "Experimental bundled taint planning or candidate discovery. Hunt can use an initial session and one repair session within the approved Discovery allowance. Accepted discovery scopes are unsupported. Does not complete Scan.",
         options,
     )
     .with_prompt(editable_prompt(
@@ -297,6 +302,8 @@ fn taint_iris_next_hunt_tool() -> ToolDescriptor {
         "TAINT_IRIS_NEXT_PROMPT",
         crate::capabilities::taint_iris_next::taint_iris_next_system_prompt(),
     ))
+    .with_discovery_maturity(ModuleMaturity::Labs)
+    .without_phase_result()
 }
 
 fn taint_iris_next_dataflow_plan_tool() -> ToolDescriptor {
@@ -367,29 +374,10 @@ fn taint_iris_next_import_sinks_tool() -> ToolDescriptor {
     .without_phase_result()
 }
 
-fn taint_iris_next_catalog_tool() -> ToolDescriptor {
-    hidden_tool_with_options(
-        "taint-iris-next:catalog",
-        "Generate a target-specific CWE catalog tailored to this codebase.",
-        vec![
-            target_option(),
-            model_option(),
-            prompt_option("TAINT_IRIS_NEXT_CATALOG_PROMPT", "catalog generation"),
-        ],
-    )
-    .with_prompt(editable_prompt(
-        "catalog generation",
-        "taint-iris-next",
-        "catalog",
-        "TAINT_IRIS_NEXT_CATALOG_PROMPT",
-        crate::capabilities::taint_iris_next::TAINT_IRIS_NEXT_CATALOG_SYSTEM_PROMPT.to_string(),
-    ))
-}
-
 fn taint_iris_next_codeql_db_tool() -> ToolDescriptor {
     hidden_tool_with_options(
         "taint-iris-next:codeql-db",
-        "Build the CodeQL database for taint-iris-next dataflow evidence.",
+        "Experimental model-assisted database preparation for the whole bound target. Requires Context allowance and explicit repository-execution consent. Accepted discovery scopes are unsupported. No Map or Scan completion.",
         vec![
             target_option(),
             model_option(),
@@ -464,8 +452,15 @@ fn taint_iris_next_planning_knobs() -> Vec<OptionSpec> {
         discover_signals_option(),
         target_subdir_option(),
         extra_catalog_entries_option(),
+        taint_catalog_digest_option(),
     ]);
     options
+}
+
+pub(in crate::modules) fn taint_catalog_digest_option() -> OptionSpec {
+    opt("catalogDigestRef", OptionType::String,
+        "Exact saved-catalog digest, or static to explicitly use built-ins. Saved catalogs are never selected without a pinned digest.")
+        .aliases(&["catalog_digest_ref"]).advanced()
 }
 
 fn extra_catalog_entries_option() -> OptionSpec {
@@ -659,12 +654,16 @@ pub(crate) fn systems_hunt_module() -> BuiltinModule {
 fn systems_hunt_tools() -> Vec<ToolDescriptor> {
     systems_hunt_tool_specs()
         .into_iter()
-        .map(|(name, description, runtime_requirement)| {
-            systems_hunt_tool(name, description).with_policy(workspace_policy(
+        .map(|(name, description, runtime_requirement)| match name {
+            "systems-hunt:systems-context-gatherer" => bounded_context::tool(),
+            "systems-hunt:deep-semantic-cwe-select" => cwe_proposal::tool(),
+            "systems-hunt:deep-semantic-hunt" => deep_discovery::tool(),
+            "systems-hunt:systems-invariant-extract" => invariant_draft::tool(),
+            _ => systems_hunt_tool(name, description).with_policy(workspace_policy(
                 ToolPhase::Scan,
                 runtime_requirement,
                 FindingStoreRequirement::Required,
-            ))
+            )),
         })
         .collect()
 }

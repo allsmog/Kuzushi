@@ -1,6 +1,6 @@
 use super::*;
 use crate::capabilities::worklist::{
-    rank_worklist_for_target, Worklist, WorklistOptions, WorklistRow,
+    rank_worklist_observed, Worklist, WorklistOptions, WorklistRow,
 };
 
 pub(crate) fn worklist_module() -> BuiltinModule {
@@ -31,8 +31,9 @@ fn worklist_rank_tool() -> ToolDescriptor {
             opt(
                 "deep",
                 OptionType::Bool,
-                "Also walk the production inventory with the systems-hunt surface scorer. \
-                 Stays Read-safe (no graph build) but reads more files.",
+                "Build one inventory of at most 100000 entries. Read at most 2000 production source prefixes, \
+                 16 KiB per file and 16 MiB total prefixes, sharing a 512 MiB ceiling with inventory. \
+                 No graph build, model or scan jobs.",
             )
             .default(json!(false)),
             opt(
@@ -62,16 +63,25 @@ pub(in crate::modules) fn run_worklist_rank(
     } else {
         child_store.as_ref()
     };
-    let worklist = rank_worklist_for_target(target.root(), &options, store)?;
+    let mut heartbeat = crate::progress::HeartbeatGate::new(std::time::Duration::from_secs(1));
+    let report = rank_worklist_observed(
+        target.root(),
+        &options,
+        store,
+        &mut |entries| {
+            if heartbeat.ready() {
+                emit_worklist_progress(ctx, entries);
+            }
+        },
+        &|| ctx.is_cancelled(),
+    )?;
+    let worklist = report.worklist;
     let output = worklist_output_line(&worklist);
     let mut data = serde_json::to_value(&worklist)?;
     data["target"] = json!(target.root());
     data["sourceFreshnessVerified"] = json!(false);
-    Ok(crate::module_result::completed_output_result(
-        output.clone(),
-        output,
-        data,
-    ))
+    data["systemsInspection"] = json!(report.systems_inspection);
+    Ok(worklist_result(output, data, &worklist.degraded))
 }
 
 fn worklist_child_store(
@@ -142,4 +152,28 @@ fn top_row_evidence(row: &WorklistRow) -> String {
         .map(|citation| format!("{} {}", citation.contributor.glyph(), citation.raw_display))
         .collect::<Vec<_>>()
         .join(" · ")
+}
+
+fn emit_worklist_progress(ctx: &ToolExecutionContext<'_>, entries: usize) {
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool-progress",
+                "worklist:rank",
+                format!("Deep inventory: {entries} entries examined"),
+            )
+            .emit();
+    }
+}
+
+fn worklist_result(output: String, data: Value, issues: &[String]) -> Value {
+    if issues.is_empty() {
+        return crate::module_result::completed_output_result(output.clone(), output, data);
+    }
+    crate::module_result::partial_output_result(
+        output.clone(),
+        output,
+        issues.iter().map(|s| json!(s)).collect(),
+        data,
+    )
 }

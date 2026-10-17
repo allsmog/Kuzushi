@@ -6,6 +6,7 @@ pub(in crate::renderer::views) mod diagrams;
 mod entry_points;
 mod gallery;
 mod gallery_layout;
+mod gallery_reading;
 mod line_page;
 mod render_scene_view;
 mod scene_color;
@@ -20,3 +21,7 @@ pub(in crate::renderer::views) use gallery_layout::map_canvas_sections;
 pub(crate) use gallery_layout::{map_gallery_page_rows, scene_page_rows, summary_page_rows};
 pub(crate) use line_page::PageDirection;
 pub(crate) use render_scene_view::{render_embedded_map_gallery, render_scene_view};
+
+pub(crate) use gallery_reading::{
+    capture_gallery_reading, gallery_line_offset, restore_gallery_reading,
+};

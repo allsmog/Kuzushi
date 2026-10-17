@@ -26,6 +26,7 @@ past runs from disk alone?**
 | `report.md`       | report producer or placeholder writer   | run start / report output | **yes** |
 | `report.sarif`    | optional SARIF-capable producers        | producer output      | optional |
 | `stages.jsonl`    | Rust tool-stage receipt writer          | each finished multi-stage tool stage | optional |
+| `inherited-allowance.json` | shared allowance admission | verified inherited accounting offered to an observed model invocation, before admission | optional |
 | `artifacts.json`  | Rust artifact manifest writer           | artifact registration | **yes** |
 | producer-declared sidecars | individual tool producers | explicit artifact declaration | optional |
 

@@ -57,18 +57,27 @@ mod android_apk_scan;
 mod android_apk_taint_sources;
 mod android_apk_toolchain;
 mod cargo_audit_module;
+mod codeql_scan;
+mod direct_scan_receipt;
 mod exploit_chain_output;
+mod govulncheck_scan;
+mod observation_snapshot;
 mod persist_semgrep_findings;
 mod register_modules;
 mod run_android_apk;
-mod semgrep_module;
 mod sbom;
+mod semgrep_module;
+mod semgrep_scan;
 use cargo_audit_module::run_cargo_audit_scan;
 pub(in crate::modules) use cargo_audit_module::{
     cargo_audit_options, cargo_audit_settings, cargo_audit_study_options,
 };
+use semgrep_scan::run_semgrep_scan;
+mod iac_scan;
 mod inspection_output;
+mod license_scan;
 use exploit_chain_output::exploit_chain_output;
+use iac_scan::run_iac_scan;
 use inspection_output::with_inspection_receipts;
 pub(in crate::modules) use register_modules::{execute_tool, register_modules};
 

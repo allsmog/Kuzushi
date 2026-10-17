@@ -43,7 +43,10 @@ fn insert_agent_hunt_fields(object: &mut Map<String, Value>, agent: &TaintIrisNe
     object.insert("agentStatus".to_string(), json!(agent.agent_status));
     object.insert("selectedCwes".to_string(), json!(agent.selected_cwes));
     object.insert("findings".to_string(), json!(agent.findings));
-    object.insert("reviewCandidates".to_string(), json!(agent.review_candidates));
+    object.insert(
+        "reviewCandidates".to_string(),
+        json!(agent.review_candidates),
+    );
     object.insert("triage".to_string(), json!(agent.triage));
     object.insert("triageSummary".to_string(), agent.triage_summary.clone());
     object.insert("warnings".to_string(), json!(agent.warnings));
@@ -54,7 +57,10 @@ fn insert_agent_hunt_diagnostics(
     object: &mut Map<String, Value>,
     agent: &TaintIrisNextAgentResult,
 ) {
-    object.insert("structuredOutputValid".to_string(), json!(agent.structured_output_valid));
+    object.insert(
+        "structuredOutputValid".to_string(),
+        json!(agent.structured_output_valid),
+    );
     object.insert(
         "structuredOutputRetryCount".to_string(),
         json!(agent.structured_output_retry_count),
@@ -109,7 +115,7 @@ pub(crate) fn taint_iris_next_hunt_report(
         persisted,
         cost_usd: agent.cost_usd,
         cost_usd_exact: agent.cost_usd_exact,
-        ok: status != "agent-output-invalid",
+        ok: agent.structured_output_valid,
         output,
         data,
     }

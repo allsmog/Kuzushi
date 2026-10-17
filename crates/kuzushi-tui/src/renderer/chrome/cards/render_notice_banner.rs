@@ -45,6 +45,9 @@ fn notice_banner_lines(app: &ShellApp, width: u16, max_lines: usize) -> Vec<Line
 }
 
 fn complete_notice_route(app: &ShellApp) -> String {
+    if app.advisory().pending_confirm.is_some() {
+        return "Esc cancel; then logs".to_string();
+    }
     if app.budget_halt_owns_input() {
         return "Esc inspect".to_string();
     }
@@ -281,5 +284,37 @@ mod tests {
             notice_banner_line_count(&app, 90, NOTICE_BANNER_MAX_LINES),
             notice_banner_lines(&app, 90, NOTICE_BANNER_MAX_LINES).len()
         );
+    }
+}
+
+#[cfg(test)]
+mod confirmation_notice_tests {
+    use super::*;
+
+    #[test]
+    fn new_confirmation_alert_points_to_cancel_without_claiming_escape_dismissal() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.request_confirm(crate::PendingConfirm {
+            kind: crate::ConfirmKind::DescriptorEffect,
+            tool: "taint-iris-next:catalog-accept".into(),
+            target: "owned target".into(),
+            rationale: None,
+            allowlist: None,
+            actor: None,
+            remembered: false,
+        });
+        app.set_error_notice("storage", "Owned current persistence failure that must remain visible while the approval is pending.");
+        let lines = notice_banner_lines(&app, 40, 1);
+        let text = lines
+            .iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            text.contains("Esc cancel") && text.contains("logs"),
+            "{text}"
+        );
+        assert!(!text.contains("Esc dismiss"));
+        assert!(lines.iter().all(|line| line.width() <= 40));
     }
 }

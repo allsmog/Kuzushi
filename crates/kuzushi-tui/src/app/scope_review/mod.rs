@@ -1,4 +1,5 @@
 //! Scope review owns its input while open and consumes shared dispatch receipts.
+mod action_search;
 mod actions;
 pub(crate) use actions::{merge_destinations, selected_filter, selected_scope, SCOPE_ACTIONS};
 mod forms;

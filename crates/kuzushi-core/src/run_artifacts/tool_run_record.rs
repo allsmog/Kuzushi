@@ -330,7 +330,7 @@ fn prepare_unsuccessful_result(
 ) -> Result<PreparedUnsuccessfulResult> {
     let error = crate::session_transcript::redaction::redact_text(error);
     let status = unsuccessful_status_label(status);
-    let context = super::scan_failure_context::attach(record, json!({ "error": &error }))?;
+    let context = super::stopped_run_context::attach(record, json!({ "error": &error }))?;
     let terminal_digest =
         terminal_result_digest(status, &with_failure_source(context.clone(), source));
     validate_terminalization(record, status, &terminal_digest)?;
@@ -370,7 +370,7 @@ fn unsuccessful_output(
         artifacts,
     );
     set_unsuccessful_output_status(&mut output, record.tool, status);
-    let output = super::scan_failure_context::attach(record, output)?;
+    let output = super::stopped_run_context::attach(record, output)?;
     Ok(with_failure_source(output, source))
 }
 
@@ -554,10 +554,10 @@ fn prepare_reason_terminal(
     reason: &str,
     source: Option<&crate::workspace::source_snapshot::SourceSnapshot>,
 ) -> Result<PreparedReasonTerminal> {
-    let context = super::scan_failure_context::attach(record, json!({ "reason": reason }))?;
+    let context = super::stopped_run_context::attach(record, json!({ "reason": reason }))?;
     let terminal_digest = terminal_result_digest(status, &with_failure_source(context, source));
     let output =
-        super::scan_failure_context::attach(record, terminal_reason_output(status, reason))?;
+        super::stopped_run_context::attach(record, terminal_reason_output(status, reason))?;
     let output = with_failure_source(output, source);
     validate_terminalization(record, status, &terminal_digest)?;
     let artifacts = existing_run_artifacts(record)?;

@@ -12,6 +12,7 @@ pub(super) fn active_view_hydration_keys(app: &ShellApp) -> Vec<ViewHydrationKey
         .then(common_target_keys)
         .unwrap_or_default();
     append_phase_receipt_outcome_keys(app, &mut keys);
+    keys.extend(app.investigation_allowance_key());
     append_map_context_keys(app, &mut keys);
     append_context_snapshot_key(app, &mut keys);
     append_checkpoint_revision_key(
@@ -81,7 +82,7 @@ fn append_view_hydration_keys(
         ShellView::ProjectModel => append_project_model_keys(app, keys),
         ShellView::StrategyQueue => keys.push(ViewHydrationKey::StrategyQueue),
         ShellView::Campaign => append_study_keys(app, keys),
-        ShellView::Report => keys.push(app.report_hydration_key()),
+        ShellView::Report => append_report_keys(app, keys),
         ShellView::Relationships => keys.push(app.relationship_hydration_key()),
         ShellView::Lessons => {
             keys.push(ViewHydrationKey::FindingLessons {
@@ -133,6 +134,10 @@ fn append_scene_worklist_key(app: &ShellApp, view: ShellView, keys: &mut Vec<Vie
     }
     if app.router.scene().page() == crate::scene3d::VizPage::Worklist {
         keys.push(ViewHydrationKey::ScanRecommendations);
+        keys.push(ViewHydrationKey::RunSummaryEntries);
+        if let Some(id) = crate::ui_view_models::saved_worklist_run_id(app) {
+            keys.push(run_artifact_key(&id, "result.json"));
+        }
     }
 }
 
@@ -253,7 +258,9 @@ fn append_workbench_keys(
         ViewHydrationKey::StrategyQueue,
         ViewHydrationKey::HarnessFile,
     ]);
-    append_scan_receipt_keys(app, workbench_page, keys);
+    if workbench_page == WorkbenchPage::Scan {
+        append_displayed_scan_receipt_keys(app, keys);
+    }
     append_scan_recommendation_key(workbench_page, keys);
     let Some(target) = app.target() else {
         return;
@@ -322,14 +329,34 @@ fn append_finding_patch_truth_key(
     });
 }
 
-fn append_scan_receipt_keys(
-    app: &ShellApp,
-    workbench_page: WorkbenchPage,
-    keys: &mut Vec<ViewHydrationKey>,
-) {
-    if workbench_page != WorkbenchPage::Scan {
-        return;
+fn append_report_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
+    if !app.router.report().workspace_history() {
+        keys.push(app.report_hydration_key());
     }
+    if workspace_report_summary_needed(app) {
+        keys.push(ViewHydrationKey::WorkspaceReportReview {
+            findings_watermark: app.findings_read_watermark(),
+        });
+    }
+    append_displayed_scan_receipt_keys(app, keys);
+}
+
+fn workspace_report_summary_needed(app: &ShellApp) -> bool {
+    if app.router.report().workspace_history() {
+        return true;
+    }
+    if app.router.report().study().is_some() {
+        return false;
+    }
+    matches!(
+        app.workbench_cache()
+            .borrow()
+            .cached_selected_report(app.target(), &app.report_hydration_key()),
+        crate::app::ViewDataState::Ready(Ok(None))
+    )
+}
+
+fn append_displayed_scan_receipt_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
     let Some((attempt, _)) = app.engagement.displayed_phase_attempt(WorkflowPhase::Scan) else {
         return;
     };
@@ -522,14 +549,38 @@ fn append_run_json_keys(keys: &mut Vec<ViewHydrationKey>, run_id: &str) {
     });
 }
 
-fn append_replay_keys(_app: &ShellApp, keys: &mut Vec<ViewHydrationKey>, run_id: &str) {
+fn append_replay_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>, run_id: &str) {
     if run_id.is_empty() {
         return;
     }
     keys.push(run_artifact_key(run_id, "run.json"));
+    keys.push(ViewHydrationKey::RunRequestContext {
+        run_id: run_id.into(),
+    });
     keys.push(ViewHydrationKey::RunProjection {
         run_id: run_id.to_string(),
     });
+    append_selected_result_key(app, keys, run_id);
+}
+
+fn append_selected_result_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>, run_id: &str) {
+    let Some(target) = app.target() else { return };
+    let read = app
+        .workbench_cache()
+        .borrow()
+        .cached_run_projection(target, run_id);
+    let ViewDataState::Ready(Ok(read)) = read else {
+        return;
+    };
+    if let Some((producer, _, reference)) =
+        kuzushi_core::run_artifacts::single_result_artifact(&read.projection)
+    {
+        keys.push(ViewHydrationKey::RunResultDocument {
+            run_id: run_id.to_string(),
+            producer,
+            digest: reference.digest.to_string(),
+        });
+    }
 }
 
 fn append_trace_keys(keys: &mut Vec<ViewHydrationKey>, run_id: &str) {

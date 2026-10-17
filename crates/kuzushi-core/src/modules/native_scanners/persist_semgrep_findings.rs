@@ -1,11 +1,23 @@
 use super::*;
+use crate::module_result::ToolResultStatus;
+use crate::run_lifecycle::RunItemStatus;
+
+pub(in crate::modules) fn scan_persistence_status(
+    status: ToolResultStatus,
+) -> Option<RunItemStatus> {
+    match status {
+        ToolResultStatus::Completed => Some(RunItemStatus::Completed),
+        ToolResultStatus::Partial => Some(RunItemStatus::Partial),
+        _ => None,
+    }
+}
 
 pub(in crate::modules) fn persist_semgrep_findings(
     target: &Path,
     findings: &[Finding],
     ctx: &ToolExecutionContext<'_>,
     index_static_evidence: bool,
-    scan_errors: &[String],
+    status: RunItemStatus,
 ) -> Result<Option<SemgrepPersistedRun>> {
     let (Some(workspace), Some(store)) = (ctx.workspace, ctx.findings_store) else {
         return Ok(None);
@@ -26,7 +38,7 @@ pub(in crate::modules) fn persist_semgrep_findings(
     };
 
     let run_id = ctx.finding_run_id();
-    persist_findings_run_with_coverage(ctx, store, &run_id, target, findings, scan_errors)?;
+    persist_findings_run_with_status(ctx, store, &run_id, target, findings, status)?;
 
     Ok(Some(SemgrepPersistedRun {
         run_id,
@@ -41,7 +53,7 @@ pub(in crate::modules) fn persist_codeql_findings(
     ctx: &ToolExecutionContext<'_>,
     sarif_documents: &[String],
     index_static_evidence: bool,
-    scan_errors: &[String],
+    status: RunItemStatus,
 ) -> Result<Option<CodeqlPersistedRun>> {
     let (Some(workspace), Some(store)) = (ctx.workspace, ctx.findings_store) else {
         return Ok(None);
@@ -55,7 +67,7 @@ pub(in crate::modules) fn persist_codeql_findings(
     };
 
     let run_id = ctx.finding_run_id();
-    persist_findings_run_with_coverage(ctx, store, &run_id, target, findings, scan_errors)?;
+    persist_findings_run_with_status(ctx, store, &run_id, target, findings, status)?;
 
     Ok(Some(CodeqlPersistedRun {
         run_id,
@@ -94,10 +106,11 @@ fn append_static_evidence_report(
     combined.results_omitted += report.results_omitted;
 }
 
-pub(in crate::modules) fn persist_iac_findings(
+pub(in crate::modules) fn persist_native_findings_with_status(
     target: &Path,
     findings: &[Finding],
     ctx: &ToolExecutionContext<'_>,
+    status: RunItemStatus,
 ) -> Result<Option<Value>> {
     let (Some(workspace), Some(store)) = (ctx.workspace, ctx.findings_store) else {
         return Ok(None);
@@ -105,7 +118,7 @@ pub(in crate::modules) fn persist_iac_findings(
 
     workspace.ensure_state_dir()?;
     let run_id = ctx.finding_run_id();
-    persist_findings_run(ctx, store, &run_id, target, findings)?;
+    persist_findings_run_with_status(ctx, store, &run_id, target, findings, status)?;
 
     Ok(Some(json!({
         "runId": run_id,
@@ -113,54 +126,14 @@ pub(in crate::modules) fn persist_iac_findings(
     })))
 }
 
-pub(in crate::modules) fn persist_iac_findings_with_coverage(
-    findings: &[Finding],
-    ctx: &ToolExecutionContext<'_>,
-    gaps: &[String],
-) -> Result<Option<Value>> {
-    let (Some(workspace), Some(store)) = (ctx.workspace, ctx.findings_store) else {
-        return Ok(None);
-    };
-    workspace.ensure_state_dir()?;
-    let run_id = ctx.finding_run_id();
-    // These paths were already rebound to the workspace before persistence.
-    persist_findings_run_with_coverage(ctx, store, &run_id, workspace.root(), findings, gaps)?;
-    Ok(Some(
-        json!({"runId":run_id,"findingsDb":workspace.findings_db_path().display().to_string()}),
-    ))
-}
-
-/// Commit through the shared observed path so the dispatching run records a
-/// typed finding delta (receipts would otherwise show an unmeasured `+0`).
-fn persist_findings_run(
+fn persist_findings_run_with_status(
     ctx: &ToolExecutionContext<'_>,
     store: &FindingStore,
     run_id: &str,
     target: &Path,
     findings: &[Finding],
+    status: RunItemStatus,
 ) -> Result<()> {
-    crate::findings::commit_observed_findings(
-        store,
-        ctx.run_observation().as_ref(),
-        run_id,
-        target,
-        findings,
-    )
-}
-
-fn persist_findings_run_with_coverage(
-    ctx: &ToolExecutionContext<'_>,
-    store: &FindingStore,
-    run_id: &str,
-    target: &Path,
-    findings: &[Finding],
-    scan_errors: &[String],
-) -> Result<()> {
-    let status = if scan_errors.is_empty() {
-        crate::run_lifecycle::RunItemStatus::Completed
-    } else {
-        crate::run_lifecycle::RunItemStatus::Partial
-    };
     crate::findings::commit_observed_findings_with_status(
         store,
         ctx.run_observation().as_ref(),

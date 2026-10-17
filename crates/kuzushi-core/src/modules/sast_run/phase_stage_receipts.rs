@@ -37,13 +37,21 @@ pub(in crate::modules) fn record_sast_scan_stage(
     run_refs: Vec<String>,
     scan: ScanStageData,
 ) -> Result<()> {
-    let receipt = PhaseStageReceipt {
+    let receipt = sast_scan_stage_receipt(outcome, run_refs, scan);
+    artifacts.append_jsonl(SAST_PHASE_STAGES_JSONL_FILE, &json!(receipt))
+}
+
+pub(in crate::modules) fn sast_scan_stage_receipt(
+    outcome: SastPhaseStageOutcome,
+    run_refs: Vec<String>,
+    scan: ScanStageData,
+) -> PhaseStageReceipt {
+    PhaseStageReceipt {
         phase: WorkflowPhase::Scan,
         outcome,
         run_refs: deduplicated_run_refs(run_refs),
         scan: Some(scan),
-    };
-    artifacts.append_jsonl(SAST_PHASE_STAGES_JSONL_FILE, &json!(receipt))
+    }
 }
 
 pub(in crate::modules) fn record_sast_phase_output(
@@ -60,16 +68,34 @@ pub(in crate::modules) fn record_sast_phase_output(
     )
 }
 
+#[cfg(test)]
 pub(in crate::modules) fn load_sast_phase_stages(
     artifacts: &SastRunArtifacts,
 ) -> Result<Vec<Value>> {
+    Ok(ordered_phase_receipts(&read_phase_receipts(artifacts)?))
+}
+
+/// Include an unpublished Scan draft while assembling the final source-bound result.
+pub(in crate::modules) fn load_sast_phase_stages_with_scan(
+    artifacts: &SastRunArtifacts,
+    scan: PhaseStageReceipt,
+) -> Result<Vec<Value>> {
+    let mut receipts = read_phase_receipts(artifacts)?;
+    receipts.push(scan);
+    Ok(ordered_phase_receipts(&receipts))
+}
+
+fn read_phase_receipts(artifacts: &SastRunArtifacts) -> Result<Vec<PhaseStageReceipt>> {
     let label = phase_stage_artifact_label()?;
     let body = artifacts.read_text(SAST_PHASE_STAGES_JSONL_FILE, label)?;
-    let receipts = parse_phase_stage_receipts(&body)?;
-    Ok(WorkflowPhase::ORDER
+    parse_phase_stage_receipts(&body)
+}
+
+fn ordered_phase_receipts(receipts: &[PhaseStageReceipt]) -> Vec<Value> {
+    WorkflowPhase::ORDER
         .iter()
-        .filter_map(|phase| aggregate_phase_receipts(*phase, &receipts))
-        .collect())
+        .filter_map(|phase| aggregate_phase_receipts(*phase, receipts))
+        .collect()
 }
 
 fn phase_stage_artifact_label() -> Result<&'static str> {
@@ -204,6 +230,21 @@ mod tests {
     }
 
     #[test]
+    fn assembling_scan_data_does_not_publish_unverified_coverage() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let artifacts = SastRunArtifacts::create(&workspace, "unpublished").unwrap();
+        let pending = sast_scan_stage_receipt(
+            PhaseStageOutcome::Completed,
+            vec!["unpublished".into()],
+            typed_scan_stage(target.path()),
+        );
+        let preview = load_sast_phase_stages_with_scan(&artifacts, pending).unwrap();
+        assert_eq!(preview[0]["outcome"], "completed");
+        assert!(load_sast_phase_stages(&artifacts).unwrap().is_empty());
+    }
+
+    #[test]
     fn typed_scan_stage_round_trips_without_aggregate_reconstruction() {
         let target = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(target.path()).unwrap();
@@ -228,6 +269,7 @@ mod tests {
     fn typed_scan_stage(target: &std::path::Path) -> ScanStageData {
         ScanStageData {
             scope: ScanStageScope {
+                inspected_files: None,
                 target: target.display().to_string(),
                 paths: vec!["src/auth".to_string()],
             },
@@ -291,12 +333,14 @@ mod tests {
             ScanStageEngine {
                 engine: "semgrep".to_string(),
                 outcome: ScanEngineStageOutcome::Complete,
+                rule_ids: None,
                 run_ref: Some("native-run".to_string()),
                 detail: None,
             },
             ScanStageEngine {
                 engine: "cargo-audit".to_string(),
                 outcome: ScanEngineStageOutcome::Skipped,
+                rule_ids: None,
                 run_ref: None,
                 detail: Some("binary unavailable".to_string()),
             },

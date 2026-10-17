@@ -188,7 +188,8 @@ fn planning_option_draft_row(app: &ShellApp) -> Option<String> {
 
 fn setup_plan_row(app: &ShellApp) -> Option<String> {
     let picker = app.engagement.planning_picker();
-    (!picker.selected().is_empty())
+    picker
+        .has_selection_draft()
         .then(|| "    !   planning selection   session choices will be discarded".to_string())
 }
 
@@ -497,6 +498,18 @@ mod tests {
 
         assert!(text.contains("planning selection"));
         assert!(text.contains("session choices will be discarded"));
+    }
+
+    #[test]
+    fn quit_confirm_does_not_treat_untouched_planner_defaults_as_volatile_state() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.engagement.planning_picker_mut().open(
+            Vec::new(),
+            std::collections::BTreeSet::from([crate::app::PlanningTaskId::GatherRepoContext]),
+        );
+        assert!(!has_volatile_session_state(&app));
+        app.engagement.planning_picker_mut().selected_mut().clear();
+        assert!(has_volatile_session_state(&app));
     }
 
     fn assert_no_unimplemented_quit_claims(model: &QuitConfirmModel) {

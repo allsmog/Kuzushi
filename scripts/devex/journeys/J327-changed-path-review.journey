@@ -1,0 +1,112 @@
+name: Committed path changes become bounded review hints with exact Git identities
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_AGENT_MCPS
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/changed_path_review.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+paste-file: @ART/stage-alias-command.txt
+keys: Enter
+require-live-snap: 25 standalone stage | rejected-stage-expansion
+require-shell: python3 -B @REPO/scripts/devex/fixtures/changed_path_review.py @TMP_TARGET @ART stage-alias
+keys: Escape
+paste-file: @ART/skipped-command.txt
+keys: Enter
+require-live-snap: 25 Changed-path review skipped | no-baseline
+require-shell: python3 -B @REPO/scripts/devex/fixtures/changed_path_review.py @TMP_TARGET @ART skipped
+paste-file: @ART/invalid-command.txt
+keys: Enter
+require-live-snap: 25 resolve comparison commit | invalid-baseline
+require-shell: python3 -B @REPO/scripts/devex/fixtures/changed_path_review.py @TMP_TARGET @ART invalid
+keys: Escape
+paste-file: @ART/review-command.txt
+keys: Enter
+require-live-snap: 25 Changed-path review hints: 2 | committed-path-hints
+require-shell: python3 -B @REPO/scripts/devex/fixtures/changed_path_review.py @TMP_TARGET @ART review
+keys: Escape
+paste-file: @ART/replay-command.txt
+keys: Enter
+require-live-snap: 25 SAVED OUTPUT | recorded-comparison
+expect: Vulnerability findings: 0
+expect: Actual merge base:
+expect: Compared HEAD:
+resize: 160x48
+live-snap: comparison-160x48
+resize: 96x89
+live-snap: comparison-96x89
+resize: 80x24
+live-snap: comparison-80x24
+resize: 60x20
+live-snap: comparison-60x20
+resize: 40x12
+require-live-snap: 20 REPLAY · Result | comparison-40x12
+keys: NPage
+live-snap: comparison-reading-01-40x12
+keys: NPage
+live-snap: comparison-reading-02-40x12
+keys: NPage
+live-snap: comparison-reading-03-40x12
+keys: NPage
+live-snap: comparison-reading-04-40x12
+keys: NPage
+live-snap: comparison-reading-05-40x12
+keys: NPage
+live-snap: comparison-reading-06-40x12
+keys: NPage
+live-snap: comparison-reading-07-40x12
+keys: NPage
+live-snap: comparison-reading-08-40x12
+keys: NPage
+live-snap: comparison-reading-09-40x12
+keys: NPage
+live-snap: comparison-reading-10-40x12
+keys: NPage
+live-snap: comparison-reading-11-40x12
+keys: NPage
+live-snap: comparison-reading-12-40x12
+keys: End
+require-live-snap: 20 Safe terminal display | comparison-tail-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/changed_path_review.py @TMP_TARGET @ART narrow
+ask: Is this clearly a committed-path review hint, with explicit merge-base and HEAD identities, excluded working-tree changes and no vulnerability verdict, fix claim or Scan completion at all six sizes?
+keys: Tab
+require-live-snap: 20 REPLAY · Receipt | receipt-40x12
+resize: 120x36
+submit: logs
+paste-file: @ART/limited-command.txt
+keys: Enter
+require-live-snap: 25 partial path list | bounded-path-list
+require-shell: python3 -B @REPO/scripts/devex/fixtures/changed_path_review.py @TMP_TARGET @ART limited
+keys: Escape
+paste-file: @ART/limited-replay-command.txt
+keys: Enter
+require-live-snap: 25 SAVED OUTPUT | partial-result
+expect: Outcome · partial
+expect: Changed paths retained: 1/3; omitted: 2
+expect: 2 changed file paths omitted
+resize: 40x12
+require-live-snap: 20 REPLAY · Result | partial-result-40x12
+keys: End
+live-snap: partial-tail-40x12
+ask: Does a zero-hint partial path list disclose omitted matching opportunities, keep every finding count at zero and offer no implicit scan or context acceptance?
+keys: C-c
+require-exit: 15
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+resize: 120x36
+paste-file: @ART/limited-replay-command.txt
+keys: Enter
+require-live-snap: 25 SAVED OUTPUT | restarted-partial
+resize: 40x12
+require-live-snap: 20 REPLAY · Result | restarted-partial-40x12
+keys: End
+require-live-snap: 20 Safe terminal display | restarted-tail-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/changed_path_review.py @TMP_TARGET @ART restarted
+ask: Does no-color restart preserve the exact historical comparison, partial-state warning and zero findings without a model, new job or source, HEAD or status changes?
+keys: C-c
+require-exit: 15

@@ -287,7 +287,7 @@ fn workbench_footer_only_advertises_enter_for_an_actionable_findings_pane() {
     app.router
         .workbench_mut()
         .set_focus(PhaseSurfaceId::ReviewQueue);
-    assert!(footer_keybindings(&app).contains(&bind("Enter", "open detail")));
+    assert!(footer_keybindings(&app).contains(&bind("Enter", "detail")));
     app.router
         .workbench_mut()
         .set_focus(PhaseSurfaceId::ReviewDetail);

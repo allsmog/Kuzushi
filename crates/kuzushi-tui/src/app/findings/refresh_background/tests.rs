@@ -129,7 +129,11 @@ fn blocked_refresh_accepts_typing_and_does_not_steal_later_focus() {
         &app,
         crate::ui_view_models::ReviewQueueMode::All,
     );
-    assert!(status.refresh_status.unwrap().contains("previous results"));
+    assert!(status
+        .refresh_status
+        .unwrap()
+        .message
+        .contains("previous results"));
     assert!(
         app.reduce_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE))
             .handled
@@ -141,6 +145,57 @@ fn blocked_refresh_accepts_typing_and_does_not_steal_later_focus() {
     assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(app.selected_finding().is_none());
     assert_eq!(app.findings().len(), 2);
+}
+
+#[test]
+fn study_read_failure_keeps_the_filter_draft_and_scope_through_retry() {
+    let (_root, mut app) = fixture();
+    app.set_active_findings_filter(Some("severity:low limit:2".into()));
+    app.router.campaign_mut().active_batch_id = Some("missing-study".into());
+    app.set_input("Held draft\nsecond line");
+    app.set_cursor(4);
+    let reader = install_reader(&mut app);
+    let update = app.reduce_command_message(ShellCommand::FindingsRefresh);
+    EffectRuntime::execute(&mut app, update.effects);
+    reader.wait_started();
+    let pending = app.findings_read_feedback().unwrap();
+    assert_eq!(pending.population_title(), "FINDINGS · reading study");
+    assert!(!pending.message.contains("previous results"));
+    reader.release();
+    settle(&mut app);
+    let failed = app.findings_read_feedback().unwrap();
+    assert_eq!(failed.population_title(), "FINDINGS · study unavailable");
+    assert!(failed.recovery_lines().contains(&"Retry: findings refresh"));
+    assert!(failed
+        .recovery_lines()
+        .contains(&"Workspace history: batch clear"));
+    assert_eq!(
+        app.active_findings_filter().as_deref(),
+        Some("severity:low limit:2")
+    );
+    assert_eq!(
+        app.router.campaign().active_batch_id.as_deref(),
+        Some("missing-study")
+    );
+    assert_eq!(app.input(), "Held draft\nsecond line");
+    assert_eq!(app.cursor(), 4);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
+    assert!(!app.has_running_work());
+}
+
+#[test]
+fn findings_refresh_keeps_the_current_view_and_selected_row() {
+    let (_root, mut app) = fixture();
+    app.set_active_findings_filter(Some("name:alpha".into()));
+    app.router.findings_mut().set_cursor(1);
+    app.set_shell_view(ShellView::Activity);
+    let update = app.reduce_command_message(ShellCommand::FindingsRefresh);
+    assert_eq!(app.active_findings_filter().as_deref(), Some("name:alpha"));
+    assert_eq!(app.router.findings().cursor(), 1);
+    assert_eq!(app.shell_view(), ShellView::Activity);
+    assert!(
+        matches!(update.effects.as_slice(), [ShellEffect::RefreshFindings(FindingsRefresh { announce: false, filter: Some(filter) })] if filter == "name:alpha")
+    );
 }
 
 #[test]

@@ -760,6 +760,27 @@ impl PlanningPickerRouteState {
         &self.default_selected
     }
 
+    pub(crate) fn has_selection_draft(&self) -> bool {
+        self.selected != self.default_selected
+            || !self.rebuild.is_empty()
+            || self.has_other_phase_selection_draft()
+    }
+
+    fn has_other_phase_selection_draft(&self) -> bool {
+        self.draft_selected
+            .iter()
+            .filter(|(phase, _)| Some(**phase) != self.phase)
+            .any(|(phase, selected)| {
+                self.draft_defaults
+                    .get(phase)
+                    .map_or(!selected.is_empty(), |defaults| selected != defaults)
+                    || self
+                        .draft_rebuild
+                        .get(phase)
+                        .is_some_and(|rebuild| !rebuild.is_empty())
+            })
+    }
+
     pub(crate) fn rebuild(&self) -> &BTreeSet<PlanningTaskId> {
         &self.rebuild
     }
@@ -953,6 +974,75 @@ fn wrapped_cursor(cursor: usize, delta: isize, len: usize) -> usize {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn planning_selection_defaults_are_not_an_unsaved_draft_but_deselection_is() {
+        let mut route = PlanningPickerRouteState::default();
+        let task = PlanningTaskId::GatherRepoContext;
+        route.open_phase_profiled(
+            WorkflowPhase::Map,
+            rows_for(&[task]),
+            BTreeSet::from([task]),
+            false,
+        );
+        assert!(!route.has_selection_draft());
+        route.selected_mut().clear();
+        assert!(route.has_selection_draft());
+    }
+
+    #[test]
+    fn planning_selection_keeps_other_phase_edits_visible_until_reset() {
+        let mut route = PlanningPickerRouteState::default();
+        let task = PlanningTaskId::GatherRepoContext;
+        route.open_phase_profiled(
+            WorkflowPhase::Map,
+            rows_for(&[task]),
+            BTreeSet::from([task]),
+            false,
+        );
+        route.selected_mut().clear();
+        route.open_phase_profiled(
+            WorkflowPhase::Scan,
+            rows_for(&[PlanningTaskId::ScanSemgrep]),
+            BTreeSet::new(),
+            false,
+        );
+        assert!(route.has_selection_draft());
+        route.reset_phase_drafts();
+        assert!(!route.has_selection_draft());
+    }
+
+    #[test]
+    fn planning_selection_rebuild_is_unsaved_even_when_selection_matches_defaults() {
+        let mut route = PlanningPickerRouteState::default();
+        let task = PlanningTaskId::GatherRepoContext;
+        route.open_phase_profiled(
+            WorkflowPhase::Map,
+            rows_for(&[task]),
+            BTreeSet::from([task]),
+            false,
+        );
+        route.mark_rebuild(task);
+        assert!(route.has_selection_draft());
+    }
+
+    #[test]
+    fn planning_selection_current_reverted_edits_override_its_old_saved_draft() {
+        let mut route = PlanningPickerRouteState::default();
+        let task = PlanningTaskId::GatherRepoContext;
+        let rows = rows_for(&[task]);
+        route.open_phase_profiled(
+            WorkflowPhase::Map,
+            rows.clone(),
+            BTreeSet::from([task]),
+            false,
+        );
+        route.selected_mut().clear();
+        route.open_phase_profiled(WorkflowPhase::Scan, Vec::new(), BTreeSet::new(), false);
+        route.open_phase_profiled(WorkflowPhase::Map, rows, BTreeSet::from([task]), false);
+        route.selected_mut().insert(task);
+        assert!(!route.has_selection_draft());
+    }
 
     #[test]
     fn phase_reopen_preserves_selection_and_rebuild_draft() {

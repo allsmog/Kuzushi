@@ -26,8 +26,8 @@ expect: Recorded decisions: 1 of 1
 expect: Check decision sources in Review
 expect-not: carry_forward=
 keys: Tab
-require-live-snap: 25 f29dc288e0660ad20d074fc219c025f98ef7d155 | first-committed-source
-expect: 30baa1f1a56bae4cbb431ba0d453a59a8108a71b
+require-live-snap: 25 7cac9e253984e19ccc6aaeee3eb157de049ba667 | first-committed-source
+expect: c557cdbf94b931ecc250b33d33d793f79036a908
 submit: runs diff revision-later revision-absent
 require-live-snap: 30 NOT OBSERVED IN COVERED WORK | covered-absence
 expect: Absence does not establish a fix.

@@ -24,6 +24,7 @@ use crate::ui_view_models::{
 use super::*;
 
 mod activity_reader;
+mod compact_gallery;
 mod compact_notice;
 mod compact_review_notice;
 pub(in crate::renderer) mod component_map;
@@ -1382,6 +1383,13 @@ fn replay_and_trace_surfaces_reuse_current_finding_aliases() {
         finding.fingerprint = "aaaa1111".to_string();
         *app.findings_mut() = vec![finding];
         app.set_shell_view(view);
+        app.set_viewport(crate::TerminalViewport::new(80, 18));
+        app.set_input_mode(crate::InputMode::Navigate);
+        let update = app.reduce_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::End,
+            crossterm::event::KeyModifiers::NONE,
+        ));
+        assert!(update.handled);
 
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let rendered = format!("{:?}", terminal.backend().buffer());

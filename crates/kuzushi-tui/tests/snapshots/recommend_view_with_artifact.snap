@@ -4,11 +4,12 @@ assertion_line: 0
 ---
 KUZUSHI shell route · view:recommend · phase:Scan 2/3 · report ready · target:./recommend · model:unconfigured ·...
 
- -- RECOMMEND ----------------------------------------------------------------------------------------------------------
-recommendations    .kuzushi/v3/runs/run-rec/recommendations.json
-run                run-rec
+ -- GENERATED SUGGESTIONS ----------------------------------------------------------------------------------------------
+recommendations: .kuzushi/v3/runs/run-rec/recommendations.json
+run: run-rec
 surface risk       1 high/critical, max 90, tiers critical=1, frameworks Next.js=1, Spring=1, top critical POST /admin
 
+r refresh deterministic · Navigate mode
 Prioritize deterministic scanner coverage before model-backed review.
 
 priority  tool                        runtime   signal                              reason

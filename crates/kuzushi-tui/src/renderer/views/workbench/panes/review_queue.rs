@@ -20,6 +20,9 @@ pub(in crate::renderer::views::workbench) fn review_queue_pane_lines(
 }
 
 fn review_queue_empty_lines(model: &ReviewQueueModel, inner: Rect) -> Vec<Line<'static>> {
+    if let Some(feedback) = &model.refresh_status {
+        return review_read_feedback_lines(model, feedback, inner.width as usize);
+    }
     let width = inner.width as usize;
     let reason = model
         .empty_reason
@@ -32,6 +35,22 @@ fn review_queue_empty_lines(model: &ReviewQueueModel, inner: Rect) -> Vec<Line<'
         Line::styled(fit(&review_reset_hint(model), width), theme::accent()),
     ]);
     lines
+}
+
+fn review_read_feedback_lines(
+    model: &ReviewQueueModel,
+    feedback: &crate::ui_view_models::ReviewReadFeedback,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    append_or_wrap(&mut lines, &feedback.message, width);
+    for chip in &model.active_filter_chips {
+        append_or_wrap(&mut lines, &format!("[{chip}]"), width);
+    }
+    for recovery in feedback.recovery_lines() {
+        append_or_wrap(&mut lines, recovery, width);
+    }
+    lines.into_iter().map(Line::raw).collect()
 }
 
 fn populated_review_queue_pane_lines(model: &ReviewQueueModel, inner: Rect) -> Vec<Line<'static>> {
@@ -103,12 +122,22 @@ fn active_filter_lines(model: &ReviewQueueModel, width: usize) -> Vec<String> {
         .iter()
         .map(|label| format!("Saving {label} · awaiting result"))
         .collect::<Vec<_>>();
-    lines.extend(model.refresh_status.iter().cloned());
+    lines.extend(
+        model
+            .refresh_status
+            .iter()
+            .map(|feedback| feedback.message.clone()),
+    );
     lines.extend(model.page.map(|page| page.label()));
     lines.push(match model.partial_load {
         Some(partial) => partial.label(),
         None => format!("{} of {}", model.visible_count, model.total_count),
     });
+    lines.extend(
+        model
+            .path_history
+            .then(|| "File paths across saved revisions".into()),
+    );
     for chip in &model.active_filter_chips {
         append_or_wrap(&mut lines, &format!("[{chip}]"), width);
     }
@@ -560,6 +589,7 @@ mod tests {
     fn review_model(rows: Vec<ReviewQueueRow>) -> ReviewQueueModel {
         let selected_row = rows.iter().position(|row| row.selected);
         ReviewQueueModel {
+            path_history: false,
             navigation_active: true,
             refresh_status: None,
             decision_save_label: None,
@@ -581,6 +611,30 @@ mod tests {
             empty_reason: None,
             rows: rows.into(),
             selected_row,
+        }
+    }
+
+    #[test]
+    fn unavailable_study_is_not_zero_matches_and_wraps_both_recovery_actions() {
+        for width in [40, 60, 80, 96, 120, 160] {
+            let mut model = review_model(vec![]);
+            model.refresh_status = Some(crate::ui_view_models::ReviewReadFeedback::failed(true));
+            model.active_filter_chips = vec!["batch:owned-study".into()];
+            let lines = review_queue_pane_lines(&model, Rect::new(0, 0, width, 30));
+            assert!(lines.iter().all(|line| line.width() <= usize::from(width)));
+            let text = lines_text(lines);
+            for expected in [
+                "scope retained",
+                "batch:owned-study",
+                "findings refresh",
+                "batch clear",
+            ] {
+                assert!(text.contains(expected), "{width}: {text}");
+            }
+            assert!(!text.contains("0 matches"), "{text}");
+            assert!(!text.contains("0 of 0"), "{text}");
+            assert!(!text.contains("previous results"), "{text}");
+            assert_eq!(model.population_title(), "FINDINGS · study unavailable");
         }
     }
 
@@ -849,6 +903,7 @@ mod tests {
     #[test]
     fn empty_state_says_only_queue_is_empty() {
         let model = ReviewQueueModel {
+            path_history: false,
             navigation_active: true,
             refresh_status: None,
             decision_save_label: None,
@@ -880,6 +935,21 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("[completeness:open]"), "{text}");
+    }
+
+    #[test]
+    fn linked_path_history_remains_visible_in_compact_queues() {
+        let mut model = review_model(vec![review_row()]);
+        model.path_history = true;
+        model.active_filter_chips =
+            vec![r#"files:["app/a  b.rs","app/long/source/name.rs"]"#.into()];
+        for width in [40, 60, 80, 120] {
+            let text = lines_text(populated_review_queue_pane_lines(
+                &model,
+                Rect::new(0, 0, width, 7),
+            ));
+            assert!(text.contains("saved revisions"), "{width}: {text}");
+        }
     }
 
     #[test]

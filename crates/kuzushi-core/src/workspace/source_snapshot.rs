@@ -1,3 +1,4 @@
+use crate::module_result::{tool_result_status, ToolResultStatus};
 use crate::{ToolExecutionContext, WorkspaceTarget};
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -11,7 +12,7 @@ pub(crate) struct SourceSnapshot {
 }
 
 /// Bind a module result to the source present before its work starts. A
-/// changed target retains the output and spend as partial, never as current.
+/// Changed source makes usable work partial without replacing prior failures.
 pub(crate) fn run_source_bound_tool(
     ctx: &ToolExecutionContext<'_>,
     tool: &str,
@@ -24,11 +25,24 @@ pub(crate) fn run_source_bound_tool(
 }
 
 pub(crate) fn mark_source_unverified(output: &mut Value, error: &anyhow::Error) {
-    output["status"] = json!("partial");
-    output["summary"] = json!("Source could not be verified after the run. Review the saved result, then run against the current source.");
+    match tool_result_status(output) {
+        ToolResultStatus::Completed | ToolResultStatus::Partial => {
+            output["status"] = json!("partial");
+            output["summary"] = json!("Source could not be verified after the run. Review the saved result, then run against the current source.");
+        }
+        ToolResultStatus::Failed => output["status"] = json!("failed"),
+        ToolResultStatus::Skipped => output["status"] = json!("skipped"),
+    }
+    record_source_check_current(output, false);
     let mut warnings = output["warnings"].as_array().cloned().unwrap_or_default();
     warnings.push(json!(format!("Source verification: {error}")));
     output["warnings"] = json!(warnings);
+}
+
+fn record_source_check_current(output: &mut Value, current: bool) {
+    if let Some(data) = output.get_mut("data").and_then(Value::as_object_mut) {
+        data.insert("sourceCheckCurrent".into(), json!(current));
+    }
 }
 
 impl SourceSnapshot {
@@ -53,8 +67,9 @@ impl SourceSnapshot {
         target: &Path,
         mut output: Value,
     ) -> Value {
-        if let Err(error) = self.ensure_current(ctx, tool, target) {
-            mark_source_unverified(&mut output, &error);
+        match self.ensure_current(ctx, tool, target) {
+            Ok(()) => record_source_check_current(&mut output, true),
+            Err(error) => mark_source_unverified(&mut output, &error),
         }
         self.attach(output)
     }

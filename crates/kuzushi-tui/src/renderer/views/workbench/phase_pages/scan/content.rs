@@ -163,10 +163,7 @@ pub(super) fn finding_delta_lines(model: &ScanPhaseModel, width: usize) -> Vec<L
             theme::muted(),
         )];
     };
-    let mut lines = vec![Line::styled(
-        fit(&finding_delta_label(attempt), width),
-        theme::primary(),
-    )];
+    let mut lines = finding_count_lines(attempt, width);
     if !attempt.severity_counts.is_empty() {
         lines.push(Line::styled(
             fit(&severity_chip_label(&attempt.severity_counts), width),
@@ -189,6 +186,23 @@ pub(super) fn finding_delta_lines(model: &ScanPhaseModel, width: usize) -> Vec<L
                 .take(2)
                 .map(|path| Line::styled(fit(&format!("+ {path}"), width), theme::muted())),
         )
+        .collect()
+}
+
+fn finding_count_lines(
+    attempt: &crate::ui_view_models::ScanAttemptModel,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let label = finding_delta_label(attempt);
+    let groups = if unicode_width::UnicodeWidthStr::width(label.as_str()) > width {
+        label.split(" · ").collect::<Vec<_>>()
+    } else {
+        vec![label.as_str()]
+    };
+    groups
+        .into_iter()
+        .flat_map(|group| crate::renderer::shared::text::wrap_text(group, width))
+        .map(|line| Line::styled(line, theme::primary()))
         .collect()
 }
 
@@ -329,7 +343,45 @@ mod tests {
     /// `20 high · 5 medium`. Issue #172, 2026-09-28 audit.
     #[test]
     fn delta_pane_never_prints_a_total_its_own_breakdown_contradicts() {
-        let model = ScanPhaseModel {
+        let model = folded_scan_model();
+
+        let text = finding_delta_lines(&model, 80)
+            .iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            text.contains("findings 25 distinct · 27 observations"),
+            "the total must be the one the breakdown adds up to, with the \
+             observations behind it named: {text}"
+        );
+        assert!(text.contains("20 high · 5 medium"), "{text}");
+    }
+
+    #[test]
+    fn folded_counts_wrap_without_losing_the_observation_unit() {
+        let model = folded_scan_model();
+        for width in [16, 24, 34, 80] {
+            let rows = finding_count_lines(model.attempt.as_ref().unwrap(), width)
+                .into_iter()
+                .map(|line| line.to_string())
+                .collect::<Vec<_>>();
+            let text = rows.join(" ");
+            assert!(rows.iter().any(|row| row.contains("27 observations")));
+            assert!(
+                text.replace(" · ", " ") == "findings 25 distinct 27 observations",
+                "{width}: {text}"
+            );
+            assert!(!text.contains('…'), "{width}: {text}");
+            assert!(rows
+                .iter()
+                .all(|row| unicode_width::UnicodeWidthStr::width(row.as_str()) <= width));
+        }
+    }
+
+    fn folded_scan_model() -> ScanPhaseModel {
+        ScanPhaseModel {
             scope: "target".to_string(),
             plan: "manual".to_string(),
             attempt: Some(crate::ui_view_models::ScanAttemptModel {
@@ -354,20 +406,7 @@ mod tests {
             engine_outcomes: Vec::new(),
             empty_hint: None,
             live: None,
-        };
-
-        let text = finding_delta_lines(&model, 80)
-            .iter()
-            .map(|line| line.to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        assert!(
-            text.contains("findings 25 distinct · 27 observations"),
-            "the total must be the one the breakdown adds up to, with the \
-             observations behind it named: {text}"
-        );
-        assert!(text.contains("20 high · 5 medium"), "{text}");
+        }
     }
 
     #[test]

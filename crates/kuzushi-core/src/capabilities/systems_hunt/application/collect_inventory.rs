@@ -1,25 +1,6 @@
 use super::*;
 use crate::bounded_file::read_source_text_prefix;
 
-pub(crate) fn collect_inventory(
-    root: &Path,
-    max_files: usize,
-    max_bytes_per_file: usize,
-) -> Result<Vec<(String, String)>> {
-    let mut files = Vec::new();
-    collect_inventory_inner(
-        root,
-        root,
-        InventoryWalkOptions {
-            max_files,
-            max_bytes_per_file,
-            include_non_production: true,
-        },
-        &mut files,
-    )?;
-    Ok(files)
-}
-
 pub(crate) fn collect_production_inventory(
     root: &Path,
     options: &SystemsHuntInput,

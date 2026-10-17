@@ -28,6 +28,7 @@ mod finding_lessons;
 mod finding_relationships;
 pub use finding_lessons::{execute_lesson_action, load_finding_lessons};
 mod investigation_report;
+mod report_review_summary;
 pub use finding_relationships::{
     load_finding_relationships, record_finding_relationship_batch_review,
     record_finding_relationship_review, FindingRelationshipBatchReviewRequest,
@@ -36,16 +37,18 @@ pub use finding_relationships::{
 pub use investigation_report::{
     load_investigation_report, load_investigation_report_document,
     load_investigation_report_document_for_runs, load_investigation_report_for_runs,
-    ContextMatrixInvestigationReceipt, InvestigationContextCase, InvestigationReportDocument,
-    InvestigationReportEvidence, InvestigationReportReceipt, InvestigationReportSummary,
-    InvestigationWorkCounts, ScopeStudyInvestigationReceipt,
+    ContextMatrixInvestigationReceipt, InvestigationAttemptReceipt, InvestigationContextCase,
+    InvestigationReportDocument, InvestigationReportEvidence, InvestigationReportReceipt,
+    InvestigationReportSummary, InvestigationWorkCounts, ScopeStudyInvestigationReceipt,
 };
+pub use report_review_summary::{load_workspace_review_summary, WorkspaceReviewSummary};
 mod load_program_scope;
 mod nested_scope;
 mod project_model;
 mod record_review_decision;
 mod record_review_session;
 mod scan_scope_proposal;
+pub(crate) use scan_scope_proposal::recorded_scan_scope_name;
 mod since_filter;
 mod status;
 

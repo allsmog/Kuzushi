@@ -4,6 +4,7 @@ pub(in crate::capabilities::taint_iris_next) fn persist_taint_iris_next_findings
     target: &Path,
     findings: &[Finding],
     ctx: &ToolExecutionContext<'_>,
+    status: crate::run_lifecycle::RunItemStatus,
 ) -> Result<Option<TaintIrisNextPersistedRun>> {
     ensure_taint_discovery_active(ctx)?;
     let (Some(workspace), Some(store)) = (ctx.workspace, ctx.findings_store) else {
@@ -11,11 +12,11 @@ pub(in crate::capabilities::taint_iris_next) fn persist_taint_iris_next_findings
     };
     workspace.ensure_state_dir()?;
     let run_id = ctx.finding_run_id();
-    store.with_run_lifecycle(&run_id, target, || {
+    store.with_run_lifecycle_status(&run_id, target, || {
         for finding in findings {
             store.insert_finding(&run_id, finding)?;
         }
-        Ok(((), findings.len()))
+        Ok(((), findings.len(), status))
     })?;
     Ok(Some(TaintIrisNextPersistedRun {
         run_id,

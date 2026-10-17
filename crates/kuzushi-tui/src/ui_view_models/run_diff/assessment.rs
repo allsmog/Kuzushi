@@ -1,6 +1,6 @@
 use super::*;
 use crate::app::ScanStageReceiptState;
-use kuzushi_core::findings::scan_reassessment_block;
+use kuzushi_core::findings::scan_reassessment_block_for_rule;
 
 pub(super) fn classify_absences(
     app: &ShellApp,
@@ -16,12 +16,13 @@ pub(super) fn classify_absences(
             row.reassessment_block = Some("later findings snapshot is missing or malformed".into());
             continue;
         }
-        row.reassessment_block = scan_reassessment_block(
+        row.reassessment_block = scan_reassessment_block_for_rule(
             base.target.as_deref(),
             &compare.status,
             receipt.as_ref(),
             &row.file_path,
             &row.tool,
+            &row.rule_id,
         )
         .map(str::to_string);
     }

@@ -11,24 +11,45 @@ pub(crate) fn full_mode_scope_files(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Option<Vec<std::path::PathBuf>>> {
-    if input.get("scopeFile").is_none() {
-        if let Some(paths) = full_mode_input_paths(input)? {
-            return Ok(Some(paths));
-        }
+    if input.get("scopeFile").is_some() {
+        let path = full_mode_scope_path(input, ctx)
+            .context("scopeFile requires an active repository path")?;
+        return read_full_mode_scope_file(&path);
     }
-    let Some(path) = full_mode_scope_path(input, ctx) else {
+    if let Some(paths) = full_mode_input_paths(input)? {
+        return Ok(Some(paths));
+    }
+    read_implicit_full_mode_scope(ctx)
+}
+
+fn read_implicit_full_mode_scope(
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<Option<Vec<std::path::PathBuf>>> {
+    let Some(path) = full_mode_since_scope_path(ctx) else {
         return Ok(None);
     };
+    if let Err(error) = std::fs::symlink_metadata(&path) {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            return Ok(None);
+        }
+        return Err(error.into());
+    }
     read_full_mode_scope_file(&path)
 }
 
 fn full_mode_input_paths(input: &Value) -> Result<Option<Vec<std::path::PathBuf>>> {
-    let paths = string_list_input(input, &["paths", "includePaths", "include_paths"])?
-        .unwrap_or_default()
+    let Some(paths) = string_list_input(input, &["paths", "includePaths", "include_paths"])? else {
+        return Ok(None);
+    };
+    anyhow::ensure!(
+        !paths.is_empty(),
+        "source paths are empty; select files before planning work"
+    );
+    let paths = paths
         .into_iter()
         .map(std::path::PathBuf::from)
         .collect::<Vec<_>>();
-    Ok(non_empty_full_mode_scope_files(paths))
+    Ok(Some(paths))
 }
 
 pub(crate) fn full_mode_scope_path(
@@ -82,18 +103,6 @@ pub(crate) fn read_full_mode_scope_file(
     path: &std::path::Path,
 ) -> Result<Option<Vec<std::path::PathBuf>>> {
     if !path.exists() {
-        // Operator-provided `scopeFile` paths that don't exist used to
-        // silently degrade to "scan everything," which was confusing when
-        // someone misspelled the path or pointed the TUI at the wrong
-        // cwd. Fail loudly so the operator sees the typo before paying
-        // for an unwanted whole-codebase scan. The `since.txt` default
-        // path is excluded — we still allow it to be absent without
-        // raising, since most operators never produce a since.txt.
-        let looks_like_since_default =
-            path.file_name().and_then(std::ffi::OsStr::to_str) == Some("since.txt");
-        if looks_like_since_default {
-            return Ok(None);
-        }
         anyhow::bail!(
             "scopeFile {} does not exist; check spelling or pass an absolute path",
             path.display()
@@ -101,9 +110,12 @@ pub(crate) fn read_full_mode_scope_file(
     }
     let body = crate::bounded_file::read_utf8_text(path, 4 * 1024 * 1024)
         .with_context(|| format!("could not read scope file {}", path.display()))?;
-    Ok(non_empty_full_mode_scope_files(full_mode_scope_lines(
-        &body,
-    )))
+    let paths = full_mode_scope_lines(&body);
+    anyhow::ensure!(
+        !paths.is_empty(),
+        "scopeFile is empty; select repository files before planning work"
+    );
+    Ok(Some(paths))
 }
 
 pub(crate) fn full_mode_scope_lines(body: &str) -> Vec<std::path::PathBuf> {
@@ -114,37 +126,81 @@ pub(crate) fn full_mode_scope_lines(body: &str) -> Vec<std::path::PathBuf> {
         .collect()
 }
 
-pub(crate) fn non_empty_full_mode_scope_files(
-    scope_files: Vec<std::path::PathBuf>,
-) -> Option<Vec<std::path::PathBuf>> {
-    if scope_files.is_empty() {
-        None
-    } else {
-        Some(scope_files)
-    }
-}
-
 pub(crate) fn full_mode_dry_run_response(
     cfg: &crate::capabilities::full_mode_multi::FullModeConfig,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
-    let plan = crate::capabilities::full_mode_multi::plan(cfg)?;
+    let plan = with_full_mode_planning_observer(ctx, |progress, canceled| {
+        crate::capabilities::full_mode_multi::plan_with_observer(cfg, progress, canceled)
+    })?;
+    let selected =
+        crate::capabilities::full_mode_multi::selected_plan(&plan, cfg.failed_chunk_ids.as_deref());
     let model_hint = ctx.config.model.as_deref();
-    let cost = crate::full_mode_cost_summary(&plan, model_hint);
-    let summary = format!(
+    let cost = crate::full_mode_cost_summary(&selected, model_hint);
+    let geometry = format!(
         "full-mode:hunt planned {} chunk{} over {} file{}",
         cost.chunks,
         if cost.chunks == 1 { "" } else { "s" },
         cost.files,
         if cost.files == 1 { "" } else { "s" }
     );
-    let data = json!({
+    let summary =
+        crate::capabilities::full_mode_multi::partial_planning_summary(&plan).unwrap_or(geometry);
+    let output = full_mode_planning_detail(&summary, cfg, &cost, &plan);
+    let data = full_mode_planning_data(cfg, &plan, &selected, &cost);
+    let mut result = crate::module_result::completed_output_result(summary, output, data);
+    if plan
+        .coverage
+        .as_ref()
+        .is_some_and(|coverage| coverage.is_partial())
+    {
+        result["status"] = json!("partial");
+    }
+    result["costUsd"] = json!(0.0);
+    Ok(result)
+}
+
+pub(crate) fn with_full_mode_planning_observer<T>(
+    ctx: &ToolExecutionContext<'_>,
+    operation: impl FnOnce(&mut dyn FnMut(usize), &dyn Fn() -> bool) -> Result<T>,
+) -> Result<T> {
+    let mut heartbeat = crate::progress::HeartbeatGate::new(std::time::Duration::from_secs(1));
+    let mut progress = |entries| {
+        if heartbeat.ready() {
+            if let Some(trace) = ctx.trace {
+                let _ = trace
+                    .step(
+                        "tool-progress",
+                        "full-mode:hunt",
+                        format!(
+                            "bounded inventory/source planning · {entries} entries in current step"
+                        ),
+                    )
+                    .emit();
+            }
+        }
+    };
+    operation(&mut progress, &|| ctx.is_cancelled())
+}
+
+fn full_mode_planning_data(
+    cfg: &crate::capabilities::full_mode_multi::FullModeConfig,
+    plan: &crate::capabilities::full_mode_multi::FullModePlan,
+    selected: &crate::capabilities::full_mode_multi::FullModePlan,
+    cost: &crate::capabilities::full_mode_multi::CostSummary,
+) -> Value {
+    json!({
         "findings": [],
         "plan": plan,
         "chunksDispatched": 0,
         "chunksFailed": 0,
         "costUsd": 0.0,
         "dryRun": true,
+        "scanExecuted": false,
+        "reuseCachedChunks": cfg.reuse_cached_chunks,
+        "selection": {"chunkIds": selected.chunks.iter().map(|chunk| chunk.id).collect::<Vec<_>>(), "chunks":cost.chunks, "files":cost.files},
+        "estimateBasis":"legacy-token-heuristic",
+        "strictDollarCeiling":false,
         "summary": {
             "chunks": cost.chunks,
             "files": cost.files,
@@ -153,10 +209,22 @@ pub(crate) fn full_mode_dry_run_response(
             "estUsdHigh": cost.usd_high,
             "dryRun": true,
         },
-    });
-    let mut result = crate::module_result::completed_output_result(summary.clone(), summary, data);
-    result["costUsd"] = json!(0.0);
-    Ok(result)
+    })
+}
+
+fn full_mode_planning_detail(
+    summary: &str,
+    cfg: &crate::capabilities::full_mode_multi::FullModeConfig,
+    cost: &crate::capabilities::full_mode_multi::CostSummary,
+    plan: &crate::capabilities::full_mode_multi::FullModePlan,
+) -> String {
+    let cache = if cfg.reuse_cached_chunks {
+        "enabled; identical chunks may replay earlier results"
+    } else {
+        "disabled; independent discovery uses fresh requests"
+    };
+    let coverage = crate::capabilities::full_mode_multi::planning_coverage_detail(plan);
+    format!("{summary}\nPlanning only: no scan executed and no findings established.\n{coverage}\nSelected chunks: {}. Source windows: {}. Approximate input tokens: {}.\nCache reuse: {cache}.\nDollar estimate: uncertain. Legacy token bands do not bound charges.\nScan execution and provider allowance require separate approval; internal turns and repairs consume that allowance.", cost.chunks, cost.files, cost.total_tokens)
 }
 
 pub(crate) fn required_full_mode_runtime(

@@ -1,0 +1,91 @@
+name: Direct lockfile scopes retain separate identities and unknown advisory policy
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/direct_cargo_coverage.py @TMP_TARGET @ART prepare @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+paste-file: @ART/first-command.txt
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/direct_cargo_coverage.py @TMP_TARGET @ART first
+require-live-snap: 30 cargo-audit: 1 advisory findings | selected-a
+submit: open F-0001
+require-live-snap: 25 Viewing Review | first-identity
+expect: a/Cargo.lock
+submit: decision deferred Owned dependency declaration needs owner review
+require-live-snap: 25 recorded: deferred | retained-decision
+require-shell: python3 -B @REPO/scripts/devex/fixtures/direct_cargo_coverage.py @TMP_TARGET @ART deferred
+keys: NPage
+require-live-snap: 25 open generation: | initial-reference
+expect: Reopen this observation
+submit: report
+require-live-snap: 25 inspected file | selected-report
+expect: Displayed Scan: completed
+expect: a/Cargo.lock
+expect: a/Cargo.lock · 1
+expect: Advisory policy was not recorded
+ask: Does Report keep the selected lockfile and unknown advisory policy visible even though the finite job completed?
+submit: logs
+paste-file: @ART/second-command.txt
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/direct_cargo_coverage.py @TMP_TARGET @ART second
+paste-file: @ART/scope-compare.txt
+keys: Enter
+require-live-snap: 25 1 not reassessed | second-scope
+expect: 0 not observed
+keys: Escape
+submit: logs
+paste-file: @ART/omitted-command.txt
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/direct_cargo_coverage.py @TMP_TARGET @ART omitted
+paste-file: @ART/policy-compare.txt
+keys: Enter
+require-live-snap: 25 1 not reassessed | changed-database-policy
+expect: 0 not observed
+expect: finding rule coverage was not recorded
+expect: Absence does not establish a fix.
+resize: 160x48
+live-snap: comparison-160x48
+resize: 96x89
+live-snap: comparison-96x89
+resize: 80x24
+live-snap: comparison-80x24
+resize: 60x20
+live-snap: comparison-60x20
+resize: 40x12
+live-snap: comparison-40x12
+expect: 1 not reassessed
+ask: Across six sizes, does the changed-database comparison avoid suggesting a fix when the advisory policy is unknown and target lockfiles are unchanged?
+resize: 120x36
+keys: Escape
+paste-file: @ART/original-open.txt
+keys: Enter
+require-live-snap: 25 recorded: deferred | original-decision
+expect: a/Cargo.lock
+keys: NPage
+require-live-snap: 25 open generation: | original-reference
+expect: Reopen this observation
+expect: This reference belongs to this workspace.
+expect: List aliases can change as
+expect: findings arrive.
+ask: After F-0001 changes to another finding, is the displayed command a clear way to reopen this exact observation within its workspace?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/original-open.txt
+keys: Enter
+require-live-snap: 25 recorded: deferred | restarted-review
+keys: NPage
+require-live-snap: 25 open generation: | restarted-reference
+expect: Reopen this observation
+require-shell: python3 -B @REPO/scripts/devex/fixtures/direct_cargo_coverage.py @TMP_TARGET @ART restarted
+ask: Does no-color restart retain two separate lockfile findings, three installed offline audit outcomes and the original deferral with zero model requests or target execution?
+keys: C-c
+require-exit: 10

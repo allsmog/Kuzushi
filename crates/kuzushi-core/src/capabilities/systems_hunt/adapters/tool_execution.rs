@@ -45,20 +45,7 @@ pub(crate) fn execute_deep_semantic_cwe(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    let output = run_deep_semantic_cwe_select(input, ctx, runtime)?;
-    let mut result = tool_json(
-        format!("deep-semantic cwes: {}", output.cwes.len()),
-        &output,
-    );
-    let observed =
-        crate::runtime::RuntimeCost::from_usd(output.cost_usd, "deep-semantic CWE selection cost")?;
-    let cost = if output.cost_usd_exact {
-        crate::runtime::RuntimeCostReport::known(observed)
-    } else {
-        crate::runtime::RuntimeCostReport::incomplete(observed)
-    };
-    crate::module_result::apply_runtime_cost_report(&mut result, cost);
-    Ok(result)
+    execute_cwe_proposal(input, ctx, runtime)
 }
 
 pub(crate) fn execute_deep_semantic_report(
@@ -66,7 +53,7 @@ pub(crate) fn execute_deep_semantic_report(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    Ok(run_deep_semantic_hunt_report(input, ctx, runtime)?.to_tool_json())
+    execute_deep_discovery(input, ctx, runtime)
 }
 
 pub(crate) fn tool_json<T: Serialize>(output: String, data: T) -> Value {
@@ -102,7 +89,10 @@ mod not_applicable_tests {
         .unwrap();
         assert_eq!(skipped["status"], "skipped");
         assert_eq!(skipped["data"]["notApplicable"], true);
-        assert!(skipped["summary"].as_str().unwrap().contains("does not apply"));
+        assert!(skipped["summary"]
+            .as_str()
+            .unwrap()
+            .contains("does not apply"));
 
         let failure = not_applicable_result(anyhow::anyhow!("model refused"));
         assert!(failure.is_err());

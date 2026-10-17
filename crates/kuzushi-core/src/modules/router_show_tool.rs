@@ -310,11 +310,15 @@ fn run_live_full_mode_report(
     ctx: &ToolExecutionContext<'_>,
     runtime_context: &FullModeRuntimeContext<'_>,
 ) -> Result<crate::capabilities::full_mode_multi::FullModeReport> {
-    let mut report = crate::capabilities::full_mode_multi::run(
-        &runtime_context.routed,
-        runtime_context.limiter.as_ref(),
-        cfg,
-    )?;
+    let mut report = with_full_mode_planning_observer(ctx, |progress, canceled| {
+        crate::capabilities::full_mode_multi::run_with_observer(
+            &runtime_context.routed,
+            runtime_context.limiter.as_ref(),
+            cfg,
+            progress,
+            canceled,
+        )
+    })?;
     persist_full_mode_report(ctx, &mut report)?;
     Ok(report)
 }

@@ -102,6 +102,9 @@ impl ViewArtifactReader for CountingReader {
 
 pub(super) fn missing_value(key: &ViewHydrationKey) -> ViewHydrationValue {
     match key {
+        ViewHydrationKey::InvestigationAllowance { .. } => {
+            ViewHydrationValue::InvestigationAllowance(Ok(None))
+        }
         ViewHydrationKey::FindingGroups(_) => {
             ViewHydrationValue::FindingGroups(Err("missing fixture groups".into()))
         }
@@ -123,6 +126,9 @@ pub(super) fn missing_value(key: &ViewHydrationKey) -> ViewHydrationValue {
         ViewHydrationKey::StudyHistory => ViewHydrationValue::StudyHistory(Ok(Default::default())),
         ViewHydrationKey::StudyUsageRun { .. } => {
             ViewHydrationValue::StudyUsageRun(Err("missing fixture usage".into()))
+        }
+        ViewHydrationKey::WorkspaceReportReview { .. } => {
+            ViewHydrationValue::WorkspaceReportReview(Ok(Default::default()))
         }
         ViewHydrationKey::InvestigationReport { .. }
         | ViewHydrationKey::InvestigationStudyReport { .. } => {
@@ -152,6 +158,12 @@ pub(super) fn missing_value(key: &ViewHydrationKey) -> ViewHydrationValue {
         }
         ViewHydrationKey::RunProjection { .. } => {
             ViewHydrationValue::RunProjection(Err("missing fixture projection".to_string()))
+        }
+        ViewHydrationKey::RunResultDocument { .. } => {
+            ViewHydrationValue::RunResultDocument(Err("Owned fixture result unavailable".into()))
+        }
+        ViewHydrationKey::RunRequestContext { .. } => {
+            ViewHydrationValue::RunRequestContext(Err("Owned fixture request unavailable".into()))
         }
         ViewHydrationKey::PhaseReceiptOutcome { .. } => {
             ViewHydrationValue::PhaseReceiptOutcome(Ok(None))
@@ -847,7 +859,7 @@ fn wait_until(mut condition: impl FnMut() -> bool) {
 }
 
 #[test]
-fn scan_page_hydrates_typed_receipts_for_an_earlier_source_selection() {
+fn scan_page_and_report_hydrate_typed_receipts_for_an_earlier_source_selection() {
     use kuzushi_core::workflow_attempts::{
         PhaseAttemptCompleted, PhaseAttemptDisposition, PhaseAttemptDispositionRecorded,
         PhaseAttemptEvent, PhaseAttemptLedger, PhaseAttemptOutcome, PhaseTargetSnapshot,
@@ -882,11 +894,16 @@ fn scan_page_hydrates_typed_receipts_for_an_earlier_source_selection() {
     app.engagement
         .set_phase_attempt_projection(Some(snapshot("def")), ledger);
 
-    let keys = active_view_hydration_keys(&app);
-
-    for run_id in ["trial-1", "trial-2"] {
-        assert!(keys.contains(&ViewHydrationKey::ScanStageReceipt {
-            run_id: run_id.to_string()
-        }));
+    for view in [ShellView::Workbench, ShellView::Report] {
+        app.set_shell_view(view);
+        let keys = active_view_hydration_keys(&app);
+        for run_id in ["trial-1", "trial-2"] {
+            assert!(
+                keys.contains(&ViewHydrationKey::ScanStageReceipt {
+                    run_id: run_id.to_string()
+                }),
+                "{view:?}: {keys:?}"
+            );
+        }
     }
 }

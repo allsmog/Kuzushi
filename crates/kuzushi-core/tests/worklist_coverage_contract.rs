@@ -160,7 +160,7 @@ fn child_recommendations_do_not_consume_parent_findings() {
 }
 
 #[test]
-fn excessive_coverage_history_is_a_failed_recommendation_and_a_degraded_worklist() {
+fn excessive_distinct_coverage_is_a_failed_recommendation_and_a_degraded_worklist() {
     let root = tempfile::tempdir().unwrap();
     let ledger =
         kuzushi_core::workspace::coverage_ledger::CoverageLedger::open(root.path()).unwrap();
@@ -169,9 +169,10 @@ fn excessive_coverage_history_is_a_failed_recommendation_and_a_degraded_worklist
     let mut conn = rusqlite::Connection::open(&path).unwrap();
     let transaction = conn.transaction().unwrap();
     transaction.execute_batch("WITH RECURSIVE history(ts) AS (VALUES(0) UNION ALL SELECT ts+1 FROM history WHERE ts<10000)
-        INSERT INTO scan_baselines SELECT '.', 'scan', 'synthetic', 'owned-run', 'synthetic-sha', NULL, 0, ts FROM history;").unwrap();
+        INSERT INTO scan_baselines SELECT printf('owned-scope-%d', ts), 'scan', 'synthetic', 'owned-run', 'synthetic-sha', NULL, 0, ts FROM history;").unwrap();
     transaction.commit().unwrap();
     drop(conn);
+    let before = std::fs::read(&path).unwrap();
     let error = dispatch(root.path(), "coverage:recommend", json!({})).unwrap_err();
     assert!(error.to_string().contains("10000-row read limit"));
     let result = dispatch(root.path(), "worklist:rank", json!({})).unwrap();
@@ -179,4 +180,35 @@ fn excessive_coverage_history_is_a_failed_recommendation_and_a_degraded_worklist
         .to_string()
         .contains("10000-row read limit"));
     assert_eq!(result["data"]["rows"], json!([]));
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+}
+
+#[test]
+fn repeated_history_reads_latest_coverage_without_claiming_source_freshness() {
+    let root = tempfile::tempdir().unwrap();
+    drop(kuzushi_core::workspace::coverage_ledger::CoverageLedger::open(root.path()).unwrap());
+    let path = kuzushi_core::workspace::coverage_ledger::workspace_coverage_db_path(root.path());
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch("WITH RECURSIVE history(ts) AS (VALUES(0) UNION ALL SELECT ts+1 FROM history WHERE ts<10000)
+        INSERT INTO scan_baselines SELECT 'root', 'scan', 'synthetic', 'owned-run', 'synthetic-sha', NULL, 0, ts FROM history;").unwrap();
+    drop(conn);
+    let before = std::fs::read(&path).unwrap();
+    let ledger =
+        kuzushi_core::workspace::coverage_ledger::CoverageLedger::open_if_exists(root.path())
+            .unwrap()
+            .unwrap();
+    let latest = ledger.latest_baselines().unwrap();
+    assert_eq!(latest.len(), 1);
+    assert_eq!(latest[0].ts_unix, 10_000);
+    assert!(ledger
+        .all_baselines()
+        .unwrap_err()
+        .to_string()
+        .contains("10000-row read limit"));
+    drop(ledger);
+    let result = dispatch(root.path(), "coverage:recommend", json!({})).unwrap();
+    assert_eq!(result["status"], "completed");
+    assert_eq!(result["data"]["recommendations"], json!([]));
+    assert_eq!(result["data"]["sourceFreshnessVerified"], false);
+    assert_eq!(std::fs::read(path).unwrap(), before);
 }

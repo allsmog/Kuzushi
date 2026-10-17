@@ -4,7 +4,7 @@ pub(crate) use build_input::*;
 
 mod build_input;
 mod output_paths;
-pub(crate) use output_paths::resolve_build_output_dir;
+pub(crate) use output_paths::{read_output_dir, resolve_build_output_dir};
 mod operator_brief;
 pub(crate) use operator_brief::{
     attach_operator_intent, load_operator_brief, operator_brief_prompt, stamp_operator_intent,

@@ -15,6 +15,16 @@ pub(super) fn worklist_rows(width: usize, model: &WorklistViewModel) -> LinePage
 }
 
 fn worklist_document_lines(model: &WorklistViewModel) -> Vec<Line<'static>> {
+    if let Some(message) = &model.history_notice {
+        return crate::renderer::empty_state_panel(
+            "saved ranking",
+            &[message],
+            &[
+                ("runs", "inspect saved receipts"),
+                ("run worklist:rank", "explicitly refresh advisory ranking"),
+            ],
+        );
+    }
     if let Some(hint) = &model.empty_hint {
         let mut lines = crate::renderer::empty_state_panel(
             "no risk worklist",
@@ -25,6 +35,7 @@ fn worklist_document_lines(model: &WorklistViewModel) -> Vec<Line<'static>> {
             ],
         );
         append_degraded_banner(&mut lines, model);
+        append_inspection(&mut lines, model);
         return lines;
     }
     let mut lines = vec![count_line(model)];
@@ -35,6 +46,7 @@ fn worklist_document_lines(model: &WorklistViewModel) -> Vec<Line<'static>> {
     for row in &model.rows {
         lines.push(row_line(row));
     }
+    append_inspection(&mut lines, model);
     append_legend(&mut lines, model);
     append_unranked_footer(&mut lines, model);
     lines
@@ -58,6 +70,10 @@ fn append_degraded_banner(lines: &mut Vec<Line<'static>>, model: &WorklistViewMo
             theme::warn(),
         )]));
     }
+}
+
+fn append_inspection(lines: &mut Vec<Line<'static>>, model: &WorklistViewModel) {
+    lines.extend(model.inspection.iter().cloned().map(Line::from));
 }
 
 fn row_line(row: &WorklistRowModel) -> Line<'static> {
@@ -147,6 +163,8 @@ mod tests {
             rows: vec![row(1, "AC", "src/a.rs:4", "A 92/100  C scan sink-gap")],
             legend: vec![legend('A', "attack surface", None, false)],
             degraded: vec![],
+            inspection: Vec::new(),
+            history_notice: None,
             unranked_count: 0,
             ranked_total: 1,
             empty_hint: None,
@@ -165,6 +183,8 @@ mod tests {
             rows: vec![row(1, "A", "src/a.rs", "A 90/100")],
             legend: vec![legend('F', "call-graph fan-in", Some("no cpg graph"), true)],
             degraded: vec!["no cpg graph".to_string()],
+            inspection: Vec::new(),
+            history_notice: None,
             unranked_count: 2,
             ranked_total: 1,
             empty_hint: None,
@@ -226,6 +246,8 @@ mod tests {
         let model = WorklistViewModel {
             empty_hint: Some("No ranking evidence".into()),
             degraded: vec!["Coverage schema unavailable; explicit repair required".into()],
+            inspection: Vec::new(),
+            history_notice: None,
             ..Default::default()
         };
         let text = worklist_lines(40, &model)
@@ -255,6 +277,8 @@ mod tests {
                 .collect(),
             legend: vec![legend('F', "call-graph fan-in", Some("no cpg graph"), true)],
             degraded: vec!["Coverage schema unavailable; explicit repair required".into()],
+            inspection: Vec::new(),
+            history_notice: None,
             unranked_count: 3,
             ranked_total: 40,
             empty_hint: None,
@@ -271,5 +295,36 @@ mod tests {
             display_lines[0] > display_lines[1],
             "fixture must wrap at 40 columns: {display_lines:?}"
         );
+    }
+    #[test]
+    fn deep_inspection_limits_wrap_after_ranked_files_and_survive_narrow_reading() {
+        let model = WorklistViewModel {
+            rows: vec![row(1, "S", "owned.c:1", "S 12 raw points")],
+            ranked_total: 1,
+            inspection: vec![
+                "Deep inspection: partial · 3 files · 16.0 KiB known source read".into(),
+                "Bounds: 2000 file attempts · 16.0 KiB per file · 16.0 MiB source total".into(),
+            ],
+            ..Default::default()
+        };
+        for width in [40, 60, 80, 96, 120, 160] {
+            let lines = worklist_lines(width, &model);
+            assert!(lines.iter().all(|line| line.width() <= width));
+            let text = lines.iter().map(line_text).collect::<String>();
+            assert!(text.contains("16.0 MiB"), "{text}");
+            assert!(text.find("owned.c").unwrap() < text.find("Deep inspection").unwrap());
+        }
+    }
+    #[test]
+    fn saved_history_failure_shows_recovery_without_fabricating_empty_rank_counts() {
+        let model = WorklistViewModel {
+            history_notice: Some("Saved ranking result is malformed.".into()),
+            ..Default::default()
+        };
+        let text = joined(&worklist_lines(120, &model));
+        assert!(text.contains("saved ranking"));
+        assert!(text.contains("inspect saved receipts"));
+        assert!(!text.contains("0 of 0"));
+        assert!(!text.contains("context:build"));
     }
 }

@@ -24,6 +24,7 @@ def seed(root, evidence, home):
     (info / "alternates").write_text(objects + "\n")
     subprocess.run(["git", "-C", str(root), "update-ref", "HEAD", sha], check=True)
     shutil.copyfile(repo / "scripts/devex/fixtures/investigation_provider.mjs", evidence / "provider.mjs")
+    shutil.copyfile(repo / "scripts/devex/fixtures/untrusted_context.mjs", evidence / "untrusted_context.mjs")
     credential = home / ".kuzushi/investigation-credentials.json"
     credential.parent.mkdir(parents=True, exist_ok=True)
     credential.write_text(json.dumps({"openai-codex": {"access": "offline-investigation-fixture", "expires": 99999999999999}}))

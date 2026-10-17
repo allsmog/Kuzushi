@@ -4,6 +4,20 @@ use serde_json::{json, Value};
 
 #[cfg(unix)]
 pub(super) fn admitted_fixture_bridge(dir: &Path, name: &str, response: Value) -> PathBuf {
+    write_admitted_fixture_bridge(dir, name, &response.to_string())
+}
+
+#[cfg(unix)]
+pub(super) fn admitted_fixture_script_bridge(dir: &Path, name: &str, script: &Path) -> PathBuf {
+    let script = serde_json::to_string(script).unwrap();
+    let invocation = format!(
+        "JSON.parse(execFileSync({script}, {{input:JSON.stringify(request), cwd:request.cwd, encoding:'utf8', maxBuffer:1048576}}))"
+    );
+    write_admitted_fixture_bridge(dir, name, &invocation)
+}
+
+#[cfg(unix)]
+fn write_admitted_fixture_bridge(dir: &Path, name: &str, invocation: &str) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
     let module = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../scripts/langgraph-bridge/provider-admission.mjs");
@@ -11,6 +25,7 @@ pub(super) fn admitted_fixture_bridge(dir: &Path, name: &str, response: Value) -
     let script = format!(
         r#"#!/usr/bin/env node
 import assert from 'node:assert/strict';
+import {{ execFileSync }} from 'node:child_process';
 import {{ pathToFileURL }} from 'node:url';
 const {{ readBridgeRequest, openProviderAdmission, withProviderAdmission }} =
     await import(pathToFileURL({module}).href);
@@ -19,7 +34,7 @@ const write = text => new Promise(resolve => process.stdout.write(text, resolve)
 const request = await readBridgeRequest(process.stdin);
 assert.equal(request.providerAdmission, 'stdio-v1');
 await openProviderAdmission(request, write);
-const result = await withProviderAdmission(request, async () => ({{...{response}, costUsd: 0}}), () => ({{costUsd: 0}}));
+const result = await withProviderAdmission(request, async () => ({{...({invocation}), costUsd: 0}}), () => ({{costUsd: 0}}));
 await write('\x1e' + JSON.stringify({{type:'result', result}}) + '\n');
 process.stdin.destroy();
 "#,
@@ -31,6 +46,15 @@ process.stdin.destroy();
 }
 
 pub(super) fn approve_model_work(config: &V2Config, workspace: &WorkspaceTarget) -> Value {
+    approve_model_work_with_limits(config, workspace, 4, 2)
+}
+
+pub(super) fn approve_model_work_with_limits(
+    config: &V2Config,
+    workspace: &WorkspaceTarget,
+    calls: u32,
+    protected_review: u32,
+) -> Value {
     let registry = ModuleRegistry::with_v2_builtins();
     let ctx = ToolExecutionContext {
         config,
@@ -42,7 +66,7 @@ pub(super) fn approve_model_work(config: &V2Config, workspace: &WorkspaceTarget)
     };
     let input = json!({
         "investigationId":"dispatch-fixture", "expectedRevision":0,
-        "model":config.model, "maxProviderCalls":4, "protectedReviewCalls":2,
+        "model":config.model, "maxProviderCalls":calls, "protectedReviewCalls":protected_review,
         "reason":"Owned local bridge fixture; no live provider requests"
     });
     let prepared = registry

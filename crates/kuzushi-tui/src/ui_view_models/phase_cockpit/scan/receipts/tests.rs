@@ -11,6 +11,7 @@ fn stage(pass: usize) -> PhaseStageReceipt {
         run_refs: vec![child.clone()],
         scan: Some(ScanStageData {
             scope: ScanStageScope {
+                inspected_files: None,
                 target: "/fixture".into(),
                 paths: vec!["src".into()],
             },
@@ -21,6 +22,7 @@ fn stage(pass: usize) -> PhaseStageReceipt {
             engines: vec![ScanStageEngine {
                 engine: "agentic-sast:scan".into(),
                 outcome: ScanEngineStageOutcome::Complete,
+                rule_ids: None,
                 run_ref: Some(child.clone()),
                 detail: None,
             }],
@@ -132,4 +134,35 @@ fn different_scopes_are_named_and_different_source_snapshots_cannot_be_combined(
     absent.scan = None;
     assert!(summarize(&[absent]).is_none());
     assert!(summarize(&[]).is_none());
+}
+
+#[test]
+fn exact_file_counts_keep_the_scope_label_bounded() {
+    let scope = ScanStageScope {
+        target: "/fixture".into(),
+        paths: vec!["selected".into()],
+        inspected_files: Some(
+            (0..10000)
+                .map(|index| format!("selected/{index}"))
+                .collect(),
+        ),
+    };
+    assert_eq!(
+        scope_label(&scope),
+        "paths selected · 10000 inspected files · workspace /fixture"
+    );
+}
+
+#[test]
+fn inspected_scope_keeps_primary_facts_ahead_of_a_long_workspace_path() {
+    let scope = ScanStageScope {
+        target: format!("/workspace/{}", "long".repeat(40)),
+        paths: vec!["selected".into()],
+        inspected_files: Some(["selected/Dockerfile".into()].into()),
+    };
+    assert!(scope_label(&scope).starts_with("paths selected · 1 inspected file · workspace "));
+    let mut empty = scope;
+    empty.paths.clear();
+    empty.inspected_files.as_mut().unwrap().clear();
+    assert!(scope_label(&empty).starts_with("requested target · 0 inspected files · workspace "));
 }

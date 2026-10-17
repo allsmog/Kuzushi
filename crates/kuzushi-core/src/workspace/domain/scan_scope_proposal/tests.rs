@@ -225,6 +225,7 @@ fn inventory(paths: &[&str]) -> RepositoryInventory {
         generated_vendor_paths: Vec::new(),
         truncation: None,
         inspection: Some(crate::workspace::InventoryInspection {
+            enumeration_complete: None,
             files: paths.iter().map(|p| (*p).into()).collect(),
             enumeration: "fixture".into(),
             entries: paths.len(),

@@ -6,7 +6,7 @@ pub(crate) fn parse_nested_shell_command(
     original: &str,
 ) -> Option<ShellCommand> {
     let command = match verb {
-        "options" | "findings" | "f" | "export" => parse_finding_surface_command(verb, args),
+        "options" | "findings" | "f" | "export" => parse_finding_surface(verb, args, original),
         "recon:import" | "recon-import" => parse_recon_import_command(args),
         "recon" => return parse_recon_nested_command(args),
         "auth" => parse_auth_command(args),
@@ -50,11 +50,11 @@ fn parse_relationship_view(verb: &str, args: &[&str]) -> ShellCommand {
     }
 }
 
-fn parse_finding_surface_command(verb: &str, args: &[&str]) -> ShellCommand {
+fn parse_finding_surface(verb: &str, args: &[&str], original: &str) -> ShellCommand {
     match verb {
         "options" => options_command(args, OptionsFilter::Standard),
         "export" => parse_workspace_findings_export_args(args),
-        _ => parse_findings_command(args),
+        _ => parse_findings_command(args, original),
     }
 }
 
@@ -374,28 +374,6 @@ pub(crate) fn options_command(args: &[&str], filter: OptionsFilter) -> ShellComm
     ShellCommand::Options {
         tool: args.first().map(|value| (*value).to_string()),
         filter,
-    }
-}
-
-pub(crate) fn parse_findings_command(args: &[&str]) -> ShellCommand {
-    match args.first().copied() {
-        Some("filter") => parse_findings_filter(args.get(1..).unwrap_or_default()),
-        Some("since") => args
-            .get(1)
-            .map(|reference| ShellCommand::Since((*reference).to_string()))
-            .unwrap_or_else(|| ShellCommand::Unknown("findings since <ref>".to_string())),
-        Some("export") => parse_workspace_findings_export_args(args.get(1..).unwrap_or_default()),
-        Some(other) => ShellCommand::Unknown(format!("findings {other}")),
-        None => ShellCommand::Findings,
-    }
-}
-
-fn parse_findings_filter(args: &[&str]) -> ShellCommand {
-    let expression = args.join(" ");
-    match expression.trim() {
-        "" => ShellCommand::Unknown("findings filter".to_string()),
-        "clear" => ShellCommand::Findings,
-        _ => ShellCommand::FindingsFilter(expression),
     }
 }
 

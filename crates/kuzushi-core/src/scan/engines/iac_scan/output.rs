@@ -14,6 +14,7 @@ impl IacScanReport {
                 "count": self.findings.len(),
                 "findings": self.findings,
                 "filesScanned": self.files_scanned,
+                "inspectedFiles": self.inspected_files,
                 "filesSkipped": self.files_skipped,
                 "coverageGaps": self.coverage_gaps,
                 "inspection": Some(&self.inspection).filter(|receipt| !receipt.is_unavailable()),

@@ -31,8 +31,13 @@ fn logs_header(app: &ShellApp, area: Rect, summary: &str) -> Vec<Line<'static>> 
         "paused · G follows"
     };
     if app.router.logs().reader_open() {
+        let commands = if app.router.logs().command_text_expanded() {
+            " · command text"
+        } else {
+            ""
+        };
         return vec![muted(&fit(
-            &format!("{summary} · {follow}"),
+            &format!("{summary}{commands} · {follow}"),
             usize::from(area.width),
         ))];
     }

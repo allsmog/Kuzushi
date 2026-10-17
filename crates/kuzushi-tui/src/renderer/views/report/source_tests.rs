@@ -20,6 +20,44 @@ fn report_header_prioritizes_the_target_and_review_counts_without_route_diagnost
     assert!(lines.len() <= 4);
 }
 
+#[test]
+fn source_reassessment_header_and_explanation_survive_every_viewport_and_plain_output() {
+    let mut app = app_with_current_revision("a");
+    app.set_target(Some(std::path::PathBuf::from("/report-source-reading")));
+    app.router.report_mut().toggle_scope();
+    app.domain_mut()
+        .set_review_source_applicabilities(std::collections::BTreeMap::from([(
+            "recorded-marker".into(),
+            kuzushi_core::workspace::WorkspaceReviewSourceApplicability::LaterSourceUnverified,
+        )]));
+    hydrate_workspace_review(&app);
+    for (width, height) in [(40, 12), (60, 20), (80, 24), (96, 89), (120, 36), (160, 48)] {
+        let area = Rect::new(0, 0, width, height);
+        let header = report_header_lines(&app, area);
+        let text = header
+            .iter()
+            .map(Line::to_string)
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            text.contains("source review needed: 1"),
+            "{width}x{height}: {text}"
+        );
+        assert!(header.iter().all(|line| line.width() <= width as usize));
+        let document = report_document_lines(&app, area)
+            .iter()
+            .map(Line::to_string)
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(document.contains("Earlier decisions remain recorded."));
+    }
+    let plain = crate::renderer::render_plain_app(&app, 40);
+    let words = plain.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(words.contains("source review needed: 1"));
+    assert!(words.contains("Earlier decisions remain recorded."));
+    assert!(!plain.contains('\u{1b}'));
+}
+
 fn app_with_current_revision(revision: &str) -> ShellApp {
     let original = PhaseTargetSnapshot {
         target: "/report-source-reading".into(),
@@ -138,4 +176,23 @@ fn source_notice_reading_preserves_the_draft_and_destination_editor() {
     assert!(!editing
         .iter()
         .any(|line| line.to_string().contains("Earlier source")));
+}
+
+fn hydrate_workspace_review(app: &ShellApp) {
+    let key = crate::app::ViewHydrationKey::WorkspaceReportReview {
+        findings_watermark: app.findings_read_watermark(),
+    };
+    app.workbench_cache()
+        .borrow_mut()
+        .apply_view_hydration(crate::app::ViewHydrationResult {
+            target: app.target_owned().unwrap(),
+            key,
+            value: crate::app::ViewHydrationValue::WorkspaceReportReview(Ok(
+                kuzushi_core::workspace::WorkspaceReviewSummary {
+                    finding_count: 2,
+                    reassessment_required: 1,
+                    ..Default::default()
+                },
+            )),
+        });
 }

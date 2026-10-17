@@ -2,17 +2,86 @@ use super::*;
 use crate::ui_view_models::{
     replay_can_lead_with_results, replay_model, replay_reading_rows, trace_model, RunArtifactDetail,
 };
+mod failure_summary;
+mod result_document;
+mod supplied_input;
 
 pub(crate) fn replay_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line<'static>> {
+    let lines = selected_replay_lines(app, area, run_id);
+    let context = crate::ui_view_models::replay_request_context(app, run_id);
+    wrap_replay_with_request(lines, &context.compact(usize::from(area.width)), area.width)
+}
+
+fn wrap_replay_with_request(
+    mut lines: Vec<Line<'static>>,
+    context: &str,
+    width: u16,
+) -> Vec<Line<'static>> {
+    lines.insert(lines.len().min(2), muted(context));
+    wrap_document_lines(lines, width)
+}
+
+fn selected_replay_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line<'static>> {
     let model = replay_model(app, run_id);
-    let mut lines = context_strip(app, area);
-    lines.push(blank());
-    lines.push(divider("REPLAY", area.width));
+    if app.router.replay().inputs() {
+        return supplied_input::lines(app, area, &model);
+    }
+    if !app.router.replay().full_receipt() {
+        if let Some(lines) = focused_replay_lines(app, area, &model) {
+            return lines;
+        }
+    }
+    replay_full_lines(app, area, &model, true)
+}
+
+fn focused_replay_lines(
+    app: &ShellApp,
+    area: Rect,
+    model: &crate::ui_view_models::ReplayModel,
+) -> Option<Vec<Line<'static>>> {
+    let summary = crate::ui_view_models::replay_summary(model)?;
+    if crate::ui_view_models::replay_document_available(model) {
+        if let Some(Ok(document)) = &model.document {
+            return Some(result_document::lines(app, area, model, document));
+        }
+    }
+    Some(failure_summary::lines(app, area, model, &summary))
+}
+
+pub(crate) fn replay_receipt_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    let lines = replay_full_lines(
+        app,
+        area,
+        &replay_model(app, app.router.replay().run_id()),
+        false,
+    );
+    wrap_document_lines(lines, area.width)
+}
+
+fn replay_full_lines(
+    app: &ShellApp,
+    area: Rect,
+    model: &crate::ui_view_models::ReplayModel,
+    interactive: bool,
+) -> Vec<Line<'static>> {
+    let mut lines = replay_context_preamble(app, area, interactive);
+    lines.push(divider(
+        replay_full_heading(app, model, interactive, area.width),
+        area.width,
+    ));
     let outcome = append_replay_outcome(&mut lines, &model);
+    lines.push(divider("RECORDED REQUEST AND LIMITS", area.width));
+    let context = crate::ui_view_models::replay_request_context(app, &model.run_id);
+    lines.extend(context.details.iter().map(|row| muted(row)));
+    if interactive {
+        lines.extend(context_strip(app, area));
+        lines.push(blank());
+    }
     let typed = append_optional_presentation(&mut lines, &model, outcome.as_ref(), area.width);
     if !typed {
         append_run_artifacts(&mut lines, &model.artifacts, area.width);
     }
+    append_plain_documents(&mut lines, model, area.width, interactive);
     if model.metadata_missing {
         lines.push(blank());
         lines.push(muted(
@@ -20,7 +89,60 @@ pub(crate) fn replay_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line
         ));
     }
     lines.extend(alias_reference_lines(app, area));
-    wrap_document_lines(lines, area.width)
+    lines
+}
+
+fn append_plain_documents(
+    lines: &mut Vec<Line<'static>>,
+    model: &crate::ui_view_models::ReplayModel,
+    width: u16,
+    interactive: bool,
+) {
+    if interactive {
+        return;
+    }
+    let Some(Ok(document)) = &model.document else {
+        return;
+    };
+    result_document::append_output(lines, document, width);
+    supplied_input::append_document(lines, document, width);
+}
+
+fn replay_context_preamble(app: &ShellApp, area: Rect, interactive: bool) -> Vec<Line<'static>> {
+    if interactive {
+        return Vec::new();
+    }
+    let mut lines = context_strip(app, area);
+    lines.push(blank());
+    lines
+}
+
+fn replay_full_heading(
+    app: &ShellApp,
+    model: &crate::ui_view_models::ReplayModel,
+    interactive: bool,
+    width: u16,
+) -> &'static str {
+    if !crate::ui_view_models::replay_summary_available(model) {
+        return "REPLAY";
+    }
+    if interactive && crate::ui_view_models::replay_switch_owns_input(app) {
+        full_receipt_switch_heading(
+            width,
+            model.issue.is_some() && !crate::ui_view_models::replay_document_available(model),
+        )
+    } else {
+        "REPLAY · Full receipt"
+    }
+}
+
+fn full_receipt_switch_heading(width: u16, has_issue: bool) -> &'static str {
+    match (width <= 40, has_issue) {
+        (true, true) => "REPLAY · Receipt · Tab summary",
+        (false, true) => "REPLAY · Full receipt · Tab summary",
+        (true, false) => "REPLAY · Receipt · Tab result",
+        (false, false) => "REPLAY · Full receipt · Tab result",
+    }
 }
 
 fn append_replay_outcome(

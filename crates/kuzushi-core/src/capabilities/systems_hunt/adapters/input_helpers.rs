@@ -123,14 +123,6 @@ pub(crate) fn normalize_relative_path(value: String) -> String {
         .join("/")
 }
 
-pub(crate) fn format_inventory(inventory: &[(String, String)]) -> String {
-    inventory
-        .iter()
-        .map(|(path, body)| format!("## {path}\n```text\n{}\n```", body.trim()))
-        .collect::<Vec<_>>()
-        .join("\n\n")
-}
-
 pub(crate) fn parse_severity(value: String) -> Severity {
     Severity::from_label(&value)
 }

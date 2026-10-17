@@ -13,8 +13,9 @@ pub(crate) fn parse_uaf_hunt_input(input: &Value, target: &Path) -> Result<UafHu
     // at 85 steps with a single alloc/free pair on a 200-file C codebase.
     // Tool-augmented hunts on real codebases routinely need 80-150 steps
     // before the model converges on a structured Final.
-    let max_agent_steps = read_u32(input, &["maxAgentSteps", "max_agent_steps"], 120, 4).min(400);
-    let clang_call_timeout_secs = read_u64(input, &["clangTimeoutSecs"], 60, 5).min(300);
+    let max_agent_steps = read_u32(input, &["maxAgentSteps", "max_agent_steps"], 120, 1).min(400);
+    let clang_call_timeout_secs =
+        read_u64(input, &["clangTimeoutSecs", "clang_timeout_secs"], 60, 1).min(300);
     let include_non_production = read_bool(
         input,
         &["includeNonProduction", "include_non_production"],
@@ -38,13 +39,60 @@ pub(crate) fn parse_uaf_hunt_input(input: &Value, target: &Path) -> Result<UafHu
 }
 
 /// Resolve `compile_commands.json` precedence:
-///   1. Explicit `compileCommandsPath` input field
+///   1. Explicit workspace `compileCommandsPath` or operator-owned `externalCompileCommandsPath`
 ///   2. `<target>/compile_commands.json`
 ///   3. `<target>/build/compile_commands.json`
 ///
 /// Bails loudly when none exist — uaf-hunt is useless without a clangd
 /// index, and silently degrading to grep-only would defeat the module.
 pub(crate) fn resolve_compile_commands_path(input: &Value, target: &Path) -> Result<PathBuf> {
+    if let Some(path) = external_compile_commands_path(input)? {
+        return Ok(path);
+    }
+    if let Some(path) = workspace_compile_commands_path(input, target)? {
+        return Ok(path);
+    }
+    if let Some(path) = default_compile_commands_path(target) {
+        return Ok(path);
+    }
+    anyhow::bail!(
+        "uaf-hunt:hunt requires an existing compiler database in compile_commands.json format for {target}. \
+         Select a workspace file with compileCommandsPath or an operator-owned out-of-tree \
+         file with externalCompileCommandsPath. Kuzushi does not build the target or run \
+         compiler-driver probes. For CMake, prepare one separately with -DCMAKE_EXPORT_COMPILE_COMMANDS=ON.",
+        target = target.display(),
+    )
+}
+
+fn default_compile_commands_path(target: &Path) -> Option<PathBuf> {
+    for relative in ["compile_commands.json", "build/compile_commands.json"] {
+        let candidate = target.join(relative);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn external_compile_commands_path(input: &Value) -> Result<Option<PathBuf>> {
+    if let Some(external) = input
+        .get("externalCompileCommandsPath")
+        .and_then(Value::as_str)
+    {
+        anyhow::ensure!(
+            input.get("compileCommandsPath").is_none(),
+            "choose compileCommandsPath or externalCompileCommandsPath, not both"
+        );
+        anyhow::ensure!(
+            !external.is_empty(),
+            "externalCompileCommandsPath must not be empty"
+        );
+        return Ok(Some(PathBuf::from(external)));
+    }
+    Ok(None)
+}
+
+fn workspace_compile_commands_path(input: &Value, target: &Path) -> Result<Option<PathBuf>> {
     if let Some(explicit) = input
         .get("compileCommandsPath")
         .and_then(Value::as_str)
@@ -62,46 +110,44 @@ pub(crate) fn resolve_compile_commands_path(input: &Value, target: &Path) -> Res
                 resolved.display()
             );
         }
-        return Ok(resolved);
+        return Ok(Some(resolved));
     }
-    for relative in ["compile_commands.json", "build/compile_commands.json"] {
-        let candidate = target.join(relative);
-        if candidate.exists() {
-            return Ok(candidate);
-        }
-    }
-    anyhow::bail!(
-        "uaf-hunt:hunt requires a clangd-compatible compile_commands.json under {target}. \
-         Generate one with `bear -- make` (Make-based projects like Redis) or by re-running \
-         cmake with `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` and symlinking \
-         `build/compile_commands.json` to the workspace root. Pass an explicit path via the \
-         `compileCommandsPath` input field if the file lives elsewhere.",
-        target = target.display(),
-    )
+    Ok(None)
 }
 
 fn resolve_alloc_free_pairs(input: &Value) -> Result<Vec<AllocFreePair>> {
-    if let Some(explicit) = input.get("allocFreePairs").and_then(Value::as_array) {
-        let pairs = parse_pair_array(explicit, "allocFreePairs")?;
-        if pairs.is_empty() {
-            anyhow::bail!(
-                "uaf-hunt:hunt: `allocFreePairs` was empty; remove the key to use the defaults \
-                 (malloc/free, calloc/free, realloc/free, strdup/free, strndup/free) or pass at \
-                 least one {{\"alloc\":\"...\",\"free\":\"...\"}} entry."
-            );
-        }
-        return Ok(pairs);
+    if let Some(explicit) = input.get("allocFreePairs") {
+        return replacement_alloc_free_pairs(explicit);
     }
     let mut pairs = default_alloc_free_pairs();
-    if let Some(extras) = input.get("extraAllocFreePairs").and_then(Value::as_array) {
-        let parsed = parse_pair_array(extras, "extraAllocFreePairs")?;
-        for pair in parsed {
-            if !pairs.iter().any(|existing| existing == &pair) {
-                pairs.push(pair);
-            }
-        }
+    if let Some(extras) = input.get("extraAllocFreePairs") {
+        extend_unique_pairs(&mut pairs, parse_pair_value(extras, "extraAllocFreePairs")?);
     }
     Ok(pairs)
+}
+
+fn replacement_alloc_free_pairs(value: &Value) -> Result<Vec<AllocFreePair>> {
+    let pairs = parse_pair_value(value, "allocFreePairs")?;
+    anyhow::ensure!(
+        !pairs.is_empty(),
+        "uaf-hunt:hunt: `allocFreePairs` was empty; omit it to use the default pairs, or supply at least one allocation/free pair."
+    );
+    Ok(pairs)
+}
+
+fn extend_unique_pairs(pairs: &mut Vec<AllocFreePair>, extras: Vec<AllocFreePair>) {
+    for pair in extras {
+        if !pairs.contains(&pair) {
+            pairs.push(pair);
+        }
+    }
+}
+
+fn parse_pair_value(value: &Value, field: &str) -> Result<Vec<AllocFreePair>> {
+    let items = value.as_array().with_context(|| {
+        format!("uaf-hunt: `{field}` must be an array of {{alloc, free}} objects")
+    })?;
+    parse_pair_array(items, field)
 }
 
 fn parse_pair_array(items: &[Value], field: &str) -> Result<Vec<AllocFreePair>> {

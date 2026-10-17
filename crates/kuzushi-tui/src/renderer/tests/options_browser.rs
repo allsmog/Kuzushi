@@ -17,6 +17,17 @@ fn draw(app: &ShellApp, width: u16, height: u16) -> String {
     rendered_buffer_rows(terminal.backend().buffer()).join("\n")
 }
 
+fn option_body_text(app: &ShellApp, width: u16, height: u16) -> String {
+    let (page, _) = option_detail_page_bounds(app);
+    draw(app, width, height)
+        .lines()
+        .skip(2)
+        .take(page)
+        .map(|line| line.split('│').next().unwrap())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[test]
 fn options_selection_value_and_support_are_visible_in_every_viewport() {
     for (width, height) in SIZES {
@@ -28,6 +39,39 @@ fn options_selection_value_and_support_are_visible_in_every_viewport() {
         );
         assert!(visible.contains("Value:"), "{width}x{height}: {visible}");
         assert!(visible.contains("Enter"), "{width}x{height}: {visible}");
+    }
+}
+
+#[test]
+fn preparation_limits_are_readable_without_hiding_the_selected_option() {
+    for (width, height) in SIZES {
+        let mut app = options_app("taint-iris-next:codeql-db", "target", width, height);
+        let first = draw(&app, width, height);
+        assert!(first.contains("Value:"), "{width}x{height}: {first}");
+        let mut read = option_body_text(&app, width, height);
+        for _ in 0..8 {
+            app.reduce_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
+            read.push('\n');
+            read.push_str(&option_body_text(&app, width, height));
+        }
+        for fact in [
+            "whole bound target",
+            "Context allowance",
+            "execution consent",
+            "No Map or Scan completion",
+        ] {
+            let normalized = read.split_whitespace().collect::<Vec<_>>().join(" ");
+            assert!(
+                normalized.contains(fact),
+                "{width}x{height} missing {fact}: {read}"
+            );
+            assert!(
+                plain_options_lines(&app, usize::from(width), app.router.options())
+                    .join("\n")
+                    .contains(fact)
+            );
+        }
+        assert_eq!(app.selected_browser_option().as_deref(), Some("target"));
     }
 }
 

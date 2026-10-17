@@ -1012,6 +1012,11 @@ impl ShellApp {
         let Some(run_id) = resolve_run_artifact_selector(self, &open) else {
             return;
         };
+        if let Some(target) = self.target_owned() {
+            self.workbench_cache()
+                .borrow_mut()
+                .invalidate_one_run_cache(&target, &run_id);
+        }
         match open.view {
             RunArtifactView::Replay => {
                 self.router.replay_mut().open(run_id.clone());

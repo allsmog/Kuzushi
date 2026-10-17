@@ -11,6 +11,7 @@ mod tests {
             required: false,
             advanced: false,
             evasion: false,
+            editable_json: false,
             path_semantics: None,
             file_reference_semantics: None,
             default: None,
@@ -77,6 +78,24 @@ mod tests {
         assert!(coerce_raw_option_value(&option_spec(OptionType::Bool), "maybe").is_err());
         assert!(coerce_raw_option_value(&option_spec(OptionType::Int), "many").is_err());
         assert!(coerce_raw_option_value(&option_spec(OptionType::Float), "NaN").is_err());
+    }
+
+    #[test]
+    fn declared_operator_json_uses_canonical_coercion_and_preserves_values() {
+        let spec = option_spec(OptionType::Json).editable_json();
+        let value = json!([{"alloc":"owned_alloc", "free":"owned_free"}]);
+        assert!(option_is_operator_editable(&spec));
+        assert_eq!(
+            coerce_raw_option_value(&spec, &value.to_string()).unwrap(),
+            value
+        );
+        let displayed = format_option_value_for_spec(&spec, &value);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&displayed).unwrap(),
+            value
+        );
+        assert_eq!(option_input_kind(&spec), "JSON");
+        assert!(option_edit_hint(&spec).contains("edits"));
     }
 
     #[test]

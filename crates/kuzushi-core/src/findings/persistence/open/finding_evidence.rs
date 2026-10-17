@@ -98,11 +98,7 @@ pub(super) fn ground_primary_anchor(
     let snippet = finding
         .evidence
         .iter()
-        .find(|item| {
-            item.file_path == finding.file_path
-                && item.line == finding.start_line
-                && !item.kind.eq_ignore_ascii_case("reasoning")
-        })
+        .find(|item| primary_source_evidence(item, finding))
         .map_or("", |item| item.snippet.as_str());
     Ok(ground_finding_location(
         &root,
@@ -111,6 +107,12 @@ pub(super) fn ground_primary_anchor(
         snippet,
         None,
     ))
+}
+
+fn primary_source_evidence(item: &FindingEvidence, finding: &Finding) -> bool {
+    item.file_path == finding.file_path
+        && item.line == finding.start_line
+        && !item.is_model_generated_reasoning()
 }
 
 fn verify_finding_evidence_for_insert(
@@ -175,10 +177,11 @@ fn citation_verification(
 /// citation contract, matching `ground_finding_location`; runtime, URL, HTTP,
 /// and reasoning evidence remain outside the filesystem trust boundary.
 fn is_target_source_citation(evidence: &FindingEvidence) -> bool {
-    !matches!(
-        evidence.kind.trim().to_ascii_lowercase().as_str(),
-        "reasoning" | "live-chain-step" | "http-request" | "external-reference" | "trace-summary"
-    )
+    !evidence.is_model_generated_reasoning()
+        && !matches!(
+            evidence.kind.trim().to_ascii_lowercase().as_str(),
+            "live-chain-step" | "http-request" | "external-reference" | "trace-summary"
+        )
 }
 
 fn line_window_for_evidence(source: &str, line: u32) -> Option<String> {
@@ -521,5 +524,35 @@ mod tests {
                 .count(),
             1
         );
+    }
+}
+
+#[cfg(test)]
+mod unscored_evidence_tests {
+    use super::*;
+
+    #[test]
+    fn unscored_model_claims_are_not_treated_as_observed_source() {
+        let claim = FindingEvidence {
+            kind: FindingEvidence::UNSCORED_MODEL_CLAIM.into(),
+            file_path: "unavailable.c".into(),
+            line: 1,
+            snippet: "Model text is not a source quotation".into(),
+            ..Default::default()
+        };
+        let checked = verify_evidence_item(None, &claim);
+        assert_eq!(checked, claim);
+        let finding = Finding {
+            file_path: "unavailable.c".into(),
+            start_line: 1,
+            ..Default::default()
+        };
+        assert!(!primary_source_evidence(&claim, &finding));
+        let source = FindingEvidence {
+            kind: FindingEvidence::UNSCORED_SOURCE_CITATION.into(),
+            ..claim
+        };
+        assert!(primary_source_evidence(&source, &finding));
+        assert!(is_target_source_citation(&source));
     }
 }

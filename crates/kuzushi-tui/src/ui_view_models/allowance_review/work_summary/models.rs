@@ -12,7 +12,9 @@ pub(super) fn model_overview(models: &[Option<&str>]) -> Vec<String> {
 
 fn overview_model_line(model: Option<&str>) -> String {
     match model {
-        Some(model) if !model.trim().is_empty() => format!("Model: {model}"),
+        Some(model) if !model.trim().is_empty() => {
+            format!("Model: {}", crate::app::display_model_selector(model))
+        }
         Some(_) => "Model: unrecorded; inspect plan details".into(),
         None => "Model: none (native engines)".into(),
     }
@@ -20,7 +22,12 @@ fn overview_model_line(model: Option<&str>) -> String {
 
 pub(super) fn execution_model_line(model: Option<&str>) -> String {
     match model {
-        Some(model) if !model.trim().is_empty() => format!("Execution model: {model}"),
+        Some(model) if !model.trim().is_empty() => {
+            format!(
+                "Execution model: {}",
+                crate::app::display_model_selector(model)
+            )
+        }
         Some(_) => "Execution model: unrecorded; inspect the frozen plan before approval".into(),
         None => "Execution model: none; this frozen discovery uses native engines".into(),
     }

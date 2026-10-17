@@ -1,0 +1,214 @@
+name: Scoped discovery, historical inputs and protected Review
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_AGENT_MCPS
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_deep.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: options systems-hunt:deep-semantic-hunt
+require-live-snap: 25 Experimental | experimental-discovery
+submit: logs
+paste-file: @ART/unbound-command.txt
+keys: Enter
+require-live-snap: 25 approved investigation allowance | unbound-refused
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_deep.py @TMP_TARGET @ART unbound
+paste-file: @ART/approval-command.txt
+keys: Enter
+require-live-snap: 25 REVIEW ALLOWANCE | allowance
+expect: Total provider calls: 4
+expect: Protected review calls: 1
+resize: 40x12
+keys: End
+require-live-snap: 20 y approve | allowance-40x12
+ask: Does this allowance clearly permit three separately invoked intercepted discovery requests while reserving one Review call, with unknown dollars and no implicit selection or follow-up work?
+keys: y
+resize: 120x36
+require-live-snap: 25 Allowance approved | approved
+paste-file: @ART/missing-classes-command.txt
+keys: Enter
+require-live-snap: 25 requires option cwes | missing-classes
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_deep.py @TMP_TARGET @ART missing-classes
+paste-file: @ART/invalid-command.txt
+keys: Enter
+require-live-snap: 30 Deep discovery failed | invalid-output
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_deep.py @TMP_TARGET @ART invalid
+paste-file: @ART/capture-limited-command.txt
+keys: Enter
+require-live-snap: 30 Source capture refused publication | capture-limited
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_deep.py @TMP_TARGET @ART capture-limited
+keys: Escape
+paste-file: @ART/capture-replay-command.txt
+keys: Enter
+require-live-snap: 25 SAVED OUTPUT | capture-limited-result
+expect: Capture limit 1 B
+expect: Inspect unpublished candidates in Replay
+expect: HISTORICAL CANDIDATE OUTPUT
+keys: Tab
+require-live-snap: 20 REPLAY · Inputs | withheld-inputs
+expect: FROZEN MODEL INPUT
+keys: BTab
+require-live-snap: 20 SAVED OUTPUT | withheld-result-restored
+resize: 40x12
+require-live-snap: 20 Capture limit 1 B | capture-limited-40x12
+ask: Does the retained result explain that the one-byte capture limit withheld the candidate, preserved its paid request and started no automatic retry or ledger import?
+resize: 120x36
+submit: logs
+paste-file: @ART/generate-command.txt
+keys: Enter
+require-live-snap: 30 Deep discovery: 1 candidate; partial | proposal
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_deep.py @TMP_TARGET @ART generated
+keys: Escape
+paste-file: @ART/replay-command.txt
+keys: Enter
+require-live-snap: 30 SAVED OUTPUT | proposal-result
+expect: Owned scoped metadata observation
+expect: Unverified model observations
+expect: Truncated source prefix: app/owned.c
+expect: Scope: accepted membership
+expect: Retained source: 2 cited files
+expect: capture limit 16 MiB
+keys: Tab
+require-live-snap: 20 REPLAY · Inputs | supplied-inputs
+expect: FROZEN MODEL INPUT
+expect: Model supplied:
+expect: Source: app/owned.c
+keys: Tab
+require-live-snap: 20 Full receipt | receipt
+keys: Tab
+require-live-snap: 20 SAVED OUTPUT | result-restored
+resize: 160x48
+live-snap: result-160x48
+resize: 96x89
+live-snap: result-96x89
+resize: 80x24
+live-snap: result-80x24
+resize: 60x20
+live-snap: result-60x20
+expect: Owned scoped metadata observation
+resize: 40x12
+live-snap: result-40x12
+keys: NPage
+live-snap: result-reading-01-40x12
+expect: Any further work needs separate
+expect: scope and allowance.
+keys: NPage
+live-snap: result-reading-02-40x12
+expect: Owned scoped metadata observation
+expect: app/owned.c:1
+keys: NPage
+live-snap: result-reading-03-40x12
+expect: REPLAY · Result
+expect: Tab inputs
+expect: rows
+keys: End
+live-snap: result-tail-40x12
+expect: REPLAY · Result
+expect: Tab inputs
+ask: Are the unverified candidate, accepted scope, inherited context-only files, partial source and separately approved follow-up work understandable at all six sizes?
+keys: Tab
+require-live-snap: 20 REPLAY · Inputs | inputs-40x12
+resize: 120x36
+keys: Home
+require-live-snap: 20 FROZEN MODEL INPUT | frozen-inputs
+resize: 160x48
+live-snap: inputs-160x48
+resize: 96x89
+live-snap: inputs-96x89
+resize: 80x24
+live-snap: inputs-80x24
+resize: 60x20
+live-snap: inputs-60x20
+resize: 40x12
+require-live-snap: 20 REPLAY · Inputs | inputs-reading-start-40x12
+keys: NPage
+live-snap: inputs-reading-01-40x12
+keys: NPage
+live-snap: inputs-reading-02-40x12
+keys: NPage
+live-snap: inputs-reading-03-40x12
+keys: NPage
+live-snap: inputs-reading-04-40x12
+keys: NPage
+live-snap: inputs-reading-05-40x12
+keys: NPage
+live-snap: inputs-reading-06-40x12
+keys: NPage
+live-snap: inputs-reading-07-40x12
+keys: NPage
+live-snap: inputs-reading-08-40x12
+keys: NPage
+live-snap: inputs-reading-09-40x12
+keys: NPage
+live-snap: inputs-reading-10-40x12
+keys: End
+require-live-snap: 20 Safe terminal display | inputs-tail-40x12
+expect: REPLAY · Inputs
+expect: Tab receipt
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_deep.py @TMP_TARGET @ART inputs-read
+ask: Can the operator read the exact historical source, class selection, supporting context and instructions without another request or active context change?
+resize: 120x36
+submit: open F-0001
+require-live-snap: 25 model claim | scoped-observation
+expect: unscored
+resize: 40x12
+live-snap: scoped-observation-40x12
+keys: NPage
+live-snap: scoped-evidence-reading-1-40x12
+keys: NPage
+live-snap: scoped-evidence-reading-2-40x12
+keys: NPage
+live-snap: scoped-evidence-reading-3-40x12
+keys: NPage
+live-snap: scoped-evidence-reading-4-40x12
+keys: NPage
+live-snap: scoped-evidence-reading-5-40x12
+keys: NPage
+live-snap: scoped-evidence-reading-6-40x12
+keys: NPage
+live-snap: scoped-evidence-reading-7-40x12
+keys: NPage
+live-snap: scoped-evidence-reading-8-40x12
+ask: Does Review identify this labeled source-only observation, preserve its source and evidence, and keep the operator decision separate from model output?
+resize: 120x36
+submit: decision fp Owned fixture metadata only; no vulnerability is asserted
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_deep.py @TMP_TARGET @ART decided
+submit: logs
+paste-file: @ART/exhausted-command.txt
+keys: Enter
+require-live-snap: 25 allowance exhausted: 3 calls committed | exhausted
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_deep.py @TMP_TARGET @ART exhausted
+ask: Does exhaustion preserve the protected Review call and stop without repair, implicit CWE selection, model fallback or extra jobs?
+keys: C-c
+require-exit: 15
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: logs
+paste-file: @ART/status-command.txt
+keys: Enter
+require-live-snap: 25 Calls committed: 3/4 | restarted-accounting
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_deep.py @TMP_TARGET @ART restarted
+paste-file: @ART/replay-command.txt
+keys: Enter
+require-live-snap: 30 SAVED OUTPUT | restarted-result
+resize: 40x12
+require-live-snap: 20 Deep discovery: | no-color-result-loaded-40x12
+keys: End
+require-live-snap: 20 Safe terminal display | no-color-result-tail-40x12
+expect: REPLAY · Result
+expect: Tab inputs
+keys: Home
+live-snap: no-color-result-start-40x12
+keys: Tab
+require-live-snap: 20 REPLAY · Inputs | no-color-inputs-start-40x12
+keys: End
+require-live-snap: 20 Safe terminal display | no-color-inputs-tail-40x12
+expect: Tab receipt
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_deep.py @TMP_TARGET @ART restarted
+ask: Does no-color restart retain evidence, the human FP decision, readable controls and exhausted discovery accounting without additional requests?
+keys: C-c
+require-exit: 15

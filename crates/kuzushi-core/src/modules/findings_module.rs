@@ -199,6 +199,13 @@ fn findings_basic_options() -> Vec<OptionSpec> {
         ),
         opt("filePath", OptionType::String, "File path filter.").aliases(&["file_path"]),
         opt(
+            "filePaths",
+            OptionType::StringList,
+            "Exact file paths, matching any supplied path. Other filters still apply.",
+        )
+        .aliases(&["file_paths"])
+        .advanced(),
+        opt(
             "severity",
             OptionType::StringList,
             "Severity filter: critical, high, medium, low, info.",
@@ -208,6 +215,13 @@ fn findings_basic_options() -> Vec<OptionSpec> {
 
 fn findings_page_options() -> Vec<OptionSpec> {
     vec![
+        opt(
+            "batchId",
+            OptionType::String,
+            "Read identities observed in this finite study, including incomplete attempts. Membership applies before paging; aliases and decisions remain those of workspace history.",
+        )
+        .aliases(&["batch_id", "batch"])
+        .advanced(),
         opt(
             "cursor",
             OptionType::String,

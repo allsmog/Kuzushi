@@ -124,7 +124,7 @@ fn sticky_controls(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
 
 fn sticky_control_text(deck: &crate::app::CampaignRouteState) -> String {
     if deck.has_dispatcher_failure_notice() {
-        return "r refresh · a review · PgUp/Dn".into();
+        return "R report · a plan/allowance\nr refresh · PgUp/Dn".into();
     }
     active_control_text(deck)
 }
@@ -137,7 +137,7 @@ fn active_control_text(deck: &crate::app::CampaignRouteState) -> String {
     if deck.dispatcher_stop_requested {
         "Stop requested · saving partial work\nr refresh · PgUp/Dn · q list".into()
     } else if commands.contains(&"K stop") {
-        "K stop · L launch · a plan/allowance\n↑↓ jobs · Enter inspect · r refresh · q list".into()
+        "K stop · L launch · R report\na plan/allowance · ↑↓ jobs · Enter inspect · r refresh · q list".into()
     } else {
         settled_control_text(commands)
     }
@@ -148,17 +148,20 @@ fn job_detail_controls(deck: &crate::app::CampaignRouteState) -> String {
         return "Stop requested · saving partial work\nq jobs · r refresh · PgUp/Dn read".into();
     }
     if deck.dispatcher_pid.is_some() {
-        return "K stop · q jobs · a plan/allowance\n↑↓ jobs · PgUp/Dn read · r refresh".into();
+        return "K stop · R report · q jobs\na plan/allowance · ↑↓ jobs · PgUp/Dn read · r refresh"
+            .into();
     }
-    "q jobs · a plan/allowance · ↑↓ jobs\nPgUp/Dn read · r refresh".into()
+    "R report · q jobs · a plan/allowance\n↑↓ jobs · PgUp/Dn read · r refresh".into()
 }
 
 fn settled_control_text(commands: &[&str]) -> String {
     if commands.contains(&"work paused") {
-        "work paused · L resume · a plan/allowance\n↑↓ jobs · Enter inspect · r refresh · q list"
-            .into()
+        "R report · a plan/allowance\nwork paused · L resume · ↑↓ jobs · r refresh · q list".into()
     } else if commands.contains(&"work ended") {
-        "work ended · new work needs a new plan\na plan/allowance · workbench report · r refresh · q list".into()
+        "R report · a plan/allowance\nwork ended · new work needs a new plan".into()
+    } else if commands.contains(&"work finished") {
+        "R report · a plan/allowance\nwork finished · ↑↓ jobs · Enter inspect · r refresh · q list"
+            .into()
     } else {
         commands.join(" · ")
     }
@@ -173,7 +176,11 @@ fn reader_scroll(total: usize, height: u16, pinned: usize) -> CampaignReaderScro
 }
 
 fn pinned_action_result(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
-    let Some(notice) = app.router.campaign().notice.as_ref() else {
+    let deck = app.router.campaign();
+    if deck.read_scroll == 0 && deck.has_dispatcher_failure_notice() {
+        return Vec::new();
+    }
+    let Some(notice) = deck.notice.as_ref() else {
         return Vec::new();
     };
     let mut lines = vec![Line::styled(

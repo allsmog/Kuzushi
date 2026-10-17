@@ -1,5 +1,7 @@
 pub(crate) mod clang_subprocess;
+mod compile_database;
 mod input;
+pub(crate) mod local_limits;
 mod output;
 mod tool_execution;
 

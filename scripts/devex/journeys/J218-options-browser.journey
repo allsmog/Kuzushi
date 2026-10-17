@@ -7,6 +7,14 @@ require-shell: python3 -B @REPO/scripts/devex/fixtures/options_browser.py @TMP_T
 require-wrapper-flow:
 launch: --target @TMP_TARGET
 require-live-snap: 30 KUZUSHI | ready
+submit: modules
+keys: NPage
+require-live-snap: 20 selected 3/3 | last-capability
+expect: INPUT REQUIRED
+keys: NPage
+require-live-snap: 20 selected 3/3 | page-stops-at-end
+keys: PPage PPage
+require-live-snap: 20 selected 1/3 | page-stops-at-start
 submit: options context:build
 require-live-snap: 20 Sample limit | selected-setting
 expect: Value: 200
@@ -69,6 +77,33 @@ keys: Enter
 live-snap: reference-not-editable
 expect: supplied by the workflow
 expect-not: EDIT
+submit: use codeql
+submit: options .
+require-live-snap: 20 Module codeql requires an exact tool | exact-tool-required
+expect-not: options .` requires a focused module
+submit: logs
+nav-mode:
+keys: z End
+require-live-snap: 20 READ TRANSCRIPT | exact-guidance-reader
+resize: 160x48
+live-snap: guidance-160x48
+resize: 96x89
+live-snap: guidance-96x89
+resize: 80x24
+live-snap: guidance-80x24
+resize: 60x20
+live-snap: guidance-60x20
+resize: 40x12
+keys: End
+live-snap: guidance-40x12
+keys: PPage
+live-snap: guidance-40x12-previous
+ask: Is the focused module's exact-tool requirement and settings path readable through the transcript at all six sizes without implying missing focus or starting work?
+keys: q
+resize: 120x36
+submit: options codeql:scan
+require-live-snap: 20 codeql:scan | exact-options-reader
+expect: OPTIONS
 submit: options x-ray:run
 require-live-snap: 20 Experimental | support-120x36
 resize: 160x48

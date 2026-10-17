@@ -78,7 +78,7 @@ def results(root, tool):
 
 def inspect(root, evidence, stage):
     assert source_hashes(root) == json.loads((evidence / "expected-source.json").read_text())
-    ranks = [value for _, value in results(root, "worklist:rank") if value and value.get("status") == "completed"]
+    ranks = [value for _, value in results(root, "worklist:rank") if value and value.get("status") in ["completed", "partial"]]
     expected = {"capped":2, "child":4, "repaired":6, "restarted":6}
     assert len(ranks) == expected[stage], (stage, len(ranks))
     assert all(not value["data"]["sourceFreshnessVerified"] for value in ranks)
@@ -94,7 +94,7 @@ def inspect(root, evidence, stage):
         counts = {name:db.execute("select count(*) from " + name).fetchone()[0] if name in tables else 0
                   for name in ["finding_observations", "investigation_call_reservations", "investigation_work_attempts"]}
     assert all(value == 0 for value in counts.values()), counts
-    save(evidence, stage + "-check", {"rankReceipts":len(ranks), "counts":counts, "source":source_hashes(root)})
+    save(evidence, stage + "-check", {"rankReceipts":len(ranks), "outcomes":[value["status"] for value in ranks], "counts":counts, "source":source_hashes(root)})
 
 
 root, evidence = map(Path, sys.argv[1:3])

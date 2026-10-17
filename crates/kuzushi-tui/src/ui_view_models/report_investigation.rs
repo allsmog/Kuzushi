@@ -1,13 +1,15 @@
-use super::report_summary::report_investigation_state;
+use super::report_summary::{report_document_view, report_workspace_review_view, ReportReadView};
 use crate::app::{ShellApp, ViewDataState};
 use kuzushi_core::workspace::InvestigationReportDocument;
 use kuzushi_core::workspace::InvestigationReportReceipt;
 
 mod context_guidance;
 mod matrix;
+mod models;
 mod scan_receipt;
 mod scope;
 mod scopes;
+use models::discovery_model_line;
 
 pub(crate) fn report_source_notice(app: &ShellApp) -> Option<&'static str> {
     if app.router.report().workspace_history() {
@@ -22,19 +24,40 @@ pub(crate) fn report_source_notice(app: &ShellApp) -> Option<&'static str> {
 }
 
 pub(crate) fn report_investigation_lines(app: &ShellApp) -> Vec<String> {
-    let mut lines = report_scope_lines(app);
-    lines.push(lesson_export_note(app.router.report().format()).into());
+    let mut lines = vec![authority_note(app.router.report().provenance_details()).into()];
+    lines.extend(report_scope_lines(app));
+    lines.push(lesson_note(app).into());
     lines
+}
+
+fn authority_note(details: bool) -> &'static str {
+    if details {
+        return "TP confirmed · FP false positive. Includes human and automatic review. Severity stays as reported.";
+    }
+    "TP/FP: human and automatic decisions."
+}
+
+fn lesson_note(app: &ShellApp) -> &'static str {
+    let format = app.router.report().format();
+    if app.router.report().provenance_details() {
+        return lesson_export_note(format);
+    }
+    if kuzushi_core::workspace::workspace_export_omitted_fields(format).contains(&"lessons") {
+        return "Lessons: omitted. JSON, JSONL, SARIF and Markdown preserve them.";
+    }
+    "Lessons: linked records preserved. p details."
 }
 
 fn report_scope_lines(app: &ShellApp) -> Vec<String> {
     if app.router.report().workspace_history() {
         return history_lines(app);
     }
-    match report_investigation_state(app) {
-        ViewDataState::Ready(Ok(Some(receipt))) => selected_document_lines(app, &receipt),
-        ViewDataState::Ready(Ok(None)) => empty_receipt_lines(app),
-        ViewDataState::Ready(Err(error)) => vec![
+    match report_document_view(app) {
+        ReportReadView::Ready(receipt) | ReportReadView::Refreshing(receipt) => {
+            selected_document_lines(app, &receipt)
+        }
+        ReportReadView::Empty => empty_receipt_lines(app),
+        ReportReadView::Failed(error) => vec![
             "Scope: study receipt unavailable".into(),
             error,
             "s selects workspace history without a study coverage claim.".into(),
@@ -76,6 +99,10 @@ fn selected_document_lines(app: &ShellApp, document: &InvestigationReportDocumen
             scopes::lines(receipt, details, current)
         }
     };
+    lines.splice(
+        0..0,
+        reassessment_lines(document.summary().reassessment_required_count),
+    );
     lines.extend(operator_brief_lines(document));
     lines.extend(context_guidance::lines(document));
     if explicit {
@@ -178,8 +205,31 @@ fn history_lines(app: &ShellApp) -> Vec<String> {
         "Finding review completeness does not describe repository coverage.".into(),
         "Workspace spend: total unavailable".into(),
     ];
+    match report_workspace_review_view(app) {
+        ReportReadView::Ready(summary) | ReportReadView::Refreshing(summary) => {
+            lines.splice(0..0, reassessment_lines(summary.reassessment_required));
+        }
+        ReportReadView::Failed(error) => {
+            lines.insert(1, format!("Review counts unavailable: {error}"));
+        }
+        _ => {}
+    }
     lines.extend(scan_receipt::lines(app));
     lines
+}
+
+fn reassessment_lines(count: usize) -> Vec<String> {
+    if count == 0 {
+        return Vec::new();
+    }
+    let subject = if count == 1 {
+        "finding needs"
+    } else {
+        "findings need"
+    };
+    vec![format!(
+        "Review: {count} {subject} source reassessment. Earlier decisions remain recorded."
+    )]
 }
 
 fn study_lines(receipt: &InvestigationReportReceipt, details: bool, current: bool) -> Vec<String> {
@@ -189,7 +239,7 @@ fn study_lines(receipt: &InvestigationReportReceipt, details: bool, current: boo
         format!("Evidence: {} producer observations · recurrence is separate from confidence", receipt.observation_count),
         "Coverage: engine and inventory omissions are not fully recorded; no complete coverage claim.".into(),
         source_label(receipt), context_label(receipt),
-        format!("Model: {} · {} worker(s)", receipt.equivalence.components.model.as_deref().unwrap_or("none recorded for discovery"), receipt.workers)];
+        discovery_model_line(receipt.equivalence.components.model.as_deref(), receipt.workers)];
     lines.splice(1..1, source_currency_lines(current));
     lines.splice(1..1, allowance_lines(receipt));
     lines.extend(scope::lines(&receipt.scope, details));
@@ -282,6 +332,7 @@ fn provenance_lines(receipt: &InvestigationReportReceipt) -> Vec<String> {
             components.prompt_overrides_sha256
         ),
     ];
+    lines.extend(models::recorded_model_line(components.model.as_deref()));
     lines.extend(receipt.limitations.iter().cloned());
     lines
 }
@@ -306,6 +357,7 @@ mod receipt_detail_tests {
         let mut engine = kuzushi_core::run_artifacts::ScanStageEngine {
             engine: "agentic".into(),
             outcome: kuzushi_core::run_artifacts::ScanEngineStageOutcome::Complete,
+            rule_ids: None,
             run_ref: None,
             detail: Some(
                 "Source preparation: 1 snippet. Partial preparation: file limit reached.".into(),

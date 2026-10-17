@@ -59,6 +59,7 @@ fn receipt(target: &Path) -> PhaseStageReceipt {
         run_refs: vec!["middle-observation".into()],
         scan: Some(ScanStageData {
             scope: ScanStageScope {
+                inspected_files: None,
                 target: target.display().to_string(),
                 paths: Vec::new(),
             },

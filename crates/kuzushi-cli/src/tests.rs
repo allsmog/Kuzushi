@@ -719,18 +719,18 @@ mod tests {
     fn cli_autonomy_flag_refuses_tools_above_the_rung() {
         let tmp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
-        // triage:run is a Review action; deprecated `--autonomy hunt` resolves
-        // to Scan and must refuse it rather than silently running/substituting.
+        // This runtime-free Review action isolates the posture gate from
+        // model prerequisites. The deprecated `hunt` alias resolves to Scan.
         let error = run_tool_command(
-            "triage:run".to_string(),
-            "{}".to_string(),
+            "findings:lesson-save".to_string(),
+            serde_json::json!({"content":"Owned offline posture refusal example."}).to_string(),
             Vec::new(),
             Some("hunt".to_string()),
             Some(workspace.root().to_path_buf()),
             Vec::new(),
             None,
         )
-        .expect_err("triage:run must be refused under deprecated --autonomy hunt alias");
+        .expect_err("Review action must be refused under deprecated --autonomy hunt alias");
         assert!(error.to_string().contains("raise posture"), "{error}");
         let exit = error
             .downcast_ref::<crate::application::run_exit::RunCommandExit>()

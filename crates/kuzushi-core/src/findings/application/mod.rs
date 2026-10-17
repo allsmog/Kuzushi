@@ -1,7 +1,8 @@
 mod scan_assessment;
 use super::domain::*;
 use super::presentation::{proof_state_label, runtime_validation_label};
-pub use scan_assessment::scan_reassessment_block;
+pub(crate) use scan_assessment::scan_rule_coverage_block;
+pub use scan_assessment::{scan_reassessment_block, scan_reassessment_block_for_rule};
 use serde::Serialize;
 
 mod goal_review;
@@ -29,8 +30,8 @@ pub use review_groups::{
 mod finding_review_gate;
 pub use finding_page::{
     finding_page_anchor, finding_page_anchor_index, finding_page_continuity_anchor,
-    read_finding_page, FindingListPage, FindingPageAnchorMissing, FindingPageMetadata,
-    FindingPageOrder, FindingPageRequest,
+    read_finding_page, read_finding_page_snapshot, FindingListPage, FindingPageAnchorMissing,
+    FindingPageMetadata, FindingPageOrder, FindingPageRequest, FindingPageSnapshot,
 };
 mod generic_tool_findings;
 mod identity_audit;
@@ -42,8 +43,8 @@ mod reviewed_refutation;
 mod run_delta;
 mod scan_comparison;
 pub(crate) use run_delta::{
-    commit_observed_findings, commit_observed_findings_with_status, emit_finding_delta,
-    emit_persisted_finding_delta,
+    commit_observed_findings, commit_observed_findings_with_counts,
+    commit_observed_findings_with_status, emit_finding_delta, emit_persisted_finding_delta,
 };
 
 pub use batch_occurrence::{
@@ -64,13 +65,15 @@ pub(crate) use finding_review_gate::{
 };
 pub(crate) use generic_tool_findings::{
     normalize_agent_json_findings, persist_tool_findings, persist_tool_findings_to,
-    render_generic_findings_output, GenericPersistedRun, ToolFindingsSink,
+    persist_tool_findings_to_with_status, render_generic_findings_output, GenericPersistedRun,
+    ToolFindingsSink,
 };
 pub use identity_audit::{
     audit_finding_identities, FindingIdentityAuditGroup, FindingIdentityAuditIssueKind,
     FindingIdentityAuditReport,
 };
 pub(crate) use identity_fold_projection::project_finding_generations;
+pub(in crate::findings) use identity_fold_projection::representative_fingerprints_for_members;
 pub use identity_policy_approval::{
     approve_finding_identity_audit, build_finding_identity_audit_evidence,
     current_finding_identity_audit_evidence, identity_audit_approval_receipt_path,

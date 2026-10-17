@@ -1,0 +1,84 @@
+name: Vendor context keeps draft settings, capture limits and earlier packets honest
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/vendor_context.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: options vendor-assessment:assess
+require-live-snap: 25 Experimental | experimental-opinion
+submit: logs
+submit: run vendor-assessment:scope {"vendorName":"Owned vendor","profile":"operator-profile"}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/vendor_context.py @TMP_TARGET @ART set
+submit: run vendor-assessment:scope {}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/vendor_context.py @TMP_TARGET @ART inspect
+paste-file: @ART/scope-replay.txt
+keys: Enter
+require-live-snap: 25 Profile: operator-profile | retained-profile
+keys: Escape
+submit: logs
+submit: run vendor-assessment:attach {"source":"missing.txt","profile":"must-not-be-saved"}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/vendor_context.py @TMP_TARGET @ART failed
+submit: run vendor-assessment:attach {"source":"owned-evidence.txt","title":"Owned evidence"}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/vendor_context.py @TMP_TARGET @ART attached
+paste-file: @ART/capture-replay.txt
+keys: Enter
+require-live-snap: 25 text prefix only | captured-prefix
+resize: 160x48
+live-snap: capture-160x48
+resize: 96x89
+live-snap: capture-96x89
+resize: 80x24
+live-snap: capture-80x24
+resize: 60x20
+live-snap: capture-60x20
+resize: 40x12
+live-snap: capture-40x12
+expect: 255999/256251 bytes
+keys: NPage
+live-snap: capture-reading-40x12
+keys: NPage
+live-snap: capture-reading-40x12-2
+ask: Across six sizes, can you identify the captured prefix and omitted bytes without treating attachment completion as a complete document or repository scan?
+resize: 120x36
+keys: Escape
+submit: logs
+submit: run vendor-assessment:attach {"url":"https://example.invalid/evidence","title":"URL reference"}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/vendor_context.py @TMP_TARGET @ART referenced
+paste-file: @ART/reference-replay.txt
+keys: Enter
+require-live-snap: 25 document not fetched | unfetched-reference
+keys: Escape
+submit: logs
+submit: run vendor-assessment:prompts {"runId":"owned-packet"}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/vendor_context.py @TMP_TARGET @ART packet
+submit: run vendor-assessment:scope {"clear":true}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/vendor_context.py @TMP_TARGET @ART cleared
+require-live-snap: 25 draft scope cleared | cleared-draft
+ask: Is clearing the current vendor draft understandable while earlier evidence receipts and generated packets remain available?
+submit: report
+require-live-snap: 25 0 findings | auxiliary-report
+expect-not: Displayed Scan: completed
+keys: Home
+keys: j j j
+require-live-snap: 20 format json (4/6) | export-format
+keys: Enter
+require-live-snap: 25 EXPORTED | exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/vendor_context.py @TMP_TARGET @ART exported
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: logs
+paste-file: @ART/capture-replay.txt
+keys: Enter
+require-live-snap: 25 text prefix only | recovered-capture
+require-shell: python3 -B @REPO/scripts/devex/fixtures/vendor_context.py @TMP_TARGET @ART restarted
+ask: Does no-color restart retain the earlier partial capture, cleared draft and packet without granting repository progress or starting new work?
+keys: C-c
+require-exit: 10

@@ -13,7 +13,9 @@ use kuzushi_core::workflow_attempts::{
 };
 use kuzushi_core::{write_run_summary, RunSummary, V2Config, WorkflowPhase, WorkspaceTarget};
 
+mod partial_membership;
 mod repeated;
+mod result_ownership;
 
 #[test]
 fn missing_target_discloses_unloaded_scan_receipts() {
@@ -43,6 +45,10 @@ fn projects_only_terminal_scan_phase_runs() {
     assert_eq!(attempt.findings, Some(3));
     assert_eq!(attempt.duration_secs, Some(9));
     assert_eq!(model.engine_outcomes[0].engine, "Run SAST scan");
+    assert_eq!(
+        model.scope, "not recorded",
+        "A workspace target does not establish discovery scope"
+    );
 }
 
 /// Issue #172 (2026-09-28 audit): `secret-scan` recorded 27 emitted findings
@@ -227,6 +233,7 @@ fn selected_partial_attempt_discloses_acknowledgement() {
     assert_eq!(attempt.outcome, "partial");
     assert_eq!(attempt.disposition, "selected · partial acknowledged");
     assert_eq!(model.engine_outcomes[0].outcome, "partial");
+    assert_eq!(model.scope, "not recorded");
 }
 
 #[test]
@@ -456,6 +463,7 @@ fn record_typed_scan_attempt(target: &std::path::Path, run_id: &str) {
         run_refs: vec![run_id.to_string(), "semgrep-child".to_string()],
         scan: Some(ScanStageData {
             scope: ScanStageScope {
+                inspected_files: None,
                 target: target.display().to_string(),
                 paths: vec!["src/auth".to_string()],
             },
@@ -467,12 +475,14 @@ fn record_typed_scan_attempt(target: &std::path::Path, run_id: &str) {
                 ScanStageEngine {
                     engine: "semgrep".to_string(),
                     outcome: ScanEngineStageOutcome::Complete,
+                    rule_ids: None,
                     run_ref: Some("semgrep-child".to_string()),
                     detail: None,
                 },
                 ScanStageEngine {
                     engine: "cargo-audit".to_string(),
                     outcome: ScanEngineStageOutcome::Skipped,
+                    rule_ids: None,
                     run_ref: None,
                     detail: Some("binary unavailable".to_string()),
                 },

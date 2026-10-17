@@ -174,6 +174,9 @@ fn input_specific_runtime_requirement(tool_name: &str, input: &Value) -> Option<
         }
         "verify:finding" => Some(!super::verification_is_empirical(input)),
         "context:build" => Some(context_build_needs_runtime(input)),
+        "pipeline:taint-cwe-select" => {
+            Some(input.get("cwes").or_else(|| input.get("cwe")).is_none())
+        }
         "offense:chain" => Some(
             input
                 .get("goal")
@@ -250,12 +253,27 @@ pub fn agent_runtime_tool_names() -> &'static [&'static str] {
 /// the `sast:scan` context — every call site in the workspace should
 /// route through here rather than re-deriving the rule.
 pub fn wants_sast_runtime(input: &Value) -> bool {
+    if sast_has_standalone_stage_alias(input) {
+        return false;
+    }
     let whitebox_static = crate::whitebox_static::whitebox_static_enabled(input).unwrap_or(false);
     let triage_runtime = any_true_input(input, &["triage", "aiTriage", "ai_triage"]);
     let execution_runtime =
         !whitebox_static && any_true_input(input, &["verify", "autoPatch", "auto_patch"]);
 
     triage_runtime || execution_runtime || sast_tasks_request_runtime(input)
+}
+
+fn sast_has_standalone_stage_alias(input: &Value) -> bool {
+    input
+        .get("tasks")
+        .and_then(Value::as_array)
+        .is_some_and(|tasks| {
+            tasks
+                .iter()
+                .filter_map(Value::as_str)
+                .any(crate::capabilities::agentic_sast::is_standalone_stage_scan_alias)
+        })
 }
 
 fn any_true_input(input: &Value, names: &[&str]) -> bool {
@@ -283,15 +301,12 @@ const SAST_RUNTIME_TASK_NAMES: &[&str] = &[
     "carlini",
     "carlini-threat-hunt",
     "carlini-threat-hunt:run",
-    "deep-semantic",
-    "deep-semantic-hunt",
     "iris",
     "iris-next",
     "offense-review",
     "offense-review:threat-hunt",
     "systems",
     "systems-hunt",
-    "systems-hunt:deep-semantic-hunt",
     "systems-hunt:systems-hunt",
     "taint",
     "taint-iris",

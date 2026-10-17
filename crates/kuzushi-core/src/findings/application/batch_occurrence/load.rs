@@ -144,10 +144,11 @@ fn insert_run_id(run_ids: &mut BTreeSet<String>, run_id: &str) {
 }
 
 pub(super) fn read_batch_document(root: &Path, batch_id: &str, file: &str) -> Result<Value> {
-    let path = batch_file(root, batch_id, file);
-    let body =
-        std::fs::read(&path).with_context(|| format!("could not read {}", path.display()))?;
-    serde_json::from_slice(&body).with_context(|| format!("{} is malformed JSON", path.display()))
+    let path = batch_file(root, batch_id, file)?;
+    let workspace = crate::WorkspaceTarget::new(root)?;
+    let body = crate::bounded_file::read_utf8_text_within(workspace.root(), &path, 4 * 1024 * 1024)
+        .with_context(|| format!("could not read bounded study metadata {}", path.display()))?;
+    serde_json::from_str(&body).with_context(|| format!("{} is malformed JSON", path.display()))
 }
 
 pub(super) fn read_optional_batch_document(
@@ -155,9 +156,10 @@ pub(super) fn read_optional_batch_document(
     batch_id: &str,
     file: &str,
 ) -> Result<Option<Value>> {
-    let path = batch_file(root, batch_id, file);
-    match std::fs::read(&path) {
-        Ok(body) => serde_json::from_slice(&body)
+    let path = batch_file(root, batch_id, file)?;
+    let workspace = crate::WorkspaceTarget::new(root)?;
+    match crate::bounded_file::read_utf8_text_within(workspace.root(), &path, 4 * 1024 * 1024) {
+        Ok(body) => serde_json::from_str(&body)
             .with_context(|| format!("{} is malformed JSON", path.display()))
             .map(Some),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -165,8 +167,14 @@ pub(super) fn read_optional_batch_document(
     }
 }
 
-fn batch_file(root: &Path, batch_id: &str, file: &str) -> PathBuf {
-    crate::capabilities::campaign::campaign_dir(root, batch_id).join(file)
+fn batch_file(root: &Path, batch_id: &str, file: &str) -> Result<PathBuf> {
+    crate::capabilities::campaign::validate_scan_batch_id(batch_id)?;
+    let workspace = crate::WorkspaceTarget::new(root)?;
+    let path = crate::capabilities::campaign::campaign_dir(workspace.root(), batch_id).join(file);
+    crate::workspace::validated_workspace_descendant(
+        workspace.root(),
+        path.strip_prefix(workspace.root())?,
+    )
 }
 
 pub(super) fn required_string(value: &Value, key: &str) -> Result<String> {

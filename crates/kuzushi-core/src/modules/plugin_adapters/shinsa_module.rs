@@ -5,20 +5,21 @@ pub(in crate::modules) fn shinsa_module() -> BuiltinModule {
         "shinsa",
         "Shinsa Compliance",
         ModuleKind::Governance,
-        "Compliance assessment wrapper around the shinsa-plugin Claude Code plugin.",
+        "Experimental compliance assessment from bounded repository snippets.",
         shinsa_tools(),
         vec![
             dag("shinsa:scan", "assessment", &["context:build"]),
             dag("shinsa:nist-scan", "assessment", &["context:build"]),
         ],
     )
+    .labs()
 }
 
 fn shinsa_tools() -> Vec<ToolDescriptor> {
     vec![
         shinsa_assessment_tool(
             "shinsa:scan",
-            "Run a full ISO 27001 Annex A compliance assessment.",
+            "Draft an experimental ISO 27001 Annex A assessment from bounded repository snippets.",
             false,
         ),
         shinsa_assessment_tool(
@@ -28,7 +29,7 @@ fn shinsa_tools() -> Vec<ToolDescriptor> {
         ),
         shinsa_assessment_tool(
             "shinsa:nist-scan",
-            "Run a full NIST SP 800-53 Rev 5 compliance assessment.",
+            "Draft an experimental NIST SP 800-53 Rev 5 assessment from bounded repository snippets.",
             false,
         ),
         shinsa_assessment_tool(
@@ -44,18 +45,21 @@ fn shinsa_tools() -> Vec<ToolDescriptor> {
                 WorkspaceRequirement::Required,
                 FindingStoreRequirement::Optional,
             ),
-        ),
+        ).without_phase_result(),
     ]
 }
 
 fn shinsa_assessment_tool(name: &str, description: &str, hidden: bool) -> ToolDescriptor {
     let mut descriptor = tool_with_options(name, description, shinsa_tool_options());
     descriptor.hidden = hidden;
-    descriptor.with_policy(target_write_policy(
-        ToolPhase::Scan,
-        RuntimeRequirement::Always,
-        FindingStoreRequirement::Required,
-    ))
+    descriptor
+        .with_policy(target_write_policy(
+            ToolPhase::Scan,
+            RuntimeRequirement::Always,
+            FindingStoreRequirement::Required,
+        ))
+        .with_allowance_category(AllowanceCategory::Discovery)
+        .without_phase_result()
 }
 
 fn shinsa_tool_options() -> Vec<OptionSpec> {

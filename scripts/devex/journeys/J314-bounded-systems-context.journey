@@ -1,0 +1,121 @@
+name: Bounded systems context exposes coverage and never starts model or index work
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_AGENT_MCPS
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_context.py @TMP_TARGET @ART seed
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: options systems-hunt:systems-context-gatherer
+require-live-snap: 20 Max source bytes | context-options
+keys: Down Down Down Down Down
+require-live-snap: 20 Key: maxSourceBytes | aggregate-byte-option
+ask: Are file, byte and surface bounds understandable before running this auxiliary context action, without suggesting Scan or complete Map progress?
+submit: logs
+paste-file: @ART/context-command.txt
+keys: Enter
+require-live-snap: 30 partial inspection | bounded-context
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_context.py @TMP_TARGET @ART partial
+nav-mode:
+keys: z
+require-live-snap: 20 READ TRANSCRIPT | context-reader
+resize: 160x48
+live-snap: context-160x48
+resize: 96x89
+live-snap: context-96x89
+resize: 80x24
+live-snap: context-80x24
+resize: 60x20
+live-snap: context-60x20
+resize: 40x12
+keys: End
+live-snap: context-40x12-tail
+keys: PPage
+live-snap: context-reading-01-40x12
+keys: PPage
+live-snap: context-reading-02-40x12
+keys: PPage
+live-snap: context-reading-03-40x12
+keys: PPage
+live-snap: context-reading-04-40x12
+keys: PPage
+live-snap: context-reading-05-40x12
+keys: PPage
+live-snap: context-reading-06-40x12
+keys: PPage
+live-snap: context-reading-07-40x12
+keys: PPage
+live-snap: context-reading-08-40x12
+keys: PPage
+live-snap: context-reading-09-40x12
+keys: PPage
+live-snap: context-reading-10-40x12
+keys: PPage
+live-snap: context-reading-11-40x12
+keys: PPage
+live-snap: context-reading-12-40x12
+keys: PPage
+live-snap: context-reading-13-40x12
+keys: PPage
+live-snap: context-reading-14-40x12
+keys: PPage
+live-snap: context-reading-15-40x12
+keys: PPage
+live-snap: context-reading-16-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_context.py @TMP_TARGET @ART reader
+ask: Are bounded source coverage, exact file paths, omissions and the absence of model/index work readable through keyboard paging at all six sizes?
+keys: q
+resize: 120x36
+keys: Escape C-u
+submit: run systems-hunt:systems-context-gatherer {"maxFiles":0}
+require-live-snap: 20 must be at least 1 | invalid-limit
+submit: run systems-hunt:systems-context-gatherer {"maxFindings":1}
+require-live-snap: 20 unsupported by standalone systems context | unsupported-compatibility
+ask: Do invalid and unused compatibility options fail clearly without producing findings, new jobs or hidden model work?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_context.py @TMP_TARGET @ART cli @TMP_HOME
+keys: C-c
+require-exit: 15
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: logs
+paste-file: @ART/context-command.txt
+keys: Enter
+require-live-snap: 30 partial inspection | restarted-context
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_context.py @TMP_TARGET @ART restarted
+nav-mode:
+keys: z
+require-live-snap: 20 READ TRANSCRIPT | no-color-reader
+resize: 40x12
+keys: End
+live-snap: no-color-40x12-tail
+keys: PPage
+live-snap: no-color-reading-01-40x12
+keys: PPage
+live-snap: no-color-reading-02-40x12
+keys: PPage
+live-snap: no-color-reading-03-40x12
+keys: PPage
+live-snap: no-color-reading-04-40x12
+keys: PPage
+live-snap: no-color-reading-05-40x12
+keys: PPage
+live-snap: no-color-reading-06-40x12
+keys: PPage
+live-snap: no-color-reading-07-40x12
+keys: PPage
+live-snap: no-color-reading-08-40x12
+keys: PPage
+live-snap: no-color-reading-09-40x12
+keys: PPage
+live-snap: no-color-reading-10-40x12
+keys: PPage
+live-snap: no-color-reading-11-40x12
+keys: PPage
+live-snap: no-color-reading-12-40x12
+ask: Does the restarted no-color reader retain usable navigation and honest partial-context wording without treating this action as a scan?
+keys: q C-c
+require-exit: 15

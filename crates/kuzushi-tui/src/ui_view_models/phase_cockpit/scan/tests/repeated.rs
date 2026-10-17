@@ -1,7 +1,7 @@
 use super::*;
 use kuzushi_core::findings::{FindingSource, Severity};
 
-fn repeated_app(workspace: &WorkspaceTarget) -> ShellApp {
+pub(super) fn repeated_app(workspace: &WorkspaceTarget) -> ShellApp {
     let target = workspace.root();
     for pass in 1..=3 {
         let parent = format!("parent-{pass}");

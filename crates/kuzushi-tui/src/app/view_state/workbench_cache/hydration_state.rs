@@ -6,6 +6,7 @@ impl WorkbenchCache {
             HydrationGroup::Transient => false,
             HydrationGroup::Completion => self.completion_hydration_needed(target, key),
             HydrationGroup::Run => self.run_hydration_needed(target, key),
+            HydrationGroup::Allowance => self.investigation_allowance_needs_refresh(target, key),
             HydrationGroup::StudyUsage => self.study_usage_hydration_needed(target, key),
             HydrationGroup::Project => self.project_hydration_needed(target, key),
             HydrationGroup::Workspace => self.workspace_hydration_needed(target, key),
@@ -28,6 +29,22 @@ impl WorkbenchCache {
                 .remove(&(failure.target.clone(), failure.key.clone()));
             self.record_failed_study_usage(failure);
             self.record_failed_review_source(failure);
+            self.record_failed_allowance_read(failure);
+            self.record_failed_report_read(failure);
+            if let ViewHydrationKey::RunRequestContext { run_id } = &failure.key {
+                self.store_run_request_context(
+                    failure.target.clone(),
+                    run_id.clone(),
+                    Err("Request context read failed. r refreshes without starting work.".into()),
+                );
+            }
+            if matches!(failure.key, ViewHydrationKey::RunResultDocument { .. }) {
+                self.run_result_document = Some((
+                    failure.target.clone(),
+                    failure.key.clone(),
+                    Err("Saved output read failed. Reopen replay to retry this read.".into()),
+                ));
+            }
         }
     }
 
@@ -39,6 +56,7 @@ impl WorkbenchCache {
             HydrationGroup::Transient => {}
             HydrationGroup::Completion => self.apply_completion_hydration(target, key, value),
             HydrationGroup::Run => self.apply_run_hydration(target, key, value),
+            HydrationGroup::Allowance => self.apply_allowance_hydration(target, key, value),
             HydrationGroup::StudyUsage => self.apply_study_usage_hydration(target, key, value),
             HydrationGroup::Project => self.apply_project_hydration(target, key, value),
             HydrationGroup::Workspace => self.apply_workspace_hydration(target, key, value),
@@ -46,8 +64,25 @@ impl WorkbenchCache {
         }
     }
 
+    fn record_failed_report_read(&mut self, failure: &ViewHydrationFailure) {
+        if !is_report_hydration_key(&failure.key) {
+            return;
+        }
+        let error = "Report read failed. Press r to refresh.".to_string();
+        let target = failure.target.clone();
+        let key = failure.key.clone();
+        if matches!(key, ViewHydrationKey::WorkspaceReportReview { .. }) {
+            self.workspace_report_review.store(target, key, Err(error));
+        } else {
+            self.investigation_report.store(target, key, Err(error));
+        }
+    }
+
     fn run_hydration_needed(&self, target: &Path, key: &ViewHydrationKey) -> bool {
         match key {
+            ViewHydrationKey::WorkspaceReportReview { .. } => self
+                .cached_workspace_report_review(target, key)
+                .is_not_requested(),
             ViewHydrationKey::InvestigationReport { .. }
             | ViewHydrationKey::InvestigationStudyReport { .. } => self
                 .cached_selected_report(Some(target), key)
@@ -61,6 +96,12 @@ impl WorkbenchCache {
                 .is_not_requested(),
             ViewHydrationKey::RunProjection { run_id } => self
                 .cached_run_projection(target, run_id)
+                .is_not_requested(),
+            key @ ViewHydrationKey::RunResultDocument { .. } => self
+                .cached_run_result_document(target, key)
+                .is_not_requested(),
+            ViewHydrationKey::RunRequestContext { run_id } => self
+                .cached_run_request_context(target, run_id)
                 .is_not_requested(),
             ViewHydrationKey::PhaseReceiptOutcome { attempt_id } => self
                 .cached_phase_receipt_outcome(target, attempt_id)
@@ -212,14 +253,11 @@ impl WorkbenchCache {
         key: ViewHydrationKey,
         value: ViewHydrationValue,
     ) {
+        if is_report_hydration_key(&key) {
+            self.apply_report_hydration(target, key, value);
+            return;
+        }
         match (key, value) {
-            (
-                key @ (ViewHydrationKey::InvestigationReport { .. }
-                | ViewHydrationKey::InvestigationStudyReport { .. }),
-                ViewHydrationValue::InvestigationReport(state),
-            ) => {
-                self.investigation_report = Some((target, key, state));
-            }
             (ViewHydrationKey::LatestRunPointer, ViewHydrationValue::LatestRunPointer(state)) => {
                 self.store_latest_run_pointer(target, state)
             }
@@ -227,6 +265,67 @@ impl WorkbenchCache {
                 ViewHydrationKey::RunSummaryEntries,
                 ViewHydrationValue::RunSummaryEntries(hydration),
             ) => self.store_run_summary_entries(target, hydration.state),
+            (
+                key @ (ViewHydrationKey::RunArtifactText { .. }
+                | ViewHydrationKey::RunProjection { .. }
+                | ViewHydrationKey::RunResultDocument { .. }
+                | ViewHydrationKey::RunRequestContext { .. }),
+                value,
+            ) => self.apply_run_reader_hydration(target, key, value),
+            (
+                ViewHydrationKey::PhaseReceiptOutcome { attempt_id },
+                ViewHydrationValue::PhaseReceiptOutcome(state),
+            ) => self.store_phase_receipt_outcome(target, attempt_id, state),
+            (
+                ViewHydrationKey::ScanStageReceipt { run_id },
+                ViewHydrationValue::ScanStageReceipt(state),
+            ) => self.store_scan_stage_receipt(target, run_id, state),
+            _ => {}
+        }
+    }
+
+    fn apply_report_hydration(
+        &mut self,
+        target: PathBuf,
+        key: ViewHydrationKey,
+        value: ViewHydrationValue,
+    ) {
+        match (key, value) {
+            (
+                key @ ViewHydrationKey::WorkspaceReportReview { .. },
+                ViewHydrationValue::WorkspaceReportReview(state),
+            ) => {
+                self.workspace_report_review
+                    .store(target, key, state.map(Arc::new));
+            }
+            (
+                key @ (ViewHydrationKey::InvestigationReport { .. }
+                | ViewHydrationKey::InvestigationStudyReport { .. }),
+                ViewHydrationValue::InvestigationReport(state),
+            ) => {
+                self.investigation_report.store(
+                    target,
+                    key,
+                    state.map(|document| document.map(Arc::new)),
+                );
+            }
+            _ => {}
+        }
+    }
+
+    fn apply_run_reader_hydration(
+        &mut self,
+        target: PathBuf,
+        key: ViewHydrationKey,
+        value: ViewHydrationValue,
+    ) {
+        match (key, value) {
+            (
+                ViewHydrationKey::RunRequestContext { run_id },
+                ViewHydrationValue::RunRequestContext(state),
+            ) => {
+                self.store_run_request_context(target, run_id, state);
+            }
             (
                 ViewHydrationKey::RunArtifactText { run_id, leaf },
                 ViewHydrationValue::RunArtifactText(state),
@@ -236,13 +335,11 @@ impl WorkbenchCache {
                 ViewHydrationValue::RunProjection(state),
             ) => self.store_run_projection(target, run_id, state),
             (
-                ViewHydrationKey::PhaseReceiptOutcome { attempt_id },
-                ViewHydrationValue::PhaseReceiptOutcome(state),
-            ) => self.store_phase_receipt_outcome(target, attempt_id, state),
-            (
-                ViewHydrationKey::ScanStageReceipt { run_id },
-                ViewHydrationValue::ScanStageReceipt(state),
-            ) => self.store_scan_stage_receipt(target, run_id, state),
+                key @ ViewHydrationKey::RunResultDocument { .. },
+                ViewHydrationValue::RunResultDocument(state),
+            ) => {
+                self.run_result_document = Some((target, key, state));
+            }
             _ => {}
         }
     }
@@ -661,6 +758,7 @@ impl WorkbenchCache {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HydrationGroup {
     Transient,
+    Allowance,
     Completion,
     Run,
     StudyUsage,
@@ -673,6 +771,7 @@ fn hydration_group(key: &ViewHydrationKey) -> HydrationGroup {
     use ViewHydrationKey as Key;
     match key {
         Key::FindingsProjection(_) => HydrationGroup::Transient,
+        Key::InvestigationAllowance { .. } => HydrationGroup::Allowance,
         Key::StudyHistory
         | Key::StudyUsageCatalogue
         | Key::StudyUsageRun { .. }
@@ -681,11 +780,14 @@ fn hydration_group(key: &ViewHydrationKey) -> HydrationGroup {
             HydrationGroup::Completion
         }
         Key::LatestRunPointer
+        | Key::WorkspaceReportReview { .. }
         | Key::InvestigationReport { .. }
         | Key::InvestigationStudyReport { .. }
         | Key::RunSummaryEntries
         | Key::RunArtifactText { .. }
         | Key::RunProjection { .. }
+        | Key::RunResultDocument { .. }
+        | Key::RunRequestContext { .. }
         | Key::PhaseReceiptOutcome { .. }
         | Key::ScanStageReceipt { .. } => HydrationGroup::Run,
         key => artifact_hydration_group(key),
@@ -763,4 +865,13 @@ mod entry_point_authentication_tests {
                 if error == "worker context auth"
         ));
     }
+}
+
+fn is_report_hydration_key(key: &ViewHydrationKey) -> bool {
+    matches!(
+        key,
+        ViewHydrationKey::WorkspaceReportReview { .. }
+            | ViewHydrationKey::InvestigationReport { .. }
+            | ViewHydrationKey::InvestigationStudyReport { .. }
+    )
 }

@@ -1,5 +1,7 @@
 use super::*;
+mod batch_membership;
 mod native_fixture;
+mod run_membership;
 
 fn fixture() -> (tempfile::TempDir, ShellApp, FindingStore) {
     let root = tempfile::tempdir().unwrap();

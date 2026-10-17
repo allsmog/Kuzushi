@@ -1,6 +1,6 @@
 use super::*;
 
-fn retained_fixture(root: &Path) -> FindingStore {
+pub(super) fn retained_fixture(root: &Path) -> FindingStore {
     seed_batch_documents(root);
     let expected = planned_config_sha256(root);
     for run in [

@@ -546,6 +546,12 @@ impl ShellApp {
             ShellCommand::FindingsFilter(expression) => {
                 Some(self.reduce_open_filtered_findings(expression))
             }
+            ShellCommand::FindingsRefresh => {
+                Some(vec![ShellEffect::RefreshFindings(FindingsRefresh {
+                    announce: false,
+                    filter: self.active_findings_filter().clone(),
+                })])
+            }
             ShellCommand::Open(id) => Some(self.open_finding_effects(id)),
             ShellCommand::ShowAliases(prefix) => {
                 self.show_aliases(prefix.as_deref());

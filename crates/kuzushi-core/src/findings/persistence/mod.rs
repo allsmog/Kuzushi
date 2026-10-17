@@ -10,6 +10,7 @@ pub(crate) mod lesson_reads;
 mod open;
 pub(crate) use open::validate_lesson_origin;
 pub use open::FindingLessonPage;
+pub(crate) use open::{CapturedFindingSources, FindingSourceSnapshot};
 pub(crate) mod relationship_reads;
 pub use open::FindingRelationshipPage;
 mod store_rows;

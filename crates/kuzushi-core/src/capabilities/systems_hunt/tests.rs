@@ -123,6 +123,7 @@ mod tests {
                             "filePath": "src/parser.c",
                             "startLine": 3,
                             "message": "memcpy uses packet-controlled length for a 64-byte stack buffer",
+                            "evidence": ["src/parser.c:3 - supplied source operation"],
                             "reasoningChain": "packet length is attacker-controlled and no bound check is visible",
                             "analysisPath": ["inspect parser", "compare len with buffer size"]
                         }]
@@ -539,6 +540,12 @@ mod tests {
     #[test]
     fn standalone_invariant_extract_reports_exact_provider_cost() {
         let temp = tempdir().unwrap();
+        fs::create_dir(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("src/parser.c"),
+            "// memcpy is owned inert metadata, never executed.\n",
+        )
+        .unwrap();
         let workspace = crate::workspace::WorkspaceTarget::new(temp.path()).unwrap();
         let config = V2Config {
             model: Some("openai:gpt-4.1".to_string()),
@@ -552,7 +559,10 @@ mod tests {
             cancellation: None,
             authorization: Default::default(),
         };
-        let input = json!({"context": ctx_with(vec![surface("src/parser.c", "unsafe-region")])});
+        let mut supplied = surface("src/parser.c", "source-note");
+        supplied.id = "surface".into();
+        let input = json!({"context": ctx_with(vec![supplied]),
+            "SYSTEMS_INVARIANT_PROMPT":systems_invariant_system_prompt()});
 
         let output = execute_systems_hunt_tool(
             "systems-hunt:systems-invariant-extract",
@@ -638,7 +648,7 @@ mod tests {
         };
         let runtime = FakeRuntime::new();
 
-        let report = run_deep_semantic_hunt_report(
+        let result = execute_deep_discovery(
             &json!({
                 "maxFindings": 1,
                 "cwes": [{
@@ -652,6 +662,7 @@ mod tests {
         )
         .unwrap();
 
+        let report: SystemsHuntReport = serde_json::from_value(result["data"].clone()).unwrap();
         assert_eq!(report.count, 1);
         assert_eq!(report.findings[0].tool, "deep-semantic-hunt");
         assert_eq!(store.list_findings(10).unwrap().len(), 1);
@@ -906,6 +917,7 @@ mod tests {
                 codeql_db_path: None,
                 bash_probing_used: false,
                 systems_source_files: 1,
+                inspection: None,
             },
         }
     }

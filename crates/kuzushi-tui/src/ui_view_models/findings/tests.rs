@@ -8,6 +8,30 @@ use kuzushi_core::{
 };
 use std::collections::BTreeMap;
 
+mod observation_reference;
+
+#[test]
+fn auxiliary_planning_cannot_claim_a_clean_scan_or_hide_a_scan_refusal() {
+    let mut plan = RunSummary::running("local-plan", "scan", Some("full-mode:hunt".into()), ".")
+        .complete()
+        .with_findings(Some(0));
+    plan.completed_at_unix = Some(20);
+    let mut runs = BTreeMap::from([(plan.run_id.clone(), plan)]);
+    assert!(clean_scan_empty_state(&runs, SystemTime::now()).is_none());
+
+    let mut blocked = RunSummary::running(
+        "blocked-scan",
+        "tool",
+        Some("agentic-sast:scan".into()),
+        ".",
+    );
+    blocked.status = "blocked".into();
+    blocked.completed_at_unix = Some(10);
+    runs.insert(blocked.run_id.clone(), blocked);
+    assert_eq!(latest_scan_summary(&runs).unwrap().run_id, "blocked-scan");
+    assert!(clean_scan_empty_state(&runs, SystemTime::now()).is_none());
+}
+
 #[test]
 fn rule_suppression_label_does_not_invent_a_human_false_positive_decision() {
     let mut app = ShellApp::new(V2Config::default(), None);
@@ -1519,4 +1543,34 @@ fn missing_live_source_without_a_scanned_copy_notes_the_absence() {
     let note = snippet.note.expect("absence note");
     assert!(note.contains("source unavailable"), "{note}");
     assert!(note.contains("no scanned copy recorded"), "{note}");
+}
+
+#[test]
+fn unscored_model_evidence_and_source_citations_keep_distinct_origins() {
+    let claim = kuzushi_core::FindingEvidence {
+        kind: kuzushi_core::FindingEvidence::UNSCORED_MODEL_CLAIM.into(),
+        file_path: "owned.c".into(),
+        line: 1,
+        rationale: "Owned unverified model text".into(),
+        ..Default::default()
+    };
+    let model = FindingEvidenceRow::from_evidence(&claim);
+    assert_eq!(model.origin, "model-generated reasoning");
+    assert!(model.header.contains("model claim · unscored"));
+    assert!(!model.header.contains("conf 0"));
+    let citation = kuzushi_core::FindingEvidence {
+        kind: kuzushi_core::FindingEvidence::UNSCORED_SOURCE_CITATION.into(),
+        snippet: "// owned source".into(),
+        ..claim
+    };
+    let source = FindingEvidenceRow::from_evidence(&citation);
+    assert_eq!(source.origin, "observed code evidence");
+    assert!(source.header.contains("source citation · unscored"));
+    let legacy = kuzushi_core::FindingEvidence {
+        kind: "reasoning".into(),
+        ..citation
+    };
+    assert!(FindingEvidenceRow::from_evidence(&legacy)
+        .header
+        .contains("conf 0"));
 }

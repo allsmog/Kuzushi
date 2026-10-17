@@ -73,14 +73,16 @@ mod findings;
 mod health;
 mod help;
 mod home_cockpit;
+mod investigation_allowance;
+pub(crate) use investigation_allowance::investigation_allowance_model;
 mod jobs_registry;
 mod journey;
 mod report_investigation;
 mod report_summary;
 pub(crate) use report_investigation::{report_investigation_lines, report_source_notice};
 pub(crate) use report_summary::{
-    report_cost_coverage, report_export_campaign, report_investigation_state,
-    report_review_summary, report_source_history_coverage,
+    report_action_error, report_cost_coverage, report_export_campaign, report_investigation_state,
+    report_is_refreshing, report_review_summary, report_source_history_coverage,
 };
 mod keybindings;
 mod keymap;
@@ -119,6 +121,7 @@ mod run_status;
 mod run_timeline;
 mod run_trace;
 mod sast_tasks;
+mod scan_summary;
 mod screen_context;
 mod session_story;
 mod setup;
@@ -177,9 +180,10 @@ pub(crate) use catalog::{
     CatalogModuleGroup,
 };
 pub(crate) use chrome_layout::{
-    compact_document_notice, compact_map_reading, compact_phase_reading, compact_review_reading,
-    keybind_footer_chrome_height, rail_width, status_footer_chrome_height,
-    transcript_chrome_height, RAIL_AUTO_MIN_WIDTH, RAIL_FORCE_MIN_WIDTH, RAIL_WIDTH,
+    compact_document_notice, compact_gallery_reading, compact_map_reading, compact_phase_reading,
+    compact_replay_reading, compact_review_reading, keybind_footer_chrome_height, rail_width,
+    status_footer_chrome_height, transcript_chrome_height, RAIL_AUTO_MIN_WIDTH,
+    RAIL_FORCE_MIN_WIDTH, RAIL_WIDTH,
 };
 pub(crate) use command_palette::{command_palette_model, CommandPaletteModel, PaletteRow};
 pub(crate) use config::{
@@ -265,9 +269,9 @@ pub(crate) use module_run::{
     ModuleRunSummary,
 };
 pub(crate) use options::{
-    option_display_name, options_model, plain_options_model, OptionsBody, OptionsModel,
-    OptionsSummaryRow, OptionsTable, OptionsTableRow, PlainOptionRow, PlainOptionsBody,
-    PlainOptionsModel, PlainOptionsTable,
+    option_display_name, options_model, options_tool_description, plain_options_model, OptionsBody,
+    OptionsModel, OptionsSummaryRow, OptionsTable, OptionsTableRow, PlainOptionRow,
+    PlainOptionsBody, PlainOptionsModel, PlainOptionsTable,
 };
 pub(crate) use patch_review::{patch_review_model, PatchReviewModel, PatchReviewTestRow};
 pub(crate) use permission_policy::{
@@ -328,6 +332,7 @@ pub(crate) use report_preview::{
     report_preview_model, ReportPreviewCounts, ReportPreviewModel, ReportPreviewRow,
 };
 pub(crate) use retry_card::{retry_card_model, RetryCardModel, RetryCardRow};
+pub(crate) use review_queue::ReviewReadFeedback;
 pub(crate) use review_queue::{
     review_queue_model, ReviewFacetCount, ReviewFacetGroup, ReviewOccurrence, ReviewQueueMode,
     ReviewQueueModel, ReviewQueueRow, ReviewWorkflowGroup, LEARN_ORDERING_INDICATOR,
@@ -354,8 +359,11 @@ pub(crate) use run_paths::{
 pub(crate) use run_status::scan_status;
 pub(crate) use run_timeline::{run_timeline_model, PastRunStatus, RunTimelineRow};
 pub(crate) use run_trace::{
-    alias_reference_model, replay_can_lead_with_results, replay_model, replay_reading_rows,
-    trace_model, ReplayIssueModel, ReplayModel, RunArtifactDetail, TraceModel, TraceStep,
+    alias_reference_model, replay_can_lead_with_results, replay_document_available,
+    replay_has_inputs, replay_has_summary, replay_model, replay_next_label, replay_reading_rows,
+    replay_request_context, replay_summary, replay_summary_available, replay_summary_label,
+    replay_switch_owns_input, trace_model, ReplayIssueModel, ReplayModel, RunArtifactDetail,
+    TraceModel, TraceStep,
 };
 pub(crate) use sast_tasks::{
     plain_sast_tasks_model, sast_tasks_model, PlainSastTaskRow, PlainSastTasksModel, SastTasksModel,
@@ -407,8 +415,8 @@ pub(crate) use threat_stride::{
 };
 pub(crate) use tools::{tools_model, ToolGroup, ToolRow, ToolsModel};
 pub(crate) use transcript::{
-    logs_model, plain_command_result_model, transcript_model, transcript_model_from_log_index,
-    LogsModel, PlainCommandResultModel,
+    logs_model, plain_command_result_model, plain_logs_lines, transcript_model,
+    transcript_model_from_log_index, LogsModel, PlainCommandResultModel,
 };
 pub(crate) use update_available::{update_available_model, UpdateAvailableModel};
 pub(crate) use view_status::view_status_segment;
@@ -419,15 +427,16 @@ pub(crate) use viz_data::{
     cached_risk_by_module, component_stack, dfd_model, dfd_model_is_empty, dfd_overview,
     dfd_overview_component_at, dfd_overview_component_count, dfd_security_items_for_selection,
     dfd_selectable_count, dfd_selected_item, dfd_selection_for_key, display_target,
-    entry_point_breakdown, risk_by_module, taint_flow_path, taint_flow_path_for_finding,
-    worklist_artifact_version, worklist_model, AttackChain, AttackTree, ComponentItem,
-    ComponentScope, ComponentSource, ComponentSourceKind, ComponentStack, DfdBoundaryModel,
-    DfdContextCounts, DfdFlowModel, DfdKind, DfdLinkState, DfdModel, DfdNodeModel, DfdOverview,
-    DfdOverviewComponent, DfdOverviewFlow, DfdOverviewZone, DfdSecurityItem, DfdSecurityKind,
-    DfdSelected, DfdZoneFlow, EntryPointArtifactStatus, EntryPointBreakdown, EntryPointComposition,
-    EntryPointCounts, EntryPointDisposition, EntryPointFreshness, EntryPointGroup, EntryPointItem,
-    EntryPointReceipt, EntryPointTarget, FindingsHeatmap, LegendEntry, ModuleRisk, RiskByModule,
-    TaintFlowPath, TaintStageModel, WorklistRowModel, WorklistViewModel,
+    entry_point_breakdown, risk_by_module, saved_worklist_run_id, taint_flow_path,
+    taint_flow_path_for_finding, worklist_artifact_version, worklist_model, AttackChain,
+    AttackTree, ComponentItem, ComponentScope, ComponentSource, ComponentSourceKind,
+    ComponentStack, DfdBoundaryModel, DfdContextCounts, DfdFlowModel, DfdKind, DfdLinkState,
+    DfdModel, DfdNodeModel, DfdOverview, DfdOverviewComponent, DfdOverviewFlow, DfdOverviewZone,
+    DfdSecurityItem, DfdSecurityKind, DfdSelected, DfdZoneFlow, EntryPointArtifactStatus,
+    EntryPointBreakdown, EntryPointComposition, EntryPointCounts, EntryPointDisposition,
+    EntryPointFreshness, EntryPointGroup, EntryPointItem, EntryPointReceipt, EntryPointTarget,
+    FindingsHeatmap, LegendEntry, ModuleRisk, RiskByModule, TaintFlowPath, TaintStageModel,
+    WorklistRowModel, WorklistViewModel,
 };
 pub(crate) use workbench::{
     active_review_queue_mode, active_workbench_page, active_workbench_page_with_reality_phase,

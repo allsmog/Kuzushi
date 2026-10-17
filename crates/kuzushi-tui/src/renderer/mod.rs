@@ -78,3 +78,5 @@ pub(crate) mod surface_lints;
 mod tests;
 pub use plain::{render_plain_app, render_plain_command_result};
 pub use render_app::render_app;
+
+pub(crate) use views::{capture_gallery_reading, gallery_line_offset, restore_gallery_reading};

@@ -1,0 +1,94 @@
+name: Offline audit keeps source drift partial and preserves failure causes
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cargo_outcome_settlement.py @TMP_TARGET @ART prepare @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+paste-file: @ART/scan-command.txt
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cargo_outcome_settlement.py @TMP_TARGET @ART baseline
+require-live-snap: 30 1 advisory findings | baseline-advisory
+submit: open F-0001
+require-live-snap: 25 signal-only | baseline-review
+submit: decision deferred Declared dependency needs owner review; runtime reachability unassessed
+require-live-snap: 25 recorded: deferred | deferred-observation
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cargo_outcome_settlement.py @TMP_TARGET @ART deferred
+ask: Does the installed offline audit produce a declared-dependency signal with a scripted deferral, without claiming runtime reachability or vulnerability execution?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cargo_outcome_settlement.py @TMP_TARGET @ART prepare-drift
+submit: logs
+paste-file: @ART/scan-command.txt
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cargo_outcome_settlement.py @TMP_TARGET @ART release
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cargo_outcome_settlement.py @TMP_TARGET @ART partial
+require-live-snap: 30 Source could not be verified | source-partial
+submit: open F-0001
+require-live-snap: 25 recorded: deferred | retained-after-drift
+ask: Does a source-changed audit retain its usable observation as partial work and preserve the earlier decision without pretending it applies to current source?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cargo_outcome_settlement.py @TMP_TARGET @ART prepare-failure
+submit: logs
+paste-file: @ART/scan-command.txt
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cargo_outcome_settlement.py @TMP_TARGET @ART release
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cargo_outcome_settlement.py @TMP_TARGET @ART failed
+require-live-snap: 30 Owned audit adapter stopped for this fixture | failed-cause
+nav-mode:
+keys: /
+type: Owned audit adapter
+keys: Enter
+require-live-snap: 25 Owned audit adapter | filtered-failure
+keys: z
+require-live-snap: 25 READ TRANSCRIPT | failure-reader
+resize: 160x48
+live-snap: failure-160x48
+resize: 96x89
+live-snap: failure-96x89
+resize: 80x24
+live-snap: failure-80x24
+resize: 60x20
+live-snap: failure-60x20
+resize: 40x12
+keys: End
+live-snap: failure-40x12-tail
+expect: PgUp/Dn
+keys: PPage
+live-snap: failure-40x12-page
+keys: PPage
+live-snap: failure-40x12-page-2
+keys: PPage
+live-snap: failure-40x12-cause
+ask: Is the original failure cause readable through the transcript controls at six sizes, with the source warning kept separate from usable partial work?
+keys: q
+resize: 120x36
+submit: report
+require-live-snap: 25 Displayed Scan: failed | failed-report
+expect: Scope: workspace history
+expect: Owned audit adapter stopped for this fixture
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cargo_outcome_settlement.py @TMP_TARGET @ART report
+ask: Does Report preserve failed work and its cause without turning it into a usable partial scan or complete coverage?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cargo_outcome_settlement.py @TMP_TARGET @ART stable
+submit: logs
+nav-mode:
+keys: / Escape
+paste-file: @ART/scan-command.txt
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cargo_outcome_settlement.py @TMP_TARGET @ART complete
+submit: open F-0001
+require-live-snap: 25 recorded: deferred | recovered-review
+ask: Does an explicitly requested stable audit retain the earlier partial and failed history, raw observations and deferral without declaring a fix?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: open F-0001
+require-live-snap: 25 recorded: deferred | restarted-review
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cargo_outcome_settlement.py @TMP_TARGET @ART restarted
+ask: After restart without color, are two completed audits, one partial audit, one controlled failure and the retained decision readable without new work?
+keys: C-c
+require-exit: 10

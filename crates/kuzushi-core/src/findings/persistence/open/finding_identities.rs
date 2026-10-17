@@ -17,6 +17,7 @@ impl FindingStore {
         conn: &Connection,
         scan_id: &str,
         finding: &Finding,
+        captured_text: Option<&str>,
     ) -> Result<FindingIdentityAssignment> {
         let context = scan_identity_context(conn, scan_id)?;
         // Preserve already-issued identities before applying the structural
@@ -31,9 +32,14 @@ impl FindingStore {
         if let Some(reused) = self.cross_run_identity(conn, scan_id, &context.target_id, finding)? {
             return Ok(reused);
         }
-        let identity_key = finding_identity_key_for_finding_at_target(
-            finding,
-            std::path::Path::new(&context.target_id),
+        let identity_key = captured_text.map_or_else(
+            || {
+                finding_identity_key_for_finding_at_target(
+                    finding,
+                    std::path::Path::new(&context.target_id),
+                )
+            },
+            |text| finding_identity_key_for_captured_source(finding, text),
         );
         let identity_id = compute_finding_identity_id(&context.target_id, &identity_key.key);
         let assignment = FindingIdentityAssignment {

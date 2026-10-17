@@ -847,6 +847,9 @@ impl ShellApp {
         key: KeyEvent,
         modifiers: KeyModifierState,
     ) -> InputUpdate {
+        if let Some(update) = self.handle_run_artifact_boundary_key(key) {
+            return update;
+        }
         match self.input_mode() {
             InputMode::Prompt => self.reduce_prompt_key(key, modifiers),
             InputMode::Navigate => self.reduce_navigate_key(key, modifiers),
@@ -1415,7 +1418,8 @@ impl ShellApp {
         if key.code == KeyCode::Esc {
             return self.dismiss_notice_or_leave_contextual_surface(key);
         }
-        self.handle_catalog_picker_key(key)
+        self.handle_replay_refresh_key(key)
+            .unwrap_or_else(|| self.handle_catalog_picker_key(key))
     }
 
     fn dismiss_notice_or_leave_contextual_surface(&mut self, key: KeyEvent) -> bool {
@@ -1725,7 +1729,10 @@ impl ShellApp {
     }
 
     pub(crate) fn notice_captures_escape(&self) -> bool {
-        if self.phase_result_is_open() || self.budget_halt_owns_input() {
+        if self.phase_result_is_open()
+            || self.budget_halt_owns_input()
+            || self.advisory().pending_confirm.is_some()
+        {
             return false;
         }
         self.advisory().notice.as_ref().is_some_and(|notice| {

@@ -70,12 +70,26 @@ pub(crate) fn commit_observed_findings_with_status(
     findings: &[Finding],
     status: RunItemStatus,
 ) -> Result<()> {
+    commit_observed_findings_with_counts(store, observation, run_id, target, findings, status)
+        .map(|_| ())
+}
+
+pub(crate) fn commit_observed_findings_with_counts(
+    store: &FindingStore,
+    observation: Option<&RunObservationHandle>,
+    run_id: &str,
+    target: &Path,
+    findings: &[Finding],
+    status: RunItemStatus,
+) -> Result<(u64, u64)> {
     anyhow::ensure!(
         matches!(status, RunItemStatus::Completed | RunItemStatus::Partial),
         "Finding commits require a completed or partial outcome"
     );
     let delta = insert_run_findings(store, run_id, target, findings, status)?;
-    emit_finding_delta(observation, store, findings, (delta.added, delta.updated))
+    let counts = (delta.added, delta.updated);
+    emit_finding_delta(observation, store, findings, counts)?;
+    Ok(counts)
 }
 
 /// The run's recorded findings count stays the number of observations it

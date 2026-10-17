@@ -3,6 +3,9 @@ use crate::app::source_review::{SourceReviewForm, SourceReviewMode, SOURCE_VERDI
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
+mod header;
+pub(crate) use header::source_review_header_lines;
+
 pub(crate) fn source_review_wrapped_lines(form: &SourceReviewForm, width: usize) -> Vec<String> {
     let mut lines = form.notice.clone().into_iter().collect::<Vec<_>>();
     lines.extend(source_review_lines(form));
@@ -38,23 +41,6 @@ pub(super) fn wrap_code_line(line: &str, width: usize) -> Vec<String> {
     }
     rows.push(current);
     rows
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn captured_code_wrap_preserves_indentation_and_unicode_graphemes() {
-        let source = "   2 │     if 東京 == e\u{301}:";
-        let rows = wrap_code_line(source, 12);
-        assert_eq!(rows.concat(), source);
-        assert!(rows.iter().all(|row| row.width() <= 12));
-        assert!(!rows.iter().any(|row| row.starts_with('\u{301}')));
-    }
-    #[test]
-    fn code_controls_are_displayed_as_text_without_terminal_sequences() {
-        assert_eq!(display_code("a\x1b[31mb\t"), "a�[31mb ");
-    }
 }
 
 pub(crate) fn source_review_title(form: &SourceReviewForm) -> &'static str {
@@ -122,10 +108,7 @@ fn captured_code_lines(form: &SourceReviewForm) -> Vec<String> {
     let Some(capture) = &form.capture else {
         return vec!["No captured source is available.".into()];
     };
-    let mut lines = vec![
-        format!("Captured file: {}", form.file),
-        "Frozen code from the captured source; not a live checkout read.".into(),
-    ];
+    let mut lines = vec!["Captured source code".into()];
     match capture["citedSourceCode"].as_str() {
         Some("") => lines.push("Captured file is empty.".into()),
         Some(code) => lines.extend(
@@ -153,6 +136,11 @@ pub(crate) fn source_receipt_lines(form: &SourceReviewForm) -> Vec<String> {
             "Source reference: {}",
             capture["sourceRef"].as_str().unwrap_or("unavailable")
         ),
+        kuzushi_core::run_lifecycle::SafeText::operator_visible(format!(
+            "Cited location: {}:{}",
+            form.file, form.line
+        ))
+        .to_string(),
         format!(
             "Captured: {}",
             super::recorded_timestamp_label(source["capturedAt"].as_str().unwrap_or("unavailable"))
@@ -204,11 +192,14 @@ fn display_code(line: &str) -> String {
 pub(crate) fn source_review_plain_lines(form: &SourceReviewForm) -> Vec<String> {
     let mut lines = vec![
         source_review_title(form).into(),
-        format!(
+        kuzushi_core::run_lifecycle::SafeText::operator_visible(format!(
             "Finding generation {} · {}:{}",
             form.finding_id, form.file, form.line
-        ),
+        ))
+        .to_string(),
     ];
+    lines.push(kuzushi_core::run_lifecycle::SafeText::operator_visible(&form.title).to_string());
+    lines.push(header::captured_identity(form.capture.as_ref()));
     lines.extend(source_review_lines(form));
     if form.mode == SourceReviewMode::Reason {
         lines.extend(form.reason.text().lines().map(str::to_owned));
@@ -216,4 +207,21 @@ pub(crate) fn source_review_plain_lines(form: &SourceReviewForm) -> Vec<String> 
     lines.extend(form.notice.clone());
     lines.push(source_review_controls(form.mode).into());
     lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn captured_code_wrap_preserves_indentation_and_unicode_graphemes() {
+        let source = "   2 │     if 東京 == e\u{301}:";
+        let rows = wrap_code_line(source, 12);
+        assert_eq!(rows.concat(), source);
+        assert!(rows.iter().all(|row| row.width() <= 12));
+        assert!(!rows.iter().any(|row| row.starts_with('\u{301}')));
+    }
+    #[test]
+    fn code_controls_are_displayed_as_text_without_terminal_sequences() {
+        assert_eq!(display_code("a\x1b[31mb\t"), "a�[31mb ");
+    }
 }

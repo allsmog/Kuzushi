@@ -111,6 +111,18 @@ fn status_footer_model_reports_idle_shell_segments() {
     assert_eq!(model.right_segments, ["0 findings"]);
 }
 
+#[test]
+fn replay_footer_names_the_workspace_count_instead_of_the_selected_result() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Replay);
+    *app.findings_mut() = vec![engagement_duplicate_semgrep_finding()];
+
+    let model = status_footer_model(&app);
+
+    assert_eq!(model.right_segments, ["Workspace 1 finding / 1 med"]);
+    assert_eq!(model.compact_right_segments, ["Workspace 1 finding · 1 M"]);
+}
+
 /// The rail renders unfiltered ledger truth on the same frame as this footer,
 /// so a bare projection count here reads as a second, contradicting ledger
 /// total. The projection stays the headline; the ledger it narrows is named.
@@ -423,5 +435,26 @@ fn operator_ceiling_leads_full_and_compact_footers() {
             segments.iter().filter(|s| s.contains("autonomy:")).count(),
             1
         );
+    }
+}
+
+#[test]
+fn report_footer_never_substitutes_loaded_workspace_severity_for_a_study() {
+    let (_root, mut app) = setup_fixture();
+    app.set_findings(vec![Finding::new_tool(
+        "owned-unrelated",
+        "old-rule",
+        "notes.txt",
+        1,
+        None,
+        Severity::High,
+        "Unrelated history",
+    )]);
+    app.set_shell_view(ShellView::Report);
+    let model = status_footer_model(&app);
+    for segments in [model.right_segments, model.compact_right_segments] {
+        let text = segments.join(" ");
+        assert!(!text.contains("high"), "{text}");
+        assert!(text.to_lowercase().contains("loading"), "{text}");
     }
 }

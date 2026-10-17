@@ -65,7 +65,6 @@ pub fn ground_finding_location(
     snippet: &str,
     revision: Option<&str>,
 ) -> GroundingStatus {
-    let file_path = file_path.trim();
     if file_path.is_empty() || file_path.contains("://") || line == 0 {
         return GroundingStatus::NotApplicable;
     }
@@ -98,7 +97,7 @@ pub(crate) fn grounding_read_error(
 /// Shared with the evidence citation check at finding-insert time.
 pub(crate) fn safe_target_path(target_root: &Path, raw_path: &str) -> Option<PathBuf> {
     let mut relative = PathBuf::new();
-    for component in Path::new(raw_path.trim()).components() {
+    for component in Path::new(raw_path).components() {
         match component {
             Component::Normal(part) => relative.push(part),
             Component::CurDir => {}
@@ -331,5 +330,45 @@ mod tests {
         });
         let drift = grounding_prompt_note(&finding).unwrap();
         assert!(drift.contains("nearest line 7"));
+    }
+}
+
+#[cfg(test)]
+mod literal_path_tests {
+    use super::*;
+
+    #[test]
+    fn source_paths_preserve_literal_whitespace_and_still_reject_traversal() {
+        let root = Path::new("/owned-repository");
+        assert_eq!(
+            safe_target_path(root, " owned.c "),
+            Some(root.join(" owned.c "))
+        );
+        assert!(safe_target_path(root, "../outside.c").is_none());
+        assert!(safe_target_path(root, "/outside.c").is_none());
+    }
+}
+
+#[cfg(test)]
+mod literal_grounding_paths {
+    use super::*;
+
+    #[test]
+    fn grounding_does_not_redirect_a_literal_whitespace_filename() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("owned.c"), "other content\n").unwrap();
+        std::fs::write(root.path().join(" owned.c "), "literal source marker\n").unwrap();
+        assert!(ground_finding_location(
+            root.path(),
+            " owned.c ",
+            1,
+            "literal source marker",
+            None
+        )
+        .is_grounded());
+        assert!(
+            !ground_finding_location(root.path(), "owned.c", 1, "literal source marker", None)
+                .is_grounded()
+        );
     }
 }

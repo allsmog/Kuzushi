@@ -107,8 +107,11 @@ pub(super) fn scan_attempt_from_record(
 ) -> ScanAttemptModel {
     let run_id = leading_run_ref(&record.completed.run_refs);
     let (cost_usd, cost_complete) = summed_recorded_cost(summaries);
-    let findings =
-        app.attempt_finding_facts(&record.completed.run_refs, sum_recorded_findings(summaries));
+    let finding_runs = app.phase_result_finding_runs(&record.completed);
+    let findings = app.attempt_finding_facts(
+        finding_runs.as_deref().unwrap_or_default(),
+        sum_recorded_findings(summaries),
+    );
     ScanAttemptModel {
         attempt_id: Some(record.completed.attempt_id.clone()),
         run_id,

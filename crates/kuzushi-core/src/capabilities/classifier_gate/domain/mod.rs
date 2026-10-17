@@ -3,6 +3,7 @@ mod config;
 mod marker_adjustment;
 mod quantile_estimator;
 mod quantile_estimator_update;
+mod stored_quantile;
 
 pub use classifier_assessment::ClassifierAssessment;
 pub use config::ClassifierConfig;

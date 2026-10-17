@@ -1,6 +1,11 @@
 use kuzushi_core::run_lifecycle::*;
 
 pub(crate) fn replay_can_lead_with_results(presentation: &RunPresentationV1) -> bool {
+    saved_result_has_trusted_receipt(presentation)
+        && presentation.health.progress == RunProgressFidelity::Complete
+}
+
+pub(super) fn saved_result_has_trusted_receipt(presentation: &RunPresentationV1) -> bool {
     presentation
         .terminal_status
         .is_some_and(RunItemStatus::is_terminal)
@@ -9,10 +14,10 @@ pub(crate) fn replay_can_lead_with_results(presentation: &RunPresentationV1) -> 
             RunLifecycleHealth {
                 integrity: ProjectionHealth::Healthy,
                 durability: RunDurabilityHealth::Durable { .. },
-                progress: RunProgressFidelity::Complete,
                 delivery: RunDeliveryHealth::Current { .. },
                 derivative_delivery: RunDerivativeDeliveryHealth::NotObserved
                     | RunDerivativeDeliveryHealth::Current { .. },
+                ..
             }
         )
 }

@@ -67,6 +67,7 @@ impl ScanEngine for ConfiguredSemgrepScanner {
         vec![
             json!({"engine":"semgrep", "configuredLimits":{"timeoutMs":self.timeout.as_millis() as u64,"jobs":self.jobs},
             "elapsedMs":elapsed, "started":elapsed.is_some(), "sourceAuthenticationIncluded":false,
+            "excludedPaths":[SemgrepScanner::SOURCE_EXCLUSION_GLOB],
             "exactFileBatching":SemgrepScanner::exact_file_batch_limits()}),
         ]
     }

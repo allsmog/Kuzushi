@@ -3,10 +3,19 @@ use kuzushi_core::{
     run_artifacts::canonical_run_artifact_spec, RunArtifactRead, RunArtifactTextRead,
 };
 
+mod failure_summary;
 mod replay_issue;
 mod replay_reading;
+mod request_context;
+pub(crate) use request_context::replay_request_context;
+mod result_document;
+mod result_summary;
+pub(crate) use failure_summary::{failure_summary, failure_summary_available};
 pub(crate) use replay_issue::ReplayIssueModel;
 pub(crate) use replay_reading::{replay_can_lead_with_results, replay_reading_rows};
+pub(crate) use result_summary::{
+    replay_document_available, replay_summary, replay_summary_available,
+};
 
 const RUN_TRIAGE_FILE: &str = "triage.jsonl";
 const RUN_VERIFY_FILE: &str = "verify.jsonl";
@@ -34,6 +43,8 @@ pub(crate) struct ReplayModel {
     pub(crate) artifacts: Vec<RunArtifactDetail>,
     pub(crate) metadata_missing: bool,
     pub(crate) issue: Option<ReplayIssueModel>,
+    pub(crate) document: Option<crate::app::RunResultDocumentRead>,
+    pub(crate) single_result_work: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -75,18 +86,62 @@ pub(crate) fn replay_model(app: &ShellApp, run_id: &str) -> ReplayModel {
         .as_ref()
         .map(kuzushi_core::run_lifecycle::present_run);
     let issue = presentation.as_ref().and_then(replay_issue::replay_issue);
+    let document = result_document::read_cached(app, run_id, projection.as_ref());
+    let single_result_work = projection.as_ref().is_some_and(|read| {
+        kuzushi_core::run_artifacts::single_result_artifact(&read.projection).is_some()
+    });
     ReplayModel {
         run_id: run_id.to_string(),
         presentation,
         projection_error,
         metadata_missing,
         issue,
+        document,
+        single_result_work,
         artifacts: vec![
             metadata.into_display(),
             result.into_display(),
             triage.into_display(),
         ],
     }
+}
+
+pub(crate) fn replay_has_summary(app: &ShellApp) -> bool {
+    replay_summary_available(&replay_model(app, app.router.replay().run_id()))
+}
+
+pub(crate) fn replay_has_inputs(app: &ShellApp) -> bool {
+    let model = replay_model(app, app.router.replay().run_id());
+    if !replay_summary_available(&model) {
+        return false;
+    }
+    model
+        .document
+        .as_ref()
+        .and_then(|document| document.as_ref().ok())
+        .is_some_and(|document| document.supplied_input.is_some())
+}
+
+pub(crate) fn replay_next_label(app: &ShellApp) -> &'static str {
+    if app.router.replay().full_receipt() {
+        return replay_summary_label(app);
+    }
+    if !app.router.replay().inputs() && replay_has_inputs(app) {
+        return "inputs";
+    }
+    "full receipt"
+}
+
+pub(crate) fn replay_summary_label(app: &ShellApp) -> &'static str {
+    if replay_document_available(&replay_model(app, app.router.replay().run_id())) {
+        "result"
+    } else {
+        "summary"
+    }
+}
+
+pub(crate) fn replay_switch_owns_input(app: &ShellApp) -> bool {
+    app.input().is_empty() || app.input_mode() == crate::InputMode::Navigate
 }
 
 fn replay_projection(

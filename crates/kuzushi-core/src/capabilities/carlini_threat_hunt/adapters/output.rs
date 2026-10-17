@@ -392,7 +392,7 @@ fn explicit_context_snippet(
     title: &str,
 ) -> Option<ArtifactKnowledgeSnippet> {
     let body = load_context_snippet_body(target, source_path)?;
-    let snippet_limit = if source_path.ends_with("threat-leads.md") {
+    let snippet_limit = if source_path.starts_with(".kuzushi/threat-leads.") {
         5000
     } else {
         1200
@@ -417,6 +417,16 @@ fn explicit_context_snippet(
 }
 
 fn load_context_snippet_body(target: &Path, source_path: &str) -> Option<String> {
+    if matches!(
+        source_path,
+        ".kuzushi/threat-leads.md" | ".kuzushi/threat-leads.json"
+    ) {
+        return crate::capabilities::threat_leads::read_threat_leads_context(
+            target,
+            source_path.ends_with(".md"),
+        )
+        .ok();
+    }
     if source_path == persistent_threat_model_source_path(target) {
         let document = crate::capabilities::try_load_persistent_threat_model(target)
             .ok()
@@ -454,6 +464,85 @@ fn compact_carlini_context_text(text: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn produced_lead_markdown_reaches_passive_context_with_its_limits() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = crate::WorkspaceTarget::new(root.path()).unwrap();
+        workspace.ensure_state_dir().unwrap();
+        fs::write(
+            root.path().join("owned.rs"),
+            "// Owned parser response size limits. Never executed.\n",
+        )
+        .unwrap();
+        fs::write(
+            crate::capabilities::persistent_threat_model_path(root.path()),
+            json!({"threats":[{"id":"T1","title":"Owned parser resource limits"}],"dfd":{}})
+                .to_string(),
+        )
+        .unwrap();
+        let config = crate::V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let registry = crate::ModuleRegistry::with_v2_builtins_without_optional_adapters();
+        let prepared = registry
+            .prepare_dispatch_input("threat-leads:build", json!({}), &ctx, None)
+            .unwrap();
+        registry
+            .dispatch_prepared_input_with_runtime(prepared, &ctx, None)
+            .unwrap();
+        let snippets = explicit_carlini_context_snippets(root.path());
+        let lead = snippets
+            .iter()
+            .find(|row| row.source_path == ".kuzushi/threat-leads.md")
+            .unwrap();
+        assert!(lead.snippet.contains("T1: Owned parser resource limits"));
+        assert!(lead
+            .snippet
+            .contains("No accepted Map, scan jobs or findings"));
+        assert!(lead
+            .snippet
+            .contains("Complete repository coverage is not established"));
+        assert!(!lead.snippet.contains("from threat model, X-Ray"));
+    }
+
+    #[test]
+    fn saved_lead_context_ignores_mismatched_markdown_and_derives_from_validated_json() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join(".kuzushi")).unwrap();
+        fs::write(
+            root.path().join(".kuzushi/threat-leads.json"),
+            json!({"leadCount":1,
+            "leads":[{"threatId":"T1","title":"SAVED_OWNED_HINT"}]})
+            .to_string(),
+        )
+        .unwrap();
+        fs::write(
+            root.path().join(".kuzushi/threat-leads.md"),
+            "STALE_OWNED_HINT",
+        )
+        .unwrap();
+        let snippets = explicit_carlini_context_snippets(root.path());
+        assert!(snippets
+            .iter()
+            .all(|s| s.source_path != ".kuzushi/threat-leads.md"));
+        let saved = snippets
+            .iter()
+            .find(|s| s.source_path == ".kuzushi/threat-leads.json")
+            .unwrap();
+        assert!(saved.snippet.contains("SAVED_OWNED_HINT"));
+        assert!(saved.snippet.contains("Markdown summary: stale"));
+        assert!(saved.snippet.contains("legacy-unverified"));
+        assert!(!saved.snippet.contains("STALE_OWNED_HINT"));
+        fs::write(root.path().join(".kuzushi/threat-leads.json"), "{}").unwrap();
+        assert!(explicit_carlini_context_snippets(root.path()).is_empty());
+    }
 
     #[test]
     fn bound_context_replaces_active_model_and_unbound_lead_snippets() {

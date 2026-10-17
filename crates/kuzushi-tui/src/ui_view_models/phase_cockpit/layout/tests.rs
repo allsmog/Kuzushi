@@ -171,14 +171,14 @@ fn compact_review_reading_keeps_detail_without_changing_the_explicit_zoom() {
     ];
     for (width, height) in [(40, 4), (60, 12), (120, 9)] {
         let area = Rect::new(0, 0, width, height);
-        let focus = compact_review_detail(&specs, area, Some(PhaseSurfaceId::ReviewDetail));
+        let focus = compact_reading_focus(&specs, area, Some(PhaseSurfaceId::ReviewDetail));
         let (density, visible) = visible_specs(&specs, area, focus, AttentionMode::Normal);
         assert_eq!(density, LayoutDensity::Focused);
         assert_eq!(visible[0].id, PhaseSurfaceId::ReviewDetail);
-        assert!(compact_review_detail(&specs, area, Some(PhaseSurfaceId::ReviewQueue)).is_none());
+        assert!(compact_reading_focus(&specs, area, Some(PhaseSurfaceId::ReviewQueue)).is_none());
     }
     let wide = Rect::new(0, 0, 120, 30);
-    assert!(compact_review_detail(&specs, wide, Some(PhaseSurfaceId::ReviewDetail)).is_none());
+    assert!(compact_reading_focus(&specs, wide, Some(PhaseSurfaceId::ReviewDetail)).is_none());
     assert_eq!(automatic_specs(&specs, wide).0, LayoutDensity::MasterDetail);
 }
 
@@ -186,10 +186,45 @@ fn compact_review_reading_keeps_detail_without_changing_the_explicit_zoom() {
 fn compact_review_reading_requires_detail_and_yields_to_guided_attention() {
     let queue = test_spec(PhaseSurfaceId::ReviewQueue);
     let area = Rect::new(0, 0, 40, 8);
-    assert!(compact_review_detail(&[queue], area, Some(PhaseSurfaceId::ReviewDetail)).is_none());
+    assert!(compact_reading_focus(&[queue], area, Some(PhaseSurfaceId::ReviewDetail)).is_none());
     let specs = [queue, test_spec(PhaseSurfaceId::ReviewDetail)];
-    let focus = compact_review_detail(&specs, area, Some(PhaseSurfaceId::ReviewDetail));
+    let focus = compact_reading_focus(&specs, area, Some(PhaseSurfaceId::ReviewDetail));
     let (density, visible) = visible_specs(&specs, area, focus, AttentionMode::GuidedQuestion);
     assert_eq!(density, LayoutDensity::Guided);
     assert_eq!(visible[0].id, PhaseSurfaceId::ReviewQueue);
+}
+
+#[test]
+fn scan_reading_surface_stays_visible_when_terminal_shrinks() {
+    let specs = [
+        PhaseSurfaceId::ScanEngines,
+        PhaseSurfaceId::ScanReceipt,
+        PhaseSurfaceId::ScanDelta,
+    ]
+    .map(test_spec);
+    for selected in [PhaseSurfaceId::ScanReceipt, PhaseSurfaceId::ScanDelta] {
+        for (width, height) in [(120, 36), (160, 48), (96, 89), (80, 24), (60, 20), (40, 12)] {
+            let area = Rect::new(0, 0, width, height);
+            let reading = compact_reading_focus(&specs, area, Some(selected));
+            let (_, visible) = visible_specs(&specs, area, reading, AttentionMode::Normal);
+            assert!(
+                visible.iter().any(|spec| spec.id == selected),
+                "{selected:?} at {width}x{height}"
+            );
+        }
+    }
+}
+
+#[test]
+fn compact_scan_reading_requires_its_surface_and_yields_to_pending_decisions() {
+    let engines = test_spec(PhaseSurfaceId::ScanEngines);
+    let area = Rect::new(0, 0, 40, 8);
+    assert!(compact_reading_focus(&[engines], area, Some(PhaseSurfaceId::ScanDelta)).is_none());
+    let specs = [engines, test_spec(PhaseSurfaceId::ScanDelta)];
+    let reading = compact_reading_focus(&specs, area, Some(PhaseSurfaceId::ScanDelta));
+    for attention in [AttentionMode::GuidedQuestion, AttentionMode::ResultReady] {
+        let (density, visible) = visible_specs(&specs, area, reading, attention);
+        assert_eq!(density, LayoutDensity::Guided);
+        assert_eq!(visible[0].id, PhaseSurfaceId::ScanEngines);
+    }
 }

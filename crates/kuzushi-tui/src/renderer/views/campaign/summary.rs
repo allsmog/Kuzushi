@@ -122,6 +122,10 @@ fn batch_worker_policy_label(campaign: &CampaignSnapshot) -> Option<String> {
     if !crate::app::is_scan_batch_snapshot(campaign) {
         return None;
     }
+    let (requested, effective) = (campaign.requested_workers?, campaign.effective_workers?);
+    if effective >= requested {
+        return None;
+    }
     Some(match campaign.parallel_safety_reason.as_deref() {
         Some(reason) => format!("parallel safety · {reason}"),
         None => "parallel safety · frozen by the immutable batch plan".to_string(),

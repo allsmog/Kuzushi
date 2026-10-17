@@ -34,12 +34,7 @@ pub(crate) fn scope_has_text(scope: &Value) -> bool {
         })
 }
 
-pub(crate) fn build_fallback_report(
-    run_id: &str,
-    scope: &Value,
-    run_root: &Path,
-    document_backed: bool,
-) -> Value {
+pub(crate) fn build_report_base(run_id: &str, scope: &Value, run_root: &Path) -> Value {
     let docs = scope
         .get("documents")
         .and_then(Value::as_array)
@@ -47,13 +42,9 @@ pub(crate) fn build_fallback_report(
         .unwrap_or_default();
     json!({
         "runId": run_id,
-        "overallRisk": if document_backed { "needs-review" } else { "intake" },
-        "confidence": if document_backed { "medium" } else { "low" },
-        "summary": if document_backed {
-            "Assessment synthesized from attached vendor evidence."
-        } else {
-            "No parsed evidence was attached; collect documents before making a risk decision."
-        },
+        "overallRisk": "unassessed",
+        "confidence": "unknown",
+        "summary": "No model opinion stored.",
         "documents": docs,
         "domains": [],
         "mitigations": [],

@@ -110,6 +110,7 @@ impl ShellApp {
             expected_watermark: self.findings_read_watermark(),
             operator_state,
             filter: filter.clone(),
+            batch_id: self.router.campaign().active_batch_id.clone(),
             identity_fold: self
                 .option_store()
                 .effective_stored_values("sast:scan")
@@ -138,6 +139,7 @@ impl ShellApp {
             self.set_target(Some(snapshot.target.clone()));
         }
         self.apply_snapshot_counts(&snapshot);
+        self.apply_selected_study_read(request, snapshot.study);
         self.router
             .findings_mut()
             .refresh_selected_finding(&snapshot.corpus);
@@ -160,6 +162,8 @@ impl ShellApp {
             snapshot.watermark,
         );
         self.domain_mut().set_findings_page(snapshot.page);
+        self.domain_mut()
+            .set_findings_batch_id(request.batch_id.clone());
         self.restore_snapshot_filter(request.filter.as_deref(), count);
     }
 
@@ -175,6 +179,28 @@ impl ShellApp {
                 self.findings().len()
             ),
         );
+    }
+
+    fn apply_selected_study_read(
+        &mut self,
+        request: &FindingsReadRequest,
+        report: Option<kuzushi_core::findings::BatchOccurrenceReport>,
+    ) {
+        let Some(id) = request.batch_id.as_deref() else {
+            return;
+        };
+        let deck = self.router.campaign_mut();
+        if deck.active_batch_id.as_deref() != Some(id) {
+            return;
+        }
+        deck.active_batch_report = report.filter(|report| report.batch_id == id);
+        deck.active_batch_observation_fingerprints = deck
+            .active_batch_report
+            .as_ref()
+            .into_iter()
+            .flat_map(|report| &report.rows)
+            .flat_map(|row| row.fingerprints.iter().cloned())
+            .collect();
     }
 
     fn apply_snapshot_counts(&mut self, snapshot: &FindingsReadSnapshot) {
@@ -345,10 +371,11 @@ impl ShellApp {
     }
 
     pub(crate) fn log_refresh_findings_error(&mut self, error: anyhow::Error, announce: bool) {
+        self.record_findings_read_failure();
         if announce {
             self.log(
                 "error",
-                with_next_step(error.to_string(), "full <target> or workspace status"),
+                with_next_step(error.to_string(), "findings refresh or workspace status"),
             );
         }
     }

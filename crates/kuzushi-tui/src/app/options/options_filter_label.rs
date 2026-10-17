@@ -15,7 +15,7 @@ pub(crate) fn find_option_spec<'a>(tool: &'a ToolDescriptor, name: &str) -> Opti
 }
 
 pub(crate) fn coerce_raw_option_value(spec: &OptionSpec, raw: &str) -> Result<serde_json::Value> {
-    if spec.option_type == OptionType::Json {
+    if !option_is_operator_editable(spec) {
         anyhow::bail!(
             "this setting comes from its workflow and cannot be edited here; use the owning workflow or a file option"
         );
@@ -24,10 +24,13 @@ pub(crate) fn coerce_raw_option_value(spec: &OptionSpec, raw: &str) -> Result<se
 }
 
 pub(crate) fn option_is_operator_editable(spec: &OptionSpec) -> bool {
-    spec.option_type != OptionType::Json
+    spec.option_type != OptionType::Json || spec.editable_json
 }
 
 pub(crate) fn option_input_kind(spec: &OptionSpec) -> &'static str {
+    if spec.option_type == OptionType::Json && spec.editable_json {
+        return "JSON";
+    }
     match spec.option_type {
         OptionType::String => "text",
         OptionType::Bool => "yes / no",
@@ -41,6 +44,9 @@ pub(crate) fn option_input_kind(spec: &OptionSpec) -> &'static str {
 }
 
 pub(crate) fn option_edit_hint(spec: &OptionSpec) -> String {
+    if spec.option_type == OptionType::Json && spec.editable_json {
+        return "Enter edits this JSON value".into();
+    }
     match spec.option_type {
         OptionType::Bool => "Space switches between yes and no".to_string(),
         OptionType::Enum => format!("Space cycles {}", spec.choices.join(" / ")),
@@ -77,6 +83,13 @@ pub(crate) fn format_option_value(value: &serde_json::Value) -> String {
         serde_json::Value::Array(items) => counted_label(items.len(), "workflow value"),
         serde_json::Value::Object(fields) => counted_label(fields.len(), "workflow field"),
     }
+}
+
+pub(crate) fn format_option_value_for_spec(spec: &OptionSpec, value: &serde_json::Value) -> String {
+    if spec.option_type == OptionType::Json && spec.editable_json {
+        return value.to_string();
+    }
+    format_option_value(value)
 }
 
 fn counted_label(count: usize, noun: &str) -> String {

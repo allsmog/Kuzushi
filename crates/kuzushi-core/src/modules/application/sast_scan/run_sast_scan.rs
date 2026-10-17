@@ -1,9 +1,12 @@
+mod scan_completion;
 mod stopped_scan;
 use super::*;
+use crate::run_artifacts::scan_severity_counts;
+#[cfg(test)]
+use crate::run_artifacts::ScanSeverityCount;
 use crate::run_artifacts::{
-    PhaseStageOutcome, ScanArtifactDelta, ScanEngineStageOutcome, ScanFindingDelta,
-    ScanSeverityCount, ScanStageCost, ScanStageData, ScanStageEngine, ScanStagePlan,
-    ScanStageScope,
+    PhaseStageOutcome, PhaseStageReceipt, ScanArtifactDelta, ScanEngineStageOutcome,
+    ScanFindingDelta, ScanStageCost, ScanStageData, ScanStageEngine, ScanStagePlan, ScanStageScope,
 };
 use crate::WorkspaceTarget;
 use std::collections::BTreeSet;
@@ -298,15 +301,16 @@ fn run_started_sast_scan(
     let findings_count = executed.tally.distinct;
     let (artifacts, result) =
         source.bind_result(executed.into_result(workspace, whitebox_static.as_ref()))?;
+    let settlement_source = source.clone();
     let result = source.finish(ctx, "sast:scan", workspace.root(), result);
-    persist_sast_scan_result(
+    settlement_source.bind_result(persist_sast_scan_result(
         ctx,
         workspace,
         &primary_run_id,
         findings_count,
         artifacts,
         result,
-    )
+    ))
 }
 
 fn persist_sast_scan_result(
@@ -315,8 +319,9 @@ fn persist_sast_scan_result(
     run_id: &str,
     findings_count: usize,
     artifacts: SastRunArtifacts,
-    result: Value,
+    mut result: Value,
 ) -> Result<Value> {
+    scan_completion::publish(ctx, run_id, findings_count, &artifacts, &mut result)?;
     let summary_artifact = write_sast_summary(workspace, run_id, &artifacts, &result)?;
     let observation = ctx.run_observation();
     write_sast_run_metadata(
@@ -602,9 +607,8 @@ impl SastScanExecutionInput<'_> {
         )
     }
 
-    fn record_scan_stage(
+    fn prepare_scan_stage(
         &self,
-        artifacts: &SastRunArtifacts,
         reports: &SastPipelineReports,
         selected: &SastTaskSelection,
         before_findings: &BTreeSet<String>,
@@ -612,7 +616,7 @@ impl SastScanExecutionInput<'_> {
         core_findings: &[crate::findings::Finding],
         started: Instant,
         target_snapshot: crate::workflow_attempts::PhaseTargetSnapshot,
-    ) -> Result<()> {
+    ) -> Result<PhaseStageReceipt> {
         let run_ids = reports.run_ids(self.primary_run_id.to_string());
         let mut run_refs = vec![self.primary_run_id.to_string()];
         run_refs.extend(run_ids.all().into_iter().map(str::to_string));
@@ -633,14 +637,8 @@ impl SastScanExecutionInput<'_> {
             cost: scan_stage_cost(reports)?,
             target_snapshot,
         };
-        record_sast_scan_stage(artifacts, outcome, run_refs, scan.clone())?;
-        super::reconcile_completed_scan::after_receipt(
-            self.store,
-            self.primary_run_id,
-            outcome,
-            &scan,
-        )?;
-        self.emit_finding_delta(finding_delta, core_findings)
+        self.emit_finding_delta(finding_delta, core_findings)?;
+        Ok(sast_scan_stage_receipt(outcome, run_refs, scan))
     }
 
     fn emit_finding_delta(
@@ -748,6 +746,7 @@ struct ExecutedSastScan {
     whitebox_artifacts: WhiteboxArtifacts,
     post_processing: SastPostProcessing,
     lines: Vec<String>,
+    scan_stage: PhaseStageReceipt,
 }
 
 struct ScanStageBaseline {
@@ -775,8 +774,7 @@ fn execute_sast_scan(input: SastScanExecutionInput<'_>) -> Result<ExecutedSastSc
         &json!(core_findings),
     )?;
     let whitebox_artifacts = input.whitebox_artifacts(&run_ids, &artifacts)?;
-    input.record_scan_stage(
-        &artifacts,
+    let scan_stage = input.prepare_scan_stage(
         &reports,
         &baseline.selected,
         &baseline.finding_fingerprints,
@@ -804,6 +802,7 @@ fn execute_sast_scan(input: SastScanExecutionInput<'_>) -> Result<ExecutedSastSc
         whitebox_artifacts,
         post_processing,
         lines,
+        scan_stage,
     })
 }
 
@@ -972,6 +971,7 @@ fn scan_stage_scope(
     options: &SastScanOptions,
 ) -> ScanStageScope {
     ScanStageScope {
+        inspected_files: None,
         target: workspace.root().display().to_string(),
         paths: options
             .discovery_files()
@@ -1009,6 +1009,7 @@ fn scan_stage_engines(
             Ok(ScanStageEngine {
                 engine: (*engine).to_string(),
                 outcome,
+                rule_ids: scan_engine_rule_ids(engine),
                 run_ref: scan_engine_run_ref(engine, run_ids),
                 detail: scan_report_engine_detail(reports, engine, outcome),
             })
@@ -1021,11 +1022,18 @@ fn scan_stage_engines(
             .map(|skipped| ScanStageEngine {
                 engine: skipped.id.to_string(),
                 outcome: ScanEngineStageOutcome::Skipped,
+                rule_ids: None,
                 run_ref: None,
                 detail: Some(skipped.warning.clone()),
             }),
     );
     Ok(engines)
+}
+
+fn scan_engine_rule_ids(engine: &str) -> Option<Vec<String>> {
+    (engine == "license-scan").then(|| {
+        crate::license_scan::enabled_rule_ids(crate::license_scan::LicenseScanOptions::default())
+    })
 }
 
 fn scan_engine_outcome_detail(outcome: ScanEngineStageOutcome) -> Option<String> {
@@ -1092,20 +1100,6 @@ fn scan_engine_run_ref(engine: &str, run_ids: &SastRunIds) -> Option<String> {
         "systems-hunt" => run_ids.systems_hunt.clone(),
         _ => run_ids.native.clone(),
     }
-}
-
-/// Buckets the attempt's findings by severity, highest band first, zero
-/// buckets omitted — the shape the Scan cockpit renders as chips.
-fn scan_severity_counts(findings: &[crate::findings::Finding]) -> Vec<ScanSeverityCount> {
-    let mut counts = std::collections::BTreeMap::new();
-    for finding in findings {
-        *counts.entry(finding.severity).or_insert(0u64) += 1;
-    }
-    counts
-        .into_iter()
-        .rev()
-        .map(|(severity, count)| ScanSeverityCount { severity, count })
-        .collect()
 }
 
 fn scan_finding_delta(
@@ -1184,6 +1178,7 @@ impl ExecutedSastScan {
             whitebox_artifacts,
             post_processing,
             lines,
+            scan_stage,
         } = self;
         let result = sast_scan_result(SastScanResultParts {
             primary_run_id,
@@ -1197,6 +1192,7 @@ impl ExecutedSastScan {
             post_processing: &post_processing,
             artifacts: &artifacts,
             lines,
+            scan_stage,
         })?;
         Ok((artifacts, result))
     }
@@ -1247,6 +1243,7 @@ struct SastScanResultParts<'a> {
     post_processing: &'a SastPostProcessing,
     artifacts: &'a SastRunArtifacts,
     lines: Vec<String>,
+    scan_stage: PhaseStageReceipt,
 }
 
 fn sast_scan_result(mut parts: SastScanResultParts<'_>) -> Result<Value> {
@@ -1354,7 +1351,7 @@ fn sast_scan_has_partial_engine(reports: &SastPipelineReports) -> bool {
 
 fn sast_scan_data(parts: SastScanResultParts<'_>) -> Result<Value> {
     let paths = parts.whitebox_artifacts.artifact_paths(parts.artifacts);
-    let phase_stages = load_sast_phase_stages(parts.artifacts)?;
+    let phase_stages = load_sast_phase_stages_with_scan(parts.artifacts, parts.scan_stage)?;
     Ok(json!({
         "runId": parts.primary_run_id,
         "runIds": sast_run_ids_json(parts.run_ids),

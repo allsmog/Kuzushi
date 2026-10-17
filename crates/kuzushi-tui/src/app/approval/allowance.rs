@@ -4,7 +4,7 @@ pub(super) fn confirmation(input: &serde_json::Value) -> PendingConfirm {
     let id = input["investigationId"]
         .as_str()
         .unwrap_or("missing investigation");
-    let model = input["model"].as_str().unwrap_or("missing model");
+    let model = display_model_selector(input["model"].as_str().unwrap_or("missing model"));
     let current = input["expectedRevision"].as_u64().unwrap_or(0);
     PendingConfirm {
         kind: if input.get("campaignId").is_some() { ConfirmKind::InvestigationWork } else { ConfirmKind::InvestigationAllowance },
@@ -268,8 +268,10 @@ mod tests {
         assert_eq!(confirm.kind, ConfirmKind::InvestigationAllowance);
         assert_eq!(confirm.target, "study · revision 2 → 3");
         let rationale = confirm.rationale.as_deref().unwrap();
+        assert_eq!(input["model"], "openai-codex:gpt-5.5");
+        assert!(!rationale.contains("openai-codex:"));
         for text in [
-            "openai-codex:gpt-5.5",
+            "openai-oauth:gpt-5.5",
             "Total provider calls: 9",
             "Protected review calls: 3",
             "not enforced",

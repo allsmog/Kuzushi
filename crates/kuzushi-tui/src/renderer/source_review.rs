@@ -1,6 +1,8 @@
 use super::*;
 use crate::app::source_review::SourceReviewMode;
-use crate::ui_view_models::source_review::{source_review_controls, source_review_title};
+use crate::ui_view_models::source_review::{
+    source_review_controls, source_review_header_lines, source_review_title,
+};
 
 pub(super) fn render(frame: &mut Frame<'_>, app: &ShellApp) -> bool {
     let Some(form) = app.source_review_form() else {
@@ -16,15 +18,19 @@ pub(super) fn render(frame: &mut Frame<'_>, app: &ShellApp) -> bool {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(2),
+            Constraint::Length(3),
             Constraint::Min(1),
             Constraint::Length(2),
         ])
         .split(inner);
     frame.render_widget(
-        Paragraph::new(format!("{} · {}:{}", form.title, form.file, form.line))
-            .wrap(ratatui::widgets::Wrap { trim: false })
-            .style(theme::heading()),
+        Paragraph::new(
+            source_review_header_lines(form, chunks[0].width as usize)
+                .into_iter()
+                .map(Line::raw)
+                .collect::<Vec<_>>(),
+        )
+        .style(theme::heading()),
         chunks[0],
     );
     render_body(frame, form, chunks[1]);

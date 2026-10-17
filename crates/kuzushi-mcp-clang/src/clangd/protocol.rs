@@ -1,28 +1,10 @@
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
-use std::process::Stdio;
 use tokio::io::{AsyncRead, AsyncReadExt, BufReader};
 
 pub(crate) const MAX_LSP_BODY_BYTES: usize = 2 * 1024 * 1024;
 const MAX_LSP_HEADER_BYTES: usize = 8 * 1024;
 const MAX_LSP_HEADER_FIELDS: usize = 64;
-
-pub(crate) async fn clangd_command(
-    repo: kuzushi_mcp_common::AuthorizedDirectory,
-) -> Result<kuzushi_mcp_common::read_only_sandbox::SandboxedCommand> {
-    use kuzushi_mcp_common::read_only_sandbox::{read_only_command, resolve_regular_executable};
-
-    let clangd = resolve_regular_executable(std::ffi::OsStr::new("clangd"))?;
-    let args = ["--background-index=false", "--log=error"];
-    let mut sandboxed = read_only_command(&clangd, args, repo).await?;
-    sandboxed
-        .command_mut()?
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .kill_on_drop(true);
-    Ok(sandboxed)
-}
 
 pub(crate) fn initialize_params(root: &std::path::Path) -> Result<Value> {
     Ok(json!({

@@ -78,6 +78,57 @@ fn pages_cover_every_matching_finding_once_and_preserve_aliases() {
 }
 
 #[test]
+fn exact_file_paths_apply_before_paging_and_bind_the_cursor() {
+    let (_root, workspace, store) = fixture(7);
+    store
+        .insert_findings(
+            "fixture-a",
+            &[Finding::new_tool(
+                "fixture",
+                "sibling",
+                "lib.rs.backup",
+                1,
+                None,
+                Severity::Low,
+                "Different file",
+            )],
+        )
+        .unwrap();
+    let mut filter = FindingListFilter::from_tool_input(&serde_json::json!({
+        "filePaths":["lib.rs"], "limit":2
+    }))
+    .unwrap();
+    let page = read_finding_page(
+        &store,
+        &workspace,
+        &filter,
+        IdentityFoldPolicy::Legacy,
+        &FindingPageRequest::default(),
+    )
+    .unwrap();
+    assert_eq!(page.page.total, 7);
+    assert_eq!(page.report.findings.len(), 2);
+    assert!(page
+        .report
+        .findings
+        .iter()
+        .all(|finding| finding.file_path == "lib.rs"));
+    filter.file_paths.push("absent.rs".into());
+    let error = read_finding_page(
+        &store,
+        &workspace,
+        &filter,
+        IdentityFoldPolicy::Legacy,
+        &FindingPageRequest {
+            cursor: page.page.next_cursor,
+            ..Default::default()
+        },
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("query changed"), "{error}");
+}
+
+#[test]
 fn previous_page_returns_the_same_rows() {
     let (_root, workspace, store) = fixture(9);
     let first = read(&store, &workspace, 4, None).unwrap();
@@ -106,17 +157,30 @@ fn cursor_survives_unrelated_listing_run_bookkeeping() {
 fn page_reads_share_a_snapshot_without_weakening_later_cursor_validation() {
     let (_root, workspace, writer) = fixture(3);
     let reader = FindingStore::open_read_only(workspace.findings_db_path()).unwrap();
-    let first = reader.with_projection_snapshot(|reader| {
-        let first = read(reader, &workspace, 1, None)?;
-        writer.record_run_started("concurrent", workspace.root(), "completed")?;
-        let row = Finding::new_tool("fixture", "page.later", "lib.rs", 1, None, Severity::Low, "Synthetic later row");
-        writer.insert_findings("concurrent", &[row])?;
-        let second = read(reader, &workspace, 1, first.page.next_cursor.clone())?;
-        assert_eq!(second.page.total, 3);
-        assert_eq!(second.page.watermark, first.page.watermark);
-        assert_ne!(second.report.findings[0].fingerprint, first.report.findings[0].fingerprint);
-        Ok(first)
-    }).unwrap();
+    let first = reader
+        .with_projection_snapshot(|reader| {
+            let first = read(reader, &workspace, 1, None)?;
+            writer.record_run_started("concurrent", workspace.root(), "completed")?;
+            let row = Finding::new_tool(
+                "fixture",
+                "page.later",
+                "lib.rs",
+                1,
+                None,
+                Severity::Low,
+                "Synthetic later row",
+            );
+            writer.insert_findings("concurrent", &[row])?;
+            let second = read(reader, &workspace, 1, first.page.next_cursor.clone())?;
+            assert_eq!(second.page.total, 3);
+            assert_eq!(second.page.watermark, first.page.watermark);
+            assert_ne!(
+                second.report.findings[0].fingerprint,
+                first.report.findings[0].fingerprint
+            );
+            Ok(first)
+        })
+        .unwrap();
     assert!(read(&reader, &workspace, 1, first.page.next_cursor).is_err());
     assert_eq!(read(&reader, &workspace, 1, None).unwrap().page.total, 4);
 }
@@ -202,6 +266,7 @@ fn provenance_cursor_tracks_only_runs_that_supply_the_matching_findings() {
         FindingPageOrder::Ledger,
         &report,
         &runs,
+        None,
     )
     .unwrap();
     runs.get_mut("fixture-a")
@@ -217,6 +282,7 @@ fn provenance_cursor_tracks_only_runs_that_supply_the_matching_findings() {
         FindingPageOrder::Ledger,
         &report,
         &runs,
+        None,
     )
     .unwrap();
     assert_ne!(before, changed);

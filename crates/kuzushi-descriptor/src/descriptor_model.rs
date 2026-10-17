@@ -5,6 +5,9 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ModuleMetadata {
     pub id: String,
@@ -219,6 +222,10 @@ pub struct OptionSpec {
     pub required: bool,
     pub advanced: bool,
     pub evasion: bool,
+    /// Opts operator-authored JSON into the generic settings editor.
+    /// Workflow references remain read-only when this flag is omitted.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub editable_json: bool,
     /// Required for `type = path`; describes containment and provenance.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path_semantics: Option<PathSemantics>,
@@ -273,6 +280,7 @@ impl OptionSpec {
             required: false,
             advanced: false,
             evasion: false,
+            editable_json: false,
             path_semantics: None,
             file_reference_semantics: None,
             default: None,
@@ -291,6 +299,11 @@ impl OptionSpec {
 
     pub fn advanced(mut self) -> Self {
         self.advanced = true;
+        self
+    }
+
+    pub fn editable_json(mut self) -> Self {
+        self.editable_json = true;
         self
     }
 

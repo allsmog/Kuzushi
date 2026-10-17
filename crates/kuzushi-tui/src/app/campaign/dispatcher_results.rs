@@ -83,7 +83,7 @@ fn recorded_operator_stop(target: &Path, campaign: &str, cause: &str) -> Option<
         return None;
     }
     let expected = format!("campaign {campaign}: {completed} completed, {parked} parked");
-    (cause == expected).then(|| format!("Stopped by operator: {completed} completed, {parked} parked.\nConsumed attempts and unresolved spending remain recorded. Finish and report partial work, or press a to review the remaining plan and attempt allowance."))
+    (cause == expected).then(|| format!("Stopped by operator: {completed} completed, {parked} parked.\nConsumed attempts and unresolved spending remain recorded. Finish and report partial work with R, or press a to review the remaining plan and attempt allowance."))
 }
 
 fn is_canceled_park(
@@ -109,7 +109,7 @@ fn recorded_allowance_pause(target: &Path, campaign: &str, cause: &str) -> Optio
     }
     // An old parked queue must not hide a new source, approval or execution error.
     let expected = format!("campaign {campaign}: {completed} completed, {parked} parked");
-    (cause == expected).then(|| format!("Allowance reached: {completed} completed, {parked} parked.\nFinish and report partial work, or press a to review the remaining plan and allowance. No extra work has been approved."))
+    (cause == expected).then(|| format!("Allowance reached: {completed} completed, {parked} parked.\nFinish and report partial work with R, or press a to review the remaining plan and allowance. No extra work has been approved."))
 }
 
 fn is_allowance_park(

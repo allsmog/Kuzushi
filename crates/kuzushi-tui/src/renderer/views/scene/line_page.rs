@@ -1,6 +1,6 @@
 //! Row geometry for the gallery's line pages.
 //!
-//! A line page projects a model into rows — a dependency, a ranked file, a
+//! A line page projects a model into rows: a dependency, a ranked file, a
 //! module's risk. A row whose value is too long for the canvas wraps onto
 //! several display lines, so the display lines a page occupies depend on the
 //! canvas it was built for while the rows the model holds do not. The
@@ -10,11 +10,15 @@
 
 use ratatui::prelude::Line;
 
+mod reading;
+
 /// A line page's rows, each carrying the display lines its value wrapped into
 /// at the width the page was built for.
 #[derive(Debug, Default)]
 pub(super) struct LinePageRows {
     rows: Vec<Vec<Line<'static>>>,
+    starts: Vec<usize>,
+    display_len: usize,
 }
 
 /// Which way a page key moves a line page's window.
@@ -36,9 +40,11 @@ impl LinePageRows {
     /// Rows that each occupy one display line, for a page whose builder fits
     /// every value to the width instead of wrapping it.
     pub(super) fn from_lines(lines: Vec<Line<'static>>) -> Self {
-        Self {
-            rows: lines.into_iter().map(|line| vec![line]).collect(),
+        let mut rows = Self::default();
+        for line in lines {
+            rows.push(line);
         }
+        rows
     }
 
     /// One row per logical document line, each wrapped to `width`. For a page
@@ -60,13 +66,15 @@ impl LinePageRows {
     /// that wrapped to nothing is no row at all.
     pub(super) fn push_wrapped(&mut self, lines: Vec<Line<'static>>) {
         if !lines.is_empty() {
+            self.starts.push(self.display_len);
+            self.display_len += lines.len();
             self.rows.push(lines);
         }
     }
 
     /// One row that fits a single display line.
     pub(super) fn push(&mut self, line: Line<'static>) {
-        self.rows.push(vec![line]);
+        self.push_wrapped(vec![line]);
     }
 
     /// The rows the projection holds — the total the position label names.
@@ -79,35 +87,31 @@ impl LinePageRows {
         self.rows.into_iter().flatten().collect()
     }
 
-    /// The window a canvas of `visible` display lines shows at `scroll` rows
-    /// in. `None` means the page fits its canvas and states no position.
+    /// Window by display lines, including continuations of wrapped rows.
+    /// Logical row counts remain independent of terminal width.
     pub(super) fn window(&self, visible: u16, scroll: usize) -> Option<LinePageWindow> {
         let capacity = self.window_capacity(visible)?;
         let start = scroll.min(self.last_window_start(capacity));
-        let end = self.rows_fitting(start, capacity);
+        let first = self.row_at(start);
+        let last = self.row_at(start + capacity.max(1) - 1);
+        let skip = start - self.starts[first];
         Some(LinePageWindow {
-            // Clipped in the one case where a single row is taller than the
-            // canvas: the row is shown and the clip is disclosed, never
-            // dropped for a blank canvas.
-            lines: self.rows[start..end]
+            lines: self.rows[first..]
                 .iter()
                 .flatten()
-                .take(capacity.max(1))
+                .skip(skip)
+                .take(capacity)
                 .cloned()
                 .collect(),
-            position_label: position_label(start, end, self.len()),
+            position_label: self.window_label(first, last, start, capacity),
         })
     }
 
     fn display_len(&self) -> usize {
-        self.rows.iter().map(|row| row_height(row)).sum()
+        self.display_len
     }
 
-    /// How far a page key moves the scroll offset so the next window starts
-    /// on the row after the current window's last row (`Down`) or ends on the
-    /// row before its first row (`Up`): consecutive pages neither skip nor
-    /// repeat a row, and an offset past the end pages back from the last
-    /// window rather than from the overshoot.
+    /// Move one visible window, normalizing an End-key overshoot first.
     pub(super) fn page_step(&self, visible: u16, scroll: usize, direction: PageDirection) -> usize {
         let Some(capacity) = self.window_capacity(visible) else {
             return 0;
@@ -115,20 +119,20 @@ impl LinePageRows {
         let last = self.last_window_start(capacity);
         let start = scroll.min(last);
         match direction {
-            PageDirection::Down => self
-                .rows_fitting(start, capacity)
+            PageDirection::Down => start
+                .saturating_add(capacity)
                 .min(last)
                 .saturating_sub(scroll),
-            PageDirection::Up => {
-                scroll.saturating_sub(self.window_start_ending_at(start, capacity))
-            }
+            PageDirection::Up => scroll.saturating_sub(start.saturating_sub(capacity)),
         }
     }
 
-    /// The display lines a canvas of `visible` lines gives its rows, or `None`
-    /// when the page fits and states no position. Ratatui clips a `Paragraph`
-    /// without a word, so an overflowing canvas spends its last display line
-    /// stating which rows it is showing.
+    pub(super) fn normalized_scroll(&self, visible: u16, scroll: usize) -> usize {
+        self.window_capacity(visible)
+            .map_or(0, |capacity| scroll.min(self.last_window_start(capacity)))
+    }
+
+    /// An overflowing canvas reserves one display line for its position.
     fn window_capacity(&self, visible: u16) -> Option<usize> {
         let visible = visible as usize;
         if visible == 0 || self.display_len() <= visible {
@@ -137,49 +141,28 @@ impl LinePageRows {
         Some(visible - 1)
     }
 
-    /// The furthest a canvas of `capacity` display lines scrolls and still
-    /// ends on the last row, so scrolling past the end shows the final rows
-    /// rather than an empty canvas.
     fn last_window_start(&self, capacity: usize) -> usize {
-        self.window_start_ending_at(self.rows.len(), capacity)
+        self.display_len().saturating_sub(capacity.max(1))
     }
 
-    /// The first row of the fullest window of `capacity` display lines whose
-    /// last row is the one before `end`. At least one row when `end > 0`.
-    fn window_start_ending_at(&self, end: usize, capacity: usize) -> usize {
-        let mut start = end;
-        let mut used = 0;
-        while start > 0 {
-            let height = row_height(&self.rows[start - 1]);
-            if start < end && used + height > capacity {
-                break;
-            }
-            used += height;
-            start -= 1;
+    fn row_at(&self, line: usize) -> usize {
+        self.starts
+            .partition_point(|start| *start <= line)
+            .saturating_sub(1)
+    }
+
+    fn window_label(&self, first: usize, last: usize, start: usize, capacity: usize) -> String {
+        let label = position_label(first, last + 1, self.len());
+        if self.display_len() == self.len() {
+            return label;
         }
-        start
+        format!(
+            "{label} · lines {}-{}/{}",
+            start + 1,
+            (start + capacity.max(1)).min(self.display_len()),
+            self.display_len()
+        )
     }
-
-    /// The rows a canvas of `capacity` display lines holds from `start`. A row
-    /// taller than the whole canvas still counts as shown; the window clips
-    /// it rather than leaving the canvas blank.
-    fn rows_fitting(&self, start: usize, capacity: usize) -> usize {
-        let mut end = start;
-        let mut used = 0;
-        while end < self.rows.len() {
-            let height = row_height(&self.rows[end]);
-            if end > start && used + height > capacity {
-                break;
-            }
-            used += height;
-            end += 1;
-        }
-        end
-    }
-}
-
-fn row_height(row: &[Line<'static>]) -> usize {
-    row.len().max(1)
 }
 
 fn position_label(start: usize, end: usize, total: usize) -> String {
@@ -222,7 +205,12 @@ mod tests {
         for visible in [6, 12, 25] {
             let window = wrapped.window(visible, 0).expect("overflowing");
             assert!(
-                window.position_label.ends_with("/40"),
+                window
+                    .position_label
+                    .split(" ·")
+                    .next()
+                    .unwrap()
+                    .ends_with("/40"),
                 "visible={visible} {}",
                 window.position_label
             );
@@ -230,7 +218,7 @@ mod tests {
     }
 
     #[test]
-    fn a_window_shows_whole_rows_and_never_more_than_its_canvas_holds() {
+    fn a_window_can_end_inside_a_row_without_losing_its_continuation() {
         let mut rows = LinePageRows::default();
         for _ in 0..10 {
             rows.push_wrapped(vec![blank_line(), blank_line()]);
@@ -238,8 +226,12 @@ mod tests {
 
         let window = rows.window(8, 0).expect("overflowing");
 
-        assert_eq!(window.position_label, " rows 1-3/10");
-        assert_eq!(window.lines.len(), 6);
+        assert_eq!(window.position_label, " rows 1-4/10 · lines 1-7/20");
+        assert_eq!(window.lines.len(), 7);
+        assert_eq!(
+            rows.window(8, 7).unwrap().position_label,
+            " rows 4-7/10 · lines 8-14/20"
+        );
     }
 
     #[test]
@@ -259,14 +251,14 @@ mod tests {
     }
 
     #[test]
-    fn a_row_taller_than_the_canvas_is_clipped_rather_than_skipped() {
+    fn an_oversized_row_discloses_its_continuation_position() {
         let mut rows = LinePageRows::default();
         rows.push_wrapped(vec![blank_line(), blank_line(), blank_line(), blank_line()]);
         rows.push(blank_line());
 
         let window = rows.window(3, 0).expect("overflowing");
 
-        assert_eq!(window.position_label, " row 1/2");
+        assert_eq!(window.position_label, " row 1/2 · lines 1-2/5");
         assert_eq!(window.lines.len(), 2);
     }
 
@@ -294,8 +286,7 @@ mod tests {
         assert!(narrow.display_len() > wide.display_len());
     }
 
-    /// Paging moves by the rows a window actually shows, so wrapped rows
-    /// neither get skipped going down nor repeated going back up.
+    /// Paging reaches every display line in both directions.
     #[test]
     fn consecutive_pages_down_and_up_are_contiguous_over_wrapped_rows() {
         let rows = mixed_height_rows(30);
@@ -304,31 +295,20 @@ mod tests {
         let mut scroll = 0;
         let mut starts = vec![0];
         while scroll < last {
-            let window_end = rows.rows_fitting(scroll, visible as usize - 1);
+            let previous = scroll;
             scroll += rows.page_step(visible, scroll, PageDirection::Down);
-            assert!(scroll <= window_end, "skipped rows before {scroll}");
-            if scroll < last {
-                assert_eq!(
-                    scroll, window_end,
-                    "next window must start after the last shown row"
-                );
-            }
+            assert!(scroll > previous);
+            assert!(scroll <= previous + visible as usize - 1);
             starts.push(scroll);
         }
         assert_eq!(rows.page_step(visible, scroll, PageDirection::Down), 0);
         while scroll > 0 {
             let previous = scroll - rows.page_step(visible, scroll, PageDirection::Up);
             assert!(previous < scroll);
-            assert!(
-                rows.rows_fitting(previous, visible as usize - 1) >= scroll,
-                "skipped going up"
-            );
+            assert!(previous + visible as usize > scroll);
             scroll = previous;
         }
-        assert!(
-            starts.len() > 2,
-            "fixture must span several pages: {starts:?}"
-        );
+        assert!(starts.len() > 2);
     }
 
     #[test]
@@ -360,5 +340,33 @@ mod tests {
 
     fn blank_line() -> Line<'static> {
         Line::from(String::new())
+    }
+    #[test]
+    fn every_line_of_an_oversized_row_is_reachable_by_paging() {
+        let mut rows = LinePageRows::default();
+        rows.push_wrapped(
+            (0..8)
+                .map(|n| Line::from(format!("owned-part-{n}")))
+                .collect(),
+        );
+        rows.push(Line::from("owned-tail"));
+        let mut scroll = 0;
+        let mut seen = std::collections::BTreeSet::new();
+        for _ in 0..10 {
+            let window = rows.window(3, scroll).unwrap();
+            seen.extend(window.lines.into_iter().map(|line| line.to_string()));
+            let step = rows.page_step(3, scroll, PageDirection::Down);
+            if step == 0 {
+                break;
+            }
+            scroll += step;
+        }
+        for n in 0..8 {
+            assert!(
+                seen.contains(&format!("owned-part-{n}")),
+                "Missing part {n}: {seen:?}"
+            );
+        }
+        assert!(seen.contains("owned-tail"));
     }
 }

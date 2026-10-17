@@ -1,0 +1,77 @@
+name: Optional compliance assessment requires its own finite allowance and protects Review
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_SKIP_ONBOARDING KUZUSHI_AGENT_MCPS KUZUSHI_PROMPT_ARMOR_PLUGIN KUZUSHI_TOB_SKILLS_DIR KUZUSHI_VULN_SCOUT_PLUGIN
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SHINSA_PLUGIN=@TMP_TARGET/owned-plugin
+require-shell: python3 -B @REPO/scripts/devex/fixtures/compliance_allowance.py @TMP_TARGET @ART prepare @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 SETUP | fresh-setup
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+paste-file: @ART/unbound-command.txt
+keys: Enter
+require-live-snap: 25 descriptor-declared effect | unbound-effect-review
+keys: y
+require-live-snap: 30 approved investigation allowance | unbound-refused
+require-shell: python3 -B @REPO/scripts/devex/fixtures/compliance_allowance.py @TMP_TARGET @ART refused
+ask: Does explicit artifact-write consent still refuse model work before a request or output directory, with a clear allowance requirement?
+paste-file: @ART/allowance-command.txt
+keys: Enter
+require-live-snap: 25 REVIEW ALLOWANCE | review-allowance
+expect: Total provider calls: 2
+expect: Protected review calls: 1
+resize: 160x48
+live-snap: allowance-160x48
+resize: 96x89
+live-snap: allowance-96x89
+resize: 80x24
+live-snap: allowance-80x24
+resize: 60x20
+live-snap: allowance-60x20
+resize: 40x12
+live-snap: allowance-40x12
+keys: NPage NPage
+require-live-snap: 20 Read remaining terms | unread-allowance-40x12
+keys: End
+require-live-snap: 20 y approve | allowance-controls-40x12
+ask: Can the operator inspect the two-call ceiling, one protected Review call, selected OAuth model, uncertain dollars and approval controls at all six sizes?
+keys: y
+resize: 120x36
+require-live-snap: 25 Allowance approved | allowance-approved
+paste-file: @ART/approved-command.txt
+keys: Enter
+require-live-snap: 25 descriptor-declared effect | assessment-effect-review
+keys: y
+require-live-snap: 35 shinsa:scan complete | assessment-completed
+require-shell: python3 -B @REPO/scripts/devex/fixtures/compliance_allowance.py @TMP_TARGET @ART completed
+paste-file: @ART/status-command.txt
+keys: Enter
+submit: logs
+require-live-snap: 25 Calls committed: 1/2 | retained-accounting
+expect: protected review remaining: 1
+paste-file: @ART/approved-command.txt
+keys: Enter
+require-live-snap: 25 descriptor-declared effect | second-effect-review
+keys: y
+require-live-snap: 30 allowance exhausted | second-request-refused
+require-shell: python3 -B @REPO/scripts/devex/fixtures/compliance_allowance.py @TMP_TARGET @ART exhausted
+ask: Does the approved assessment retain one raw observation and report artifacts while a second request is refused without borrowing Review capacity or creating jobs?
+submit: findings
+require-live-snap: 25 Owned fixture policy marker | recorded-finding
+expect: unverified
+keys: C-c
+require-live-snap: 15 CONFIRM SESSION EXIT | exit-review
+keys: y
+require-exit: 10
+env: NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/status-command.txt
+keys: Enter
+submit: logs
+require-live-snap: 25 Calls committed: 1/2 | recovered-accounting
+expect: protected review remaining: 1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/compliance_allowance.py @TMP_TARGET @ART restarted
+keys: C-c
+require-exit: 10

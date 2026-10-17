@@ -1,22 +1,27 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
+    use crate::allowance::InvestigationWork;
     use crate::config::V2Config;
     use crate::findings::{FindingStore, StaticProofState};
+    use crate::runtime::scripted_fixture::account_scripted_runtime;
     use crate::runtime::{AgentQueryResponse, TriageRequest};
     use crate::workspace::WorkspaceTarget;
     use std::collections::VecDeque;
     use std::process::Command;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
     use std::{fs, path::Path};
     use tempfile::tempdir;
 
     struct FakeRuntime {
         response: AgentQueryResponse,
+        calls: AtomicUsize,
     }
 
     impl AgentRuntime for FakeRuntime {
         fn query_blocking(&self, _request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
             Ok(self.response.clone())
         }
 
@@ -280,6 +285,7 @@ mod tests {
             authorization: Default::default(),
         };
         let runtime = FakeRuntime {
+            calls: AtomicUsize::new(0),
             response: AgentQueryResponse {
                 text: String::new(),
                 structured: Some(json!({"findings": []})),
@@ -288,12 +294,14 @@ mod tests {
             },
         };
 
-        let report = run_agentic_sast_report(&json!({}), &ctx, Some(&runtime)).unwrap();
+        let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Discovery, 2);
+        let report = run_agentic_sast_report(&json!({}), &ctx, Some(&accounted)).unwrap();
 
         assert_eq!(report.count, 0);
         assert!((report.cost_usd - 0.073).abs() < 1e-9);
-        let result = crate::modules::ModuleRegistry::with_v2_builtins()
-            .execute_tool_with_runtime("agentic-sast:scan", json!({}), &ctx, Some(&runtime))
+        let registry = crate::modules::ModuleRegistry::with_v2_builtins();
+        let result = registry
+            .execute_tool_with_runtime("agentic-sast:scan", json!({}), &ctx, Some(&accounted))
             .unwrap();
         assert_eq!(result["status"], "completed");
         assert!(result
@@ -304,6 +312,30 @@ mod tests {
             .pointer("/data/treeHash")
             .and_then(Value::as_str)
             .is_some_and(|value| value.len() == 64));
+        let error = registry
+            .execute_tool_with_runtime("agentic-sast:scan", json!({}), &ctx, Some(&accounted))
+            .unwrap_err();
+        assert_eq!(
+            crate::runtime::runtime_failure_metadata(&error)
+                .unwrap()
+                .error_class,
+            crate::RuntimeFailureClass::AllowanceRefused
+        );
+        assert_eq!(runtime.calls.load(Ordering::SeqCst), 2);
+        let receipt = crate::SpendLimiter::open(workspace.findings_db_path())
+            .unwrap()
+            .allowance_snapshot(
+                &accounted
+                    .allowance_binding()
+                    .unwrap()
+                    .work()
+                    .investigation_id,
+            )
+            .unwrap();
+        assert_eq!(receipt.committed_calls, 2);
+        assert_eq!(receipt.unresolved_calls, 0);
+        assert!((receipt.cost.observed_usd() - 0.146).abs() < 1e-9);
+        assert!(!receipt.cost.is_complete());
     }
 
     #[test]
@@ -575,6 +607,7 @@ mod tests {
             authorization: Default::default(),
         };
         let runtime = FakeRuntime {
+            calls: AtomicUsize::new(0),
             response: AgentQueryResponse {
                 text: String::new(),
                 structured: Some(json!({

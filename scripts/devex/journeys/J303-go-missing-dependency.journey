@@ -1,0 +1,55 @@
+name: Missing experimental Go scanner retains an actionable failure and no clean evidence
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/govulncheck_missing.py @TMP_TARGET @ART prepare @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: options govulncheck:scan
+require-live-snap: 25 Experimental | experimental-options
+expect: Target
+keys: Escape
+submit: logs
+submit: run govulncheck:scan {}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/govulncheck_missing.py @TMP_TARGET @ART failed
+paste-file: @ART/failed-replay.txt
+keys: Enter
+require-live-snap: 25 Outcome · failed | failed-receipt
+expect: binary not found
+expect: go install
+resize: 160x48
+live-snap: failure-160x48
+resize: 96x89
+live-snap: failure-96x89
+resize: 80x24
+live-snap: failure-80x24
+resize: 60x20
+live-snap: failure-60x20
+resize: 40x12
+live-snap: failure-40x12
+expect: failed
+ask: Across six sizes, can the operator identify the failed action and use the visible reading controls to reach its missing-dependency cause?
+resize: 120x36
+submit: report
+require-live-snap: 25 Finding review completeness does not describe repository coverage. | empty-report
+expect: REPORT
+expect: 0 findings
+expect: Finding review completeness does not describe repository coverage.
+require-shell: python3 -B @REPO/scripts/devex/fixtures/govulncheck_missing.py @TMP_TARGET @ART report
+ask: Does the empty Report avoid treating the unavailable experimental scanner as successful clean coverage or spending model capacity?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/failed-replay.txt
+keys: Enter
+require-live-snap: 25 Outcome · failed | restarted-failure
+expect: binary not found
+require-shell: python3 -B @REPO/scripts/devex/fixtures/govulncheck_missing.py @TMP_TARGET @ART restarted
+ask: Does no-color restart retain the failure, recovery action and unchanged source with no scanner process, Go loading or model request?
+keys: C-c
+require-exit: 10

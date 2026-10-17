@@ -17,7 +17,9 @@ mod tests;
 mod license_file;
 mod manifest;
 mod report;
+mod rule_policy;
 mod source_header;
+pub(crate) use rule_policy::enabled_rule_ids;
 
 use license_file::repository_license_findings;
 use manifest::{is_license_manifest, manifest_license, ManifestLicense};

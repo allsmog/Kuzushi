@@ -17,7 +17,7 @@ pub(crate) fn report_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 fn report_reader_header(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
     let route = app.router.report();
     let mut lines = vec![
-        report_selection_line(route, width),
+        report_read_selection_line(app, width),
         Line::styled(
             fit_path(route.path_draft(), width as usize),
             theme::accent(),
@@ -27,6 +27,19 @@ fn report_reader_header(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
         lines.push(Line::styled(fit(notice, width as usize), theme::warn()));
     }
     lines
+}
+
+fn report_read_selection_line(app: &ShellApp, width: u16) -> Line<'static> {
+    let route = app.router.report();
+    if crate::ui_view_models::report_is_refreshing(app) {
+        let label = format!(
+            "Refreshing · {} · {}",
+            route.format().as_str(),
+            route.completeness().as_str()
+        );
+        return Line::styled(fit(&label, width as usize), theme::warn());
+    }
+    report_selection_line(route, width)
 }
 
 fn report_reader_height(app: &ShellApp, height: u16) -> u16 {
@@ -48,24 +61,12 @@ fn report_selection_line(route: &crate::app::ReportRouteState, width: u16) -> Li
 fn report_document_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let route = app.router.report();
     let mut lines = report_header_lines(app, area);
-    append_report_status(&mut lines, route, area.width);
+    append_report_errors(&mut lines, app, area.width);
     for line in crate::ui_view_models::report_investigation_lines(app) {
         append_wrapped(&mut lines, &line, area.width);
     }
-    if route.provenance_details() {
-        if let Some(receipt) = route.receipt() {
-            append_report_receipt(&mut lines, receipt, area.width);
-        }
-    }
-    lines.push(blank());
-    append_report_formats(&mut lines, route, area.width);
-    append_report_destination(&mut lines, route, area.width);
-    lines.push(blank());
-    append_wrapped(
-        &mut lines,
-        &crate::ui_view_models::report_cost_coverage(app),
-        area.width,
-    );
+    append_report_success(&mut lines, route, area.width);
+    append_report_metadata(&mut lines, app, area.width);
     lines.push(blank());
     append_wrapped(
         &mut lines,
@@ -102,8 +103,31 @@ fn report_header_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         &crate::ui_view_models::report_review_summary(app),
         area.width,
     );
-    lines.push(blank());
     lines
+}
+
+fn append_report_metadata(lines: &mut Vec<Line<'static>>, app: &ShellApp, width: u16) {
+    let route = app.router.report();
+    if !route.provenance_details() {
+        append_wrapped(
+            lines,
+            crate::ui_view_models::report_source_history_coverage(route.format()),
+            width,
+        );
+        return;
+    }
+    lines.push(blank());
+    append_wrapped(lines, &route.choices_status(), width);
+    if let Some(receipt) = route.receipt() {
+        append_report_receipt(lines, receipt, width);
+    }
+    append_report_formats(lines, route, width);
+    append_report_destination(lines, route, width);
+    append_wrapped(
+        lines,
+        &crate::ui_view_models::report_cost_coverage(app),
+        width,
+    );
 }
 
 fn append_report_formats(
@@ -180,17 +204,26 @@ fn append_wrapped(lines: &mut Vec<Line<'static>>, text: &str, width: u16) {
     );
 }
 
-fn append_report_status(
+fn append_report_errors(lines: &mut Vec<Line<'static>>, app: &ShellApp, width: u16) {
+    let route = app.router.report();
+    if let Some(error) = route.choices_error() {
+        append_wrapped(lines, &format!("Saved choices unavailable: {error}"), width);
+    }
+    if let Some(receipt) = route.receipt().filter(|receipt| receipt.error.is_some()) {
+        append_report_status_summary(lines, receipt, width);
+    }
+    if let Some(error) = crate::ui_view_models::report_action_error(app) {
+        append_wrapped(lines, &format!("Report action: {error}"), width);
+    }
+}
+
+fn append_report_success(
     lines: &mut Vec<Line<'static>>,
     route: &crate::app::ReportRouteState,
     width: u16,
 ) {
-    append_wrapped(lines, &route.choices_status(), width);
-    if let Some(receipt) = route.receipt() {
+    if let Some(receipt) = route.receipt().filter(|receipt| receipt.error.is_none()) {
         append_report_status_summary(lines, receipt, width);
-    }
-    if let Some(error) = route.reveal_error() {
-        append_wrapped(lines, &format!("reveal  {error}"), width);
     }
 }
 
@@ -213,33 +246,31 @@ fn append_report_status_summary(
     }
 }
 
-/// What happened and when. The long destination path stays in `p` details so
+/// What happened. Timestamp and the long destination stay in `p` details so
 /// study facts keep their place above it.
 fn compact_receipt_lines(receipt: &crate::app::ReportReceipt) -> Vec<String> {
     let count = receipt.count.map_or_else(
         || "count unavailable".to_string(),
         |count| format!("{count} finding(s)"),
     );
-    vec![
-        format!("{} · {count} · p receipt details", receipt.format.as_str()),
-        format!(
-            "timestamp {}",
-            crate::ui_view_models::recorded_timestamp_label(&receipt.timestamp)
-        ),
-    ]
+    vec![format!(
+        "{} · {count} · p receipt details",
+        receipt.format.as_str()
+    )]
 }
 
-fn report_actions(receipt: Option<&crate::app::ReportReceipt>) -> [&'static str; 9] {
+fn report_actions(receipt: Option<&crate::app::ReportReceipt>) -> [&'static str; 10] {
     let export = match receipt {
         Some(receipt) if receipt.error.is_some() => "Enter retry",
         Some(_) => "Enter export again",
         None => "Enter export",
     };
     [
+        "r refresh report",
         "j/k format",
         "c completeness",
         "s study/history",
-        "p provenance",
+        "p details",
         "e edit path",
         "S save choices",
         export,
@@ -406,7 +437,7 @@ mod tests {
             .join("\n");
         assert!(text.contains("EXPORTED"));
         assert!(text.contains("json · 1 finding(s) · p receipt details"));
-        assert!(text.contains("timestamp"));
+        assert!(!text.contains("timestamp"));
         assert!(!text.contains("/long/export"));
         app.router.report_mut().toggle_provenance();
         let detail = report_document_lines(&app, Rect::new(0, 0, 80, 24))
@@ -414,6 +445,7 @@ mod tests {
             .map(Line::to_string)
             .collect::<Vec<_>>()
             .join("\n");
+        assert!(detail.contains("timestamp"));
         assert!(
             detail.find("Scope: workspace history").unwrap() < detail.find("/long/export").unwrap()
         );

@@ -498,6 +498,19 @@ mod tests {
         assert!(visible_tools.contains(&"shinsa:scan"));
         assert!(visible_tools.contains(&"tob:audit"));
         assert!(visible_tools.contains(&"vuln-scout:audit"));
+        for name in [
+            "shinsa:scan",
+            "tob:audit",
+            "vuln-scout:audit",
+            "prompt-armor:scan",
+        ] {
+            assert!(!registry.discoverable_tools().any(|tool| tool.name == name));
+            let module = registry
+                .all_modules()
+                .find(|module| name.starts_with(&format!("{}:", module.metadata().id)))
+                .unwrap();
+            assert_eq!(module.maturity(), ModuleMaturity::Labs);
+        }
     }
 
     #[test]

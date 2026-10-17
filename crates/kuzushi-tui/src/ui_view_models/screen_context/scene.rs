@@ -381,6 +381,7 @@ mod tests {
                 detail: "Rate limit login attempts".into(),
                 evidence: "src/auth.rs".into(),
                 evidence_paths: vec!["src/auth.rs".into()],
+                file_paths: vec!["src/auth.rs".into()],
                 target_element_ids: vec!["browser".into()],
             }],
             ..DfdModel::default()

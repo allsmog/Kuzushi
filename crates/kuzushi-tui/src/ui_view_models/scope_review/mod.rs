@@ -1,5 +1,7 @@
 //! Pure scope-review projections. No workspace reads or dispatch policy.
+mod action_search;
 mod detail;
+pub(crate) use action_search::scope_search_label;
 mod source;
 use crate::app::{merge_destinations, ScopeReviewState, SCOPE_ACTIONS};
 use crate::renderer::shared::text::wrap_text;
@@ -9,6 +11,9 @@ pub(crate) use source::{scope_source_view, ScopeSourceView};
 pub(crate) fn scope_title(state: &ScopeReviewState, source: &ScopeSourceView) -> String {
     if let Some(title) = state.form.as_ref().and_then(form_title) {
         return title.into();
+    }
+    if state.menu.is_some() {
+        return "SCOPE ACTIONS".into();
     }
     state.review.as_ref().map_or_else(
         || "SCAN SCOPES".into(),
@@ -43,7 +48,7 @@ fn form_title(form: &crate::app::ScopeEditForm) -> Option<&'static str> {
 
 fn scope_choice_rows(state: &ScopeReviewState) -> Option<(Vec<String>, usize)> {
     if let Some(index) = state.menu {
-        return Some((SCOPE_ACTIONS.iter().map(|s| s.to_string()).collect(), index));
+        return Some(action_search::action_rows(state, index));
     }
     if let Some(index) = state.merge_target {
         return Some((
@@ -176,8 +181,8 @@ fn scope_form_controls(form: &crate::app::ScopeEditForm) -> [&'static str; 2] {
 }
 
 fn scope_navigation_controls(state: &ScopeReviewState) -> [&'static str; 2] {
-    if state.menu.is_some() || state.merge_target.is_some() {
-        return ["↑↓ choose · Enter select", "Esc back · no scans start"];
+    if let Some(controls) = action_search::choice_controls(state) {
+        return controls;
     }
     if state.review.is_none() {
         return ["Enter / c build inventory", "Esc back · no model requests"];
@@ -203,7 +208,7 @@ pub(crate) fn scope_detail_lines(
     if let Some(notice) = &state.notice {
         text.extend([notice.clone(), String::new()]);
     }
-    text.extend(scope_detail(state));
+    text.extend(action_search::search_detail(state).unwrap_or_else(|| scope_detail(state)));
     if let Some(review) = &state.review {
         text.push(format!(
             "Recorded boundary approval: {}.",

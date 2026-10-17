@@ -17,6 +17,26 @@ mod selection;
 mod suggestion;
 pub use selection::resolve_accepted_scan_scope_selection;
 pub(crate) use suggestion::{suggest_scan_scope_proposal, validate_scan_scope_suggestion_input};
+
+/// Describe a saved accepted boundary without checking or changing current source.
+pub(crate) fn recorded_scan_scope_name(
+    workspace: &WorkspaceTarget,
+    reference: &ScanScopeRef,
+) -> Result<String> {
+    let record = persistence::load_record(workspace, &reference.proposal)?;
+    anyhow::ensure!(
+        record.acceptance.is_some(),
+        "Recorded scope boundaries were not accepted"
+    );
+    record
+        .draft
+        .scopes
+        .iter()
+        .chain(record.draft.shared_scope.iter())
+        .find(|scope| scope.id == reference.scope_id)
+        .map(|scope| scope.name.clone())
+        .context("Recorded scope is absent from its accepted proposal")
+}
 #[cfg(test)]
 mod tests;
 

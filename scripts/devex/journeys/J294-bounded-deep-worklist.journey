@@ -1,0 +1,124 @@
+name: Bounded deep advisory ranking discloses limits without model calls or scan jobs
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_AGENT_MCPS
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/deep_worklist.py @TMP_TARGET @ART prepare @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: run worklist:rank {"deep":true,"limit":500}
+submit: worklist
+require-live-snap: 30 3 of 3 ranked files shown | deep-ranking
+require-shell: python3 -B @REPO/scripts/devex/fixtures/deep_worklist.py @TMP_TARGET @ART deep
+require-live-snap: 25 Deep inspection: partial | inspection-limits
+expect: Esc dismiss
+keys: Escape
+require-live-snap: 15 RISK WORKLIST | notice-dismissed-in-place
+expect-not: Esc dismiss
+ask: Do ranked files, raw contributor evidence and partial inspection limits remain distinct from vulnerability findings, accepted Map and automatic scan work?
+resize: 160x48
+live-snap: deep-160x48
+resize: 96x89
+live-snap: deep-96x89
+resize: 80x24
+live-snap: deep-80x24
+resize: 60x20
+live-snap: deep-60x20
+resize: 40x12
+live-snap: deep-reading-000-40x12
+expect: RISK WORKLIST
+expect: q back
+keys: NPage
+live-snap: deep-reading-001-40x12
+expect: RISK WORKLIST
+expect: q back
+keys: NPage
+live-snap: deep-reading-002-40x12
+expect: RISK WORKLIST
+expect: q back
+keys: NPage
+live-snap: deep-reading-003-40x12
+expect: RISK WORKLIST
+expect: q back
+keys: NPage
+live-snap: deep-reading-004-40x12
+expect: RISK WORKLIST
+expect: q back
+keys: NPage
+live-snap: deep-reading-005-40x12
+expect: RISK WORKLIST
+expect: q back
+keys: NPage
+live-snap: deep-reading-006-40x12
+expect: RISK WORKLIST
+expect: q back
+keys: NPage
+live-snap: deep-reading-007-40x12
+expect: RISK WORKLIST
+expect: q back
+keys: NPage
+live-snap: deep-reading-008-40x12
+expect: RISK WORKLIST
+expect: q back
+keys: NPage
+live-snap: deep-reading-009-40x12
+expect: RISK WORKLIST
+expect: q back
+keys: NPage
+live-snap: deep-reading-010-40x12
+expect: RISK WORKLIST
+expect: q back
+keys: NPage
+live-snap: deep-reading-011-40x12
+expect: RISK WORKLIST
+expect: q back
+keys: NPage
+live-snap: deep-reading-012-40x12
+expect: RISK WORKLIST
+expect: q back
+keys: PPage
+live-snap: deep-reading-013-40x12
+expect: RISK WORKLIST
+expect: q back
+keys: PPage
+live-snap: deep-reading-014-40x12
+expect: RISK WORKLIST
+expect: q back
+keys: PPage
+live-snap: deep-reading-015-40x12
+expect: RISK WORKLIST
+expect: q back
+keys: PPage
+live-snap: deep-reading-016-40x12
+expect: RISK WORKLIST
+expect: q back
+require-shell: python3 -B @REPO/scripts/devex/fixtures/worklist_reading.py @TMP_TARGET @ART deep-reading deep
+ask: Can the operator read complete ranked paths, source limits, omissions and contributor states by paging at every size without clipped evidence?
+resize: 120x36
+submit: run worklist:rank
+submit: worklist
+require-live-snap: 25 no risk worklist | default-no-deep
+require-shell: python3 -B @REPO/scripts/devex/fixtures/deep_worklist.py @TMP_TARGET @ART default
+resize: 40x12
+require-live-snap: 15 no risk worklist | default-empty-40x12
+expect: RISK WORKLIST · Tab
+expect: q back
+resize: 120x36
+submit: run worklist:rank {"deep":true,"limit":500}
+submit: worklist
+require-live-snap: 25 Deep inspection: partial | deep-restored
+require-shell: python3 -B @REPO/scripts/devex/fixtures/deep_worklist.py @TMP_TARGET @ART deep-again
+keys: C-c
+require-exit: 10
+env: NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: worklist
+require-live-snap: 25 Deep inspection: partial | retained-inspection
+require-shell: python3 -B @REPO/scripts/devex/fixtures/deep_worklist.py @TMP_TARGET @ART restarted
+ask: Does no-color restart retain the exact saved deep result and its limits without reranking, building a graph or creating model work?
+keys: C-c
+require-exit: 10

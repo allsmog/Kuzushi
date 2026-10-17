@@ -1,4 +1,5 @@
 mod client;
+mod command;
 mod locations;
 mod protocol;
 

@@ -28,6 +28,9 @@ pub struct ScanStageScope {
     pub target: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub paths: Vec<String>,
+    /// Exact files inspected when recorded. Some(empty) covers no files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inspected_files: Option<std::collections::BTreeSet<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,6 +45,10 @@ pub struct ScanStagePlan {
 pub struct ScanStageEngine {
     pub engine: String,
     pub outcome: ScanEngineStageOutcome,
+    /// Rules enabled for this scan. Omission means the policy was not recorded.
+    /// An empty list explicitly establishes that no rules were enabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule_ids: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -60,6 +67,21 @@ pub struct ScanFindingDelta {
 pub struct ScanSeverityCount {
     pub severity: crate::findings::Severity,
     pub count: u64,
+}
+
+/// Findings from this attempt grouped by severity, highest first, without empty bands.
+pub(crate) fn scan_severity_counts(
+    findings: &[crate::findings::Finding],
+) -> Vec<ScanSeverityCount> {
+    let mut counts = std::collections::BTreeMap::new();
+    for finding in findings {
+        *counts.entry(finding.severity).or_insert(0u64) += 1;
+    }
+    counts
+        .into_iter()
+        .rev()
+        .map(|(severity, count)| ScanSeverityCount { severity, count })
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -106,7 +128,7 @@ pub struct PhaseStageReceipt {
     pub scan: Option<ScanStageData>,
 }
 
-/// Loads the typed durable Scan payload from a SAST parent run. Legacy phase
+/// Loads the typed durable Scan payload from a supported host-owned producer. Legacy phase
 /// rows deserialize with `scan: None` and remain available to legacy summary
 /// projection without inventing per-engine or delta data.
 pub fn load_scan_stage_data(
@@ -159,4 +181,4 @@ pub fn scan_finding_run_refs(target: &Path, parent_runs: &[String]) -> Result<Ve
 mod result_receipt;
 
 mod scope;
-pub(crate) use scope::scan_paths_cover_file;
+pub(crate) use scope::scan_scope_covers_file;

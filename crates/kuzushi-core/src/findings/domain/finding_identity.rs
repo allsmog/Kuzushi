@@ -109,6 +109,24 @@ pub(crate) fn finding_identity_key_for_finding_at_target(
     })
 }
 
+pub(crate) fn finding_identity_key_for_captured_source(
+    finding: &Finding,
+    source: &str,
+) -> FindingIdentityKey {
+    let source_hint = finding
+        .start_line
+        .checked_sub(1)
+        .and_then(|line| source.lines().nth(line as usize))
+        .map(crate::identity::finding_identity::normalize_finding_text)
+        .filter(|line| !line.is_empty());
+    finding_identity_key_for_input(FindingIdentityInput {
+        rule_id: &finding.rule_id,
+        file_path: &finding.file_path,
+        symbol_locator: finding.defensible_source_locator().as_deref(),
+        source_hint: source_hint.as_deref(),
+    })
+}
+
 pub(crate) fn finding_identity_key_for_input(
     input: FindingIdentityInput<'_>,
 ) -> FindingIdentityKey {

@@ -24,13 +24,17 @@ impl ShellApp {
         {
             return InputUpdate::handled();
         }
-        if self
-            .scope_review()
-            .is_some_and(|state| state.form.is_some())
-        {
-            return self.scope_form_key(key);
+        if let Some(update) = self.scope_editor_key(key) {
+            return update;
         }
         self.reduce_scope_navigation(key)
+    }
+
+    fn scope_editor_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
+        if self.scope_review()?.form.is_some() {
+            return Some(self.scope_form_key(key));
+        }
+        self.scope_action_search_key(key)
     }
 
     fn reduce_scope_navigation(&mut self, key: KeyEvent) -> InputUpdate {
@@ -254,10 +258,16 @@ impl ShellApp {
         if state.pending.is_some() {
             return true;
         }
-        if let Some(form) = &mut state.form {
-            form.fields[form.cursor].1.insert(text);
-        }
+        insert_scope_paste(state, text);
         true
+    }
+}
+
+fn insert_scope_paste(state: &mut ScopeReviewState, text: &str) {
+    if state.menu.is_some() {
+        state.paste_action_search(text);
+    } else if let Some(form) = &mut state.form {
+        form.fields[form.cursor].1.insert(text);
     }
 }
 
@@ -274,6 +284,9 @@ fn move_index(index: &mut usize, code: KeyCode, count: usize) {
 }
 
 fn cancel_scope_editor(state: &mut ScopeReviewState) -> bool {
+    if super::action_search::cancel_search(state) {
+        return true;
+    }
     if let Some(form) = state.form.take() {
         super::new_scope::retain_draft(state, form);
         return true;

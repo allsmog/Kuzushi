@@ -1,6 +1,7 @@
 //! Context edit projection uses captured draft text, never a store or active model.
 use crate::app::{ContextDraftRecovery, ContextEditDraft, ContextEditMode};
 use crate::renderer::shared::text::wrap_text;
+use kuzushi_core::session_transcript::RecoveredContextDraft;
 
 pub(crate) fn context_edit_title(mode: ContextEditMode) -> &'static str {
     if mode == ContextEditMode::Recovery {
@@ -139,7 +140,7 @@ pub(crate) fn context_recovery_lines(
 
 fn recovery_choices(
     draft: &ContextEditDraft,
-    drafts: &[kuzushi_core::session_transcript::RecoveredContextDraft],
+    drafts: &[RecoveredContextDraft],
     cursor: usize,
     width: usize,
     rows: usize,
@@ -152,22 +153,36 @@ fn recovery_choices(
         plural(drafts.len(), "draft", "drafts")
     )];
     for (index, saved) in drafts.iter().enumerate().skip(start).take(count) {
-        let snapshot = saved.record.snapshot.as_ref().unwrap();
-        let name: String = snapshot
-            .name
-            .text
-            .chars()
-            .map(|ch| if ch.is_control() { ' ' } else { ch })
-            .collect();
-        lines.push(recovery_row(
-            &name,
-            snapshot.fields.len(),
-            index == cursor,
+        lines.push(recovery_choice_row(saved, index == cursor, width));
+    }
+    if let Some(saved) = drafts.get(cursor) {
+        append_recovery_preview(&mut lines, draft, saved, width);
+    } else {
+        lines.extend(wrap_text(
+            "Saved draft selection is unavailable. Start a new draft or return.",
             width,
         ));
     }
-    append_recovery_preview(&mut lines, draft, &drafts[cursor], width);
     lines
+}
+
+fn recovery_choice_row(saved: &RecoveredContextDraft, selected: bool, width: usize) -> String {
+    let Some(snapshot) = &saved.record.snapshot else {
+        return crate::renderer::shared::text::fit_path(
+            &format!(
+                "{} Saved draft unavailable",
+                if selected { "▸" } else { " " }
+            ),
+            width,
+        );
+    };
+    let name: String = snapshot
+        .name
+        .text
+        .chars()
+        .map(|ch| if ch.is_control() { ' ' } else { ch })
+        .collect();
+    recovery_row(&name, snapshot.fields.len(), selected, width)
 }
 
 fn recovery_row(name: &str, fields: usize, selected: bool, width: usize) -> String {
@@ -190,10 +205,13 @@ fn plural<'a>(count: usize, singular: &'a str, multiple: &'a str) -> &'a str {
 fn append_recovery_preview(
     lines: &mut Vec<String>,
     draft: &ContextEditDraft,
-    saved: &kuzushi_core::session_transcript::RecoveredContextDraft,
+    saved: &RecoveredContextDraft,
     width: usize,
 ) {
-    let snapshot = saved.record.snapshot.as_ref().unwrap();
+    let Some(snapshot) = &saved.record.snapshot else {
+        lines.extend(wrap_text("Saved draft content is unavailable. Original checkpoint retained; choose another draft or start a new one.", width));
+        return;
+    };
     if let Some(field) = snapshot
         .fields
         .iter()
@@ -234,3 +252,6 @@ fn selected_context_text_lines(draft: &ContextEditDraft, width: usize) -> Vec<St
         .flat_map(|line| wrap_text(&line, width))
         .collect()
 }
+
+#[cfg(test)]
+mod tests;

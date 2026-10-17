@@ -4,6 +4,8 @@ mod cargo_audit_dispatch;
 mod compact_map_summary;
 mod prepared_dispatch;
 mod prove_result_reading;
+#[cfg(unix)]
+mod source_engine_dispatch;
 use crate::ui_view_models::PhaseSurfaceId;
 
 fn wb_focus(app: &ShellApp) -> crate::ui_view_models::PhaseSurfaceId {
@@ -385,7 +387,7 @@ fn missing_model_backed_prereqs_block_without_auto_accept_or_model_fallback() {
     run_command(
         &mut app,
         ShellCommand::RunTool {
-            tool: None,
+            tool: Some("offense-review:threat-hunt".to_string()),
             input: Some(r#"{"maxActors":1,"runsPerActor":1}"#.to_string()),
         },
     );
@@ -895,7 +897,7 @@ fn first_map_run_chip_never_reads_scan_before_its_terminal_event() {
     // with it the journey chip) before the first Map run launches.
     app.engagement
         .planning_picker_mut()
-        .set_return_to_setup(false);
+        .set_return_to_setup(true);
 
     // A fresh target retains Setup ownership until Start Map commits its plan.
     assert!(crate::ui_view_models::journey_footer_segment(&app).is_none());
@@ -1217,7 +1219,7 @@ request="$(cat)"
 case "$request" in
   *"variant analysis agent"*)
     cat <<'JSON'
-{"ok":true,"structured":{"variants":[{"filePath":"src/other.ts","startLine":9,"severity":"ERROR","message":"exec with untrusted input","confidence":"HIGH","rationale":"same source reaches exec","cwe":["CWE-78"]}]}}
+{"ok":true,"structured":{"variants":[{"filePath":"src/other.ts","startLine":1,"severity":"ERROR","message":"exec with untrusted input","confidence":"HIGH","rationale":"same source reaches exec","cwe":["CWE-78"]}]}}
 JSON
     ;;
   *)
@@ -2482,7 +2484,7 @@ fn command_effect_reducer_routes_existing_effectful_commands() {
     );
     assert_eq!(
         command_effect_kind(ShellCommand::Plan("map authz drift".to_string())),
-        Some(EffectKind::Planner)
+        None
     );
     assert_eq!(
         command_effect_kind(ShellCommand::Auth),
@@ -7146,10 +7148,9 @@ fn auth_provider_backend_model_and_cost_commands_are_explicit_and_secret_safe() 
         .set_last_tool_cost_usd_for_test(Some(0.0123));
     app.session_mut().set_session_cost_usd_for_test(0.0456);
     run_command(&mut app, ShellCommand::Cost);
-    assert!(app
-        .log_lines()
-        .iter()
-        .any(|line| { line.prefix == "cost" && line.body.contains("session estimate $0.0456") }));
+    assert!(app.log_lines().iter().any(|line| {
+        line.prefix == "cost" && line.body.contains("session $0.05; last tool $0.0123")
+    }));
 }
 
 #[cfg(unix)]
@@ -7395,11 +7396,11 @@ fn options_dot_resolves_to_focused_module_primary_tool() {
     // because "." was looked up directly. Now it resolves to the
     // focused module's primary tool, mirroring `run .`.
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.set_focused_module(Some("codeql".to_string()));
+    app.set_focused_module(Some("semgrep".to_string()));
     let resolved = app
         .resolve_options_tool(Some(".".to_string()))
-        .expect("`options .` with codeql focused should resolve");
-    assert_eq!(resolved, "codeql:scan");
+        .expect("`options .` with semgrep focused should resolve");
+    assert_eq!(resolved, "semgrep:scan");
 
     // Without a focused module the helper produces a useful error so
     // the user knows to `use <module>` first.
@@ -9207,7 +9208,7 @@ fn run_command_dispatches_codeql_and_refuses_to_autobuild_a_database() {
     run_command(
         &mut app,
         ShellCommand::RunTool {
-            tool: None,
+            tool: Some("codeql:scan".to_string()),
             input: Some(format!(
                 r#"{{"binary":"{}","language":"javascript"}}"#,
                 binary.display()
@@ -9352,58 +9353,6 @@ fn run_dot_from_catalog_dispatches_sast_scan() {
 
 #[cfg(unix)]
 #[test]
-fn run_command_dispatches_variant_hunt_through_langgraph_runtime_bridge_and_persists() {
-    let _env_lock = env_test_lock();
-    let _api_key = EnvVarGuard::set("OPENAI_API_KEY", "test-key");
-    let tmp = tempfile::tempdir().unwrap();
-    fs::create_dir(tmp.path().join("src")).unwrap();
-    fs::write(tmp.path().join("src/app.ts"), "exec(req.body.cmd)\n").unwrap();
-    fs::write(tmp.path().join("src/other.ts"), "exec(req.body.other)\n").unwrap();
-    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
-    let fingerprint = seed_true_positive_finding(&workspace);
-    let bridge = fake_variant_bridge(&tmp.path().to_path_buf());
-    let mut config = V2Config::default();
-    config.model = Some("openai:gpt-4.1".to_string());
-    config.runtime = RuntimeConfig {
-        kind: RuntimeKind::LangGraph,
-        api_key_env: "OPENAI_API_KEY".to_string(),
-        base_url: None,
-        thinking_level: None,
-        langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
-        worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
-        bridge_retry_attempts: None,
-        bridge_retry_backoff_ms: None,
-        anthropic_oauth: None,
-    };
-
-    let mut app = ShellApp::new(config, Some(&workspace));
-    run_command(&mut app, ShellCommand::Use("variant".to_string()));
-    run_command(
-        &mut app,
-        ShellCommand::RunTool {
-            tool: None,
-            input: Some(format!(
-                r#"{{"fingerprint":"{fingerprint}","maxFindings":5}}"#
-            )),
-        },
-    );
-    drain_tool(&mut app);
-
-    assert_eq!(app.shell_view(), ShellView::Activity);
-    assert!(app
-        .log_lines()
-        .iter()
-        .any(|line| { line.prefix == "result" && line.body.contains("variant:hunt complete") }));
-
-    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
-    let findings = store.list_findings(10).unwrap();
-    assert!(findings
-        .iter()
-        .any(|finding| finding.tool == "variant-analysis"));
-}
-
-#[cfg(unix)]
-#[test]
 fn run_command_dispatches_ndiff_hunt_through_langgraph_runtime_bridge_and_persists() {
     let _env_lock = env_test_lock();
     let _api_key = EnvVarGuard::set("OPENAI_API_KEY", "test-key");
@@ -9458,232 +9407,6 @@ fn run_command_dispatches_ndiff_hunt_through_langgraph_runtime_bridge_and_persis
     assert!(findings
         .iter()
         .any(|finding| finding.tool == "n-day-diff-hunter"));
-}
-
-#[cfg(unix)]
-#[test]
-fn run_command_dispatches_taint_iris_through_langgraph_runtime_bridge_and_persists() {
-    let _env_lock = env_test_lock();
-    let _api_key = EnvVarGuard::set("OPENAI_API_KEY", "test-key");
-    let tmp = tempfile::tempdir().unwrap();
-    fs::create_dir(tmp.path().join("src")).unwrap();
-    fs::write(tmp.path().join("src/db.ts"), "db.query(req.query.q)\n").unwrap();
-    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
-    let bridge = fake_taint_iris_bridge(&tmp.path().to_path_buf());
-    let mut config = V2Config::default();
-    config.model = Some("openai:gpt-4.1".to_string());
-    config.runtime = RuntimeConfig {
-        kind: RuntimeKind::LangGraph,
-        api_key_env: "OPENAI_API_KEY".to_string(),
-        base_url: None,
-        thinking_level: None,
-        langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
-        worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
-        bridge_retry_attempts: None,
-        bridge_retry_backoff_ms: None,
-        anthropic_oauth: None,
-    };
-
-    let mut app = ShellApp::new(config, Some(&workspace));
-    app.session_mut().set_trusted_workflow_auto_accept(true);
-    run_command(
-        &mut app,
-        ShellCommand::RunTool {
-            tool: Some("taint-iris:hunt".to_string()),
-            input: Some(r#"{"maxFindings":5,"mcps":false}"#.to_string()),
-        },
-    );
-    drain_chain_with_auto_reuse(&mut app);
-
-    // The compatibility path now runs the taint-iris-next report shape. It
-    // persists findings, but emits no structured `data.flows[]`; the AttackPath
-    // page correctly stays closed rather than showing an empty visualization.
-    assert_eq!(app.shell_view(), ShellView::Activity);
-    assert!(app.domain().taint_flow().is_none());
-    assert!(app.log_lines().iter().any(|line| {
-        line.prefix == "result"
-            && line.body.contains("Taint IRIS Next")
-            && line.body.contains("findings: 1")
-    }));
-
-    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
-    let findings = store.list_findings(10).unwrap();
-    assert_eq!(findings.len(), 1);
-    assert_eq!(findings[0].tool, "taint-iris-next");
-}
-
-#[cfg(unix)]
-#[test]
-fn run_command_dispatches_legacy_taint_iris_next_hunt_through_langgraph_runtime_bridge_and_persists(
-) {
-    let _env_lock = env_test_lock();
-    let _api_key = EnvVarGuard::set("OPENAI_API_KEY", "test-key");
-    let tmp = tempfile::tempdir().unwrap();
-    fs::create_dir(tmp.path().join("src")).unwrap();
-    fs::write(
-        tmp.path().join("package.json"),
-        r#"{"dependencies":{"express":"latest","prisma":"latest"}}"#,
-    )
-    .unwrap();
-    fs::write(
-        tmp.path().join("src/routes.ts"),
-        "const sql = `SELECT * FROM users WHERE id = ${req.query.id}`;\ndb.query(sql);\n",
-    )
-    .unwrap();
-    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
-    let bridge = fake_taint_iris_next_bridge(&tmp.path().to_path_buf());
-    let mut config = V2Config::default();
-    config.model = Some("openai:gpt-4.1".to_string());
-    config.runtime = RuntimeConfig {
-        kind: RuntimeKind::LangGraph,
-        api_key_env: "OPENAI_API_KEY".to_string(),
-        base_url: None,
-        thinking_level: None,
-        langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
-        worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
-        bridge_retry_attempts: None,
-        bridge_retry_backoff_ms: None,
-        anthropic_oauth: None,
-    };
-
-    let mut app = ShellApp::new(config, Some(&workspace));
-    app.session_mut().set_trusted_workflow_auto_accept(true);
-    run_command(&mut app, ShellCommand::Use("taint-iris-next".to_string()));
-    run_command(&mut app, ShellCommand::RunTool {
-        tool: Some("taint-iris-next:hunt".to_string()),
-        input: Some(
-            r#"{"mode":"hunt","maxCatalogEntries":3,"maxAgentFindings":5,"minEvidenceLevel":"candidate"}"#
-                .to_string(),
-        ),
-    });
-    drain_chain_with_auto_reuse(&mut app);
-
-    // taint-iris-next flattens its taint path into finding text and emits no
-    // structured `data.flows[]`, so there's nothing for the attack-path page to
-    // draw — auto-open correctly leaves the view on Activity.
-    assert_eq!(app.shell_view(), ShellView::Activity);
-    assert!(
-        app.log_lines().iter().any(|line| {
-            line.prefix == "result"
-                && line.body.contains("Taint IRIS Next")
-                && line.body.contains("hunt complete")
-        }),
-        "expected Taint IRIS Next hunt result log; logs={:?}",
-        app.log_lines()
-            .iter()
-            .map(|line| format!("{}: {}", line.prefix, line.body))
-            .collect::<Vec<_>>()
-    );
-
-    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
-    let findings = store.list_findings(10).unwrap();
-    assert_eq!(findings.len(), 1);
-    assert_eq!(findings[0].tool, "taint-iris-next");
-}
-
-#[cfg(unix)]
-#[test]
-fn run_command_dispatches_carlini_threat_hunt_through_langgraph_runtime_bridge_and_persists() {
-    let _env_lock = env_test_lock();
-    let _api_key = EnvVarGuard::set("OPENAI_API_KEY", "test-key");
-    let tmp = tempfile::tempdir().unwrap();
-    fs::create_dir(tmp.path().join("src")).unwrap();
-    fs::write(
-        tmp.path().join("src/app.ts"),
-        "res.send(`<p>${req.query.name}</p>`)\n",
-    )
-    .unwrap();
-    write_carlini_threat_model_fixture(&tmp.path().to_path_buf());
-    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
-    let bridge = fake_carlini_bridge(&tmp.path().to_path_buf());
-    let mut config = V2Config::default();
-    config.model = Some("openai:gpt-4.1".to_string());
-    config.runtime = RuntimeConfig {
-        kind: RuntimeKind::LangGraph,
-        api_key_env: "OPENAI_API_KEY".to_string(),
-        base_url: None,
-        thinking_level: None,
-        langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
-        worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
-        bridge_retry_attempts: None,
-        bridge_retry_backoff_ms: None,
-        anthropic_oauth: None,
-    };
-
-    let mut app = ShellApp::new(config, Some(&workspace));
-    run_command(
-        &mut app,
-        ShellCommand::RunTool {
-            tool: Some("carlini-threat-hunt:run".to_string()),
-            input: Some(r#"{"maxActors":1,"runsPerActor":1}"#.to_string()),
-        },
-    );
-    drain_chain_with_auto_reuse(&mut app);
-
-    assert_eq!(app.shell_view(), ShellView::Activity);
-    assert!(app.log_lines().iter().any(|line| {
-        line.prefix == "result" && line.body.contains("carlini-threat-hunt: 1 finding")
-    }));
-
-    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
-    let findings = store.list_findings(10).unwrap();
-    assert_eq!(findings.len(), 1);
-    assert_eq!(findings[0].tool, "carlini-threat-hunt");
-    assert_eq!(
-        findings[0].actor_fingerprint.as_deref(),
-        Some("carlini-threat-hunt:Authenticated_User:0")
-    );
-}
-
-#[cfg(unix)]
-#[test]
-fn run_command_dispatches_systems_hunt_through_langgraph_runtime_bridge_and_persists() {
-    let _env_lock = env_test_lock();
-    let _api_key = EnvVarGuard::set("OPENAI_API_KEY", "test-key");
-    let tmp = tempfile::tempdir().unwrap();
-    write_systems_hunt_fixture(&tmp.path().to_path_buf());
-    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
-    let bridge = fake_systems_hunt_bridge(&tmp.path().to_path_buf());
-    let mut config = V2Config::default();
-    config.model = Some("openai:gpt-4.1".to_string());
-    config.runtime = RuntimeConfig {
-        kind: RuntimeKind::LangGraph,
-        api_key_env: "OPENAI_API_KEY".to_string(),
-        base_url: None,
-        thinking_level: None,
-        langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
-        worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
-        bridge_retry_attempts: None,
-        bridge_retry_backoff_ms: None,
-        anthropic_oauth: None,
-    };
-
-    let mut app = ShellApp::new(config, Some(&workspace));
-    run_command(
-        &mut app,
-        ShellCommand::RunTool {
-            tool: Some("systems-hunt:systems-hunt".to_string()),
-            input: Some(r#"{"maxFindings":5}"#.to_string()),
-        },
-    );
-    drain_tool(&mut app);
-
-    assert_eq!(app.shell_view(), ShellView::Activity);
-    assert!(
-        app.log_lines()
-            .iter()
-            .any(|line| line.prefix == "result" && line.body.contains("systems-hunt: 1 finding")),
-        "logs={:?}",
-        app.log_lines()
-            .iter()
-            .map(|line| format!("{}: {}", line.prefix, line.body))
-            .collect::<Vec<_>>()
-    );
-
-    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
-    let findings = store.list_findings(10).unwrap();
-    assert_eq!(findings.len(), 1);
-    assert_eq!(findings[0].tool, "systems-hunt");
 }
 
 #[test]
@@ -9847,6 +9570,7 @@ fn filtered_complete_subset_does_not_advance_workspace_journey() {
             },
         )
         .unwrap();
+    persist_review_ready_import(tmp.path(), "scan-all");
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
 
     run_command(
@@ -10347,53 +10071,6 @@ fn run_command_dispatches_threat_model_build_through_langgraph_runtime_bridge() 
         .join(".kuzushi/tm/normalized-threat-model.json")
         .exists());
     prepared_dispatch::assert_settled_model_work(&workspace);
-}
-
-#[cfg(unix)]
-#[test]
-fn run_command_dispatches_x_ray_run_through_langgraph_runtime_bridge() {
-    let _env_lock = env_test_lock();
-    let _api_key = EnvVarGuard::set("OPENAI_API_KEY", "test-key");
-    let tmp = tempfile::tempdir().unwrap();
-    fs::write(tmp.path().join("README.md"), "# app\n").unwrap();
-    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
-    let bridge = fake_x_ray_bridge(&tmp.path().to_path_buf());
-    let mut config = V2Config::default();
-    config.model = Some("openai:gpt-4.1".to_string());
-    config.runtime = RuntimeConfig {
-        kind: RuntimeKind::LangGraph,
-        api_key_env: "OPENAI_API_KEY".to_string(),
-        base_url: None,
-        thinking_level: None,
-        langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
-        worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
-        bridge_retry_attempts: None,
-        bridge_retry_backoff_ms: None,
-        anthropic_oauth: None,
-    };
-
-    let mut app = ShellApp::new(config, Some(&workspace));
-    run_command(&mut app, ShellCommand::Use("x-ray".to_string()));
-    run_command(
-        &mut app,
-        ShellCommand::RunTool {
-            tool: Some("x-ray:run".to_string()),
-            input: None,
-        },
-    );
-    press_key(
-        &mut app,
-        KeyEvent::new(KeyCode::Char('y'), KeyModifiers::empty()),
-    );
-    drain_tool(&mut app);
-
-    assert_eq!(app.shell_view(), ShellView::Activity);
-    assert!(app
-        .log_lines()
-        .iter()
-        .any(|line| { line.prefix == "result" && line.body.contains("x-ray:run complete") }));
-    assert!(workspace.root().join("x-ray/x-ray.md").exists());
-    assert!(workspace.root().join("x-ray/architecture.svg").exists());
 }
 
 #[test]
@@ -22551,7 +22228,7 @@ fn review_invariant_hunt_hotkey_requires_a_selected_finding() {
 }
 
 #[test]
-fn chains_screen_folds_confirmed_findings_and_enter_opens_a_constituent() {
+fn existing_compatibility_chain_reader_opens_a_constituent_and_can_close() {
     use kuzushi_core::{TriageOutcome, TriageVerdict};
     let temp = tempfile::tempdir().unwrap();
     let workspace = WorkspaceTarget::new(temp.path()).unwrap();
@@ -22593,10 +22270,10 @@ fn chains_screen_folds_confirmed_findings_and_enter_opens_a_constituent() {
     app.set_shell_view(ShellView::Workbench);
     app.set_input_mode(crate::InputMode::Navigate);
 
-    press_key(
-        &mut app,
-        KeyEvent::new(KeyCode::Char('C'), KeyModifiers::empty()),
-    );
+    assert!(app.router.workbench_mut().toggle_chains_view());
+    app.router
+        .workbench_mut()
+        .set_focus(crate::ui_view_models::PhaseSurfaceId::ReviewChains);
     let plan = workbench_phase_plan(&app);
     assert!(matches!(
         plan.composition,
@@ -22624,6 +22301,25 @@ fn chains_screen_folds_confirmed_findings_and_enter_opens_a_constituent() {
         plan.composition,
         crate::ui_view_models::Composition::FullScreen(_)
     ));
+}
+
+#[test]
+fn default_review_chain_shortcut_preserves_the_curated_surface() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Review));
+    app.set_shell_view(ShellView::Workbench);
+    app.set_input_mode(crate::InputMode::Navigate);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('C'), KeyModifiers::empty()),
+    );
+    assert!(!app.router.workbench().chains_view_open());
+    assert!(!app.has_running_work());
+    assert!(app.log_lines().iter().any(|line| line
+        .body
+        .contains("Finding-chain composition is experimental")));
 }
 
 #[test]

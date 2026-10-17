@@ -28,20 +28,22 @@ pub(crate) fn pipeline_module() -> BuiltinModule {
 }
 
 fn pipeline_tools() -> Vec<ToolDescriptor> {
-    tools_with_policy(
-        tool_policy(
+    let local_policy = tool_policy(
+        ToolPhase::Scan,
+        RuntimeRequirement::Never,
+        ToolEffect::WorkspaceWrite,
+        WorkspaceRequirement::Optional,
+        FindingStoreRequirement::Optional,
+    );
+    vec![
+        pipeline_task_selector_tool().with_policy(local_policy),
+        pipeline_approval_tool().with_policy(local_policy),
+        pipeline_taint_cwe_select_tool().with_policy(workspace_policy(
             ToolPhase::Scan,
-            RuntimeRequirement::Never,
-            ToolEffect::WorkspaceWrite,
-            WorkspaceRequirement::Optional,
+            RuntimeRequirement::InputAware,
             FindingStoreRequirement::Optional,
-        ),
-        vec![
-            pipeline_task_selector_tool(),
-            pipeline_approval_tool(),
-            pipeline_taint_cwe_select_tool(),
-        ],
-    )
+        )),
+    ]
 }
 
 fn pipeline_task_selector_tool() -> ToolDescriptor {
@@ -61,6 +63,7 @@ fn pipeline_task_selector_tool() -> ToolDescriptor {
             .advanced(),
         ],
     )
+    .without_phase_result()
 }
 
 fn pipeline_approval_tool() -> ToolDescriptor {
@@ -80,9 +83,9 @@ fn pipeline_approval_tool() -> ToolDescriptor {
 fn pipeline_taint_cwe_select_tool() -> ToolDescriptor {
     hidden_tool_with_options(
         "pipeline:taint-cwe-select",
-        "Select taint-analysis CWE classes for Taint IRIS.",
+        "Propose source-analysis CWE classes using an approved allowance, or retain supplied classes without model work. Selection creates no Scan jobs or findings.",
         pipeline_taint_cwe_select_options(),
-    )
+    ).with_allowance_category(AllowanceCategory::Scope).without_phase_result()
 }
 
 fn pipeline_taint_cwe_select_options() -> Vec<OptionSpec> {
@@ -371,13 +374,19 @@ pub(crate) fn randori_module() -> BuiltinModule {
         ModuleKind::Intel,
         "Threat-model generation using PASTA stage framing and adversarial scenario review.",
         vec![
-            randori_pasta_tool().with_policy(workspace_policy(
-                ToolPhase::Map,
-                RuntimeRequirement::Always,
-                FindingStoreRequirement::Optional,
-            )),
+            randori_pasta_tool()
+                .with_policy(workspace_policy(
+                    ToolPhase::Map,
+                    RuntimeRequirement::Always,
+                    FindingStoreRequirement::Optional,
+                ))
+                .without_phase_result()
+                .with_allowance_category(AllowanceCategory::Context)
+                .with_discovery_maturity(ModuleMaturity::Labs),
             randori_threat_model_tool()
-                .with_policy(read_policy(ToolPhase::Map, WorkspaceRequirement::Required)),
+                .with_policy(read_policy(ToolPhase::Map, WorkspaceRequirement::Required))
+                .without_phase_result()
+                .with_discovery_maturity(ModuleMaturity::Compatibility),
         ],
         vec![dag(
             "randori:threat-model",
@@ -390,7 +399,7 @@ pub(crate) fn randori_module() -> BuiltinModule {
 fn randori_pasta_tool() -> ToolDescriptor {
     tool_with_options(
         "randori:pasta",
-        "Generate a PASTA threat model.",
+        "Experimental PASTA draft artifacts. Active context stays unchanged; import and accept the draft before scanning.",
         randori_pasta_options(),
     )
 }
@@ -398,7 +407,7 @@ fn randori_pasta_tool() -> ToolDescriptor {
 fn randori_threat_model_tool() -> ToolDescriptor {
     hidden_tool_with_options(
         "randori:threat-model",
-        "Compatibility alias for threat-model PASTA artifacts.",
+        "Read historical PASTA artifacts without accepting context. Prefer threat-model:read with the same outputDir and methodology=pasta.",
         randori_threat_model_options(),
     )
 }
@@ -411,7 +420,7 @@ fn randori_pasta_options() -> Vec<OptionSpec> {
         opt(
             "stages",
             OptionType::StringList,
-            "PASTA stages to generate.",
+            "PASTA stage labels supplied to one synthesis request.",
         )
         .advanced(),
     ];
@@ -432,8 +441,15 @@ fn randori_threat_model_options() -> Vec<OptionSpec> {
         .aliases(&["type"])
         .choices(&["pasta", "stride", "dread"])
         .default(json!("pasta")),
-        model_option(),
+        randori_legacy_model_option(),
     ]
+}
+
+fn randori_legacy_model_option() -> OptionSpec {
+    let mut option = model_option().advanced();
+    option.description =
+        "Legacy input accepted but ignored. Reading artifacts makes no model request.".into();
+    option
 }
 
 fn randori_output_dir_option(required: bool, writes_state: bool) -> OptionSpec {
@@ -466,10 +482,12 @@ fn randori_limit_options() -> Vec<OptionSpec> {
     vec![
         opt("maxElements", OptionType::Int, "Maximum model elements.")
             .aliases(&["max_elements"])
+            .integer_range(5, 500)
             .default(json!(40))
             .advanced(),
         opt("maxThreats", OptionType::Int, "Maximum threats.")
             .aliases(&["max_threats"])
+            .integer_range(1, 500)
             .default(json!(30))
             .advanced(),
         opt(
@@ -483,7 +501,7 @@ fn randori_limit_options() -> Vec<OptionSpec> {
         opt(
             "preserveUserEdits",
             OptionType::Bool,
-            "Preserve existing user-edited threat model.",
+            "Preserve existing draft files. Reusing outputDir requires an explicit false value; active context is never replaced.",
         )
         .aliases(&["preserve_user_edits"])
         .default(json!(true))

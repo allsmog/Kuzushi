@@ -93,17 +93,18 @@ fn historical_selection_is_not_rebound_when_the_same_finding_is_observed_again()
 }
 
 #[test]
-fn explicit_generation_open_does_not_require_a_folded_page_anchor() {
+fn review_reopen_reference_reads_original_generation_after_source_replacement() {
     let (root, mut app) = fixture();
     app.set_active_findings_filter(None);
     app.refresh_findings_preserving_active_filter(false);
-    let before = crate::ui_view_models::visible_finding_at_cursor(&app)
-        .unwrap()
-        .1;
+    let (alias, before) = crate::ui_view_models::visible_finding_at_cursor(&app).unwrap();
+    let reference =
+        crate::ui_view_models::finding_detail_model_for_projection(&app, Some(alias), &before)
+            .observation_reference
+            .expect("persisted observation has a reopening reference");
     replace_cursored_generation(root.path(), &app);
     app.refresh_findings_preserving_active_filter(false);
     let offset = app.domain().findings_page().unwrap().offset;
-    let reference = format!("generation:{}", before.id.unwrap());
     let effects = app.resolve_open_finding_effect(OpenFindingReference {
         reference: reference.clone(),
     });
@@ -116,11 +117,10 @@ fn explicit_generation_open_does_not_require_a_folded_page_anchor() {
     EffectRuntime::execute(&mut app, effects);
     assert_eq!(app.selected_finding().as_ref().unwrap().id, before.id);
     assert_eq!(
-        crate::ui_view_models::current_finding_for_detail(&app)
+        crate::ui_view_models::selected_finding_detail_model(&app)
             .unwrap()
-            .1
-            .id,
-        before.id
+            .observation_reference,
+        Some(reference.clone())
     );
     assert_eq!(app.domain().findings_page().unwrap().offset, offset);
     assert_eq!(

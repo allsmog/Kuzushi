@@ -102,6 +102,28 @@
             ],
             "properties": {
               "path": {
+                "pattern": "(^|/)inherited-allowance\\.json$"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "label": {
+                "const": "Inherited accounting context"
+              },
+              "kind": {
+                "const": "json"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "path"
+            ],
+            "properties": {
+              "path": {
                 "pattern": "(^|/)run\\.json$"
               }
             }

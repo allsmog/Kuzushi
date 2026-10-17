@@ -12,7 +12,7 @@ impl ShellApp {
         key: KeyEvent,
         modifiers: KeyModifierState,
     ) -> InputUpdate {
-        if self.run_diff_owns_tab(key, modifiers) {
+        if self.artifact_reader_owns_tab(key, modifiers) {
             return self.handle_view_hotkey(key);
         }
         let scene_update = self.handle_scene_view_key(key, modifiers);
@@ -26,11 +26,26 @@ impl ShellApp {
         InputUpdate::handled()
     }
 
-    fn run_diff_owns_tab(&self, key: KeyEvent, modifiers: KeyModifierState) -> bool {
-        self.shell_view() == ShellView::RunDiff
+    pub(super) fn handle_replay_refresh_key(&mut self, key: KeyEvent) -> Option<bool> {
+        let binding = self.view_keybindings().into_iter().find(|binding| {
+            binding.action == ViewHotkeyAction::ReplayRefreshContext && binding.matches(key)
+        })?;
+        Some(self.apply_view_hotkey(binding.action).handled)
+    }
+
+    fn artifact_reader_owns_tab(&self, key: KeyEvent, modifiers: KeyModifierState) -> bool {
+        self.artifact_reader_has_tabs()
             && self.input().is_empty()
             && modifiers.plain
             && matches!(key.code, KeyCode::Tab | KeyCode::BackTab)
+    }
+
+    fn artifact_reader_has_tabs(&self) -> bool {
+        match self.shell_view() {
+            ShellView::RunDiff => true,
+            ShellView::Replay => crate::ui_view_models::replay_has_summary(self),
+            _ => false,
+        }
     }
 
     pub(super) fn handle_empty_input_view_key(
@@ -114,9 +129,20 @@ impl ShellApp {
         key: KeyEvent,
         modifiers: KeyModifierState,
     ) -> InputUpdate {
-        let Some(target) = self.gallery_key_target(modifiers) else {
+        let Some(target) = self.gallery_input_target(modifiers) else {
             return InputUpdate::ignored();
         };
+        if self.is_dfd_findings_key(key) {
+            return self.open_selected_dfd_findings();
+        }
+        match target {
+            GalleryKeyTarget::EmbeddedMap => self.handle_embedded_map_gallery_key(key),
+            GalleryKeyTarget::FullScene => self.handle_full_scene_view_key(key),
+        }
+    }
+
+    fn gallery_input_target(&self, modifiers: KeyModifierState) -> Option<GalleryKeyTarget> {
+        let target = self.gallery_key_target(modifiers)?;
         // Gallery hotkeys yield to the prompt the moment the operator starts
         // typing — otherwise `back`/`home` are untypeable on the 3D page
         // (h/j/k/l would orbit the camera instead of reaching the prompt).
@@ -125,13 +151,7 @@ impl ShellApp {
         // which turned `q` — the advertised way out of a leaf view — into one
         // more character of the draft and left the operator inside the view
         // they asked to leave.
-        if self.composer_is_mid_draft() {
-            return InputUpdate::ignored();
-        }
-        match target {
-            GalleryKeyTarget::EmbeddedMap => self.handle_embedded_map_gallery_key(key),
-            GalleryKeyTarget::FullScene => self.handle_full_scene_view_key(key),
-        }
+        (!self.composer_is_mid_draft()).then_some(target)
     }
 
     /// `true` while the composer is mid-draft in the one mode that extends a
@@ -209,9 +229,7 @@ impl ShellApp {
         match key.code {
             KeyCode::Tab => self.cycle_scene(1),
             KeyCode::BackTab => self.cycle_scene(-1),
-            KeyCode::Esc | KeyCode::Char('q') if self.input_mode() == InputMode::Navigate => {
-                self.go_back()
-            }
+            KeyCode::Esc | KeyCode::Char('q') => self.go_back(),
             _ => return self.handle_entry_point_navigation_key(key),
         }
         InputUpdate::handled()
@@ -338,35 +356,33 @@ impl ShellApp {
     }
 
     fn handle_embedded_component_key(&mut self, key: KeyEvent) -> InputUpdate {
-        let page_down = self.map_gallery_page_step(crate::renderer::PageDirection::Down);
-        let page_up = self.map_gallery_page_step(crate::renderer::PageDirection::Up);
-        let scroll = self.router.workbench_mut().scroll_mut();
-        match key.code {
+        let surface = crate::ui_view_models::PhaseSurfaceId::MapDfd;
+        let current = self.router.workbench().scroll().get(surface);
+        let offset = match key.code {
             KeyCode::Char('j') | KeyCode::Down => {
-                scroll.shift(crate::ui_view_models::PhaseSurfaceId::MapDfd, 1)
+                crate::renderer::gallery_line_offset(self, 1).unwrap_or(current)
             }
             KeyCode::Char('k') | KeyCode::Up => {
-                scroll.shift(crate::ui_view_models::PhaseSurfaceId::MapDfd, -1)
+                crate::renderer::gallery_line_offset(self, -1).unwrap_or(current)
             }
-            KeyCode::Char('g') => scroll.set(crate::ui_view_models::PhaseSurfaceId::MapDfd, 0),
-            KeyCode::Char('G') => {
-                scroll.set(crate::ui_view_models::PhaseSurfaceId::MapDfd, u16::MAX)
-            }
-            KeyCode::PageDown => scroll.shift(
-                crate::ui_view_models::PhaseSurfaceId::MapDfd,
-                page_down as i32,
-            ),
-            KeyCode::PageUp => scroll.shift(
-                crate::ui_view_models::PhaseSurfaceId::MapDfd,
-                -(page_up as i32),
-            ),
+            KeyCode::Char('g') => 0,
+            KeyCode::Char('G') => u16::MAX,
+            KeyCode::PageDown => current
+                .saturating_add(self.map_gallery_page_step(crate::renderer::PageDirection::Down)),
+            KeyCode::PageUp => current
+                .saturating_sub(self.map_gallery_page_step(crate::renderer::PageDirection::Up)),
             _ => return InputUpdate::ignored(),
-        }
+        };
+        self.router
+            .workbench_mut()
+            .scroll_mut()
+            .set(surface, offset);
+        self.ui_mut().set_gallery_reading(None);
         InputUpdate::handled()
     }
 
     /// PgUp/PgDn on Map's embedded line page move to the adjacent window of
-    /// whole rows, clamped to the `u16` surface offset.
+    /// display lines, clamped to the `u16` surface offset.
     fn map_gallery_page_step(&self, direction: crate::renderer::PageDirection) -> u16 {
         crate::renderer::map_gallery_page_rows(self, direction)
             .unwrap_or(VIEWPORT_PAGE_LINES)
@@ -428,7 +444,7 @@ impl ShellApp {
     fn selected_scope_regeneration_context(
         &self,
     ) -> Result<(PathBuf, kuzushi_core::NestedProjectScope), String> {
-        let evidence = self.selected_dfd_evidence();
+        let evidence = self.selected_dfd_file_paths();
         if evidence.is_empty() {
             return Err("selected component has no repository evidence path".to_string());
         }
@@ -444,21 +460,15 @@ impl ShellApp {
         Ok((target, scope))
     }
 
-    fn selected_dfd_evidence(&self) -> Vec<String> {
+    pub(super) fn selected_dfd_file_paths(&self) -> Vec<String> {
         let model = crate::ui_view_models::dfd_model(self);
-        let rows = crate::ui_view_models::dfd_security_items_for_selection(
-            &model,
+        model.file_paths_for_selection(
             self.router.scene().dfd_selection(),
-        );
-        if self.router.scene().dfd_focused() {
-            return rows
-                .get(self.router.scene().dfd_context_selection())
-                .map(|row| row.evidence_paths.clone())
-                .unwrap_or_default();
-        }
-        rows.into_iter()
-            .flat_map(|row| row.evidence_paths.clone())
-            .collect()
+            self.router
+                .scene()
+                .dfd_focused()
+                .then_some(self.router.scene().dfd_context_selection()),
+        )
     }
 
     fn dispatch_scoped_regeneration(
@@ -795,6 +805,49 @@ mod tests {
         assert_eq!(app.shell_view(), ShellView::Scene);
         assert_eq!(app.input(), "draftq");
         assert_eq!(app.input_mode(), InputMode::Prompt);
+    }
+
+    #[test]
+    fn gallery_warning_hint_matches_escape_then_back_in_both_modes() {
+        for mode in [InputMode::Prompt, InputMode::Navigate] {
+            let (_target, mut app) = scene_gallery_app(mode, "");
+            app.router
+                .scene_mut()
+                .set_page(crate::scene3d::VizPage::Worklist);
+            app.set_warn_notice("ranking", "Partial source inspection");
+            let bindings = crate::ui_view_models::footer_keybindings(&app);
+            assert!(
+                bindings
+                    .iter()
+                    .any(|binding| binding.key == "Esc" && binding.label == "dismiss notice"),
+                "{bindings:?}"
+            );
+            assert!(!bindings.iter().any(|binding| binding.key == "Esc/q"));
+            assert!(
+                app.reduce_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+                    .handled
+            );
+            assert_eq!(app.shell_view(), ShellView::Scene);
+            assert!(app.advisory().notice.is_none());
+            assert!(
+                app.reduce_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+                    .handled
+            );
+            assert_ne!(app.shell_view(), ShellView::Scene);
+        }
+    }
+
+    #[test]
+    fn entry_browser_advertised_quit_works_with_an_empty_prompt() {
+        let (_target, mut app) = scene_gallery_app(InputMode::Prompt, "");
+        app.router
+            .scene_mut()
+            .set_page(crate::scene3d::VizPage::EntryPoints);
+        assert!(
+            app.reduce_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
+                .handled
+        );
+        assert_ne!(app.shell_view(), ShellView::Scene);
     }
 
     fn scene_gallery_app(mode: InputMode, draft: &str) -> (tempfile::TempDir, ShellApp) {

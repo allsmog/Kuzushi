@@ -14,12 +14,23 @@ pub(crate) fn worklist_artifact_version(app: &ShellApp) -> Option<u64> {
     let context_version = app
         .workbench_cache()
         .borrow()
-        .cached_json_file_version(&path);
-    let identity = (context_version, attack_surface_artifact_version(app));
+        .cached_nonmissing_json_file_version(&path);
+    let identity = (context_version, fallback_artifact_version(app));
     if identity == (None, None) {
         return None;
     }
     Some(identity_hash(&identity))
+}
+
+fn fallback_artifact_version(app: &ShellApp) -> Option<u64> {
+    let target = app.target()?;
+    let cache = app.workbench_cache().borrow();
+    let ViewDataState::Ready(kuzushi_core::LatestRunPointerState::Ready(id)) =
+        cache.cached_latest_run_pointer(Some(target))
+    else {
+        return None;
+    };
+    cache.cached_nonmissing_run_artifact_version(target, id.as_str(), "attack-surface.json")
 }
 
 fn identity_hash(value: &impl Hash) -> u64 {
@@ -126,5 +137,32 @@ mod tests {
             .degraded
             .iter()
             .any(|reason| reason.contains("unreadable")));
+    }
+    #[test]
+    fn hydrating_missing_context_and_run_artifacts_preserves_an_explicit_ranking() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = kuzushi_core::workspace::workspace_state_dir(root.path()).join("runs/owned-rank");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut run = kuzushi_core::RunSummary::running(
+            "owned-rank",
+            "tool",
+            Some("worklist:rank".into()),
+            root.path().display().to_string(),
+        );
+        run.status = "partial".into();
+        std::fs::write(dir.join("run.json"), serde_json::to_vec(&run).unwrap()).unwrap();
+        std::fs::write(
+            dir.parent().unwrap().parent().unwrap().join("latest"),
+            "owned-rank",
+        )
+        .unwrap();
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.set_target(Some(root.path().to_path_buf()));
+        let data = json!({"target":root.path(),"rows":[{"rank":1,"path":"owned.c","citations":[]}],"rankedTotal":1,"contributors":{"systemsHunt":"live"}});
+        let before = worklist_artifact_version(&app);
+        app.cache_tool_snapshot("worklist:rank", &json!({"data":data}));
+        app.hydrate_all_view_data_for_test();
+        assert_eq!(worklist_artifact_version(&app), before);
+        assert_eq!(worklist_model(&app).rows[0].location, "owned.c");
     }
 }

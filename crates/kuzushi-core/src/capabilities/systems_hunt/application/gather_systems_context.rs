@@ -19,6 +19,7 @@ pub(crate) fn gather_systems_context(
             codeql_db_path: codeql_db_path.map(|path| path.display().to_string()),
             bash_probing_used: false,
             systems_source_files: inventory.len(),
+            inspection: None,
         },
     })
 }
@@ -31,13 +32,57 @@ pub(crate) fn gather_systems_context(
 pub(crate) fn rank_systems_surfaces_lite(
     target: &Path,
     max: usize,
-) -> Result<Vec<RankedSystemsSurface>> {
-    let options = SystemsHuntInput::from_tool_input(&json!({ "maxSurfaces": max }))?;
-    let inventory = collect_production_inventory(target, &options)?;
-    let mut surfaces = collect_system_surfaces(&inventory);
+    progress: &mut dyn FnMut(usize),
+    canceled: &dyn Fn() -> bool,
+) -> Result<(Vec<RankedSystemsSurface>, Value)> {
+    use crate::workspace::inventory::{collect_source_prefixes, SourcePrefixLimits};
+    let index = collect_source_prefixes(
+        target,
+        SourcePrefixLimits {
+            max_files: 2000,
+            max_bytes: 16 * 1024 * 1024,
+            max_file_bytes: 16 * 1024,
+        },
+        &production_systems_path,
+        progress,
+        canceled,
+    )?;
+    let mut receipt = index.coverage;
+    let (mut surfaces, clipped) = bounded_system_surfaces(index.files, canceled)?;
     sort_system_surfaces(&mut surfaces);
     surfaces.truncate(max);
-    Ok(surfaces)
+    receipt["maxEvidenceSignalsPerFile"] = json!(32);
+    receipt["evidenceLimitedFiles"] = json!(clipped);
+    if clipped > 0 {
+        receipt["status"] = json!("partial");
+    }
+    Ok((surfaces, receipt))
+}
+
+fn production_systems_path(relative: &str) -> bool {
+    is_systems_source(Path::new(relative))
+        && !relative
+            .split('/')
+            .any(|part| SKIP_DIRS.contains(&part) || NON_PRODUCTION_SYSTEMS_DIRS.contains(&part))
+}
+
+fn bounded_system_surfaces(
+    files: Vec<crate::workspace::inventory::SourcePrefix>,
+    canceled: &dyn Fn() -> bool,
+) -> Result<(Vec<RankedSystemsSurface>, usize)> {
+    let mut surfaces = Vec::new();
+    let mut clipped = 0;
+    for file in files {
+        anyhow::ensure!(!canceled(), "deep worklist ranking canceled");
+        let mut by_file = BTreeMap::new();
+        collect_file_surfaces(&mut by_file, &file.relative, &file.text);
+        for mut surface in by_file.into_values() {
+            clipped += usize::from(surface.evidence.len() > 32);
+            surface.evidence.truncate(32);
+            surfaces.push(surface.finish());
+        }
+    }
+    Ok((surfaces, clipped))
 }
 
 fn ranked_system_surfaces(

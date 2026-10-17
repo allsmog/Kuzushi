@@ -14,6 +14,8 @@ use crate::{ReviewQueueCacheKey, ShellApp};
 use kuzushi_core::findings::{ReviewDecisionConflict, ReviewDecisionVerdict};
 use kuzushi_core::{project_finding, Finding, PersistedVerification, ProofConfidence};
 use std::sync::Arc;
+mod read_feedback;
+pub(crate) use read_feedback::ReviewReadFeedback;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ReviewQueueMode {
@@ -53,7 +55,8 @@ impl ReviewQueueMode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ReviewQueueModel {
     pub(crate) navigation_active: bool,
-    pub(crate) refresh_status: Option<String>,
+    pub(crate) path_history: bool,
+    pub(crate) refresh_status: Option<ReviewReadFeedback>,
     pub(crate) decision_save_label: Option<String>,
     pub(crate) page: Option<ReviewQueuePage>,
     pub(crate) partial_load: Option<ReviewQueuePartialLoad>,
@@ -177,8 +180,8 @@ impl ReviewQueueModel {
     }
 
     fn findings_population_title(&self) -> String {
-        if self.refresh_status.is_some() {
-            return "FINDINGS · previous results".into();
+        if let Some(feedback) = &self.refresh_status {
+            return feedback.population_title().into();
         }
         if let Some(page) = self.page.filter(|page| page.offset > 0) {
             return format!(
@@ -266,8 +269,9 @@ pub(crate) fn review_queue_model(app: &ShellApp, mode: ReviewQueueMode) -> Revie
         review_queue_header(visible_count, total_count, open_count, complete_count)
     };
     ReviewQueueModel {
+        path_history: app.dfd_path_query_is_active(),
         navigation_active: app.input_mode() == crate::InputMode::Navigate,
-        refresh_status: app.findings_refresh_status(),
+        refresh_status: app.findings_read_feedback(),
         decision_save_label: app.review_decision_save_label(),
         page: app
             .domain()

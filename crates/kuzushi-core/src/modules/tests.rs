@@ -1,12 +1,16 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
+    use crate::allowance::InvestigationWork;
     use crate::config::V2Config;
     use crate::findings::{
         Finding, FindingListFilter, PatchStatus, Severity, StaticProofState, TriageOutcome,
         TriageVerdict,
     };
     use crate::run_artifacts::{run_dir, write_run_summary, RunSummary, TraceHandle};
+    use crate::runtime::scripted_fixture::{
+        account_scripted_model_runtime, account_scripted_runtime,
+    };
     use crate::runtime::{
         AgentLoopStep, AgentQueryRequest, AgentQueryResponse, AgentToolLoopRequest,
         LoopHistoryEntry, TriageRequest,
@@ -41,6 +45,21 @@ mod tests {
             .prepare_dispatch_input(name, input, ctx, None)?
             .authorize_explicit_headless();
         registry.dispatch_prepared_input_with_runtime(prepared, ctx, runtime)
+    }
+
+    fn assert_allowance_consumption(
+        ctx: &ToolExecutionContext<'_>,
+        runtime: &dyn AgentRuntime,
+        calls: u32,
+        unresolved: u32,
+    ) {
+        let binding = runtime.allowance_binding().unwrap();
+        let snapshot = crate::SpendLimiter::open(ctx.workspace.unwrap().findings_db_path())
+            .unwrap()
+            .allowance_snapshot(&binding.work().investigation_id)
+            .unwrap();
+        assert_eq!(snapshot.committed_calls, calls);
+        assert_eq!(snapshot.unresolved_calls, unresolved);
     }
 
     fn decoded_untrusted_records(
@@ -364,7 +383,7 @@ mod tests {
                 .lock()
                 .unwrap()
                 .last()
-                .is_some_and(|query| query.system_prompt.contains("classifier gate"));
+                .is_some_and(|query| query.stage.as_deref() == Some("finding-classifier"));
             if is_classifier_request {
                 return Ok(AgentQueryResponse {
                     text: String::new(),
@@ -609,8 +628,9 @@ mod tests {
                         || query.system_prompt.contains("Shinsa compliance adapter")
                         || query.system_prompt.contains("PromptArmor adapter")
                         || query
-                            .system_prompt
-                            .contains("vendor security assessment agent")
+                            .structured_output
+                            .as_ref()
+                            .is_some_and(|output| output.name == "VendorAssessmentReport")
                 });
             if is_plugin_adapter_request {
                 return Ok(AgentQueryResponse {
@@ -1066,6 +1086,7 @@ OUT
                 "demo finding",
             )],
             plan: crate::capabilities::full_mode_multi::FullModePlan {
+                coverage: None,
                 chunks: Vec::new(),
                 total_files: 1,
                 total_bytes: 10,
@@ -1158,8 +1179,15 @@ OUT
             Some(3)
         );
 
+        let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Review, 1);
+
         let assessed = registry
-            .execute_tool_with_runtime("vendor-assessment:assess", json!({}), &ctx, Some(&runtime))
+            .execute_tool_with_runtime(
+                "vendor-assessment:assess",
+                json!({}),
+                &ctx,
+                Some(&accounted),
+            )
             .unwrap();
         assert_eq!(assessed.get("ok").and_then(Value::as_bool), Some(true));
         let report_path = assessed
@@ -1173,6 +1201,21 @@ OUT
                 .and_then(Value::as_str),
             Some("medium")
         );
+        let queries = runtime.queries.lock().unwrap();
+        assert_eq!(queries.len(), 1);
+        let query = &queries[0];
+        assert!(query.prompt.contains("SOC 2 controls cover access review."));
+        assert!(query.tool_policy.tools.is_empty());
+        assert!(!query.tool_policy.mcps);
+        assert_eq!(
+            query.runtime_options.as_ref().unwrap().max_model_turns,
+            Some(1)
+        );
+        assert!(assessed["output"]
+            .as_str()
+            .unwrap()
+            .contains("Model opinion over stored evidence"));
+        assert!(store.list_all_findings().unwrap().is_empty());
     }
 
     #[test]
@@ -1353,10 +1396,14 @@ OUT
             result.pointer("/data/count").and_then(Value::as_u64),
             Some(1)
         );
+        assert!(
+            result["data"]["findings"].as_array().unwrap().is_empty(),
+            "A changed path is a review hint, not a discovered vulnerability"
+        );
+        assert!(store.list_all_findings().unwrap().is_empty());
         assert_eq!(
             result
-                .pointer("/data/findings/0/rule_id")
-                .or_else(|| result.pointer("/data/findings/0/ruleId"))
+                .pointer("/data/reviewHints/0/ruleId")
                 .and_then(Value::as_str),
             Some("chrome-rce-hot-path-v8-maglev-phi-representation-selector")
         );
@@ -1388,6 +1435,8 @@ OUT
         };
         let runtime = MockRuntime::new();
 
+        let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Discovery, 4);
+
         for tool in [
             "vuln-scout:audit",
             "tob:audit",
@@ -1399,7 +1448,7 @@ OUT
                 tool,
                 json!({"pluginRoot": plugin_root.display().to_string()}),
                 &ctx,
-                Some(&runtime),
+                Some(&accounted),
             )
             .unwrap();
             assert_eq!(
@@ -1489,14 +1538,27 @@ OUT
             authorization: Default::default(),
         };
         let runtime = MockRuntime::new();
+        let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Discovery, 1);
 
         let err = registry
-            .execute_tool_with_runtime("vuln-scout:audit", json!({}), &ctx, Some(&runtime))
+            .execute_tool_with_runtime("vuln-scout:audit", json!({}), &ctx, Some(&accounted))
             .unwrap_err()
             .to_string();
 
         assert!(err.contains("@kuzushi/vuln-scout"));
         assert!(err.contains("pluginRoot"));
+        assert!(runtime.queries().is_empty());
+        let receipt = crate::SpendLimiter::open(workspace.findings_db_path())
+            .unwrap()
+            .allowance_snapshot(
+                &accounted
+                    .allowance_binding()
+                    .unwrap()
+                    .work()
+                    .investigation_id,
+            )
+            .unwrap();
+        assert_eq!(receipt.committed_calls, 0);
     }
 
     #[test]
@@ -2187,12 +2249,14 @@ OUT
             authorization: Default::default(),
         };
 
+        let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Context, 1);
+
         let result = execute_authorized_tool_with_runtime(
             &registry,
             "context:build",
             json!({"enrichment": true}),
             &ctx,
-            Some(&runtime),
+            Some(&accounted),
         )
         .unwrap();
 
@@ -2240,12 +2304,14 @@ OUT
         registry
             .execute_tool("context:build", json!({}), &ctx)
             .unwrap();
+        let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Context, 1);
+
         let result = execute_authorized_tool_with_runtime(
             &registry,
             "context:build",
             json!({"scope": "enrichment"}),
             &ctx,
-            Some(&runtime),
+            Some(&accounted),
         )
         .unwrap();
 
@@ -2974,6 +3040,8 @@ OUT
             authorization: Default::default(),
         };
 
+        let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Discovery, 1);
+
         let result = registry
             .execute_tool_with_runtime(
                 "sast:scan",
@@ -2983,7 +3051,7 @@ OUT
                     "triage": true
                 }),
                 &ctx,
-                Some(&runtime),
+                Some(&accounted),
             )
             .unwrap();
 
@@ -3009,6 +3077,7 @@ OUT
         )
         .unwrap();
         assert_eq!(record.content, "Persistent triage guidance.");
+        assert_allowance_consumption(&ctx, &accounted, 1, 0);
     }
 
     #[test]
@@ -3031,12 +3100,14 @@ OUT
             authorization: Default::default(),
         };
 
+        let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Discovery, 1);
+
         let result = registry
             .execute_tool_with_runtime(
                 "agentic-sast:scan",
                 json!({"maxFindings": 5, "severity": ["ERROR"]}),
                 &ctx,
-                Some(&runtime),
+                Some(&accounted),
             )
             .unwrap();
 
@@ -3083,6 +3154,8 @@ OUT
             authorization: Default::default(),
         };
 
+        let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Discovery, 1);
+
         let result = registry
             .execute_tool_with_runtime(
                 "sast:scan",
@@ -3093,7 +3166,7 @@ OUT
                     "maxFindings": 5
                 }),
                 &ctx,
-                Some(&runtime),
+                Some(&accounted),
             )
             .unwrap();
 
@@ -3126,6 +3199,7 @@ OUT
                 "forbidden whitebox tool was enabled: {forbidden}"
             );
         }
+        assert_allowance_consumption(&ctx, &accounted, 1, 0);
     }
 
     #[test]
@@ -3148,6 +3222,8 @@ OUT
             authorization: Default::default(),
         };
 
+        let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Discovery, 1);
+
         registry
             .execute_tool_with_runtime(
                 "sast:scan",
@@ -3158,7 +3234,7 @@ OUT
                     "maxFindings": 5
                 }),
                 &ctx,
-                Some(&runtime),
+                Some(&accounted),
             )
             .unwrap();
 
@@ -3205,6 +3281,7 @@ OUT
         assert!(query
             .prompt
             .contains("Every reported claim must cite repository source lines"));
+        assert_allowance_consumption(&ctx, &accounted, 1, 0);
     }
 
     #[test]
@@ -3270,6 +3347,8 @@ OUT
             authorization: Default::default(),
         };
 
+        let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Discovery, 1);
+
         let result = registry
             .execute_tool_with_runtime(
                 "taint-iris:hunt",
@@ -3279,7 +3358,7 @@ OUT
                     "TAINT_IRIS_PROMPT": "Focus on SQL sinks only."
                 }),
                 &ctx,
-                Some(&runtime),
+                Some(&accounted),
             )
             .unwrap();
 
@@ -3391,8 +3470,14 @@ OUT
             authorization: Default::default(),
         };
 
+        let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Scope, 1);
         let result = registry
-            .execute_tool_with_runtime("pipeline:taint-cwe-select", json!({}), &ctx, Some(&runtime))
+            .execute_tool_with_runtime(
+                "pipeline:taint-cwe-select",
+                json!({}),
+                &ctx,
+                Some(&accounted),
+            )
             .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
@@ -3432,12 +3517,14 @@ OUT
             authorization: Default::default(),
         };
 
+        let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Discovery, 1);
+
         let result = registry
             .execute_tool_with_runtime(
                 "carlini-threat-hunt:run",
                 json!({"maxActors": 1, "runsPerActor": 1}),
                 &ctx,
-                Some(&runtime),
+                Some(&accounted),
             )
             .unwrap();
 
@@ -3496,17 +3583,25 @@ OUT
             authorization: Default::default(),
         };
 
+        let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Discovery, 1);
+
         let result = registry
             .execute_tool_with_runtime(
                 "offense-review:threat-hunt",
                 json!({"maxActors": 1, "runsPerActor": 1}),
                 &ctx,
-                Some(&runtime),
+                Some(&accounted),
             )
             .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
-        assert_completed_result_envelope(&result, "carlini-threat-hunt:");
+        assert_eq!(result["status"], "partial");
+        assert_eq!(result["data"]["coverage"]["complete"], false);
+        assert_eq!(result["data"]["observationsVerified"], false);
+        assert!(result["summary"]
+            .as_str()
+            .unwrap()
+            .contains("partial coverage"));
         assert_eq!(runtime.queries().len(), 1);
         assert_eq!(store.list_findings(10).unwrap().len(), 1);
     }
@@ -3569,6 +3664,8 @@ OUT
             authorization: Default::default(),
         };
 
+        let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Discovery, 1);
+
         let result = registry
             .execute_tool_with_runtime(
                 "sast:scan",
@@ -3578,7 +3675,7 @@ OUT
                     "maxFindings": 5
                 }),
                 &ctx,
-                Some(&runtime),
+                Some(&accounted),
             )
             .unwrap();
 
@@ -3598,6 +3695,7 @@ OUT
             .and_then(Value::as_u64)
             .is_some());
         assert_eq!(store.list_findings(10).unwrap()[0].tool, "agentic");
+        assert_allowance_consumption(&ctx, &accounted, 1, 0);
     }
 
     #[test]
@@ -3625,6 +3723,8 @@ OUT
             authorization: Default::default(),
         };
 
+        let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Discovery, 1);
+
         let result = registry
             .execute_tool_with_runtime(
                 "sast:scan",
@@ -3634,7 +3734,7 @@ OUT
                     "maxFindings": 5
                 }),
                 &ctx,
-                Some(&runtime),
+                Some(&accounted),
             )
             .unwrap();
 
@@ -3657,6 +3757,7 @@ OUT
             store.list_findings(10).unwrap()[0].tool,
             "carlini-threat-hunt"
         );
+        assert_allowance_consumption(&ctx, &accounted, 1, 0);
     }
 
     #[test]
@@ -3679,6 +3780,8 @@ OUT
             authorization: Default::default(),
         };
 
+        let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Discovery, 1);
+
         let result = registry
             .execute_tool_with_runtime(
                 "sast:scan",
@@ -3689,7 +3792,7 @@ OUT
                     "maxFindings": 5
                 }),
                 &ctx,
-                Some(&runtime),
+                Some(&accounted),
             )
             .unwrap();
 
@@ -3709,6 +3812,7 @@ OUT
             .and_then(Value::as_u64)
             .is_some());
         assert_eq!(store.list_findings(10).unwrap()[0].tool, "taint-iris-next");
+        assert_allowance_consumption(&ctx, &accounted, 1, 0);
     }
 
     #[cfg(unix)]
@@ -3747,6 +3851,8 @@ OUT
             authorization: Default::default(),
         };
 
+        let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Discovery, 1);
+
         let result = registry
             .execute_tool_with_runtime(
                 "sast:scan",
@@ -3758,7 +3864,7 @@ OUT
                     "minEvidenceLevel": "candidate"
                 }),
                 &ctx,
-                Some(&runtime),
+                Some(&accounted),
             )
             .unwrap();
 
@@ -3782,6 +3888,7 @@ OUT
             .and_then(Value::as_str)
             .is_some());
         assert_eq!(store.list_findings(10).unwrap()[0].tool, "taint-iris-next");
+        assert_allowance_consumption(&ctx, &accounted, 1, 0);
     }
 
     #[test]
@@ -3803,12 +3910,15 @@ OUT
             authorization: Default::default(),
         };
 
+        // The existing scanner issues three scripted analysis queries.
+        let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Discovery, 3);
+
         let result = registry
             .execute_tool_with_runtime(
                 "systems-hunt:systems-hunt",
                 json!({"maxFindings": 5}),
                 &ctx,
-                Some(&runtime),
+                Some(&accounted),
             )
             .unwrap();
 
@@ -3832,6 +3942,20 @@ OUT
             .and_then(Value::as_str)
             .is_some_and(|path| path.starts_with(".kuzushi/systems-hunt/")));
         assert_eq!(store.list_findings(10).unwrap()[0].tool, "systems-hunt");
+        assert_eq!(runtime.queries().len(), 3);
+        let receipt = crate::SpendLimiter::open(workspace.findings_db_path())
+            .unwrap()
+            .allowance_snapshot(
+                &accounted
+                    .allowance_binding()
+                    .unwrap()
+                    .work()
+                    .investigation_id,
+            )
+            .unwrap();
+        assert_eq!(receipt.committed_calls, 3);
+        assert_eq!(receipt.unresolved_calls, 0);
+        assert!(!receipt.cost.is_complete());
     }
 
     #[test]
@@ -3890,6 +4014,8 @@ OUT
             authorization: Default::default(),
         };
 
+        let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Discovery, 3);
+
         let result = registry
             .execute_tool_with_runtime(
                 "sast:scan",
@@ -3899,7 +4025,7 @@ OUT
                     "maxFindings": 5
                 }),
                 &ctx,
-                Some(&runtime),
+                Some(&accounted),
             )
             .unwrap();
 
@@ -3923,6 +4049,7 @@ OUT
             .and_then(Value::as_str)
             .is_some());
         assert_eq!(store.list_findings(10).unwrap()[0].tool, "systems-hunt");
+        assert_allowance_consumption(&ctx, &accounted, 3, 0);
     }
 
     #[cfg(unix)]
@@ -5047,6 +5174,14 @@ OUT
             authorization: Default::default(),
         };
 
+        let accounted = account_scripted_model_runtime(
+            &ctx,
+            &runtime,
+            "openai:gpt-override",
+            InvestigationWork::Review,
+            1,
+        );
+
         let result = registry
             .execute_tool_with_runtime(
                 "triage:run",
@@ -5056,7 +5191,7 @@ OUT
                     "TRIAGE_PROMPT": "Use repository evidence only."
                 }),
                 &ctx,
-                Some(&runtime),
+                Some(&accounted),
             )
             .unwrap();
 
@@ -5087,6 +5222,7 @@ OUT
             requests[0].prompt_template.as_deref(),
             Some("Use repository evidence only.")
         );
+        assert_allowance_consumption(&ctx, &accounted, 1, 0);
     }
 
     #[test]
@@ -5151,12 +5287,14 @@ OUT
             authorization: Default::default(),
         };
 
+        let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Review, 1);
+
         let result = registry
             .execute_tool_with_runtime(
                 "triage:run",
                 json!({"fingerprint": "missing"}),
                 &ctx,
-                Some(&runtime),
+                Some(&accounted),
             )
             .unwrap();
 
@@ -5176,10 +5314,11 @@ OUT
             Some("missing")
         );
         assert!(runtime.requests().is_empty());
+        assert_allowance_consumption(&ctx, &accounted, 0, 0);
     }
 
     #[test]
-    fn dispatches_classifier_gate_score_and_persists_skip_triage() {
+    fn dispatches_classifier_gate_score_without_writing_a_review_decision() {
         let temp = tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
@@ -5209,6 +5348,8 @@ OUT
             authorization: Default::default(),
         };
 
+        let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Review, 1);
+
         let result = registry
             .execute_tool_with_runtime(
                 "classifier-gate:score",
@@ -5217,7 +5358,7 @@ OUT
                     "targetPercentile": 0.9
                 }),
                 &ctx,
-                Some(&runtime),
+                Some(&accounted),
             )
             .unwrap();
 
@@ -5237,10 +5378,7 @@ OUT
             .get_finding_by_fingerprint(&finding.fingerprint)
             .unwrap()
             .unwrap();
-        assert_eq!(
-            reloaded.triage.as_ref().map(|triage| triage.verdict),
-            Some(TriageVerdict::NeedsReview)
-        );
+        assert!(reloaded.triage.is_none());
     }
 
     /// A classifier response with no readable verdict used to score a neutral
@@ -5292,12 +5430,14 @@ OUT
             authorization: Default::default(),
         };
 
+        let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Review, 1);
+
         let result = registry
             .execute_tool_with_runtime(
                 "classifier-gate:score",
                 json!({ "findingFingerprint": finding.fingerprint.clone() }),
                 &ctx,
-                Some(&runtime),
+                Some(&accounted),
             )
             .unwrap();
 
@@ -5361,6 +5501,8 @@ OUT
             authorization: Default::default(),
         };
 
+        let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Review, 1);
+
         let result = registry
             .execute_tool_with_runtime(
                 "deep-audit:run",
@@ -5370,7 +5512,7 @@ OUT
                     "depositUsd": 0.01
                 }),
                 &ctx,
-                Some(&runtime),
+                Some(&accounted),
             )
             .unwrap();
 
@@ -5391,6 +5533,7 @@ OUT
             reloaded.triage.as_ref().map(|triage| triage.verdict),
             Some(TriageVerdict::TruePositive)
         );
+        assert_allowance_consumption(&ctx, &accounted, 1, 0);
     }
 
     #[test]
@@ -5477,6 +5620,8 @@ OUT
             authorization: Default::default(),
         };
 
+        let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Discovery, 2);
+
         let result = registry
             .execute_tool_with_runtime(
                 "full-mode:hunt",
@@ -5488,7 +5633,7 @@ OUT
                     "maxTokensPerChunk": 4096
                 }),
                 &ctx,
-                Some(&runtime),
+                Some(&accounted),
             )
             .unwrap();
 
@@ -5513,6 +5658,7 @@ OUT
             )
             .unwrap();
         assert_eq!(evidence_events, 1);
+        assert_allowance_consumption(&ctx, &accounted, 2, 0);
     }
 
     #[test]
@@ -5541,6 +5687,8 @@ OUT
             authorization: Default::default(),
         };
 
+        let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Discovery, 2);
+
         let error = registry
             .execute_tool_with_runtime(
                 "full-mode:hunt",
@@ -5552,7 +5700,7 @@ OUT
                     "maxTokensPerChunk": 4096
                 }),
                 &ctx,
-                Some(&runtime),
+                Some(&accounted),
             )
             .unwrap_err()
             .to_string();
@@ -5568,6 +5716,7 @@ OUT
         assert_eq!(stored.len(), 1);
         assert!(stored[0].id.is_some());
         assert!(stored[0].triage.is_none());
+        assert_allowance_consumption(&ctx, &accounted, 2, 1);
     }
 
     #[test]

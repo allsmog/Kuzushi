@@ -6,6 +6,8 @@ use crate::modules::ModuleRegistry;
 
 mod context_guidance;
 mod matrix;
+mod reassessment;
+mod review_counts;
 mod scope;
 
 pub(in crate::workspace::application) fn planned_report(root: &Path) -> InvestigationReportReceipt {

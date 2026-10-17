@@ -39,6 +39,8 @@ pub(crate) struct FileRequest {
     pub(crate) repo: AuthorizedDirectory,
     pub(crate) file: PathBuf,
     pub(crate) source_text: String,
+    pub(crate) compile_database:
+        Option<Arc<kuzushi_mcp_common::compile_database::CompileDatabaseSnapshot>>,
 }
 
 impl FileRequest {
@@ -52,15 +54,20 @@ impl FileRequest {
         )?;
         let file = opened.path().to_path_buf();
         let source_text = opened.read_utf8()?;
+        let compile_database =
+            crate::compile_db::selected_snapshot(args, &repo, &handle.read_capability)?;
         Ok(Self {
             repo,
             file,
             source_text,
+            compile_database,
         })
     }
 
     pub(crate) async fn client(&self, handle: &ClangdHandle) -> Result<Arc<ClangdClient>> {
-        handle.for_repo(&self.repo).await
+        handle
+            .for_repo(&self.repo, self.compile_database.clone())
+            .await
     }
 
     pub(crate) fn text_document(&self) -> Result<Value> {

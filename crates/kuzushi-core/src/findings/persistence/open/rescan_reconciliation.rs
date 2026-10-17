@@ -1,45 +1,16 @@
-//! Re-scan reconciler: the ONLY emitter of `FindingDisappeared`.
+//! Record covered observation gaps without changing finding verdicts.
 //!
-//! After a scan run completes successfully, this diffs the identities observed
-//! in prior runs against the just-completed run and marks the vanished ones
-//! stale. `Fixed`/`Removed` are computed from this, never asserted by a human,
-//! so the reconciler is the load-bearing honesty boundary: a finding is only
-//! "gone" if a re-run of its own engine, over the SAME scope, no longer
-//! produces it.
-//!
-//! Three structural guards keep a partial/flaky re-run from fabricating a
-//! `Fixed`/`Removed`:
-//! 1. **Deterministic tools only.** Only reproducible static scanners are
-//!    reconcilable (`all_components_deterministic`). Non-deterministic/agentic
-//!    engines (`taint-iris*`, `agentic-sast`, `carlini-*`, `variant`, `ndiff`,
-//!    `exploit-chain`) NEVER retire a finding: a re-hunt that happens not to
-//!    re-surface a real bug must not report it Fixed. Unknown tools are treated
-//!    as non-deterministic (conservative default). Deduplication can merge
-//!    several engines into one comma-joined tool, so the test is over ALL
-//!    components: every one must be deterministic and every one must have run
-//!    evidence, which makes one agentic component permanently unretirable.
-//! 2. **Scope parity.** A finding is only retired when the completed run's scan
-//!    target is byte-identical to the finding's last-seen run target AND the
-//!    completed run's recorded scan paths (its durable Scan stage receipt)
-//!    cover the finding's file. A subdir-scoped re-run therefore cannot stale
-//!    a finding it never re-examined, whether the restriction was a different
-//!    target or a `paths=[…]` selection over the same target. Recorded scope is
-//!    three-way, never two: a store with no artifact root at all (in-memory)
-//!    means whole-target, an existing run directory without a Scan receipt
-//!    means whole-target, and a *missing* run directory means unknown — so a
-//!    pruned run (`kz runs prune` deletes the whole directory while the
-//!    observations survive) retires nothing instead of reading as whole-target.
-//!    Runs from before run directories existed degrade the same fail-closed way.
-//! 3. **Completed runs only.** The caller reconciles solely on `completed`
-//!    status (allowlist), so failed/canceled/partial runs never reconcile.
-//!
-//! Reconciling the same run twice is a no-op: `FindingDisappeared` flips
-//! `current_status` to `stale`, and only `open` findings are candidates.
+//! This is the only emitter of the compatibility event `FindingDisappeared`.
+//! That event retains the prior signal and human decisions. It establishes
+//! neither resolution nor a fix. Reconciliation requires completed work over
+//! the same target and a covered path, with deterministic engine evidence and
+//! any required rule-policy coverage. Missing or damaged artifacts fail closed.
+//! Agentic misses never retire a signal. Replaying the same run is idempotent.
 
 use super::*;
 use crate::event_log::EventKind;
 use crate::findings::{all_components_deterministic, tool_components};
-use crate::run_artifacts::{ScanEngineStageOutcome, ScanStageData};
+use crate::run_artifacts::{ScanEngineStageOutcome, ScanStageData, ScanStageEngine};
 use crate::storage_v3::writer_actor::{
     DecisionCommand, FindingLifecycleWrite, StorageWriterActor, WriterCommand,
 };
@@ -61,6 +32,7 @@ struct StaleCandidate {
     last_seen_run_id: String,
     origin_target: Option<String>,
     path: Option<String>,
+    rule_id: String,
 }
 
 impl StaleCandidate {
@@ -78,13 +50,15 @@ impl StaleCandidate {
 
 /// Scope of a completed scan: the target it ran over and, when the scan was
 /// path-restricted (recorded in its durable Scan stage receipt), the paths it
-/// actually examined. An empty path list means the whole target was scanned.
+/// actually examined. Optional inspected membership narrows requested paths;
+/// Some(empty) proves that no file was inspected.
 pub(crate) struct CompletedScanScope {
     target: String,
     paths: Vec<String>,
+    inspected_files: Option<BTreeSet<String>>,
     /// Engines the Scan stage receipt records as having completed, which is the
     /// only evidence a clean re-run of an engine leaves behind.
-    receipt_engines: BTreeSet<String>,
+    receipt_engines: Vec<ScanStageEngine>,
 }
 
 impl CompletedScanScope {
@@ -93,14 +67,19 @@ impl CompletedScanScope {
     }
 
     fn covers(&self, candidate: &StaleCandidate) -> bool {
+        if self
+            .rule_coverage_block(&candidate.tool, &candidate.rule_id)
+            .is_some()
+        {
+            return false;
+        }
         if candidate.origin_target.as_deref() != Some(self.target.as_str()) {
             return false;
         }
-        if self.paths.is_empty() {
+        if self.paths.is_empty() && self.inspected_files.is_none() {
             return true;
         }
-        // A path-restricted scan can only retire findings whose file it
-        // provably re-examined; an unknown finding path is never covered.
+        // Restricted or enumerated scans require a known, inspected file.
         candidate
             .path
             .as_deref()
@@ -111,7 +90,16 @@ impl CompletedScanScope {
     /// within the recorded scan paths. Whole-target scans cover every file; a
     /// path that cannot be resolved inside the target is never covered.
     pub(crate) fn covers_file(&self, file_path: &str) -> bool {
-        crate::run_artifacts::scan_paths_cover_file(&self.target, &self.paths, file_path)
+        crate::run_artifacts::scan_scope_covers_file(
+            &self.target,
+            &self.paths,
+            self.inspected_files.as_ref(),
+            file_path,
+        )
+    }
+
+    pub(crate) fn rule_coverage_block(&self, tool: &str, rule_id: &str) -> Option<&'static str> {
+        crate::findings::scan_rule_coverage_block(&self.receipt_engines, tool, rule_id)
     }
 }
 
@@ -119,7 +107,8 @@ impl CompletedScanScope {
 #[derive(Default)]
 struct RecordedScanEvidence {
     paths: Vec<String>,
-    engines: BTreeSet<String>,
+    inspected_files: Option<BTreeSet<String>>,
+    engines: Vec<ScanStageEngine>,
 }
 
 /// Only engines the receipt records as `Complete` prove a re-examination: a
@@ -127,11 +116,12 @@ struct RecordedScanEvidence {
 fn receipt_scan_evidence(scan: &ScanStageData) -> RecordedScanEvidence {
     RecordedScanEvidence {
         paths: scan.scope.paths.clone(),
+        inspected_files: scan.scope.inspected_files.clone(),
         engines: scan
             .engines
             .iter()
             .filter(|engine| engine.outcome == ScanEngineStageOutcome::Complete)
-            .map(|engine| engine.engine.clone())
+            .cloned()
             .collect(),
     }
 }
@@ -171,6 +161,7 @@ impl FindingStore {
         let scope = CompletedScanScope {
             target,
             paths: evidence.paths,
+            inspected_files: evidence.inspected_files,
             receipt_engines: evidence.engines,
         };
         self.reconcile_completed_scope(run_id, &scope)
@@ -237,6 +228,7 @@ impl FindingStore {
             Ok(Some(evidence)) => Ok(Some(CompletedScanScope {
                 target,
                 paths: evidence.paths,
+                inspected_files: evidence.inspected_files,
                 receipt_engines: evidence.engines,
             })),
             Ok(None) | Err(_) => Ok(None),
@@ -290,7 +282,12 @@ impl FindingStore {
         Ok(observed
             .iter()
             .flat_map(|tool| tool_components(tool).map(str::to_string))
-            .chain(scope.receipt_engines.iter().cloned())
+            .chain(
+                scope
+                    .receipt_engines
+                    .iter()
+                    .map(|engine| engine.engine.clone()),
+            )
             .collect())
     }
 
@@ -329,7 +326,7 @@ impl FindingStore {
     fn candidate_stale_identities(&self, run_id: &str) -> Result<Vec<StaleCandidate>> {
         let mut stmt = self.conn.prepare(
             r#"
-            select o.stable_fp, o.tool, o.run_id, rs.target, o.display_path
+            select o.stable_fp, o.tool, o.run_id, rs.target, o.display_path, o.rule_id
               from finding_observations o
               join stable_findings sf on sf.stable_fp = o.stable_fp
               join (
@@ -353,6 +350,7 @@ impl FindingStore {
                 last_seen_run_id: row.get(2)?,
                 origin_target: row.get(3)?,
                 path: row.get(4)?,
+                rule_id: row.get(5)?,
             })
         })?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -391,7 +389,8 @@ mod tests {
         CompletedScanScope {
             target: "/tmp/repo".to_string(),
             paths: paths.iter().map(|path| path.to_string()).collect(),
-            receipt_engines: BTreeSet::new(),
+            inspected_files: None,
+            receipt_engines: Vec::new(),
         }
     }
 

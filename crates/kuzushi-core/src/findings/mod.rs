@@ -1,4 +1,5 @@
-pub use application::scan_reassessment_block;
+pub(crate) use application::scan_rule_coverage_block;
+pub use application::{scan_reassessment_block, scan_reassessment_block_for_rule};
 mod application;
 pub(crate) use application::read_goals;
 pub use application::{FindingGoalPage, FindingGoalRow};
@@ -14,6 +15,7 @@ pub use domain::{
 };
 pub use domain::{ReviewCapturedFile, ReviewCapturedFileState, ReviewSourceCapture};
 pub use persistence::FindingLessonPage;
+pub(crate) use persistence::{CapturedFindingSources, FindingSourceSnapshot};
 pub mod import;
 pub mod ingest_contract;
 pub(crate) mod persistence;
@@ -62,9 +64,10 @@ pub use application::{
     IDENTITY_AUDIT_EVIDENCE_SCHEMA_VERSION,
 };
 pub(crate) use application::{
-    commit_observed_findings, commit_observed_findings_with_status, emit_finding_delta,
-    emit_persisted_finding_delta, load_finding_review_gate, normalize_agent_json_findings,
-    persist_tool_findings, persist_tool_findings_to, render_generic_findings_output,
+    commit_observed_findings, commit_observed_findings_with_counts,
+    commit_observed_findings_with_status, emit_finding_delta, emit_persisted_finding_delta,
+    load_finding_review_gate, normalize_agent_json_findings, persist_tool_findings,
+    persist_tool_findings_to, persist_tool_findings_to_with_status, render_generic_findings_output,
     FindingReviewGate, GenericPersistedRun, ReviewConfirmation, ToolFindingsSink,
     MISSING_CONFIRMATION_GUIDANCE,
 };
@@ -74,8 +77,8 @@ pub use application::{
 };
 pub use application::{
     finding_page_anchor, finding_page_anchor_index, finding_page_continuity_anchor,
-    read_finding_page, FindingListPage, FindingPageAnchorMissing, FindingPageMetadata,
-    FindingPageOrder, FindingPageRequest,
+    read_finding_page, read_finding_page_snapshot, FindingListPage, FindingPageAnchorMissing,
+    FindingPageMetadata, FindingPageOrder, FindingPageRequest, FindingPageSnapshot,
 };
 #[cfg(test)]
 pub(crate) use domain::test_verified_receipt;
@@ -95,10 +98,10 @@ pub use domain::{
     PatchReverificationCaseKind, PatchReverificationFileHash, PatchReverificationReceipt,
     PatchReverificationStep, PatchReverificationTarget, PatchStatus, PersistedProofVerdict,
     PersistedSandboxBackend, PersistedVerification, ProofConfidence, RefuteReason, ReviewDecision,
-    ReviewDecisionPropagation, ReviewDecisionProvenance, ReviewDecisionRecord,
-    ReviewDecisionSubject, ReviewDecisionVerdict, Severity, StableLifecycleStatus,
-    StaticProofState, StaticProofStateEvent, TriageAuthor, TriageOutcome, TriageVerdict,
-    VerificationProvenance, VulnSource, PATCH_REVERIFICATION_RECEIPT_SCHEMA_VERSION,
+    ReviewDecisionCounts, ReviewDecisionPropagation, ReviewDecisionProvenance,
+    ReviewDecisionRecord, ReviewDecisionSubject, ReviewDecisionVerdict, Severity,
+    StableLifecycleStatus, StaticProofState, StaticProofStateEvent, TriageAuthor, TriageOutcome,
+    TriageVerdict, VerificationProvenance, VulnSource, PATCH_REVERIFICATION_RECEIPT_SCHEMA_VERSION,
 };
 pub(crate) use persistence::finding_stable_fp;
 pub use persistence::{

@@ -1,5 +1,14 @@
 use super::*;
 
+pub(crate) fn bounded_classifier_prompt(finding: &Finding) -> Result<String> {
+    let prompt = render_prompt(finding);
+    anyhow::ensure!(
+        prompt.len() <= 64 * 1024,
+        "Classifier metadata exceeds the 64 KiB prompt limit. No model request started."
+    );
+    Ok(prompt)
+}
+
 pub(crate) fn render_prompt(f: &Finding) -> String {
     format!(
         "tool       : {tool}\n\

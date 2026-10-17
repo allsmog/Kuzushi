@@ -37,14 +37,19 @@ impl AllowanceBinding {
 
     /// Nested dispatch may reuse its parent accounting, never replace it.
     pub fn require_same_work(&self, other: &Self) -> Result<()> {
-        let ledger_id = self.ledger.lock().ledger_id.clone();
-        anyhow::ensure!(
-            ledger_id == other.ledger.lock().ledger_id,
-            "cannot replace an inherited allowance ledger"
-        );
+        self.require_ledger(&other.ledger)?;
         anyhow::ensure!(
             self.work == other.work,
             "cannot replace inherited investigation work"
+        );
+        Ok(())
+    }
+
+    pub(crate) fn require_ledger(&self, ledger: &SpendLimiter) -> Result<()> {
+        let ledger_id = self.ledger.lock().ledger_id.clone();
+        anyhow::ensure!(
+            ledger_id == ledger.lock().ledger_id,
+            "cannot replace an inherited allowance ledger"
         );
         Ok(())
     }

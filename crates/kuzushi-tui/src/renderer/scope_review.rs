@@ -23,10 +23,7 @@ pub(super) fn render_scope_review(frame: &mut Frame<'_>, app: &ShellApp) -> bool
         Block::default()
             .borders(Borders::ALL)
             .border_style(theme::subtle())
-            .title(Line::styled(
-                format!(" {} ", scope_title(state, &scope_source_view(app, state))),
-                theme::heading(),
-            )),
+            .title(scope_title_line(app, state, area.width)),
         area,
     );
     render_scope_target(frame, state, area);
@@ -78,6 +75,20 @@ fn render_scope_source(
         )),
         Rect::new(area.x + 2, area.y + 2, area.width.saturating_sub(4), 1),
     );
+}
+
+fn scope_title_line(app: &ShellApp, state: &ScopeReviewState, width: u16) -> Line<'static> {
+    let Some(field) = state.menu_search.as_ref().filter(|_| state.menu.is_some()) else {
+        return Line::styled(
+            format!(" {} ", scope_title(state, &scope_source_view(app, state))),
+            theme::heading(),
+        );
+    };
+    let mut line = Line::styled(" Search: ", theme::label());
+    for content in field_editor_lines(field, width.saturating_sub(12) as usize, 1) {
+        line.spans.extend(content.spans);
+    }
+    line
 }
 
 fn render_scope_panels(
@@ -176,6 +187,7 @@ pub(super) fn scope_review_plain_lines(app: &ShellApp, width: usize) -> Option<V
         format!("Repository: {}", state.target.display()),
         scope_source_view(app, state).label().into(),
     ];
+    text.extend(scope_search_label(state));
     text.extend(scope_rows(state).0);
     text.extend(scope_detail_lines(
         state,

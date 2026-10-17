@@ -80,10 +80,10 @@ fn categorized_external_actions_cannot_inherit_parent_review_capacity() {
     };
     let binding = AllowanceBinding::new(open_ledger(&ctx).unwrap(), work.clone()).unwrap();
     let tool = registry.resolve_tool("ndiff:extract-fix-pattern").unwrap();
-    assert!(require_declared_effect_category(&tool, &binding).is_err());
+    assert!(require_inherited_work_category(&tool, &binding).is_err());
     work.work = InvestigationWork::Learning;
     let binding = AllowanceBinding::new(open_ledger(&ctx).unwrap(), work).unwrap();
-    require_declared_effect_category(&tool, &binding).unwrap();
+    require_inherited_work_category(&tool, &binding).unwrap();
 }
 
 pub(super) fn context<'a>(

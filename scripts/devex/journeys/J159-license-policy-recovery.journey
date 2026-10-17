@@ -14,17 +14,17 @@ submit: run license-scan:scan {"requireSpdxHeaders":false}
 require-live-snap: 35 license-scan: 1 finding | first-scan
 require-shell: python3 -B @REPO/scripts/devex/fixtures/license_audit.py @TMP_TARGET @ART first
 submit: run license-scan:scan {"requireSourceSpdxHeaders":false}
-require-live-snap: 35 run receipt | second-scan
 require-shell: python3 -B @REPO/scripts/devex/fixtures/license_audit.py @TMP_TARGET @ART second
+require-live-snap: 35 run receipt | second-scan
 submit: run license-scan:scan {"require_source_spdx_headers":false}
-require-live-snap: 35 run receipt | third-scan
 require-shell: python3 -B @REPO/scripts/devex/fixtures/license_audit.py @TMP_TARGET @ART third
+require-live-snap: 35 run receipt | third-scan
 submit: open F-0001
 require-live-snap: 25 Package manifest does not declare a license | actual-finding
 expect: signal-only
 ask: Do three explicit scanner repetitions produce one retained finding with real source evidence and distinct observations, while keeping generated analysis artifacts outside source policy?
 submit: decision deferred Owned license policy needs owner review
-require-live-snap: 25 Owned license policy needs owner review | deferred-finding
+require-live-snap: 25 recorded: deferred | deferred-finding
 expect: recorded: deferred
 require-shell: python3 -B @REPO/scripts/devex/fixtures/license_audit.py @TMP_TARGET @ART deferred
 resize: 160x48
@@ -37,11 +37,11 @@ resize: 60x20
 live-snap: review-60x20
 nav-mode:
 keys: Enter
-require-live-snap: 25 SELECTED FINDING | finding-reader
+require-live-snap: 25 F-0001 · FINDING | finding-reader
 resize: 40x12
 live-snap: review-40x12
 expect: F-0001
-expect: PgUp/PgDn scroll
+expect: PgUp/PgDn read
 keys: NPage
 live-snap: finding-page-1-40x12
 keys: NPage
@@ -55,7 +55,7 @@ live-snap: finding-page-5-40x12
 keys: NPage
 live-snap: finding-page-6-40x12
 expect: F-0001
-expect: PgUp/PgDn scroll
+expect: PgUp/PgDn read
 ask: Are the real policy observation, signal-only evidence and scripted deferral readable through normal Review controls across six terminal sizes without claiming a verified vulnerability?
 resize: 120x36
 keys: q

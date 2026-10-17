@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use serde_json::{json, Map, Value};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -10,6 +11,22 @@ pub(crate) struct ScopeUpdate {
     pub(crate) profile: Option<String>,
     pub(crate) data_classes: Option<Vec<String>>,
     pub(crate) integrations: Option<Vec<String>>,
+}
+
+impl ScopeUpdate {
+    pub(crate) fn is_empty(&self) -> bool {
+        [
+            self.vendor_name.is_none(),
+            self.product_name.is_none(),
+            self.primary_domain.is_none(),
+            self.use_case.is_none(),
+            self.profile.is_none(),
+            self.data_classes.is_none(),
+            self.integrations.is_none(),
+        ]
+        .into_iter()
+        .all(|empty| empty)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -35,10 +52,13 @@ pub(crate) fn empty_scope() -> Value {
     })
 }
 
-pub(crate) fn merge_scope_inputs(mut scope: Value, update: &ScopeUpdate) -> Value {
-    let Value::Object(ref mut object) = scope else {
-        return empty_scope();
-    };
+pub(crate) fn merge_scope_inputs(mut scope: Value, update: &ScopeUpdate) -> Result<Value> {
+    if update.is_empty() {
+        return Ok(scope);
+    }
+    let object = scope
+        .as_object_mut()
+        .context("vendor scope must be a JSON object")?;
     insert_string_update(object, "vendorName", &update.vendor_name);
     insert_string_update(object, "productName", &update.product_name);
     insert_string_update(object, "primaryDomain", &update.primary_domain);
@@ -47,7 +67,7 @@ pub(crate) fn merge_scope_inputs(mut scope: Value, update: &ScopeUpdate) -> Valu
     insert_array_update(object, "dataClasses", &update.data_classes);
     insert_array_update(object, "integrations", &update.integrations);
     object.insert("updatedAt".to_string(), json!(unix_millis()));
-    scope
+    Ok(scope)
 }
 
 fn insert_string_update(object: &mut Map<String, Value>, key: &str, value: &Option<String>) {

@@ -1,4 +1,5 @@
 use crate::{LogLine, ShellApp};
+mod command_echo;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TranscriptModel {
@@ -43,6 +44,18 @@ pub(crate) struct LogsModel {
 }
 
 pub(crate) fn logs_model(app: &ShellApp) -> LogsModel {
+    build_logs_model(app, app.router.logs().command_text_expanded())
+}
+
+pub(crate) fn plain_logs_lines(app: &ShellApp) -> Vec<String> {
+    let model = build_logs_model(app, true);
+    let mut lines = vec!["LOGS".into(), model.summary];
+    lines.extend(model.notice);
+    lines.extend(model.rows.into_iter().map(plain_transcript_row));
+    lines
+}
+
+fn build_logs_model(app: &ShellApp, expanded: bool) -> LogsModel {
     let route = app.router.logs();
     let history = route.history();
     let live = app.log_lines();
@@ -57,7 +70,12 @@ pub(crate) fn logs_model(app: &ShellApp) -> LogsModel {
     LogsModel {
         summary: logs_summary(total, earlier.len(), lines.len(), route.query()),
         notice: logs_notice(history.error(), lines.is_empty(), route.query()),
-        rows: transcript_rows_all(&lines),
+        rows: command_echo::rows(
+            &lines,
+            expanded,
+            route.reader_open(),
+            route.query().is_some(),
+        ),
     }
 }
 

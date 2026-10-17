@@ -6,7 +6,7 @@ pub(crate) fn reader_area(full: Rect) -> Rect {
         full.x + 1,
         full.y + 1,
         full.width.saturating_sub(2),
-        full.height.saturating_sub(3),
+        full.height.saturating_sub(2 + footer_rows(full.width)),
     )
 }
 
@@ -27,6 +27,7 @@ pub(super) fn render(frame: &mut Frame<'_>, app: &ShellApp) -> bool {
         full,
     );
     let area = reader_area(full);
+    let footer_height = footer_rows(full.width).min(full.height.saturating_sub(2));
     let lines = super::views::pinned_document_viewport_lines(
         logs_lines(app, area),
         area.height,
@@ -35,15 +36,34 @@ pub(super) fn render(frame: &mut Frame<'_>, app: &ShellApp) -> bool {
     );
     frame.render_widget(Paragraph::new(lines), area);
     frame.render_widget(
-        Paragraph::new(reader_controls(area.width)).style(theme::muted()),
-        Rect::new(area.x, full.bottom().saturating_sub(2), area.width, 1),
+        Paragraph::new(reader_controls(
+            area.width,
+            app.router.logs().command_text_expanded(),
+        ))
+        .style(theme::muted()),
+        Rect::new(
+            area.x,
+            full.bottom().saturating_sub(footer_height + 1),
+            area.width,
+            footer_height,
+        ),
     );
     true
 }
 
-fn reader_controls(width: u16) -> &'static str {
-    if width < 60 {
-        return "PgUp/Dn · Esc back · Ctrl+G palette";
+fn footer_rows(width: u16) -> u16 {
+    if width < 82 {
+        2
+    } else {
+        1
     }
-    "↑↓ / PgUp/Dn · Home/End · Esc back · Ctrl+G palette"
+}
+
+fn reader_controls(width: u16, expanded: bool) -> &'static str {
+    match (width < 80, expanded) {
+        (true, false) => "c read commands · PgUp/Dn · Esc back\n↑↓ · Home/End · Ctrl+G palette",
+        (true, true) => "c fold commands · PgUp/Dn · Esc back\n↑↓ · Home/End · Ctrl+G palette",
+        (false, false) => "c read commands · ↑↓ / PgUp/Dn · Home/End · Esc back · Ctrl+G palette",
+        (false, true) => "c fold commands · ↑↓ / PgUp/Dn · Home/End · Esc back · Ctrl+G palette",
+    }
 }

@@ -1,0 +1,88 @@
+name: Chunked analysis refuses unused standard controls and keeps local planning auxiliary
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/strategy_consumers.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+submit: run agentic-sast:scan {"strategy":"chunked","includePatterns":["owned.c"]}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/strategy_consumers.py @TMP_TARGET @ART include
+require-live-snap: 25 option includePatterns requires strategy=standard | include-refused
+submit: run agentic-sast:scan {"strategy":"chunked","max_model_turns":20}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/strategy_consumers.py @TMP_TARGET @ART turns
+require-live-snap: 25 option maxModelTurns requires strategy=standard | turn-limit-refused
+submit: use agentic-sast
+submit: options agentic-sast:scan
+submit: setg max_inventory_files 80
+submit: logs
+submit: run agentic-sast:scan {"strategy":"chunked"}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/strategy_consumers.py @TMP_TARGET @ART stored
+paste-file: @ART/refusal-replay.txt
+keys: Enter
+require-live-snap: 25 REPLAY · Summary | stored-refusal
+expect: option maxInventoryFiles requires strategy=standard
+expect: No model request started.
+resize: 160x48
+live-snap: refusal-160x48
+resize: 96x89
+live-snap: refusal-96x89
+resize: 80x24
+live-snap: refusal-80x24
+resize: 60x20
+live-snap: refusal-60x20
+resize: 40x12
+live-snap: refusal-40x12
+expect: Tab receipt
+keys: NPage
+wait: 0.2
+live-snap: refusal-reading-40x12
+ask: Across six sizes, does the refusal identify the supplied limit, explain strategy ownership and make clear that no model request started?
+resize: 120x36
+keys: Escape
+submit: options agentic-sast:scan
+submit: unsetg maxInventoryFiles
+submit: logs
+submit: run agentic-sast:scan {"strategy":"chunked","excludePatterns":["other.c"]}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/strategy_consumers.py @TMP_TARGET @ART exclude
+require-live-snap: 25 option excludePatterns requires strategy=standard | exclusion-refused
+require-shell: python3 -B @REPO/scripts/devex/fixtures/strategy_consumers.py @TMP_TARGET @ART cleared
+submit: run full-mode:hunt {"dryRun":true,"scopeFile":"scope.txt","reuseCachedChunks":false}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/strategy_consumers.py @TMP_TARGET @ART planned
+paste-file: @ART/plan-replay.txt
+keys: Enter
+require-live-snap: 25 Outcome · completed | local-plan
+expect: Planning only
+expect: Cache reuse: disabled
+ask: Is the local scope plan clearly separate from the refused scan requests, with exactly the selected source and no permission for model work?
+keys: Escape
+submit: report
+require-live-snap: 25 Displayed Scan: blocked | auxiliary-plan-report
+expect: 0 findings
+expect-not: Displayed Scan: completed
+keys: Home
+keys: j j j
+require-live-snap: 20 format json (4/6) | export-format
+keys: Enter
+require-live-snap: 25 EXPORTED | exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/strategy_consumers.py @TMP_TARGET @ART exported
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: logs
+paste-file: @ART/refusal-replay.txt
+keys: Enter
+require-live-snap: 25 option maxInventoryFiles requires strategy=standard | recovered-refusal
+submit: report
+require-live-snap: 25 Displayed Scan: blocked | recovered-report
+expect: 0 findings
+require-shell: python3 -B @REPO/scripts/devex/fixtures/strategy_consumers.py @TMP_TARGET @ART restarted
+ask: Does no-color restart preserve the cleared setting, four refusals and auxiliary plan without implying a completed scan or starting more work?
+keys: C-c
+require-exit: 10

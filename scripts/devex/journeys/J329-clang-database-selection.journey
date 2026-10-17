@@ -1,0 +1,131 @@
+name: Selected compiler input drives real source-only clangd and survives source drift
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_AGENT_MCPS KUZUSHI_MCP_CLANG_BIN
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/clang_database.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: options uaf-hunt:hunt
+require-live-snap: 20 uaf-hunt:hunt | compiler-options
+keys: Down Down Down Down Down
+require-live-snap: 20 Key: externalCompileCommandsPath | external-compiler-option
+ask: Is the separate out-of-tree compiler-file option understandable, with bounded private copying and no implied Scan completion?
+submit: logs
+paste-file: @ART/unbound-command.txt
+keys: Enter
+require-live-snap: 25 approved investigation allowance | unbound-refused
+require-shell: python3 -B @REPO/scripts/devex/fixtures/clang_database.py @TMP_TARGET @ART unbound
+paste-file: @ART/approval-command.txt
+keys: Enter
+require-live-snap: 25 REVIEW ALLOWANCE | allowance
+expect: Total provider calls: 5
+expect: Protected review calls: 1
+resize: 40x12
+keys: End
+require-live-snap: 20 y approve | allowance-40x12
+keys: y
+resize: 120x36
+require-live-snap: 25 Allowance approved | approved
+paste-file: @ART/generate-command.txt
+keys: Enter
+require-live-snap: 40 UAF source analysis: 0 candidates | completed-source-analysis
+require-shell: python3 -B @REPO/scripts/devex/fixtures/clang_database.py @TMP_TARGET @ART generated
+keys: Escape
+paste-file: @ART/replay-command.txt
+keys: Enter
+require-live-snap: 25 SAVED OUTPUT | result-120x36
+expect: Compiler commands: 1
+expect: cost unavailable
+resize: 160x48
+live-snap: result-160x48
+resize: 96x89
+live-snap: result-96x89
+resize: 80x24
+live-snap: result-80x24
+resize: 60x20
+live-snap: result-60x20
+expect: 0 candidates
+resize: 40x12
+keys: Home
+require-live-snap: 20 REPLAY · Result | result-40x12
+expect: 0 candidates
+expect: Outcome · completed
+expect: cost unavailable
+expect: Workspace 0 findings
+keys: Tab
+require-live-snap: 20 FROZEN COMPILER CONFIGURATION | inputs-40x12
+resize: 120x36
+keys: Home
+require-live-snap: 20 Source SHA-256 | inputs-120x36
+expect: Commands: 1
+resize: 160x48
+live-snap: inputs-160x48
+resize: 96x89
+live-snap: inputs-96x89
+resize: 80x24
+live-snap: inputs-80x24
+resize: 60x20
+live-snap: inputs-60x20
+resize: 40x12
+keys: Home
+live-snap: inputs-restored-40x12
+keys: End
+require-live-snap: 20 Safe terminal display | inputs-end-40x12
+keys: PPage
+require-live-snap: 20 receipt omits | inputs-omissions-40x12
+keys: NPage
+require-live-snap: 20 model prompt | inputs-tail-40x12
+keys: Tab
+require-live-snap: 20 REPLAY · Receipt | receipt-40x12
+keys: Tab
+keys: Home
+require-live-snap: 20 0 candidates | result-restored-40x12
+ask: Do the result and compiler receipt distinguish completed local navigation, zero unverified candidates, unknown cost and captured compiler identity at all six sizes, including omitted commands and model prompt?
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/clang_database.py @TMP_TARGET @ART headless @TMP_HOME
+submit: logs
+paste-file: @ART/status-command.txt
+keys: Enter
+require-live-snap: 25 Calls committed: 4/5 | shared-headless-budget
+paste-file: @ART/replay-command.txt
+keys: Enter
+require-live-snap: 25 SAVED OUTPUT | headless-result
+expect: Compiler commands: 1
+expect: calls 4/5 at read
+submit: logs
+paste-file: @ART/exhausted-command.txt
+keys: Enter
+require-live-snap: 25 allowance exhausted: 4 calls committed | exhausted
+require-shell: python3 -B @REPO/scripts/devex/fixtures/clang_database.py @TMP_TARGET @ART exhausted
+keys: C-c
+require-exit: 15
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: logs
+paste-file: @ART/status-command.txt
+keys: Enter
+require-live-snap: 25 Calls committed: 4/5 | recovered-budget
+require-shell: python3 -B @REPO/scripts/devex/fixtures/clang_database.py @TMP_TARGET @ART restarted
+paste-file: @ART/replay-command.txt
+keys: Enter
+require-live-snap: 25 SAVED OUTPUT | recovered-result
+resize: 40x12
+keys: Home
+require-live-snap: 20 0 candidates | no-color-result-40x12
+keys: Tab
+keys: Home
+require-live-snap: 20 FROZEN COMPILER CONFIGURATION | no-color-inputs-40x12
+keys: End
+require-live-snap: 20 Safe terminal display | no-color-inputs-end-40x12
+keys: PPage
+require-live-snap: 20 receipt omits | no-color-inputs-omissions-40x12
+keys: NPage
+require-live-snap: 20 model prompt | no-color-inputs-tail-40x12
+ask: Does no-color restart retain the original compiler receipt and protected Review accounting despite the original database changing, without new requests or accepted findings?
+keys: C-c
+require-exit: 15

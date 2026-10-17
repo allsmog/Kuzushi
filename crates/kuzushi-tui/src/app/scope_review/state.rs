@@ -13,6 +13,7 @@ pub(crate) struct ScopeReviewState {
     pub study_scope_ids: std::collections::BTreeSet<String>,
     pub scroll: usize,
     pub menu: Option<usize>,
+    pub menu_search: Option<FieldEditor>,
     pub merge_target: Option<usize>,
     pub form: Option<ScopeEditForm>,
     pub new_scope_draft: Option<ScopeEditForm>,
@@ -34,6 +35,7 @@ impl ScopeReviewState {
             study_scope_ids: Default::default(),
             scroll: 0,
             menu: None,
+            menu_search: None,
             merge_target: None,
             form: None,
             new_scope_draft: None,
@@ -63,6 +65,7 @@ impl ScopeReviewState {
         self.pending = None;
         self.form = None;
         self.menu = None;
+        self.menu_search = None;
         self.merge_target = None;
         self.accepting = false;
         self.acknowledgements = Default::default();

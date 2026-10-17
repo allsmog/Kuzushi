@@ -12,6 +12,7 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 
 use crate::clangd::ClangdClient;
+use kuzushi_mcp_common::compile_database::CompileDatabaseSnapshot;
 
 pub(crate) const PROBES: &[(&str, &[&str])] =
     &[("clangd", &["--version"]), ("clang", &["--version"])];
@@ -120,10 +121,14 @@ impl ClangdHandle {
         }
     }
 
-    pub(crate) async fn for_repo(&self, repo: &AuthorizedDirectory) -> Result<Arc<ClangdClient>> {
+    pub(crate) async fn for_repo(
+        &self,
+        repo: &AuthorizedDirectory,
+        database: Option<Arc<CompileDatabaseSnapshot>>,
+    ) -> Result<Arc<ClangdClient>> {
         repo.verify_unchanged()?;
         let mut guard = self.client.lock().await;
-        clangd_client_for_guard(&mut guard, repo).await
+        clangd_client_for_guard(&mut guard, repo, database).await
     }
 }
 
@@ -138,12 +143,13 @@ impl Default for ClangdHandle {
 pub(crate) async fn clangd_client_for_guard(
     guard: &mut Option<(PathBuf, Arc<ClangdClient>)>,
     repo: &AuthorizedDirectory,
+    database: Option<Arc<CompileDatabaseSnapshot>>,
 ) -> Result<Arc<ClangdClient>> {
     let canonical = repo.path().to_path_buf();
-    if let Some(client) = cached_clangd_client(guard, &canonical).await {
+    if let Some(client) = cached_clangd_client(guard, &canonical, database.as_deref()).await {
         return Ok(client);
     }
-    let client = start_clangd_client(repo).await?;
+    let client = start_clangd_client(repo, database).await?;
     *guard = Some((canonical, client.clone()));
     Ok(client)
 }
@@ -151,20 +157,34 @@ pub(crate) async fn clangd_client_for_guard(
 pub(crate) async fn cached_clangd_client(
     guard: &mut Option<(PathBuf, Arc<ClangdClient>)>,
     canonical: &Path,
+    database: Option<&CompileDatabaseSnapshot>,
 ) -> Option<Arc<ClangdClient>> {
     let Some((existing, client)) = guard.as_ref() else {
         return None;
     };
-    if existing == canonical && client.is_running().await {
+    if same_clangd_configuration(existing, canonical, client, database) && client.is_running().await
+    {
         return Some(client.clone());
     }
     let _ = client.shutdown().await;
     None
 }
 
-pub(crate) async fn start_clangd_client(repo: &AuthorizedDirectory) -> Result<Arc<ClangdClient>> {
+fn same_clangd_configuration(
+    existing: &Path,
+    requested: &Path,
+    client: &ClangdClient,
+    database: Option<&CompileDatabaseSnapshot>,
+) -> bool {
+    existing == requested && client.uses_database(database)
+}
+
+pub(crate) async fn start_clangd_client(
+    repo: &AuthorizedDirectory,
+    database: Option<Arc<CompileDatabaseSnapshot>>,
+) -> Result<Arc<ClangdClient>> {
     let canonical = repo.path();
-    let client = Arc::new(ClangdClient::spawn(repo.try_clone()?).await?);
+    let client = Arc::new(ClangdClient::spawn(repo.try_clone()?, database).await?);
     client.initialize(canonical).await?;
     Ok(client)
 }

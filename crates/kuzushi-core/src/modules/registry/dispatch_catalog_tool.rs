@@ -362,7 +362,9 @@ pub(in crate::modules) fn list_findings_tool(
         crate::findings::IdentityFoldPolicy::Legacy,
         &request,
     )?;
-    Ok(page.to_tool_json())
+    let mut result = page.to_tool_json();
+    result["data"]["batchId"] = serde_json::json!(filter.batch_id);
+    Ok(result)
 }
 
 pub(in crate::modules) fn dismiss_finding_tool(
@@ -482,6 +484,7 @@ fn native_scanner_tool(name: &str) -> bool {
             | "codeql:scan"
             | "iac-scan:scan"
             | "cargo-audit:scan"
+            | "govulncheck:scan"
             | "license-scan:scan"
             | "sbom-scan:scan"
             | "exploit-chain:scan"
@@ -658,16 +661,8 @@ pub(in crate::modules) fn dispatch_agentic_security_tool(
         }
         "pipeline:taint-cwe-select" => Some(run_taint_cwe_select(input.clone(), ctx, runtime)),
         "taint-iris:hunt" => Some(run_taint_iris_tool(input, ctx, runtime)),
-        "taint-iris-next:hunt" => Some(run_taint_iris_next_tool(input, ctx, runtime)),
-        "taint-iris-next:dataflow-plan" => Some(run_taint_iris_next_plan_tool(input, ctx)),
-        "taint-iris-next:source-sink-trace" => Some(run_taint_iris_next_trace_tool(input, ctx)),
-        "taint-iris-next:finding-review" => {
-            Some(run_taint_iris_next_review_tool(input, ctx, runtime))
-        }
-        "taint-iris-next:catalog" => Some(run_taint_iris_next_catalog_tool(input, ctx, runtime)),
-        "taint-iris-next:import-sinks" => Some(run_taint_iris_next_import_sinks_tool(input, ctx)),
-        "taint-iris-next:codeql-db" => {
-            Some(run_taint_iris_next_codeql_db_tool(input, ctx, runtime))
+        name if name.starts_with("taint-iris-next:") => {
+            dispatch_taint_next(name, input, ctx, runtime)
         }
         _ => None,
     }
@@ -685,19 +680,7 @@ fn run_chunked_agentic_sast_tool(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    if agentic_sast_focus_requested(input) {
-        anyhow::bail!(
-            "agentic-sast:scan option focus is not supported with strategy=chunked; rerun with strategy=standard"
-        );
-    }
     run_full_mode_hunt_tool(input.clone(), ctx, runtime)
-}
-
-fn agentic_sast_focus_requested(input: &Value) -> bool {
-    input
-        .get("focus")
-        .and_then(Value::as_str)
-        .is_some_and(|focus| !focus.trim().is_empty())
 }
 
 pub(in crate::modules) fn run_agentic_sast_tool(
@@ -712,4 +695,32 @@ pub(in crate::modules) fn run_agentic_sast_tool(
         &target,
         || Ok(run_agentic_sast_report(input, ctx, runtime)?.to_tool_json()),
     )
+}
+
+fn dispatch_taint_next(
+    name: &str,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Option<Result<Value>> {
+    match name {
+        "taint-iris-next:hunt" => Some(run_taint_iris_next_tool(input, ctx, runtime)),
+        "taint-iris-next:dataflow-plan" => Some(run_taint_iris_next_plan_tool(input, ctx)),
+        "taint-iris-next:source-sink-trace" => Some(run_taint_iris_next_trace_tool(input, ctx)),
+        "taint-iris-next:finding-review" => {
+            Some(run_taint_iris_next_review_tool(input, ctx, runtime))
+        }
+        "taint-iris-next:catalog" => Some(run_taint_iris_next_catalog_tool(input, ctx, runtime)),
+        "taint-iris-next:catalog-read" => Some(
+            crate::capabilities::taint_iris_next::read_catalog_draft(input, ctx),
+        ),
+        "taint-iris-next:catalog-accept" => Some(
+            crate::capabilities::taint_iris_next::accept_catalog_draft(input, ctx),
+        ),
+        "taint-iris-next:import-sinks" => Some(run_taint_iris_next_import_sinks_tool(input, ctx)),
+        "taint-iris-next:codeql-db" => {
+            Some(run_taint_iris_next_codeql_db_tool(input, ctx, runtime))
+        }
+        _ => None,
+    }
 }

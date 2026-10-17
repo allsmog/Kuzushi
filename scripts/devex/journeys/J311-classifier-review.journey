@@ -1,0 +1,132 @@
+name: Metadata scores preserve review authority and a finite allowance
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_AGENT_MCPS
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/classifier_review.py @TMP_TARGET @ART prepare @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: findings
+nav-mode:
+keys: Enter
+submit: decision fp Owned public example is not an active credential
+require-shell: python3 -B @REPO/scripts/devex/fixtures/classifier_review.py @TMP_TARGET @ART decided
+submit: options classifier-gate:score
+require-live-snap: 25 Experimental | experimental-score
+submit: logs
+paste-file: @ART/unbound-command.txt
+keys: Enter
+require-live-snap: 25 approved investigation allowance | unbound-refused
+require-shell: python3 -B @REPO/scripts/devex/fixtures/classifier_review.py @TMP_TARGET @ART unbound
+paste-file: @ART/approve-command.txt
+keys: Enter
+require-live-snap: 25 REVIEW ALLOWANCE | allowance-review
+expect: Total provider calls: 4
+expect: Protected review calls: 4
+resize: 160x48
+live-snap: allowance-160x48
+resize: 96x89
+live-snap: allowance-96x89
+resize: 80x24
+live-snap: allowance-80x24
+resize: 60x20
+live-snap: allowance-60x20
+resize: 40x12
+live-snap: allowance-40x12
+keys: End
+require-live-snap: 20 y approve | allowance-controls-40x12
+ask: Can you read the four-call metadata allowance, selected model, protected Review category and unknown dollars at all six sizes without approving further investigation?
+keys: y
+resize: 120x36
+require-live-snap: 25 Allowance approved | allowance-approved
+paste-file: @ART/invalid-command.txt
+keys: Enter
+require-live-snap: 25 targetPercentile | invalid-percentile
+require-shell: python3 -B @REPO/scripts/devex/fixtures/classifier_review.py @TMP_TARGET @ART invalid
+paste-file: @ART/empty-command.txt
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/classifier_review.py @TMP_TARGET @ART empty
+paste-file: @ART/partial-replay.txt
+keys: Enter
+require-live-snap: 25 Classifier unscored | partial-opinion
+expect: Outcome · partial
+resize: 160x48
+live-snap: partial-160x48
+resize: 96x89
+live-snap: partial-96x89
+resize: 80x24
+live-snap: partial-80x24
+resize: 60x20
+live-snap: partial-60x20
+resize: 40x12
+live-snap: partial-40x12
+expect: Classifier unscored
+keys: Tab
+live-snap: partial-full-40x12
+keys: NPage
+live-snap: partial-reading-40x12
+keys: NPage
+live-snap: partial-reading-40x12-2
+keys: NPage
+live-snap: partial-reading-40x12-3
+keys: NPage
+live-snap: partial-reading-40x12-4
+keys: NPage
+live-snap: partial-reading-40x12-5
+keys: NPage
+live-snap: partial-reading-40x12-6
+keys: NPage
+live-snap: partial-reading-40x12-7
+keys: NPage
+live-snap: partial-reading-40x12-8
+ask: Is the missing score clearly partial and distinct from a false-positive decision, with complete metadata limitations reachable by paging and no follow-up starting?
+resize: 120x36
+keys: Escape
+submit: logs
+paste-file: @ART/zero-command.txt
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/classifier_review.py @TMP_TARGET @ART zero
+paste-file: @ART/zero-replay.txt
+keys: Enter
+require-live-snap: 25 Classifier score 0.000 | exact-zero
+keys: Escape
+submit: logs
+paste-file: @ART/different-command.txt
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/classifier_review.py @TMP_TARGET @ART different
+paste-file: @ART/bad-command.txt
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/classifier_review.py @TMP_TARGET @ART bad
+paste-file: @ART/status-command.txt
+keys: Enter
+submit: logs
+require-live-snap: 25 Calls committed: 4/4 | retained-accounting
+paste-file: @ART/exhausted-command.txt
+keys: Enter
+require-live-snap: 25 allowance exhausted | limit-refused
+require-shell: python3 -B @REPO/scripts/devex/fixtures/classifier_review.py @TMP_TARGET @ART exhausted
+submit: report
+require-live-snap: 25 Finding review completeness does not describe repository coverage. | retained-report
+expect: TP: 0
+keys: Home
+keys: j j j
+require-live-snap: 20 format json (4/6) | export-format
+keys: Enter
+require-live-snap: 25 EXPORTED | exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/classifier_review.py @TMP_TARGET @ART exported
+keys: C-c
+require-exit: 10
+env: NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/status-command.txt
+keys: Enter
+submit: logs
+require-live-snap: 25 Calls committed: 4/4 | recovered-accounting
+require-shell: python3 -B @REPO/scripts/devex/fixtures/classifier_review.py @TMP_TARGET @ART restarted
+ask: Does restart retain the human false-positive decision, exact zero score, separate percentile samples and exhausted allowance without new Review completion or follow-up work?
+keys: C-c
+require-exit: 10

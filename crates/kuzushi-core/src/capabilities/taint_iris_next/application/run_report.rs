@@ -153,14 +153,31 @@ pub(crate) fn run_taint_iris_next_hunt(
     )?;
     drop(_trace_scope);
     apply_taint_iris_next_whitebox_profile(input, &mut agent)?;
-    let persisted = persist_taint_iris_next_findings(&target, &agent.findings, ctx)?;
+    finish_taint_iris_next_hunt(ctx, target, plan, evidence, agent_prompt, &agent)
+}
+
+fn finish_taint_iris_next_hunt(
+    ctx: &ToolExecutionContext<'_>,
+    target: &Path,
+    plan: &TaintIrisNextPlan,
+    evidence: &TaintIrisNextEvidenceResult,
+    agent_prompt: &str,
+    agent: &TaintIrisNextAgentResult,
+) -> Result<TaintIrisNextReport> {
+    let terminal = if agent.structured_output_valid {
+        crate::run_lifecycle::RunItemStatus::Completed
+    } else {
+        crate::run_lifecycle::RunItemStatus::Failed
+    };
+    let persisted = persist_taint_iris_next_findings(target, &agent.findings, ctx, terminal)?;
     let output = render_taint_iris_next_output(&plan, &evidence, Some(&agent));
     let status = taint_iris_next_hunt_status(&agent);
     let data = taint_iris_next_hunt_data(&plan, &evidence, status, &agent_prompt, &agent);
     emit_taint_iris_next_done(
         ctx,
         format!(
-            "taint-iris-next:hunt complete · {} findings",
+            "taint-iris-next:hunt {} · {} retained observations",
+            terminal.label(),
             agent.findings.len()
         ),
     );

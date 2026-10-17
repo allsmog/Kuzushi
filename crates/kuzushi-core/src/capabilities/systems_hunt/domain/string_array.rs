@@ -77,6 +77,7 @@ pub(crate) fn empty_context() -> SystemsContextOutput {
             codeql_db_path: None,
             bash_probing_used: false,
             systems_source_files: 1,
+            inspection: None,
         },
     }
 }

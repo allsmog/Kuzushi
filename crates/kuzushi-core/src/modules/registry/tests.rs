@@ -2841,7 +2841,7 @@ process.stdin.on("end", () => {
         assert!(threat_intel_research.options.iter().any(|option| {
             option.name == "maxCves"
                 && option.option_type == OptionType::Int
-                && option.default == Some(json!(20))
+                && option.default == Some(json!(8))
         }));
 
         let threat_model_read = registry.resolve_tool("threat-model:read").unwrap();
@@ -2923,21 +2923,25 @@ process.stdin.on("end", () => {
                 .modules()
                 .any(|module| module.metadata().id == "prompt-armor")
         );
+        assert!(registry.resolve_tool("recon:nmap").is_some());
         assert!(tools
             .as_array()
             .unwrap()
             .iter()
-            .any(|tool| tool["name"] == "recon:nmap"));
+            .all(|tool| tool["name"] != "recon:nmap"));
         assert!(tools
             .as_array()
             .unwrap()
             .iter()
             .all(|tool| tool["name"] != "smoke:next-step"));
+        assert!(registry
+            .resolve_tool("offense-review:threat-hunt")
+            .is_some());
         assert!(tools
             .as_array()
             .unwrap()
             .iter()
-            .any(|tool| tool["name"] == "offense-review:threat-hunt"));
+            .all(|tool| tool["name"] != "offense-review:threat-hunt"));
         assert!(tools
             .as_array()
             .unwrap()
@@ -3379,7 +3383,7 @@ process.stdin.on("end", () => {
         let registry = ModuleRegistry::with_v2_builtins_without_optional_adapters();
         assert_eq!(
             registry.tools.len(),
-            185,
+            189,
             "reviewed built-in policy tuple count"
         );
         let rows = registry
@@ -3396,7 +3400,14 @@ process.stdin.on("end", () => {
             .filter(|tool| {
                 !matches!(
                     tool.name.as_str(),
-                    "campaign:review-study" | "findings:review-source" | "threat-model:ask" | "planner:propose"
+                    "campaign:review-study"
+                        | "findings:review-source"
+                        | "findings:goal-assess"
+                        | "findings:goals"
+                        | "threat-model:ask"
+                        | "planner:propose"
+                        | "taint-iris-next:catalog-read"
+                        | "taint-iris-next:catalog-accept"
                 )
             })
             .map(builtin_policy_row_before_catalog_preview)
@@ -3405,14 +3416,110 @@ process.stdin.on("end", () => {
         assert_eq!(
             blake3::hash(prior_rows.as_bytes()).to_hex().as_str(),
             "7dc0c5debb19e4bdf769ea334c10b02c8572886e47bdef83f1b2dc5b4f140519",
-            "Existing policy tuples must remain unchanged apart from the reviewed catalog-preview runtime and advisory-search phase declarations"
+            "Existing policy tuples must remain unchanged apart from reviewed declarations. Current fingerprint: {fingerprint}. Prior-compatible rows:\n{prior_rows}"
         );
 
         assert_eq!(
             fingerprint,
-            "edc056ee9db6d16651892b852558e857baced59124bcaed7bb58f5c939cb7c14",
+            "175b006df1cedbbd4ef1ac43d803f12cc32c36ab45f98e3e681243648c4bba3d",
             "built-in policy inventory changed; review every added/renamed tuple before updating the fingerprint:\n{rows}"
         );
+    }
+
+    #[test]
+    fn bounded_investigation_policy_additions_have_explicit_contracts() {
+        let registry = ModuleRegistry::with_v2_builtins_without_optional_adapters();
+        for (name, phase, runtime, effect, approval, findings) in [
+            (
+                "campaign:review-study",
+                "review",
+                "never",
+                "workspace-write",
+                "none",
+                "required",
+            ),
+            (
+                "findings:review-source",
+                "review",
+                "never",
+                "workspace-write",
+                "explicit",
+                "required",
+            ),
+            (
+                "findings:goal-assess",
+                "review",
+                "never",
+                "workspace-write",
+                "none",
+                "required",
+            ),
+            (
+                "findings:goals",
+                "review",
+                "never",
+                "read",
+                "none",
+                "required",
+            ),
+            (
+                "threat-model:ask",
+                "map",
+                "always",
+                "workspace-write",
+                "none",
+                "optional",
+            ),
+            (
+                "planner:propose",
+                "map",
+                "always",
+                "workspace-write",
+                "none",
+                "optional",
+            ),
+            (
+                "taint-iris-next:catalog-read",
+                "map",
+                "never",
+                "read",
+                "none",
+                "optional",
+            ),
+            (
+                "taint-iris-next:catalog-accept",
+                "map",
+                "never",
+                "workspace-write",
+                "explicit",
+                "optional",
+            ),
+        ] {
+            let tool = registry.resolve_tool(name).unwrap();
+            let row: Value = serde_json::from_str(&builtin_policy_row(tool)).unwrap();
+            assert_eq!(
+                row,
+                json!({"name":name,"headless":true,"runtime":runtime,"phase":phase,
+                "effect":effect,"approval":approval,"workspace":"required","findingStore":findings}),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn builtin_tools_have_unique_canonical_option_names() {
+        let registry = ModuleRegistry::with_v2_builtins_without_optional_adapters();
+        for tool in registry.tools.values() {
+            let mut names = std::collections::BTreeSet::new();
+            for option in &tool.options {
+                assert!(
+                    names.insert(&option.name),
+                    "{} repeats option {}",
+                    tool.name,
+                    option.name
+                );
+            }
+        }
     }
 
     #[test]
@@ -3482,6 +3589,10 @@ process.stdin.on("end", () => {
 
     fn builtin_policy_row_before_catalog_preview(tool: &ToolDescriptor) -> String {
         let mut prior = tool.clone();
+        if prior.name == "vendor-assessment:assess" {
+            assert_eq!(prior.phase, ToolPhase::Review);
+            prior.phase = ToolPhase::Scan;
+        }
         if prior.name == "threat-intel:apply" {
             assert_eq!(prior.runtime_requirement, RuntimeRequirement::InputAware);
             prior.runtime_requirement = RuntimeRequirement::Always;
@@ -3490,6 +3601,77 @@ process.stdin.on("end", () => {
             assert_eq!(prior.phase, ToolPhase::Scan);
             prior.phase = ToolPhase::Map;
         }
+        if prior.name == "pipeline:taint-cwe-select" {
+            assert_eq!(prior.runtime_requirement, RuntimeRequirement::InputAware);
+            assert_eq!(prior.workspace_requirement, WorkspaceRequirement::Required);
+            prior.runtime_requirement = RuntimeRequirement::Never;
+            prior.workspace_requirement = WorkspaceRequirement::Optional;
+        }
+        if prior.name == "systems-hunt:systems-context-gatherer" {
+            assert_eq!(prior.phase, ToolPhase::Map);
+            assert_eq!(prior.effect, ToolEffect::Read);
+            prior.phase = ToolPhase::Scan;
+            prior.effect = ToolEffect::WorkspaceWrite;
+            assert_eq!(
+                prior.finding_store_requirement,
+                FindingStoreRequirement::Optional
+            );
+            prior.finding_store_requirement = FindingStoreRequirement::Required;
+        }
+        if prior.name == "taint-iris-next:catalog" {
+            assert_eq!(prior.phase, ToolPhase::Map);
+            assert_eq!(prior.effect, ToolEffect::WorkspaceWrite);
+            prior.phase = ToolPhase::Scan;
+            prior.effect = ToolEffect::Read;
+        }
+        restore_prior_cwe_selector_policy(&mut prior);
+        restore_prior_auxiliary_policy(&mut prior);
+        restore_prior_changed_path_policy(&mut prior);
         builtin_policy_row(&prior)
+    }
+
+    fn restore_prior_auxiliary_policy(prior: &mut ToolDescriptor) {
+        if !matches!(
+            prior.name.as_str(),
+            "systems-hunt:systems-invariant-extract" | "taint-iris-next:codeql-db"
+        ) {
+            return;
+        }
+        assert_eq!(prior.phase, ToolPhase::Map);
+        assert_eq!(
+            prior.finding_store_requirement,
+            FindingStoreRequirement::Optional
+        );
+        prior.phase = ToolPhase::Scan;
+        if prior.name == "systems-hunt:systems-invariant-extract" {
+            prior.finding_store_requirement = FindingStoreRequirement::Required;
+        }
+    }
+
+    fn restore_prior_cwe_selector_policy(prior: &mut ToolDescriptor) {
+        if prior.name != "systems-hunt:deep-semantic-cwe-select" {
+            return;
+        }
+        assert_eq!(prior.phase, ToolPhase::Map);
+        assert_eq!(
+            prior.finding_store_requirement,
+            FindingStoreRequirement::Optional
+        );
+        prior.phase = ToolPhase::Scan;
+        prior.finding_store_requirement = FindingStoreRequirement::Required;
+    }
+    fn restore_prior_changed_path_policy(prior: &mut ToolDescriptor) {
+        if prior.name != "chrome-rce:review-trigger" {
+            return;
+        }
+        assert_eq!(prior.phase, ToolPhase::Map);
+        assert_eq!(prior.effect, ToolEffect::Read);
+        assert_eq!(
+            prior.finding_store_requirement,
+            FindingStoreRequirement::Optional
+        );
+        prior.phase = ToolPhase::Scan;
+        prior.effect = ToolEffect::WorkspaceWrite;
+        prior.finding_store_requirement = FindingStoreRequirement::Required;
     }
 }

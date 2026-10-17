@@ -196,6 +196,8 @@ fn normalize_lifecycle_status(value: &str) -> String {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FindingListFilter {
+    /// Recorded study membership, resolved by the workspace application reader.
+    pub batch_id: Option<String>,
     pub severity: Vec<Severity>,
     pub verdict: Vec<FindingVerdictFilter>,
     pub triage_state: Vec<FindingTriageStateFilter>,
@@ -215,6 +217,7 @@ pub struct FindingListFilter {
     pub name: Option<String>,
     pub text_terms: Vec<String>,
     pub file_path: Option<String>,
+    pub file_paths: Vec<String>,
     pub run_id: Vec<String>,
     pub revision_sha: Vec<String>,
     pub branch: Vec<String>,
@@ -227,6 +230,7 @@ pub struct FindingListFilter {
 impl Default for FindingListFilter {
     fn default() -> Self {
         Self {
+            batch_id: None,
             severity: Vec::new(),
             verdict: Vec::new(),
             triage_state: Vec::new(),
@@ -237,6 +241,7 @@ impl Default for FindingListFilter {
             name: None,
             text_terms: Vec::new(),
             file_path: None,
+            file_paths: Vec::new(),
             run_id: Vec::new(),
             revision_sha: Vec::new(),
             branch: Vec::new(),

@@ -3664,7 +3664,9 @@ mod tests {
         }
 
         // The durable artifact vocabulary is unchanged: only the label moved.
-        assert!(crate::findings::is_runtime_proof_state("execution_rejected"));
+        assert!(crate::findings::is_runtime_proof_state(
+            "execution_rejected"
+        ));
     }
 
     #[test]
@@ -4750,7 +4752,10 @@ mod tests {
 
         assert_eq!(state_filter_count(&store, "state:not_observed"), 1);
         assert_eq!(state_filter_count(&store, "state:fixed"), 0);
-        let stored = store.get_finding_by_fingerprint(&vanished.fingerprint).unwrap().unwrap();
+        let stored = store
+            .get_finding_by_fingerprint(&vanished.fingerprint)
+            .unwrap()
+            .unwrap();
         let gap = stored.observation_gap.unwrap();
         assert_eq!(gap.last_seen_run_id.as_deref(), Some("run-a"));
         assert_eq!(gap.compared_run_id.as_deref(), Some("run-b"));
@@ -4799,10 +4804,19 @@ mod tests {
         let data = report.aliased_rows_json();
         assert_eq!(data["findings"][0]["review_decision"], "confirmed");
         assert_eq!(data["findings"][0]["review_decision_author"], "human");
-        assert_eq!(data["findings"][0]["observation_gap"]["comparedRunId"], "run-b");
+        assert_eq!(
+            data["findings"][0]["observation_gap"]["comparedRunId"],
+            "run-b"
+        );
         assert!(report.output().contains(" tp "));
-        for policy in [IdentityFoldPolicy::Safe, IdentityFoldPolicy::Legacy, IdentityFoldPolicy::Aggressive] {
-            let operator_report = store.list_findings_filtered_with_identity_policy(&filter, policy).unwrap();
+        for policy in [
+            IdentityFoldPolicy::Safe,
+            IdentityFoldPolicy::Legacy,
+            IdentityFoldPolicy::Aggressive,
+        ] {
+            let operator_report = store
+                .list_findings_filtered_with_identity_policy(&filter, policy)
+                .unwrap();
             assert_eq!(operator_report.count, 1, "{policy:?}");
             assert!(operator_report.findings[0].observation_gap.is_some());
         }
@@ -4816,19 +4830,54 @@ mod tests {
         let store = workspace_store(&root);
         completed_run(&store, "run-a", std::slice::from_ref(&bug));
         write_scan_scope_receipt(&root, "run-b", &[]);
-        completed_run(&store, "run-b", &[semgrep_finding("demo.other", 20, "present")]);
-        let before = store.get_finding_by_fingerprint(&bug.fingerprint).unwrap().unwrap().observation_gap;
+        completed_run(
+            &store,
+            "run-b",
+            &[semgrep_finding("demo.other", 20, "present")],
+        );
+        let before = store
+            .get_finding_by_fingerprint(&bug.fingerprint)
+            .unwrap()
+            .unwrap()
+            .observation_gap;
         assert!(before.is_some());
-        for event_kind in [crate::event_log::EventKind::SuppressionAdded, crate::event_log::EventKind::SuppressionRemoved] {
-            store.append_finding_suppression_event(&bug.fingerprint, SuppressionLifecycleEvent {
-                event_kind, reason: None, rule_id: Some("fixture".to_string()),
-                statement: None, origin: None, expires_at_unix: None, actor: "test".to_string(),
-            }).unwrap();
-            assert_eq!(store.get_finding_by_fingerprint(&bug.fingerprint).unwrap().unwrap().observation_gap, before);
+        for event_kind in [
+            crate::event_log::EventKind::SuppressionAdded,
+            crate::event_log::EventKind::SuppressionRemoved,
+        ] {
+            store
+                .append_finding_suppression_event(
+                    &bug.fingerprint,
+                    SuppressionLifecycleEvent {
+                        event_kind,
+                        reason: None,
+                        rule_id: Some("fixture".to_string()),
+                        statement: None,
+                        origin: None,
+                        expires_at_unix: None,
+                        actor: "test".to_string(),
+                    },
+                )
+                .unwrap();
+            assert_eq!(
+                store
+                    .get_finding_by_fingerprint(&bug.fingerprint)
+                    .unwrap()
+                    .unwrap()
+                    .observation_gap,
+                before
+            );
         }
         drop(store);
         let resumed = workspace_store(&root);
-        assert_eq!(resumed.get_finding_by_fingerprint(&bug.fingerprint).unwrap().unwrap().observation_gap, before);
+        assert_eq!(
+            resumed
+                .get_finding_by_fingerprint(&bug.fingerprint)
+                .unwrap()
+                .unwrap()
+                .observation_gap,
+            before
+        );
     }
 
     #[test]
@@ -4836,11 +4885,18 @@ mod tests {
         let store = FindingStore::open_in_memory().unwrap();
         let mut bug = semgrep_finding("demo.forged-gap", 10, "present");
         bug.observation_gap = Some(FindingObservationGap {
-            event_seq: 999, event_hash: "producer-claim".to_string(),
-            last_seen_run_id: Some("old".to_string()), compared_run_id: Some("new".to_string()),
+            event_seq: 999,
+            event_hash: "producer-claim".to_string(),
+            last_seen_run_id: Some("old".to_string()),
+            compared_run_id: Some("new".to_string()),
         });
         completed_run(&store, "run-a", std::slice::from_ref(&bug));
-        assert!(store.get_finding_by_fingerprint(&bug.fingerprint).unwrap().unwrap().observation_gap.is_none());
+        assert!(store
+            .get_finding_by_fingerprint(&bug.fingerprint)
+            .unwrap()
+            .unwrap()
+            .observation_gap
+            .is_none());
     }
 
     #[test]
@@ -5306,8 +5362,16 @@ mod tests {
 
         let (class, reason) = comparison_class_of(&comparison, "agent-hunted flow");
         assert_eq!(class, ScanComparisonClass::NotRescanned);
-        let absent = comparison.findings.iter().find(|row| row.after.is_none()).unwrap();
-        assert!(absent.reassessment_block.as_ref().unwrap().contains("unavailable"));
+        let absent = comparison
+            .findings
+            .iter()
+            .find(|row| row.after.is_none())
+            .unwrap();
+        assert!(absent
+            .reassessment_block
+            .as_ref()
+            .unwrap()
+            .contains("unavailable"));
         assert!(
             reason.unwrap().contains("not a deterministic engine"),
             "reason must name the missing proof"
@@ -5388,6 +5452,7 @@ mod tests {
             .map(|(engine, outcome)| ScanStageEngine {
                 engine: (*engine).to_string(),
                 outcome: *outcome,
+                rule_ids: None,
                 run_ref: None,
                 detail: None,
             })
@@ -5398,6 +5463,7 @@ mod tests {
             run_refs: vec![run_id.to_string()],
             scan: Some(ScanStageData {
                 scope: ScanStageScope {
+                    inspected_files: None,
                     target: "/tmp/repo".to_string(),
                     paths: paths.iter().map(|path| path.to_string()).collect(),
                 },

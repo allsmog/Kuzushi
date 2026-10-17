@@ -17,6 +17,8 @@ pub(super) type SharedClangCallStats = Arc<Mutex<ClangCallStats>>;
 pub(super) struct ClangCallStats {
     pub(super) calls: u32,
     pub(super) first_error: Option<String>,
+    pub(super) repo_calls: u32,
+    pub(super) first_repo_error: Option<String>,
 }
 
 pub(super) fn new_clang_call_stats() -> SharedClangCallStats {
@@ -36,28 +38,25 @@ pub(super) fn build_uaf_hunt_toolbox<'a>(
     options: &UafHuntInput,
     clang: &'a mut ClangMcpClient,
     stats: SharedClangCallStats,
+    cancellation: Option<&crate::scan::ScanCancellation>,
 ) -> UafHuntHandler<'a> {
     UafHuntHandler {
         target: target.to_path_buf(),
         include_non_production: options.include_non_production,
-        clang: clang as *mut ClangMcpClient,
+        clang,
         stats,
-        _marker: std::marker::PhantomData,
+        cancellation: cancellation.cloned(),
     }
 }
 
-/// A `ToolCallHandler` that owns a raw pointer to the `ClangMcpClient`
-/// living on the stack of `run_uaf_hunt_report`. Safety: the client's
-/// lifetime strictly outlives the handler; the tool-loop is single-threaded.
+/// Sequential local navigation with shared cancellation and error accounting.
 pub(super) struct UafHuntHandler<'a> {
     target: PathBuf,
     include_non_production: bool,
-    clang: *mut ClangMcpClient,
+    clang: &'a mut ClangMcpClient,
     stats: SharedClangCallStats,
-    _marker: std::marker::PhantomData<&'a mut ClangMcpClient>,
+    cancellation: Option<crate::scan::ScanCancellation>,
 }
-
-unsafe impl<'a> Send for UafHuntHandler<'a> {}
 
 impl<'a> ToolCallHandler for UafHuntHandler<'a> {
     fn run(&mut self, call: &ToolCall) -> Result<ToolResult> {
@@ -65,20 +64,37 @@ impl<'a> ToolCallHandler for UafHuntHandler<'a> {
         if let Some(clang_method) = clang_tool_method(name) {
             return self.run_clang_tool(call, clang_method);
         }
-        Ok(run_uaf_repo_tool(
-            &self.target,
-            self.include_non_production,
-            call,
-        ))
+        self.run_repo_tool(call)
     }
 }
 
 impl<'a> UafHuntHandler<'a> {
+    fn run_repo_tool(&mut self, call: &ToolCall) -> Result<ToolResult> {
+        anyhow::ensure!(
+            !self
+                .cancellation
+                .as_ref()
+                .is_some_and(|token| token.is_cancelled()),
+            "uaf-hunt: local work canceled"
+        );
+        let result = run_uaf_repo_tool(
+            &self.target,
+            self.include_non_production,
+            call,
+            self.cancellation.as_ref(),
+        );
+        let mut stats = self.stats.lock().expect("local tool stats lock");
+        stats.repo_calls += 1;
+        if result.is_error && stats.first_repo_error.is_none() {
+            stats.first_repo_error = Some(result.output.to_string());
+        }
+        Ok(result)
+    }
+
     fn run_clang_tool(&mut self, call: &ToolCall, clang_method: &str) -> Result<ToolResult> {
-        let clang = unsafe { &mut *self.clang };
         self.stats.lock().expect("clang stats lock").calls += 1;
         let arguments = clang_tool_arguments(&self.target, call);
-        clang
+        self.clang
             .call_tool(clang_method, arguments)
             .map(|value| successful_tool_result(call, value))
             .or_else(|error| Ok(self.clang_tool_error_result(call, clang_method, error)))

@@ -37,7 +37,12 @@ pub(crate) const CANONICAL_RUN_ARTIFACTS: [CanonicalRunArtifactSpec; 6] = [
     },
 ];
 
-pub(crate) const OPTIONAL_RUN_ARTIFACTS: [CanonicalRunArtifactSpec; 2] = [
+pub(crate) const OPTIONAL_RUN_ARTIFACTS: [CanonicalRunArtifactSpec; 3] = [
+    CanonicalRunArtifactSpec {
+        leaf: "inherited-allowance.json",
+        label: "Inherited accounting context",
+        kind: "json",
+    },
     CanonicalRunArtifactSpec {
         leaf: "report.sarif",
         label: "SARIF report",

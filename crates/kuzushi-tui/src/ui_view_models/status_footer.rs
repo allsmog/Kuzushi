@@ -17,11 +17,18 @@ pub(crate) struct StatusFooterModel {
 }
 
 pub(crate) fn status_footer_model(app: &ShellApp) -> StatusFooterModel {
+    let (mut right, mut compact_right) = status_footer_findings_segments(app);
+    let allowance = super::investigation_allowance::investigation_allowance_model(app);
+    let has_allowance = allowance.is_some();
+    if let Some(allowance) = allowance {
+        right = format!("{} · {right}", allowance.calls);
+        compact_right = allowance.calls;
+    }
     StatusFooterModel {
         left_segments: status_footer_left_segments(app),
-        right_segments: status_footer_right_segments(app),
-        compact_left_segments: compact_status_footer_left_segments(app),
-        compact_right_segments: compact_status_footer_right_segments(app),
+        right_segments: vec![right],
+        compact_left_segments: compact_status_footer_left_segments(app, has_allowance),
+        compact_right_segments: vec![compact_right],
     }
 }
 
@@ -34,8 +41,12 @@ fn leading_footer_segments(app: &ShellApp) -> Vec<String> {
     segments
 }
 
-fn compact_status_footer_left_segments(app: &ShellApp) -> Vec<String> {
+fn compact_status_footer_left_segments(app: &ShellApp, has_allowance: bool) -> Vec<String> {
     if let Some(state) = compact_source_attention(app) {
+        let state = match (state, has_allowance) {
+            ("source check", true) => "source",
+            _ => state,
+        };
         return compact_source_footer_segments(app, state);
     }
     let mut segments = leading_footer_segments(app);
@@ -164,12 +175,19 @@ fn review_conflict_footer_segment(app: &ShellApp) -> Option<String> {
     .then(|| "review:conflict".to_string())
 }
 
-fn status_footer_right_segments(app: &ShellApp) -> Vec<String> {
-    vec![status_footer_findings_segment(app)]
-}
-
-fn compact_status_footer_right_segments(app: &ShellApp) -> Vec<String> {
-    vec![compact_status_footer_findings_segment(app)]
+fn status_footer_findings_segments(app: &ShellApp) -> (String, String) {
+    if matches!(app.shell_view(), ShellView::Report) {
+        let summary = super::report_summary::report_review_footer_summary(app);
+        return (summary.clone(), summary);
+    }
+    let (full, compact) = (
+        status_footer_findings_segment(app),
+        compact_status_footer_findings_segment(app),
+    );
+    if matches!(app.shell_view(), ShellView::Replay) {
+        return (format!("Workspace {full}"), format!("Workspace {compact}"));
+    }
+    (full, compact)
 }
 
 // Workbench counts the projection the operator is actually looking at, while

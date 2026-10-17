@@ -7,6 +7,10 @@ fn semgrep_scan_workers_default_to_one_and_reject_invalid_direct_inputs() {
         scanner.inspection_receipts()[0]["configuredLimits"]["jobs"],
         1
     );
+    assert_eq!(
+        scanner.inspection_receipts()[0]["excludedPaths"],
+        json!(["**/.kuzushi/**"])
+    );
     let scanner = ConfiguredSemgrepScanner::from_tool_input(&json!({"jobs":4})).unwrap();
     assert_eq!(
         scanner.inspection_receipts()[0]["configuredLimits"]["jobs"],

@@ -61,6 +61,7 @@ pub enum ShellCommand {
     Scopes,
     Aim(Option<String>),
     Findings,
+    FindingsRefresh,
     FindingsFilter(String),
     Component(Option<String>),
     Open(String),

@@ -1,5 +1,85 @@
 # Module maturity tiers
 
+`uaf-hunt:hunt` has a Labs discovery override and no phase result. Its hidden
+module identity remains compatible. Bounded local resource and failure checks
+support explicit experimental use. Selected compiler input now has bounded
+capture and real source-navigation checks. Source/graph grounding, full input
+recovery and detector usefulness remain open. See the
+[resource audit](assessments/uaf-resource-controls-2026-10-17.md) and
+[compiler-input audit](assessments/clang-database-selection-2026-10-17.md).
+
+Internal `taint-iris-next:codeql-db` is hidden auxiliary Labs Map work, with
+Context allowance and separate explicit repository-execution consent. Neither
+approval substitutes for the other. Whole-target preparation cannot complete
+Map or Scan and does not honor accepted discovery membership. Accounting and
+refusal tests qualify no model-selected build or detector quality. See the
+[preparation assessment](assessments/repository-preparation-allowance-2026-10-17.md).
+
+`systems-hunt:deep-semantic-hunt` is hidden Labs source-only discovery under
+Discovery allowance. Supply explicit `cwes`; it no longer selects classes or
+repairs model output implicitly. Source limits, accepted `scanScopeRef`, frozen
+`scanContextRef` and exact `threatModelRef` are consumed through shared prepared
+dispatch. Shared files remain context only. Malformed findings or citations fail
+without import, and detected source drift withholds historical candidates from
+the ledger. Artifacts use separate run paths. Findings remain unverified.
+See the [bounded deep-discovery audit](assessments/bounded-deep-discovery-2026-10-16.md).
+
+The hidden `systems-hunt:deep-semantic-cwe-select` action is now auxiliary Labs
+Map planning under Scope allowance. It uses bounded repository-wide source
+prefixes and one tool-free model turn, retaining exact supplied input and honest
+partial coverage. It creates no findings or scan jobs and completes no phase.
+Selected discovery scopes and useful live ranking remain unqualified. See the
+[selector assessment](assessments/bounded-cwe-proposals-2026-10-16.md).
+
+Replay now retains orientation and primary controls in narrow readers. This
+UI evidence qualifies no module or model quality claim. See the
+[orientation assessment](assessments/reader-orientation-2026-10-16.md).
+
+Catalog drafts and frozen inputs can be read through focused Replay with
+authenticated saved output and a retained full receipt. This reader evidence
+does not qualify model usefulness or promote any action. See the
+[reader assessment](assessments/focused-saved-results-2026-10-16.md).
+
+`randori:pasta` is an auxiliary Labs context draft. It preserves existing files
+by default and requires Context allowance; generation does not accept context.
+`randori:threat-model` is an auxiliary Compatibility reader. Prefer
+`threat-model:read` with the same artifact directory and `methodology=pasta`.
+Historical artifact reads disclose partial files and unverified source identity.
+See the [artifact contract audit](assessments/randori-artifacts-2026-10-16.md).
+
+The hidden `classifier-gate:score` action is Labs and auxiliary. Its bounded
+metadata score cannot complete Review, replace finding decisions or start
+follow-up work. Parsing, percentile isolation and durable-sample failures have
+focused evidence; calibration and useful model ranking remain unqualified.
+Use the guided Review plan for source-grounded triage.
+
+The hidden `full-mode:hunt` alias is auxiliary Compatibility. Chunked planning
+and retry contracts have scoped evidence, including contained source reads and
+explicit cache policy. Accepted scope/context belongs to standard discovery.
+Chunked quality, source isolation, complete traversal bounds and late failure
+recovery remain unqualified. See the
+[source contract audit](assessments/chunked-source-contracts-2026-10-16.md).
+
+The hidden `chrome-rce:scan` action is Labs. Its handle-text heuristic now honors
+the declared positive finding limit and preserves a partial ledger outcome when
+that limit is reached. Comment matches require source review; executable calls,
+handle validation, full traversal bounds and accepted discovery scopes remain
+unqualified. The changed-hot-path action retains its dispatch contract. See the
+[internal scanner limit audit](assessments/internal-tool-limits-2026-10-16.md).
+
+The hidden `threat-leads` family is Labs. Exact build/read dispatch remains
+available for experimental keyword hints. Bounded inventory and source receipts
+do not establish accepted Map, complete coverage or vulnerability validity.
+See the [migration notes](../RELEASING.md#bounded-experimental-threat-to-code-hints).
+
+Optional `shinsa`, `tob`, `vuln-scout` and `prompt-armor` adapters are Labs even
+when their plugin roots are configured. Availability alone does not establish
+functional readiness. Shinsa's four assessment modes declare Discovery
+allowance, use supplied bounded snippets without agent tools, and preserve
+protected Review calls. Legacy `deep-audit:run` remains hidden Compatibility;
+its independent executor is not an equivalent alias for guided Review. See the
+[internal tool audit](assessments/internal-tool-audit-2026-10-15.md).
+
 Core scope review now binds inventory membership independently of working-file
 contents. Staging changes, cache reuse, legacy reading, current-use refusal and
 finite-study consumption have scoped evidence in the
@@ -223,6 +303,17 @@ inventory. Scoped evidence, prefix-coverage disclosure, cancellation during
 work and useful engine output remain unqualified. A focused module with an
 experimental primary requires an exact action rather than substituting another
 tool or model-backed operation.
+
+`taint-iris-next:catalog` is hidden Labs, auxiliary Map context generation.
+It uses one budgeted no-tools model turn over bounded frozen inputs and saves
+an immutable draft. `taint-iris-next:catalog-read` and
+`taint-iris-next:catalog-accept` are runtime-free Core helpers for inspection
+and explicit source-checked acceptance. Neither completes Map. Acceptance
+acknowledges partial input and preserves prior catalog bytes. Actual consumers
+require an accepted immutable digest or an explicit built-in selection; shell
+prerequisites cannot generate catalogs implicitly. Intercepted transport can
+qualify this lifecycle, but live catalog usefulness remains unqualified. See the
+[catalog draft audit](assessments/taint-catalog-drafts-2026-10-16.md).
 
 `threat-intel:apply` is Labs and auxiliary Map. The default dry run remains a
 runtime-free metadata preview; explicit live dispatch is a legacy path outside

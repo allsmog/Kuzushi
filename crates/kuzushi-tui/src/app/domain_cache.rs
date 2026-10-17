@@ -162,6 +162,7 @@ pub struct DomainCache {
     findings_total: usize,
     findings_read_watermark: Option<u64>,
     findings_page: Option<kuzushi_core::findings::FindingPageMetadata>,
+    findings_batch_id: Option<String>,
     review_decisions: Vec<ReviewDecisionRecord>,
     review_decisions_revision: u64,
     finding_ledger_counts: Option<FindingLedgerCounts>,
@@ -212,6 +213,7 @@ impl DomainCache {
             findings_total: 0,
             findings_read_watermark: None,
             findings_page: None,
+            findings_batch_id: None,
             review_decisions: Vec::new(),
             review_decisions_revision: 0,
             finding_ledger_counts: None,
@@ -521,6 +523,12 @@ impl DomainCache {
     /// `context:build` that rebuilt the map) yields `None`, so the deck falls
     /// back to the Read-safe fold instead of rendering a foreign or stale
     /// worklist.
+    pub(crate) fn has_worklist_snapshot_for(&self, target: &std::path::Path) -> bool {
+        self.worklist_snapshot
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.target == target)
+    }
+
     pub(crate) fn worklist_snapshot_for(
         &self,
         target: &std::path::Path,
@@ -659,6 +667,14 @@ impl DomainCache {
         self.findings_page = Some(page);
     }
 
+    pub(crate) fn findings_batch_id(&self) -> Option<&str> {
+        self.findings_batch_id.as_deref()
+    }
+
+    pub(crate) fn set_findings_batch_id(&mut self, id: Option<String>) {
+        self.findings_batch_id = id;
+    }
+
     pub(crate) fn findings_are_partial(&self) -> bool {
         self.findings_total_count() > self.findings.len()
     }
@@ -687,6 +703,7 @@ impl DomainCache {
         aliases: Vec<String>,
         policy: IdentityFoldPolicy,
     ) {
+        self.findings_batch_id = None;
         self.set_findings(findings);
         if aliases.len() == self.findings.len() {
             self.finding_aliases = aliases;

@@ -117,7 +117,9 @@ pub(in crate::modules) fn run_codeql_create_db(
     ) {
         return Ok(skipped_response(&target));
     };
-    execute_codeql_create(input, ctx, target, launcher)
+    execute_codeql_create(input, ctx, target, launcher).map_err(|error| {
+        crate::modules::support::contextualize_source_failure("codeql:create-db", error)
+    })
 }
 
 fn resolve_db_import_path(input: &Value) -> Option<PathBuf> {

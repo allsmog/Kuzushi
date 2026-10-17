@@ -1,30 +1,31 @@
 use super::files::{candidate_files, IndexedFile};
 use super::patterns::{LeadPattern, LEAD_PATTERNS};
+use super::projection::{Elements, Projection};
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
 
 pub(super) fn threat_lead(
     threat: &Value,
-    nodes: &BTreeMap<String, Value>,
-    flows: &BTreeMap<String, Value>,
+    nodes: &Elements<'_>,
+    flows: &Elements<'_>,
     file_index: &[IndexedFile],
+    projection: &mut Projection,
 ) -> Option<Value> {
-    let id = string_field(threat, "id")?;
-    let threat_text = searchable_threat_text(threat);
+    let id = projection.identity(threat, "id")?;
+    let threat_text = searchable_threat_text(threat, projection);
     let pattern = best_pattern(&threat_text)?;
-    let affected_files = string_array_field(threat, "affectedFiles");
-    let target_ids = string_array_field(threat, "targetElementIds");
-    let linked_nodes = linked_nodes(&target_ids, nodes);
-    let linked_flows = linked_flows(&target_ids, flows, nodes);
+    let affected_files = projection.references(threat, "affectedFiles");
+    let target_ids = projection.references(threat, "targetElementIds");
+    let linked_nodes = linked_nodes(&target_ids, nodes, projection);
+    let linked_flows = linked_flows(&target_ids, flows, nodes, projection);
     let candidates = candidate_files(pattern, &affected_files, file_index);
     let confidence = lead_confidence(&candidates);
 
     Some(json!({
         "threatId": id,
-        "title": string_field(threat, "title").unwrap_or_else(|| id.clone()),
-        "category": string_field(threat, "category"),
-        "impact": string_field(threat, "impact"),
-        "likelihood": string_field(threat, "likelihood"),
+        "title": projection.text(threat, "title").unwrap_or_else(|| id.clone()),
+        "category": projection.text(threat, "category"),
+        "impact": projection.text(threat, "impact"),
+        "likelihood": projection.text(threat, "likelihood"),
         "pattern": pattern.id,
         "source": pattern.source,
         "sink": pattern.sink,
@@ -32,29 +33,42 @@ pub(super) fn threat_lead(
         "affectedFiles": affected_files,
         "linkedNodes": linked_nodes,
         "linkedFlows": linked_flows,
-        "preconditions": string_field(threat, "preconditions"),
-        "missingMitigations": string_field(threat, "missingMitigations"),
+        "preconditions": projection.text(threat, "preconditions"),
+        "missingMitigations": projection.text(threat, "missingMitigations"),
         "cwe": pattern.cwes,
         "classification": lead_classification(&candidates),
         "confidence": confidence,
     }))
 }
 
-fn linked_nodes(target_ids: &[String], nodes: &BTreeMap<String, Value>) -> Vec<Value> {
+fn linked_nodes(
+    target_ids: &[String],
+    nodes: &Elements<'_>,
+    projection: &mut Projection,
+) -> Vec<Value> {
     target_ids
         .iter()
-        .filter_map(|id| nodes.get(id).map(|node| summarized_node(id, node)))
+        .filter_map(|id| {
+            nodes
+                .get(id.as_str())
+                .map(|node| summarized_node(id, node, projection))
+        })
         .collect()
 }
 
 fn linked_flows(
     target_ids: &[String],
-    flows: &BTreeMap<String, Value>,
-    nodes: &BTreeMap<String, Value>,
+    flows: &Elements<'_>,
+    nodes: &Elements<'_>,
+    projection: &mut Projection,
 ) -> Vec<Value> {
     target_ids
         .iter()
-        .filter_map(|id| flows.get(id).map(|flow| summarized_flow(id, flow, nodes)))
+        .filter_map(|id| {
+            flows
+                .get(id.as_str())
+                .map(|flow| summarized_flow(id, flow, nodes, projection))
+        })
         .collect()
 }
 
@@ -74,7 +88,7 @@ fn has_multiple_evidence_terms(candidate: &Value) -> bool {
         .is_some_and(|items| items.len() >= 2)
 }
 
-fn searchable_threat_text(threat: &Value) -> String {
+fn searchable_threat_text(threat: &Value, projection: &mut Projection) -> String {
     [
         "title",
         "description",
@@ -85,7 +99,7 @@ fn searchable_threat_text(threat: &Value) -> String {
         "category",
     ]
     .iter()
-    .filter_map(|key| threat.get(*key).and_then(Value::as_str))
+    .filter_map(|key| projection.text(threat, key))
     .collect::<Vec<_>>()
     .join(" ")
     .to_ascii_lowercase()
@@ -109,56 +123,31 @@ fn best_pattern(text: &str) -> Option<&'static LeadPattern> {
         })
 }
 
-pub(super) fn map_by_id(values: Option<&Vec<Value>>) -> BTreeMap<String, Value> {
-    values
-        .into_iter()
-        .flatten()
-        .filter_map(|value| Some((string_field(value, "id")?, value.clone())))
-        .collect()
-}
-
-fn summarized_node(id: &str, node: &Value) -> Value {
+fn summarized_node(id: &str, node: &Value, projection: &mut Projection) -> Value {
     json!({
         "id": id,
-        "name": string_field(node, "name"),
-        "type": string_field(node, "type"),
-        "trustZone": string_field(node, "trustZone"),
+        "name": projection.text(node, "name"),
+        "type": projection.text(node, "type"),
+        "trustZone": projection.text(node, "trustZone"),
     })
 }
 
-fn summarized_flow(id: &str, flow: &Value, nodes: &BTreeMap<String, Value>) -> Value {
-    let source_id = string_field(flow, "sourceId");
-    let target_id = string_field(flow, "targetId");
+fn summarized_flow(
+    id: &str,
+    flow: &Value,
+    nodes: &Elements<'_>,
+    projection: &mut Projection,
+) -> Value {
+    let source_id = projection.identity(flow, "sourceId");
+    let target_id = projection.identity(flow, "targetId");
     json!({
         "id": id,
-        "description": string_field(flow, "description"),
+        "description": projection.text(flow, "description"),
         "sourceId": source_id,
         "targetId": target_id,
-        "source": source_id.as_ref().and_then(|id| nodes.get(id)).and_then(|node| string_field(node, "name")),
-        "target": target_id.as_ref().and_then(|id| nodes.get(id)).and_then(|node| string_field(node, "name")),
+        "source": source_id.as_ref().and_then(|id| nodes.get(id.as_str())).and_then(|node| projection.text(node, "name")),
+        "target": target_id.as_ref().and_then(|id| nodes.get(id.as_str())).and_then(|node| projection.text(node, "name")),
     })
-}
-
-pub(super) fn string_field(value: &Value, key: &str) -> Option<String> {
-    value
-        .get(key)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
-}
-
-pub(super) fn string_array_field(value: &Value, key: &str) -> Vec<String> {
-    value
-        .get(key)
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
-        .collect()
 }
 
 fn lead_classification(candidates: &[Value]) -> &'static str {

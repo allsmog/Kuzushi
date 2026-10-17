@@ -3,15 +3,16 @@ mod files;
 mod markdown;
 mod output;
 mod patterns;
+mod projection;
+mod publication;
+mod source_inventory;
 
-use analysis::{lead_priority, map_by_id, threat_id_number, threat_lead};
-use files::{collect_scan_files, index_files};
+use analysis::{lead_priority, threat_id_number, threat_lead};
 use markdown::render_threat_leads_markdown;
 use output::tool_output;
 
 use crate::capabilities::threat_model::persistent_threat_model_path;
 use crate::modules::ToolExecutionContext;
-use crate::workspace::write_workspace_state_file;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 #[cfg(test)]
@@ -21,6 +22,7 @@ use std::path::{Path, PathBuf};
 const THREAT_LEADS_ARTIFACT_FILE: &str = "threat-leads.json";
 const THREAT_LEADS_SUMMARY_FILE: &str = "threat-leads.md";
 const MAX_THREAT_LEADS_BYTES: usize = 16 * 1024 * 1024;
+const MAX_THREATS: usize = 256;
 
 pub fn execute_threat_leads_tool(
     name: &str,
@@ -36,11 +38,20 @@ pub fn execute_threat_leads_tool(
 
 pub fn build_threat_leads_tool(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
     let target = resolve_target(input, ctx)?;
+    if input["repairSummary"].as_bool() == Some(true) {
+        let report = read_threat_leads(&target)?;
+        ctx.ensure_active()?;
+        publication::repair(&target, &report)?;
+        return Ok(tool_output(&target, report));
+    }
     emit_build_start(ctx, &target);
-    let report = build_threat_leads(&target)?;
-    write_threat_leads(&target, &report)?;
+    let report = build_threat_leads_observed(&target, Some(ctx))?;
+    ctx.ensure_active()?;
+    let publication_warning = publication::publish(&target, &report)?;
     emit_build_done(ctx, &report);
-    Ok(tool_output(&target, report))
+    let mut result = tool_output(&target, report);
+    output::append_publication_warning(&mut result, publication_warning);
+    Ok(result)
 }
 
 pub fn read_threat_leads_tool(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
@@ -83,26 +94,91 @@ fn plural(count: u64) -> &'static str {
 }
 
 pub fn build_threat_leads(target: &Path) -> Result<Value> {
-    let threat_model = read_threat_model(target)?;
-    let files = collect_scan_files(target)?;
-    let file_index = index_files(target, &files);
+    build_threat_leads_observed(target, None)
+}
+
+fn build_threat_leads_observed(
+    target: &Path,
+    ctx: Option<&ToolExecutionContext<'_>>,
+) -> Result<Value> {
+    let canceled = || ctx.is_some_and(|value| value.is_cancelled());
+    source_inventory::ensure_active(&canceled)?;
+    let (threat_model, model_sha256) = read_threat_model(target)?;
     let threats = threat_model
         .get("threats")
         .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let dfd = threat_model
-        .get("dfd")
-        .cloned()
-        .unwrap_or_else(|| json!({}));
-    let nodes = map_by_id(dfd.get("nodes").and_then(Value::as_array));
-    let flows = map_by_id(dfd.get("flows").and_then(Value::as_array));
-    let mut leads = threats
-        .iter()
-        .filter_map(|threat| threat_lead(threat, &nodes, &flows, &file_index))
-        .collect::<Vec<_>>();
+        .context(
+            "Threat leads require a threat-model threats array; build or import context first",
+        )?;
+    let mut heartbeat = crate::progress::HeartbeatGate::new(std::time::Duration::from_secs(1));
+    let index = source_inventory::collect(
+        target,
+        &mut |entries| {
+            if heartbeat.ready() {
+                emit_inventory_progress(ctx, entries);
+            }
+        },
+        &canceled,
+    )?;
+    let dfd = &threat_model["dfd"];
+    let mut projection = projection::Projection::default();
+    let leads = derive_leads(threats, dfd, &index.files, &canceled, &mut projection)?;
+    let mut report = threat_leads_report(target, leads);
+    report["sources"]["threatModelSha256"] = json!(model_sha256);
+    report["sourceCoverage"] = finish_coverage(index.coverage, threats.len());
+    if projection.is_partial() {
+        report["sourceCoverage"]["status"] = json!("partial");
+    }
+    report["sourceCoverage"]["contextProjection"] = projection.receipt();
+    Ok(report)
+}
+
+fn derive_leads(
+    threats: &[Value],
+    dfd: &Value,
+    files: &[files::IndexedFile],
+    canceled: &dyn Fn() -> bool,
+    projection: &mut projection::Projection,
+) -> Result<Vec<Value>> {
+    let nodes = projection.elements(dfd.get("nodes").and_then(Value::as_array));
+    let flows = projection.elements(dfd.get("flows").and_then(Value::as_array));
+    let mut leads = Vec::new();
+    for threat in threats.iter().take(MAX_THREATS) {
+        source_inventory::ensure_active(canceled)?;
+        if let Some(lead) = threat_lead(threat, &nodes, &flows, files, projection) {
+            retain_lead(&mut leads, lead, projection);
+        }
+    }
     sort_leads(&mut leads);
-    Ok(threat_leads_report(target, leads))
+    Ok(leads)
+}
+
+fn retain_lead(leads: &mut Vec<Value>, lead: Value, projection: &mut projection::Projection) {
+    if projection.admit(&lead) {
+        leads.push(lead);
+    }
+}
+
+fn finish_coverage(mut coverage: Value, threats: usize) -> Value {
+    coverage["threatsInContext"] = json!(threats);
+    coverage["processedThreats"] = json!(threats.min(MAX_THREATS));
+    coverage["unprocessedThreats"] = json!(threats.saturating_sub(MAX_THREATS));
+    if threats > MAX_THREATS {
+        coverage["status"] = json!("partial");
+    }
+    coverage
+}
+
+fn emit_inventory_progress(ctx: Option<&ToolExecutionContext<'_>>, entries: usize) {
+    if let Some(trace) = ctx.and_then(|value| value.trace) {
+        let _ = trace
+            .step(
+                "tool-progress",
+                "threat-leads:build",
+                format!("repository inventory · {entries} entries examined"),
+            )
+            .emit();
+    }
 }
 
 fn sort_leads(leads: &mut [Value]) {
@@ -122,7 +198,7 @@ fn threat_leads_report(target: &Path, leads: Vec<Value>) -> Value {
         "leads": leads,
         "sources": {
             "threatModel": workspace_relative_path(target, &persistent_threat_model_path(target)),
-            "xRay": ["x-ray/entry-points.md", "x-ray/x-ray.md", "x-ray/invariants.md"]
+            "xRay": []
         }
     })
 }
@@ -130,8 +206,43 @@ fn threat_leads_report(target: &Path, leads: Vec<Value>) -> Value {
 pub fn read_threat_leads(target: &Path) -> Result<Value> {
     let path = threat_leads_artifact_path(target);
     let text = crate::workspace::read_workspace_text(target, &path, MAX_THREAT_LEADS_BYTES)?;
-    serde_json::from_str(&text)
-        .with_context(|| format!("Could not parse threat leads artifact {}", path.display()))
+    let mut report: Value = serde_json::from_str(&text)
+        .with_context(|| format!("Could not parse threat leads artifact {}", path.display()))?;
+    validate_report(&report)?;
+    if report.get("sourceCoverage").is_none() {
+        report["sourceCoverage"] = json!({"schemaVersion":1,"status":"legacy-unverified","completeRepositoryCoverage":false});
+    }
+    Ok(report)
+}
+
+fn validate_report(report: &Value) -> Result<()> {
+    let leads = report
+        .get("leads")
+        .and_then(Value::as_array)
+        .context("Threat leads artifact requires a leads array")?;
+    anyhow::ensure!(
+        report["leadCount"].as_u64() == Some(leads.len() as u64),
+        "Threat leads count does not match the recorded cards"
+    );
+    if let Some(coverage) = report.get("sourceCoverage") {
+        validate_coverage(coverage)?;
+    }
+    Ok(())
+}
+
+fn validate_coverage(coverage: &Value) -> Result<()> {
+    anyhow::ensure!(
+        coverage["schemaVersion"] == 1 && coverage["completeRepositoryCoverage"] == false,
+        "Threat lead source receipt is unsupported; preserve the artifact and rebuild the hints"
+    );
+    anyhow::ensure!(
+        matches!(
+            coverage["status"].as_str(),
+            Some("bounded" | "partial" | "legacy-unverified")
+        ),
+        "Threat lead source receipt status is unsupported"
+    );
+    Ok(())
 }
 
 fn resolve_target(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
@@ -161,33 +272,29 @@ fn explicit_target(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Opti
     }))
 }
 
-fn read_threat_model(target: &Path) -> Result<Value> {
+fn read_threat_model(target: &Path) -> Result<(Value, String)> {
     let path = persistent_threat_model_path(target);
     let text = crate::workspace::read_workspace_text(target, &path, MAX_THREAT_LEADS_BYTES)?;
-    serde_json::from_str(&text).with_context(|| format!("Could not parse {}", path.display()))
+    let model = serde_json::from_str(&text)
+        .with_context(|| format!("Could not parse {}", path.display()))?;
+    Ok((
+        model,
+        crate::run_lifecycle::sha256_content_digest(text.as_bytes()),
+    ))
 }
 
-fn write_threat_leads(target: &Path, report: &Value) -> Result<()> {
-    let path = threat_leads_artifact_path(target);
-    let summary_path = threat_leads_summary_path(target);
-    let artifact = format!("{}\n", serde_json::to_string_pretty(report)?);
-    let artifact_relative = path
-        .strip_prefix(target)
-        .context("Threat-leads artifact path escaped the workspace")?;
-    let summary_relative = summary_path
-        .strip_prefix(target)
-        .context("Threat-leads summary path escaped the workspace")?;
-    write_workspace_state_file(
-        target,
-        artifact_relative,
-        artifact.as_bytes(),
-    )?;
-    write_workspace_state_file(
-        target,
-        summary_relative,
-        render_threat_leads_markdown(report).as_bytes(),
-    )?;
-    Ok(())
+pub(crate) fn read_threat_leads_context(target: &Path, markdown: bool) -> Result<String> {
+    let report = read_threat_leads(target)?;
+    let state = publication::inspect_summary(target, &report);
+    anyhow::ensure!(
+        !markdown || state == publication::SummaryState::Current,
+        "Saved threat-lead Markdown does not match its JSON cards"
+    );
+    Ok(format!(
+        "{}\n{}",
+        state.message(),
+        render_threat_leads_markdown(&report)
+    ))
 }
 
 pub(super) fn threat_leads_artifact_path(target: &Path) -> PathBuf {
@@ -251,7 +358,7 @@ mod tests {
         symlink(outside.path(), threat_leads_artifact_path(workspace.path()))
             .expect("symlink artifact");
 
-        let error = write_threat_leads(workspace.path(), &serde_json::json!({ "leads": [] }))
+        let error = publication::publish(workspace.path(), &serde_json::json!({ "leads": [] }))
             .expect_err("symlink must be rejected");
 
         assert!(error.to_string().contains("symlink"));

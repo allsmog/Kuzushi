@@ -1,0 +1,280 @@
+name: Focused saved catalog output, full receipts and confirmation recovery
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_AGENT_MCPS
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/catalog_reader.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+paste-file: @ART/approval-command.txt
+keys: Enter
+require-live-snap: 25 REVIEW ALLOWANCE | allowance
+expect: Total provider calls: 2
+expect: Protected review calls: 0
+resize: 40x12
+keys: End
+require-live-snap: 20 y approve | allowance-40x12
+ask: Does this allowance clearly permit only two separately invoked intercepted requests, with uncertain dollars and no new scans or review work?
+keys: y
+resize: 120x36
+require-live-snap: 25 Allowance approved | allowance-approved
+paste-file: @ART/invalid-command.txt
+keys: Enter
+require-live-snap: 30 Catalog draft failed | invalid-output
+require-shell: python3 -B @REPO/scripts/devex/fixtures/catalog_reader.py @TMP_TARGET @ART invalid
+paste-file: @ART/generate-command.txt
+keys: Enter
+require-live-snap: 30 Taint catalog draft: | partial-draft
+require-shell: python3 -B @REPO/scripts/devex/fixtures/catalog_reader.py @TMP_TARGET @ART generated
+keys: Escape
+paste-file: @ART/replay-draft-command.txt
+keys: Enter
+require-live-snap: 30 SAVED OUTPUT | draft-result
+expect: priority 0
+expect: 1 entry
+expect-not: 1 entries
+expect: Active catalog at draft creation:
+expect: Truncated inspected source prefixes: 1
+keys: Tab
+require-live-snap: 20 Full receipt | full-receipt
+keys: Tab
+require-live-snap: 20 SAVED OUTPUT | result-restored
+resize: 160x48
+live-snap: result-160x48
+resize: 96x89
+live-snap: result-96x89
+resize: 80x24
+live-snap: result-80x24
+resize: 60x20
+live-snap: result-60x20
+resize: 40x12
+live-snap: result-40x12
+keys: NPage
+live-snap: result-reading-01-40x12
+keys: NPage
+live-snap: result-reading-02-40x12
+keys: NPage
+live-snap: result-reading-03-40x12
+expect: REPLAY · Result
+expect: Tab receipt
+expect: rows
+keys: NPage
+live-snap: result-reading-04-40x12
+keys: NPage
+live-snap: result-reading-05-40x12
+keys: NPage
+live-snap: result-reading-06-40x12
+keys: NPage
+live-snap: result-reading-07-40x12
+keys: NPage
+live-snap: result-reading-08-40x12
+keys: NPage
+live-snap: result-reading-09-40x12
+keys: NPage
+live-snap: result-reading-10-40x12
+keys: NPage
+live-snap: result-reading-11-40x12
+keys: NPage
+live-snap: result-reading-12-40x12
+keys: NPage
+live-snap: result-reading-13-40x12
+keys: NPage
+live-snap: result-reading-14-40x12
+keys: NPage
+live-snap: result-reading-15-40x12
+keys: NPage
+live-snap: result-reading-16-40x12
+keys: NPage
+live-snap: result-reading-17-40x12
+keys: NPage
+live-snap: result-reading-18-40x12
+keys: NPage
+live-snap: result-reading-19-40x12
+keys: NPage
+live-snap: result-reading-20-40x12
+keys: NPage
+live-snap: result-reading-21-40x12
+keys: NPage
+live-snap: result-reading-22-40x12
+keys: NPage
+live-snap: result-reading-23-40x12
+keys: NPage
+live-snap: result-reading-24-40x12
+keys: Tab
+require-live-snap: 20 REPLAY · Receipt | narrow-receipt
+expect: Tab result
+keys: End
+live-snap: narrow-receipt-tail
+expect: REPLAY · Receipt
+expect: Tab result
+expect: rows
+keys: Tab
+require-live-snap: 20 REPLAY · Result | narrow-result-restored
+expect: Tab receipt
+ask: Is the partial draft clear at all six sizes, with priority zero, exact prior catalog version, complete saved text, a pinned heading and row position, while the narrow footer keeps Tab and paging visible?
+resize: 120x36
+submit: logs
+paste-file: @ART/inputs-command.txt
+keys: Enter
+require-live-snap: 25 Frozen catalog inputs | supplied-inputs
+require-shell: python3 -B @REPO/scripts/devex/fixtures/catalog_reader.py @TMP_TARGET @ART inputs
+paste-file: @ART/replay-inputs-command.txt
+keys: Enter
+require-live-snap: 30 SAVED OUTPUT | input-result
+expect: owned_input
+expect: explicitly absent
+resize: 160x48
+live-snap: inputs-160x48
+resize: 96x89
+live-snap: inputs-96x89
+resize: 80x24
+live-snap: inputs-80x24
+resize: 60x20
+live-snap: inputs-60x20
+resize: 40x12
+live-snap: inputs-40x12
+keys: NPage
+live-snap: inputs-reading-01-40x12
+keys: NPage
+live-snap: inputs-reading-02-40x12
+keys: NPage
+live-snap: inputs-reading-03-40x12
+keys: NPage
+live-snap: inputs-reading-04-40x12
+keys: NPage
+live-snap: inputs-reading-05-40x12
+keys: NPage
+live-snap: inputs-reading-06-40x12
+keys: NPage
+live-snap: inputs-reading-07-40x12
+keys: NPage
+live-snap: inputs-reading-08-40x12
+expect: REPLAY · Result
+expect: Tab receipt
+expect: rows
+keys: NPage
+live-snap: inputs-reading-09-40x12
+keys: NPage
+live-snap: inputs-reading-10-40x12
+keys: NPage
+live-snap: inputs-reading-11-40x12
+keys: NPage
+live-snap: inputs-reading-12-40x12
+keys: NPage
+live-snap: inputs-reading-13-40x12
+keys: NPage
+live-snap: inputs-reading-14-40x12
+keys: NPage
+live-snap: inputs-reading-15-40x12
+keys: NPage
+live-snap: inputs-reading-16-40x12
+keys: NPage
+live-snap: inputs-reading-17-40x12
+keys: NPage
+live-snap: inputs-reading-18-40x12
+keys: NPage
+live-snap: inputs-reading-19-40x12
+keys: NPage
+live-snap: inputs-reading-20-40x12
+keys: NPage
+live-snap: inputs-reading-21-40x12
+keys: NPage
+live-snap: inputs-reading-22-40x12
+keys: NPage
+live-snap: inputs-reading-23-40x12
+keys: NPage
+live-snap: inputs-reading-24-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/catalog_reader.py @TMP_TARGET @ART reader-pages
+ask: Are the supplied source prefix, absent context and full system instructions readable beyond the twelve-line preview, with terminal-safe display and no current-freshness claim?
+resize: 120x36
+submit: logs
+paste-file: @ART/no-ack-command.txt
+keys: Enter
+require-live-snap: 20 ⚠ CONFIRM · descriptor-declared effect | partial-confirmation
+keys: End y
+require-live-snap: 25 acknowledgePartial | partial-refused
+require-shell: python3 -B @REPO/scripts/devex/fixtures/catalog_reader.py @TMP_TARGET @ART no-ack
+require-shell: python3 -B @REPO/scripts/devex/fixtures/catalog_reader.py @TMP_TARGET @ART drift
+paste-file: @ART/accept-command.txt
+keys: Enter
+require-live-snap: 20 ⚠ CONFIRM · descriptor-declared effect | drift-confirmation
+keys: End y
+require-live-snap: 25 Source changed since catalog generation | source-refused
+require-shell: python3 -B @REPO/scripts/devex/fixtures/catalog_reader.py @TMP_TARGET @ART drift-refused
+require-shell: python3 -B @REPO/scripts/devex/fixtures/catalog_reader.py @TMP_TARGET @ART restore
+paste-file: @ART/accept-command.txt
+keys: Enter
+require-live-snap: 20 ⚠ CONFIRM · descriptor-declared effect | exact-acceptance
+expect: acknowledged: true
+expect: This starts no model request or scan
+expect-not: Esc dismiss
+require-shell: python3 -B @REPO/scripts/devex/fixtures/catalog_reader.py @TMP_TARGET @ART confirm-hidden
+keys: Escape
+require-live-snap: 20 Esc dismiss | canceled-acceptance
+require-shell: python3 -B @REPO/scripts/devex/fixtures/catalog_reader.py @TMP_TARGET @ART confirm-canceled
+ask: Does a new confirmation own the controls without an older error banner competing, while cancel restores that error and starts no acceptance or model work?
+paste-file: @ART/accept-command.txt
+keys: Enter
+require-live-snap: 20 ⚠ CONFIRM · descriptor-declared effect | retry-acceptance
+keys: End y
+require-live-snap: 25 Taint catalog accepted | accepted
+require-shell: python3 -B @REPO/scripts/devex/fixtures/catalog_reader.py @TMP_TARGET @ART accepted
+require-shell: python3 -B @REPO/scripts/devex/fixtures/catalog_reader.py @TMP_TARGET @ART edit-active
+submit: run taint-iris-next:catalog-read
+require-live-snap: 25 Saved taint catalog is unreadable | unreadable-active
+require-shell: python3 -B @REPO/scripts/devex/fixtures/catalog_reader.py @TMP_TARGET @ART unreadable
+paste-file: @ART/pinned-command.txt
+keys: Enter
+require-live-snap: 25 Saved taint catalog | retained-pin
+paste-file: @ART/replace-command.txt
+keys: Enter
+require-live-snap: 20 ⚠ CONFIRM · descriptor-declared effect | reviewed-replacement
+expect: Expected active catalog
+expect-not: Esc dismiss
+keys: End y
+require-live-snap: 25 Taint catalog accepted | replaced
+paste-file: @ART/exhausted-command.txt
+keys: Enter
+require-live-snap: 25 allowance exhausted: 2 calls committed | exhausted
+require-shell: python3 -B @REPO/scripts/devex/fixtures/catalog_reader.py @TMP_TARGET @ART exhausted
+ask: Can the operator explicitly repair the active catalog while retaining the accepted version and exhausted request history, without regeneration or a fallback scan?
+keys: C-c
+require-exit: 15
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: logs
+submit: run campaign:allowance {"investigationId":"owned-taint-catalog"}
+require-live-snap: 25 Calls committed: 2/2 | restarted-accounting
+paste-file: @ART/pinned-command.txt
+keys: Enter
+require-live-snap: 25 Saved taint catalog | restarted-profile
+require-shell: python3 -B @REPO/scripts/devex/fixtures/catalog_reader.py @TMP_TARGET @ART pin-read
+paste-file: @ART/replay-pin-command.txt
+keys: Enter
+require-live-snap: 30 SAVED OUTPUT | restarted-reader
+require-shell: python3 -B @REPO/scripts/devex/fixtures/catalog_reader.py @TMP_TARGET @ART restarted
+resize: 40x12
+live-snap: no-color-result-40x12
+keys: NPage
+live-snap: no-color-reading-01-40x12
+keys: NPage
+live-snap: no-color-reading-02-40x12
+keys: NPage
+live-snap: no-color-reading-03-40x12
+expect: REPLAY · Result
+expect: Tab receipt
+expect: rows
+keys: NPage
+live-snap: no-color-reading-04-40x12
+keys: NPage
+live-snap: no-color-reading-05-40x12
+keys: NPage
+live-snap: no-color-reading-06-40x12
+ask: Does the no-color reader retain the accepted catalog, freshness warning, receipt controls and exhausted accounting without starting any new work?
+keys: C-c
+require-exit: 15

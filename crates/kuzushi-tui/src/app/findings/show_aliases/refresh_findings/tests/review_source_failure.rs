@@ -46,6 +46,7 @@ fn unavailable_review_source_keeps_terminal_decisions_open() {
 fn unavailable_source_snapshot(findings: Vec<Finding>) -> FindingsReadSnapshot {
     FindingsReadSnapshot {
         page_recovery_notice: None,
+        study: None,
         target: Default::default(),
         watermark: None,
         policy: IdentityFoldPolicy::Legacy,

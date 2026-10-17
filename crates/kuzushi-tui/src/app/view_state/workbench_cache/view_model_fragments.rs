@@ -277,9 +277,15 @@ pub(crate) struct WorklistCacheKey {
     /// (large) snapshot body only on a cache miss instead of re-cloning and
     /// re-parsing it every frame (C-4).
     snapshot_generation: Option<u64>,
+    saved_run: Option<(String, u64)>,
 }
 
 impl WorklistCacheKey {
+    pub(crate) fn with_saved_run(mut self, saved_run: Option<(String, u64)>) -> Self {
+        self.saved_run = saved_run;
+        self
+    }
+
     pub(crate) fn from_parts(
         attack_surface_version: Option<u64>,
         recommendations: u64,
@@ -289,6 +295,7 @@ impl WorklistCacheKey {
             attack_surface: attack_surface_version,
             recommendations: ViewModelVersion(recommendations),
             snapshot_generation,
+            saved_run: None,
         }
     }
 }

@@ -2025,6 +2025,7 @@ mod run_focus_completion_tests {
             run_refs: vec![run_id.to_string()],
             scan: Some(ScanStageData {
                 scope: ScanStageScope {
+                    inspected_files: None,
                     target: target.display().to_string(),
                     paths: Vec::new(),
                 },

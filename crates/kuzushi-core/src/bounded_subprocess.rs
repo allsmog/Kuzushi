@@ -68,7 +68,25 @@ pub(crate) fn output_with_limits_and_control(
     stderr_limit: usize,
     timeout: Duration,
 ) -> Result<Output> {
-    controlled::controlled_output_with_limits(command, label, stdout_limit, stderr_limit, timeout)
+    output_with_limits_and_cancellation(command, label, stdout_limit, stderr_limit, None, timeout)
+}
+
+pub(crate) fn output_with_limits_and_cancellation(
+    command: &mut Command,
+    label: &str,
+    stdout_limit: usize,
+    stderr_limit: usize,
+    cancellation: Option<&crate::scan::ScanCancellation>,
+    timeout: Duration,
+) -> Result<Output> {
+    controlled::controlled_output_with_limits(
+        command,
+        label,
+        stdout_limit,
+        stderr_limit,
+        cancellation,
+        timeout,
+    )
 }
 
 pub(crate) fn output_with_input_and_control(
@@ -337,5 +355,31 @@ mod tests {
 
         assert!(error.contains("exceeded"), "{error}");
         assert!(output.metadata().unwrap().len() <= 4);
+    }
+    #[cfg(unix)]
+    #[test]
+    fn bounded_cancellable_output_refuses_pre_cancellation_and_enforces_capture_limits() {
+        let cancellation = crate::ScanCancellation::default();
+        cancellation.cancel();
+        let error = output_with_limits_and_cancellation(
+            Command::new("sh").args(["-c", "printf unused"]),
+            "owned bounded fixture",
+            4,
+            4,
+            Some(&cancellation),
+            Duration::from_secs(1),
+        )
+        .unwrap_err();
+        assert!(format!("{error:#}").contains("cancelled before"));
+        let error = output_with_limits_and_cancellation(
+            Command::new("sh").args(["-c", "printf 12345"]),
+            "owned bounded fixture",
+            4,
+            4,
+            None,
+            Duration::from_secs(1),
+        )
+        .unwrap_err();
+        assert!(format!("{error:#}").contains("limit"));
     }
 }

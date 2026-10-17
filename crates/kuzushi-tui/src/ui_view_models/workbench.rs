@@ -110,7 +110,7 @@ static SCAN_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
 static REVIEW_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
     hint("B", "review decision backlog"),
     hint("Enter", "finding details"),
-    hint("findings", "reset list"),
+    hint("findings", "full queue"),
     hint("z", "open heatmap"),
 ];
 
@@ -310,12 +310,22 @@ fn command_bar_hints(
 ) -> Vec<WorkbenchHint> {
     let mut hints = page_command_bar_hints(app, page);
     customize_phase_hints(&mut hints, app, page, selection);
+    qualify_map_zoom_hint(&mut hints, app, page);
     if page == WorkbenchPage::Prove && !selection.has_detail {
         hints[0] = review_page_hint("choose a finding in Review");
     }
     append_report_hint(&mut hints, report_cta);
     append_phase_planner_hint(&mut hints, app, page);
     hints
+}
+
+fn qualify_map_zoom_hint(hints: &mut [WorkbenchHint], app: &ShellApp, page: WorkbenchPage) {
+    if page != WorkbenchPage::Map {
+        return;
+    }
+    if let Some(hint) = hints.iter_mut().find(|hint| hint.verb == "z") {
+        hint.verb = Cow::Owned(workbench_navigate_control_hint(app, "z"));
+    }
 }
 
 /// A completed or passed phase's verb opens this page, so the page itself
@@ -466,6 +476,9 @@ fn replace_patch_hint(hints: &mut [WorkbenchHint], selection: SelectedFindingHin
 /// footer and the keymap already say. The remaining Map hints stay true in
 /// both states.
 fn page_command_bar_hints(app: &ShellApp, page: WorkbenchPage) -> Vec<WorkbenchHint> {
+    if page == WorkbenchPage::Review {
+        return review_command_bar_hints(!app.findings().is_empty());
+    }
     let hints = page_command_bar_hint_slice(page).to_vec();
     if page != WorkbenchPage::Map || super::ready_map_gallery_is_primary(app) {
         return hints;
@@ -474,6 +487,14 @@ fn page_command_bar_hints(app: &ShellApp, page: WorkbenchPage) -> Vec<WorkbenchH
         .into_iter()
         .filter(|hint| hint.verb != MAP_GALLERY_CYCLE_VERB)
         .map(map_hint_without_gallery)
+        .collect()
+}
+
+fn review_command_bar_hints(has_findings: bool) -> Vec<WorkbenchHint> {
+    REVIEW_COMMAND_BAR_HINTS
+        .iter()
+        .filter(|hint| has_findings || hint.verb != "z")
+        .cloned()
         .collect()
 }
 
@@ -690,6 +711,46 @@ mod tests {
         assert!(map
             .iter()
             .any(|hint| hint.verb == "jobs" && hint.label == "inspect Map runs"));
+    }
+
+    #[test]
+    fn map_zoom_hint_names_the_mode_transition_before_the_view_key() {
+        let mut app = app();
+        let hints = command_bar_hints(&app, WorkbenchPage::Map, None, no_selection());
+        assert!(hints.iter().any(|hint| hint.verb == "Esc then z"));
+        app.set_input_mode(crate::InputMode::Navigate);
+        let hints = command_bar_hints(&app, WorkbenchPage::Map, None, no_selection());
+        assert!(hints.iter().any(|hint| hint.verb == "z"));
+    }
+
+    #[test]
+    fn empty_review_names_queue_recovery_without_a_heatmap() {
+        let hints = page_command_bar_hints(&app(), WorkbenchPage::Review);
+
+        assert!(hints
+            .iter()
+            .any(|hint| hint.verb == "findings" && hint.label == "full queue"));
+        assert!(!hints.iter().any(|hint| hint.verb == "z"));
+    }
+
+    #[test]
+    fn populated_review_keeps_the_heatmap_hint() {
+        let mut app = app();
+        app.set_findings(vec![kuzushi_core::Finding::new_tool(
+            "agentic-sast",
+            "rule",
+            "src/lib.rs",
+            4,
+            None,
+            kuzushi_core::Severity::High,
+            "prior observation",
+        )]);
+
+        let hints = page_command_bar_hints(&app, WorkbenchPage::Review);
+
+        assert!(hints
+            .iter()
+            .any(|hint| hint.verb == "z" && hint.label == "open heatmap"));
     }
 
     /// Item: a Prove page with nothing selected sends the operator to Review,

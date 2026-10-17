@@ -3,9 +3,9 @@ use super::*;
 pub(crate) fn full_mode_module() -> BuiltinModule {
     builtin_module(
         "full-mode",
-        "Full-codebase scan",
+        "Chunked source analysis",
         ModuleKind::Offense,
-        "Whole-codebase chunked LLM pass — token-greedy file clustering, per-chunk model query.",
+        "Compatibility entry for chunked source analysis. Use standard agentic SAST for accepted scope and context.",
         tools_with_policy(
             workspace_policy(
                 ToolPhase::Scan,
@@ -16,13 +16,31 @@ pub(crate) fn full_mode_module() -> BuiltinModule {
                 "full-mode:hunt",
                 "Compatibility alias for agentic-sast:scan with strategy=chunked.",
                 full_mode_hunt_options(),
-            )],
+            ).without_phase_result()],
         ),
         vec![],
-    )
+    ).compatibility()
 }
 
 fn full_mode_hunt_options() -> Vec<OptionSpec> {
+    let mut options = full_mode_planning_options();
+    options.extend([
+        opt(
+            "budgetUsd",
+            OptionType::Float,
+            "Stop starting chunks after observed cost reaches this amount. A request can exceed it and charges may be unknown. Approved call limits remain required.",
+        ),
+        full_mode_scope_file_option(),
+        full_mode_failed_chunk_ids_option(),
+        chunked_cache_option().default(json!(true)),
+        full_mode_auto_triage_option(),
+        full_mode_auto_triage_max_steps_option(),
+        full_mode_auto_triage_deposit_option(),
+    ]);
+    options
+}
+
+fn full_mode_planning_options() -> Vec<OptionSpec> {
     vec![
         opt(
             "language",
@@ -34,9 +52,10 @@ fn full_mode_hunt_options() -> Vec<OptionSpec> {
         opt(
             "maxTokensPerChunk",
             OptionType::Int,
-            "Token budget per chunk; chunks pack files up to this cap.",
+            "Approximate input tokens per chunk for file grouping.",
         )
-        .default(serde_json::json!(12_000)),
+        .default(serde_json::json!(12_000))
+        .integer_range(1, i64::MAX),
         opt(
             "depositUsdPerChunk",
             OptionType::Float,
@@ -46,21 +65,9 @@ fn full_mode_hunt_options() -> Vec<OptionSpec> {
         opt(
             "dryRun",
             OptionType::Bool,
-            "Plan + cost estimate only; do not invoke any model.",
+            "Plan without model calls using bounded inventory and source limits (100000 entries/files, 512 MiB source). Partial plans require a smaller explicit scope before execution.",
         )
         .default(serde_json::json!(false)),
-        opt(
-            "budgetUsd",
-            OptionType::Float,
-            "Per-run USD ceiling: stop dispatching new chunks once observed \
-             cost reaches it, keep findings, report undispatched chunk IDs \
-             for a failedChunkIds retry.",
-        ),
-        full_mode_scope_file_option(),
-        full_mode_failed_chunk_ids_option(),
-        full_mode_auto_triage_option(),
-        full_mode_auto_triage_max_steps_option(),
-        full_mode_auto_triage_deposit_option(),
     ]
 }
 
@@ -73,12 +80,20 @@ fn full_mode_scope_file_option() -> OptionSpec {
     .workspace_read()
 }
 
-fn full_mode_failed_chunk_ids_option() -> OptionSpec {
+pub(super) fn full_mode_failed_chunk_ids_option() -> OptionSpec {
     opt(
         "failedChunkIds",
-        OptionType::String,
-        "Optional retry filter: comma-separated chunk IDs (\"3,7,11\") or JSON array when using run JSON input.",
+        OptionType::Json,
+        "Retry selection supplied in run input: a comma-separated string or an array of chunk IDs. Empty or unknown IDs are refused. Replan after source changes.",
     )
+}
+
+pub(super) fn chunked_cache_option() -> OptionSpec {
+    opt(
+        "reuseCachedChunks",
+        OptionType::Bool,
+        "Reuse identical chunk results. Set false for independent discovery; fresh requests consume the approved allowance. The compatibility default is true.",
+    ).advanced()
 }
 
 fn full_mode_auto_triage_option() -> OptionSpec {
@@ -111,16 +126,23 @@ pub(crate) fn classifier_gate_module() -> BuiltinModule {
         "classifier-gate",
         "Classifier gate",
         ModuleKind::Triage,
-        "Cheap LLM classifier with adaptive p80 quantile gate. Score one finding to decide whether the deep auditor should run.",
-        tools_with_policy(
-            workspace_policy(
+        "Experimental finding-metadata prioritization with a historical percentile threshold. No source review or follow-up execution.",
+        vec![classifier_score_tool().with_policy(workspace_policy(
                 ToolPhase::Review,
                 RuntimeRequirement::Always,
                 FindingStoreRequirement::Optional,
-            ),
-            vec![tool_with_options(
+            ))
+            .without_phase_result()
+            .with_allowance_category(AllowanceCategory::Review)
+            .with_discovery_maturity(ModuleMaturity::Labs)],
+        vec![],
+    )
+}
+
+fn classifier_score_tool() -> ToolDescriptor {
+    tool_with_options(
                 "classifier-gate:score",
-                "Score a finding with the cheap classifier; updates the running quantile.",
+                "Experimental prioritization opinion over finding metadata. Requires Review allowance; cannot complete Review or start follow-up work.",
                 vec![
                 opt(
                     "findingFingerprint",
@@ -135,10 +157,7 @@ pub(crate) fn classifier_gate_module() -> BuiltinModule {
                 )
                 .default(serde_json::json!(0.80)),
                 ],
-            )],
-        ),
-        vec![],
-    )
+            )
 }
 
 pub(crate) fn deep_audit_module() -> BuiltinModule {
@@ -146,7 +165,7 @@ pub(crate) fn deep_audit_module() -> BuiltinModule {
         "deep-audit",
         "Deep auditor",
         ModuleKind::Triage,
-        "Tool-augmented LLM auditor — uses code-nav primitives to verify a finding's triggerability.",
+        "Legacy independent deep auditor. Use the guided Review plan for source-bound review.",
         tools_with_policy(
             workspace_policy(
                 ToolPhase::Review,
@@ -157,12 +176,13 @@ pub(crate) fn deep_audit_module() -> BuiltinModule {
         ),
         vec![],
     )
+    .compatibility()
 }
 
 fn deep_audit_tool() -> ToolDescriptor {
     hidden_tool_with_options(
         "deep-audit:run",
-        "Compatibility alias for triage:run with strategy=deep.",
+        "Legacy independent deep-audit action. Use campaign:review-study and triage:run for approved source-bound Review.",
         deep_audit_options(),
     )
 }

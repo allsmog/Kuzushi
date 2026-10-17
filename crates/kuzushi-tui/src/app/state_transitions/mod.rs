@@ -50,6 +50,8 @@ mod budget_keys;
 mod confirmation_keys;
 mod control_keys;
 mod cursor_and_view_keys;
+mod dfd_findings;
+pub(crate) use dfd_findings::DfdReviewOrigin;
 mod exit_requests;
 mod key_dispatch;
 mod keybinding_types;

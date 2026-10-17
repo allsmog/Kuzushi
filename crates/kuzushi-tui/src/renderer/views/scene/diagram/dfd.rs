@@ -1211,7 +1211,10 @@ fn security_context_kinds() -> [DfdSecurityKind; 6] {
 fn append_detail_lines(lines: &mut Vec<Line<'static>>, key: &str, value: &str, width: usize) {
     let key_width = width.min(13);
     let value_width = width.saturating_sub(key_width).max(1);
-    let chunks = crate::renderer::shared::text::wrap_text(value, value_width);
+    let chunks = crate::renderer::shared::text::wrap_document_lines(
+        vec![Line::raw(value.to_owned())],
+        value_width.min(u16::MAX as usize) as u16,
+    );
     for (index, chunk) in chunks.into_iter().enumerate() {
         let label = if index == 0 {
             format!("{key:<key_width$}")
@@ -1220,7 +1223,7 @@ fn append_detail_lines(lines: &mut Vec<Line<'static>>, key: &str, value: &str, w
         };
         lines.push(Line::from(vec![
             Span::styled(label, crate::theme::muted()),
-            Span::styled(chunk, crate::theme::primary()),
+            Span::styled(chunk.to_string(), crate::theme::primary()),
         ]));
     }
 }
@@ -1562,6 +1565,7 @@ mod tests {
                     detail: "GET /oauth/callback".into(),
                     evidence: "src/oauth.rs:42".into(),
                     evidence_paths: vec!["src/oauth.rs:42".into()],
+                    file_paths: vec!["src/oauth.rs".into()],
                     target_element_ids: vec!["oauth".into()],
                 },
                 DfdSecurityItem {
@@ -1571,6 +1575,7 @@ mod tests {
                     detail: "callback state can cross sessions".into(),
                     evidence: "src/oauth.rs:51".into(),
                     evidence_paths: vec!["src/oauth.rs:51".into()],
+                    file_paths: vec!["src/oauth.rs".into()],
                     target_element_ids: vec!["oauth".into()],
                 },
             ],
@@ -1631,6 +1636,7 @@ mod tests {
                 detail: "authorized operator".into(),
                 evidence: "src/main.rs:1".into(),
                 evidence_paths: vec!["src/main.rs:1".into()],
+                file_paths: vec!["src/main.rs".into()],
                 target_element_ids: vec!["Local developer user".into()],
             }],
             link_state: DfdLinkState::Complete,
@@ -1750,6 +1756,21 @@ mod tests {
             assert!(!first.contains("┌ DETAIL"), "{first}");
             let next = render_to_text(diagram(1), 40, height);
             assert!(next.contains("does"), "{next}");
+        }
+    }
+
+    #[test]
+    fn evidence_detail_preserves_literal_filename_spaces_at_every_wrap() {
+        let value = "app/a  b.tf#L7";
+        for width in [16, 24, 40, 120] {
+            let mut lines = Vec::new();
+            append_detail_lines(&mut lines, "evidence", value, width);
+            let recovered = lines
+                .iter()
+                .flat_map(|line| line.spans.iter().skip(1))
+                .map(|span| span.content.as_ref())
+                .collect::<String>();
+            assert_eq!(recovered, value, "{width}");
         }
     }
 

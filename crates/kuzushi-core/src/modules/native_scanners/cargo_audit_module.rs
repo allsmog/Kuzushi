@@ -1,5 +1,7 @@
+use super::direct_scan_receipt::{DirectScanPolicy, DirectScanReceipt};
 use super::*;
 use crate::dep_hygiene::ConfiguredCargoAuditScanner;
+use crate::workspace::source_snapshot::SourceSnapshot;
 
 const STUDY_KEYS: [(&str, &str, &str); 6] = [
     ("cargoAuditBinary", "binary", "cargo_audit_binary"),
@@ -68,29 +70,56 @@ pub(in crate::modules) fn run_cargo_audit_scan(
 ) -> Result<Value> {
     let target = resolve_tool_target(&input, ctx)?;
     let scanner = ConfiguredCargoAuditScanner::from_tool_input(&input)?;
-    let result = crate::workspace::source_snapshot::run_source_bound_tool(
-        ctx,
-        "cargo-audit:scan",
-        &target,
-        || run_started_audit(&target, &scanner, ctx),
-    )?;
+    let source = SourceSnapshot::capture(ctx, "cargo-audit:scan", &target)?;
+    let receipt = DirectScanReceipt::capture(ctx, &target, DirectScanPolicy::CargoAudit)?;
+    let (output, findings) = source.bind_result(analyze(&target, &scanner, ctx))?;
+    let settlement_source = source.clone();
+    let output = source.finish(ctx, "cargo-audit:scan", &target, output);
+    let result = settlement_source.bind_result(receipt.finish(ctx, &findings, output))?;
     Ok(with_inspection_receipts(
         result,
         scanner.inspection_receipts(),
     ))
 }
 
-fn run_started_audit(
+fn analyze(
     target: &Path,
     scanner: &ConfiguredCargoAuditScanner,
     ctx: &ToolExecutionContext<'_>,
-) -> Result<Value> {
-    let findings = match ctx.with_cancellation(|cancel| scanner.scan(target, cancel)) {
+) -> Result<(Value, Vec<Finding>)> {
+    let mut findings = match ctx.with_cancellation(|cancel| scanner.scan(target, cancel)) {
         Ok(findings) => findings,
-        Err(error) => return Ok(failed_tool_output("cargo-audit:scan", target, error)),
+        Err(error) => {
+            return Ok((
+                failed_tool_output("cargo-audit:scan", target, error),
+                Vec::new(),
+            ))
+        }
     };
-    let persisted = persist_iac_findings(target, &findings, ctx)?;
-    Ok(cargo_audit_output(target, findings, persisted))
+    rebase_findings(target, scanner, ctx, &mut findings)?;
+    Ok((cargo_audit_output(target, findings.clone(), None), findings))
+}
+
+fn rebase_findings(
+    target: &Path,
+    scanner: &ConfiguredCargoAuditScanner,
+    ctx: &ToolExecutionContext<'_>,
+    findings: &mut [Finding],
+) -> Result<()> {
+    let Some(workspace) = ctx.workspace else {
+        return Ok(());
+    };
+    let prefix = target
+        .strip_prefix(workspace.root())
+        .context("Cargo discovery target must stay inside its workspace")?;
+    for finding in findings {
+        let file = prefix
+            .join(&finding.file_path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        scanner.rebind_scoped_finding(finding, file);
+    }
+    Ok(())
 }
 
 pub(super) fn cargo_audit_output(

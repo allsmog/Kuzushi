@@ -5,7 +5,7 @@
 
 use super::diagram::{DfdDiagram, DfdSummary, TreeDiagram};
 use super::entry_points::EntryPointBrowser;
-use super::gallery::{gallery_header_lines, map_gallery_header_lines, page_body_rows};
+use super::gallery::{gallery_viewport_header_lines, map_gallery_header_lines, page_body_rows};
 use super::scene_color::to_color;
 use super::*;
 use crate::scene3d::{
@@ -26,7 +26,7 @@ const CAM_DISTANCE: f32 = 4.2;
 pub(crate) fn render_scene_view(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     let outer = super::gallery_layout::gallery_sections(area, false);
     frame.render_widget(
-        Paragraph::new(gallery_header_lines(app, area.width as usize)),
+        Paragraph::new(gallery_viewport_header_lines(app, area)),
         outer[0],
     );
     render_scene_body(frame, outer[1], app, app.router.scene().page(), 0);
@@ -277,7 +277,7 @@ mod tests {
         let rendered = render_embedded_gallery(&app, 60, 10, 0);
 
         let position = rendered.last().expect("a rendered canvas").trim_end();
-        assert_eq!(position, " rows 1-7/16", "{rendered:#?}");
+        assert!(position.starts_with(" rows 1-7/16"), "{rendered:#?}");
         drop(temp);
     }
 
@@ -297,7 +297,7 @@ mod tests {
             "the last page must show the tree's tail, not blank rows: {rendered:#?}"
         );
         let position = rendered.last().expect("a rendered canvas").trim_end();
-        assert_eq!(position, " rows 10-16/16", "{rendered:#?}");
+        assert!(position.starts_with(" rows 10-16/16"), "{rendered:#?}");
         drop(temp);
     }
 
@@ -314,7 +314,10 @@ mod tests {
         for width in [24, 40, 60] {
             let rendered = render_embedded_gallery(&app, width, 10, 0);
             let position = rendered.last().expect("a rendered canvas").trim_end();
-            assert!(position.ends_with("/16"), "width={width} {position}");
+            assert!(
+                position.split(" ·").next().unwrap().ends_with("/16"),
+                "width={width} {position}"
+            );
         }
 
         let zoom =
@@ -325,7 +328,15 @@ mod tests {
             .map(|line| line.to_string())
             .find(|text| text.contains("rows "))
             .expect("the zoom discloses its window");
-        assert!(position.trim_end().ends_with("/16"), "{position}");
+        assert!(
+            position
+                .split(" ·")
+                .next()
+                .unwrap()
+                .trim_end()
+                .ends_with("/16"),
+            "{position}"
+        );
         drop(temp);
     }
 
@@ -375,10 +386,9 @@ mod tests {
         drop(temp);
     }
 
-    /// The step is measured on the canvas the full-frame viewport draws: the
-    /// pinned three-line header, its blank separator, and the position label
-    /// leave `height - 5` display lines, so a run of one-line rows pages by
-    /// exactly that many rows at every supported size.
+    /// The full-frame page step matches its actual content area. Short
+    /// readers keep one header and one position line; taller readers retain
+    /// the expanded header and separator.
     #[test]
     fn line_gallery_paging_uses_visible_body_rows_at_every_supported_size() {
         let (temp, mut app) = app_with_components(component_report(400, "crate"));
@@ -389,7 +399,8 @@ mod tests {
             app.router.default_scroll_mut().set(200);
             let area =
                 crate::renderer::workbench_primary_area(&app, Rect::new(0, 0, width, height));
-            let expected = usize::from(area.height.saturating_sub(5)).max(1);
+            let framing = if area.height < 12 { 2 } else { 5 };
+            let expected = usize::from(area.height.saturating_sub(framing)).max(1);
             assert_eq!(
                 scene_page_rows(&app, PageDirection::Down),
                 Some(expected),
@@ -430,6 +441,27 @@ mod tests {
         drop(temp);
     }
 
+    #[test]
+    fn component_continuations_survive_repeated_full_frame_resizes() {
+        let (_temp, mut app) =
+            app_with_components(component_report(40, "a-dependency-with-a-long-name"));
+        app.set_shell_view(ShellView::Scene);
+        app.router.scene_mut().set_page(VizPage::Components);
+        app.set_viewport(crate::TerminalViewport::new(40, 12));
+        app.router.default_scroll_mut().set(19);
+        let initial = crate::renderer::capture_gallery_reading(&app).unwrap();
+        for (width, height) in [(120, 36), (60, 20), (96, 89), (40, 12)] {
+            app.set_viewport(crate::TerminalViewport::new(width, height));
+            assert_eq!(
+                crate::renderer::capture_gallery_reading(&app)
+                    .unwrap()
+                    .anchor,
+                initial.anchor
+            );
+        }
+        assert_eq!(app.router.default_scroll().offset(), 19);
+    }
+
     /// The rows the full-frame viewport names as `(first, last, total)`.
     fn shown_rows(app: &ShellApp) -> (usize, usize, usize) {
         let viewport = app.viewport();
@@ -448,6 +480,9 @@ mod tests {
 
     fn parse_position(label: &str) -> (usize, usize, usize) {
         let (range, total) = label
+            .split(" ·")
+            .next()
+            .unwrap()
             .split_once(' ')
             .and_then(|(_, rest)| rest.split_once('/'))
             .expect("row label");

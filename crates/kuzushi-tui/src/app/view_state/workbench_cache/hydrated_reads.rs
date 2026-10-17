@@ -2,33 +2,6 @@ use super::*;
 use kuzushi_core::workspace::ProjectModelDocument;
 
 impl WorkbenchCache {
-    pub(crate) fn invalidate_investigation_report(&mut self, target: &Path) {
-        if self
-            .investigation_report
-            .as_ref()
-            .is_some_and(|(root, _, _)| root == target)
-        {
-            self.investigation_report = None;
-        }
-    }
-    pub(crate) fn cached_selected_report(
-        &self,
-        target: Option<&Path>,
-        key: &ViewHydrationKey,
-    ) -> ViewDataState<InvestigationReportRead> {
-        let Some(target) = target else {
-            return ViewDataState::Ready(Ok(None));
-        };
-        if let Some((_, _, state)) = self
-            .investigation_report
-            .as_ref()
-            .filter(|(path, cached_key, _)| path == target && cached_key == key)
-        {
-            return ViewDataState::Ready(state.clone());
-        }
-        self.loading_state(target, key)
-    }
-
     pub(crate) fn cached_target_profile(
         &self,
         target: Option<&Path>,
@@ -44,6 +17,30 @@ impl WorkbenchCache {
             return ViewDataState::Ready(cache.profile);
         }
         self.loading_state(target, &ViewHydrationKey::TargetProfile)
+    }
+
+    pub(crate) fn cached_saved_worklist_run(
+        &self,
+        target: Option<&Path>,
+    ) -> ViewDataState<Result<Option<String>, String>> {
+        let Some(target) = target else {
+            return ViewDataState::Ready(Ok(None));
+        };
+        let Some(cache) = self
+            .run_summary_entries
+            .as_ref()
+            .filter(|row| row.target == target)
+        else {
+            return self.loading_state(target, &ViewHydrationKey::RunSummaryEntries);
+        };
+        match &cache.state {
+            RunSummaryEntriesState::Ready(entries) => {
+                ViewDataState::Ready(Ok(entries.iter().find_map(saved_worklist_run_id)))
+            }
+            RunSummaryEntriesState::Failed(reason) => ViewDataState::Ready(Err(format!(
+                "Saved ranking history is unavailable: {reason}"
+            ))),
+        }
     }
 
     pub(crate) fn cached_run_summary_entries(
@@ -283,6 +280,25 @@ impl WorkbenchCache {
         )
     }
 
+    pub(crate) fn cached_nonmissing_json_file_version(&self, path: &Path) -> Option<u64> {
+        self.json_files
+            .get(path)
+            .filter(|cache| !matches!(cache.state, JsonFileState::Missing))
+            .map(|cache| cache.version)
+    }
+
+    pub(crate) fn cached_nonmissing_run_artifact_version(
+        &self,
+        target: &Path,
+        run_id: &str,
+        leaf: &str,
+    ) -> Option<u64> {
+        self.run_artifact_texts
+            .get(&(target.to_path_buf(), run_id.into(), leaf.into()))
+            .filter(|cache| !matches!(cache.state, kuzushi_core::RunArtifactRead::Missing { .. }))
+            .map(|cache| cache.version)
+    }
+
     pub(crate) fn cached_json_file_version(&self, path: &Path) -> Option<u64> {
         self.json_files.get(path).map(|cache| cache.version)
     }
@@ -372,4 +388,13 @@ impl WorkbenchCache {
             },
         )
     }
+}
+
+fn saved_worklist_run_id(entry: &kuzushi_core::RunSummaryEntry) -> Option<String> {
+    let kuzushi_core::RunSummaryEntryState::Ready(summary) = &entry.state else {
+        return None;
+    };
+    let tool = summary.tool.as_deref().unwrap_or(&summary.kind);
+    (tool == "worklist:rank" && matches!(summary.status.as_str(), "completed" | "partial"))
+        .then(|| summary.run_id.clone())
 }

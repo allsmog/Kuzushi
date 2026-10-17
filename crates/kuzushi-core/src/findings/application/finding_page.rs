@@ -9,8 +9,10 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 
 mod anchor;
+mod batch_membership;
 mod cursor;
 pub use anchor::{finding_page_anchor_index, finding_page_continuity_anchor};
+use batch_membership::{matching_report, BatchPageMembership};
 #[cfg(test)]
 mod tests;
 use cursor::{page_offset, query_binding, window_report};
@@ -82,6 +84,12 @@ pub struct FindingListPage {
     pub page: FindingPageMetadata,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct FindingPageSnapshot {
+    pub page: FindingListPage,
+    pub study: Option<crate::findings::BatchOccurrenceReport>,
+}
+
 pub fn read_finding_page(
     store: &FindingStore,
     workspace: &WorkspaceTarget,
@@ -89,24 +97,46 @@ pub fn read_finding_page(
     policy: IdentityFoldPolicy,
     request: &FindingPageRequest,
 ) -> Result<FindingListPage> {
-    store.with_projection_snapshot(|store| {
-        read_finding_page_snapshot(store, workspace, filter, policy, request)
-    })
+    read_finding_page_snapshot(store, workspace, filter, policy, request)
+        .map(|snapshot| snapshot.page)
 }
 
-fn read_finding_page_snapshot(
+/// Returns the study summary used to determine membership and bind the cursor.
+pub fn read_finding_page_snapshot(
     store: &FindingStore,
     workspace: &WorkspaceTarget,
     filter: &FindingListFilter,
     policy: IdentityFoldPolicy,
     request: &FindingPageRequest,
-) -> Result<FindingListPage> {
+) -> Result<FindingPageSnapshot> {
+    store.with_projection_snapshot(|store| {
+        read_finding_page_projection(store, workspace, filter, policy, request)
+    })
+}
+
+fn read_finding_page_projection(
+    store: &FindingStore,
+    workspace: &WorkspaceTarget,
+    filter: &FindingListFilter,
+    policy: IdentityFoldPolicy,
+    request: &FindingPageRequest,
+) -> Result<FindingPageSnapshot> {
     let before = store.projection_meta()?;
     let runs = provenance_runs(workspace, filter)?;
-    let report = store.matching_findings_for_page(filter, policy)?;
+    let membership =
+        BatchPageMembership::load(store, workspace, filter.batch_id.as_deref(), policy)?;
+    let report = matching_report(store, filter, policy, membership.as_ref())?;
     let mut report = apply_provenance(report, filter, &runs);
     order_matching_rows(&mut report, request.order);
-    let binding = query_binding(workspace, filter, policy, request.order, &report, &runs)?;
+    let binding = query_binding(
+        workspace,
+        filter,
+        policy,
+        request.order,
+        &report,
+        &runs,
+        membership.as_ref(),
+    )?;
     let offset = request_offset(
         request,
         &binding,
@@ -125,6 +155,10 @@ fn read_finding_page_snapshot(
         before.applied_seq,
         request.order,
     )
+    .map(|page| FindingPageSnapshot {
+        page,
+        study: membership.map(|membership| membership.report),
+    })
 }
 
 pub fn finding_page_anchor(finding: &Finding) -> String {
@@ -141,7 +175,9 @@ pub(super) fn matching_report_with_provenance(
     policy: IdentityFoldPolicy,
 ) -> Result<FindingListReport> {
     let runs = provenance_runs(workspace, filter)?;
-    let report = store.matching_findings_for_page(filter, policy)?;
+    let membership =
+        BatchPageMembership::load(store, workspace, filter.batch_id.as_deref(), policy)?;
+    let report = matching_report(store, filter, policy, membership.as_ref())?;
     Ok(apply_provenance(report, filter, &runs))
 }
 

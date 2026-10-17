@@ -116,6 +116,56 @@ fn workflow_supplied_references_are_visible_missing_and_cannot_be_edited() {
 }
 
 #[test]
+fn declared_structured_setting_saves_and_reopens_without_running_work() {
+    let mut app = fixture("uaf-hunt:hunt", "allocFreePairs", OptionsFilter::Advanced);
+    app.set_input("kept composer");
+    key(&mut app, KeyCode::Enter);
+    assert!(app.tool_option_editor_open());
+    app.reduce_paste(r#"[{"alloc":"owned_alloc","free":"owned_free"}]"#);
+    assert!(key(&mut app, KeyCode::Enter).effects.is_empty());
+    let expected = serde_json::json!([{"alloc":"owned_alloc","free":"owned_free"}]);
+    assert_eq!(
+        app.option_store().effective_stored_values("uaf-hunt:hunt")["allocFreePairs"],
+        expected
+    );
+    assert_eq!(app.input(), "kept composer");
+    key(&mut app, KeyCode::Enter);
+    let value = app
+        .router
+        .options_browser()
+        .edit
+        .as_ref()
+        .unwrap()
+        .field
+        .text();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(value).unwrap(),
+        expected
+    );
+    assert!(!app.has_running_work());
+}
+
+#[test]
+fn malformed_structured_setting_keeps_the_draft_and_previous_value() {
+    let mut app = fixture(
+        "uaf-hunt:hunt",
+        "extraAllocFreePairs",
+        OptionsFilter::Advanced,
+    );
+    key(&mut app, KeyCode::Enter);
+    app.reduce_paste("[{ unfinished");
+    assert!(key(&mut app, KeyCode::Enter).effects.is_empty());
+    let edit = app.router.options_browser().edit.as_ref().unwrap();
+    assert_eq!(edit.field.text(), "[{ unfinished");
+    assert!(edit.error.is_some());
+    assert!(app
+        .option_store()
+        .effective_stored_values("uaf-hunt:hunt")
+        .is_empty());
+    assert!(!app.has_running_work());
+}
+
+#[test]
 fn global_save_is_explicit_and_uses_the_existing_persistence_effect() {
     let mut app = fixture("context:build", "enrichment", OptionsFilter::Advanced);
     key(&mut app, KeyCode::Enter);

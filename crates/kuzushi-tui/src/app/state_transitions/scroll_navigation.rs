@@ -3,6 +3,30 @@ use super::*;
 use crate::renderer::PageDirection;
 
 impl ShellApp {
+    pub(super) fn handle_run_artifact_boundary_key(
+        &mut self,
+        key: KeyEvent,
+    ) -> Option<InputUpdate> {
+        if !self.run_artifact_owns_boundary_key(key) {
+            return None;
+        }
+        let max = crate::renderer::run_artifact_max_scroll(self)?;
+        let offset = match key.code {
+            KeyCode::Home => 0,
+            KeyCode::End => max,
+            _ => return None,
+        };
+        self.router.default_scroll_mut().set(offset);
+        Some(InputUpdate::handled())
+    }
+
+    fn run_artifact_owns_boundary_key(&self, key: KeyEvent) -> bool {
+        key.modifiers.is_empty()
+            && matches!(key.code, KeyCode::Home | KeyCode::End)
+            && crate::ui_view_models::replay_switch_owns_input(self)
+            && !crate::ui_view_models::answers_own_input(self)
+    }
+
     pub(super) fn handle_generic_scroll_hotkey(&mut self, key: KeyEvent) -> bool {
         if self.handle_catalog_row_hotkey(key) {
             return true;
@@ -21,6 +45,9 @@ impl ShellApp {
     }
 
     pub(super) fn scroll_current_view_down(&mut self, amount: usize) {
+        if self.shift_scene_line_scroll(amount.min(i32::MAX as usize) as i32) {
+            return;
+        }
         if let Some(kind) = self.current_page_scroll_kind() {
             self.add_page_scroll(kind, amount);
         } else {
@@ -29,11 +56,26 @@ impl ShellApp {
     }
 
     pub(super) fn scroll_current_view_up(&mut self, amount: usize) {
+        if self.shift_scene_line_scroll(-(amount.min(i32::MAX as usize) as i32)) {
+            return;
+        }
         if let Some(kind) = self.current_page_scroll_kind() {
             self.subtract_page_scroll(kind, amount);
         } else {
             self.scroll_up(amount.min(u16::MAX as usize) as u16);
         }
+    }
+
+    fn shift_scene_line_scroll(&mut self, amount: i32) -> bool {
+        if self.shell_view() != ShellView::Scene {
+            return false;
+        }
+        let Some(offset) = crate::renderer::gallery_line_offset(self, amount) else {
+            return false;
+        };
+        self.router.default_scroll_mut().set(offset);
+        self.ui_mut().set_gallery_reading(None);
+        true
     }
 
     pub(super) fn scroll_current_view_to_top(&mut self) {

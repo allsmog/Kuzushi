@@ -81,6 +81,7 @@ impl ShellApp {
     pub fn request_confirm(&mut self, request: PendingConfirm) {
         let advisory = self.advisory_mut();
         advisory.pending_confirm = Some(request);
+        advisory.pending_confirm_since = Some(std::time::Instant::now());
         advisory.confirm_scroll = 0;
         advisory.pending_confirm_launch = None;
         advisory.pending_confirm_model_switch = None;
@@ -104,6 +105,7 @@ impl ShellApp {
             return None;
         }
         let mut request = self.advisory_mut().pending_confirm.take()?;
+        self.advisory_mut().pending_confirm_since = None;
         request.remembered = remember;
         self.remember_confirm_decision(&request, outcome, remember);
         self.log_confirm_resolution(&request, outcome, remember);

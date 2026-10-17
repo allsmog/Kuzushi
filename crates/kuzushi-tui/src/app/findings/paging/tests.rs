@@ -1,7 +1,7 @@
 use super::*;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use kuzushi_core::findings::{ReviewDecision, ReviewDecisionVerdict, TriageAuthor};
-use kuzushi_core::{OptionScope, OptionTarget, Severity, V2Config};
+use kuzushi_core::{OptionScope, OptionTarget, Severity, V2Config, WorkflowPhase};
 use std::collections::BTreeSet;
 
 pub(super) fn fixture() -> (tempfile::TempDir, ShellApp) {
@@ -213,6 +213,7 @@ fn later_page_rail_and_detail_share_the_whole_ledger_alias() {
             text.contains(&format!("scope: {alias} · Review")),
             "{width}: {text}"
         );
+        assert!(text.contains("Viewing Review · next required Map"));
     }
 }
 
@@ -307,7 +308,7 @@ pub(super) fn review_decision() -> ReviewDecision {
 fn filtered_pin_drives_both_the_detail_and_manual_action() {
     let (_root, mut app) = fixture();
     let (alias, finding) = filtered_pin(&mut app);
-    let model = crate::ui_view_models::phase_cockpit_model(&app).unwrap();
+    let model = crate::ui_view_models::phase_cockpit_model_for_phase(&app, WorkflowPhase::Review);
     let detail = model.selected_finding_detail().unwrap();
     assert_eq!(detail.alias.as_deref(), Some(alias.as_str()));
     assert_eq!(detail.fingerprint, finding.fingerprint);

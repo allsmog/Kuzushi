@@ -10,6 +10,7 @@ mod finding_lookup;
 mod finding_rekeys;
 mod finding_sources;
 mod finding_writes;
+pub(crate) use finding_writes::{CapturedFindingSources, FindingSourceSnapshot};
 mod goal_relevance;
 mod lessons;
 mod lifecycle_event_reads;

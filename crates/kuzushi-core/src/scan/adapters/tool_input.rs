@@ -1,6 +1,8 @@
 use super::*;
 
 impl SemgrepScanner {
+    pub(in crate::scan) const SOURCE_EXCLUSION_GLOB: &'static str = "**/.kuzushi/**";
+
     pub fn from_tool_input(input: &Value) -> Result<Self> {
         let mut scanner = Self::default();
         if let Some(binary) = input
@@ -102,6 +104,9 @@ impl SemgrepScanner {
     pub(super) fn semgrep_base_command(&self, target: &Path) -> Command {
         let mut command = Command::new(&self.binary);
         command.args(["--metrics", "off", "--json"]);
+        // Generated workspace evidence is not repository source. Semgrep may
+        // ignore .gitignore in an unversioned target, so exclude it explicitly.
+        command.args(["--exclude", Self::SOURCE_EXCLUSION_GLOB]);
         for config in &self.config {
             command.arg("--config").arg(config);
         }

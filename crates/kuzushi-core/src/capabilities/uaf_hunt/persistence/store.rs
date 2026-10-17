@@ -5,10 +5,27 @@ use crate::runtime::LoopHistoryEntry;
 use anyhow::{Context, Result};
 use std::path::Path;
 
+#[cfg(test)]
 pub fn persist_uaf_hunt_findings(
     target: &Path,
     findings: &[Finding],
     transcript: &[LoopHistoryEntry],
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<Option<UafHuntPersistedRun>> {
+    persist_uaf_hunt_outcome(
+        target,
+        findings,
+        transcript,
+        crate::run_lifecycle::RunItemStatus::Completed,
+        ctx,
+    )
+}
+
+pub(crate) fn persist_uaf_hunt_outcome(
+    target: &Path,
+    findings: &[Finding],
+    transcript: &[LoopHistoryEntry],
+    status: crate::run_lifecycle::RunItemStatus,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Option<UafHuntPersistedRun>> {
     let (Some(workspace), Some(store)) = (ctx.workspace, ctx.findings_store) else {
@@ -22,7 +39,7 @@ pub fn persist_uaf_hunt_findings(
             transcript_relative_path(&run_id),
         )?;
     }
-    persist_uaf_findings_run(&run_id, target, findings, store)?;
+    persist_uaf_findings_run(&run_id, target, findings, status, store)?;
     let transcript_path = write_uaf_hunt_transcript(workspace.root(), &run_id, transcript)?;
 
     Ok(Some(UafHuntPersistedRun {
@@ -36,11 +53,12 @@ fn persist_uaf_findings_run(
     run_id: &str,
     target: &Path,
     findings: &[Finding],
+    status: crate::run_lifecycle::RunItemStatus,
     store: &crate::findings::FindingStore,
 ) -> Result<()> {
-    store.with_run_lifecycle(run_id, target, || {
+    store.with_run_lifecycle_status(run_id, target, || {
         insert_uaf_findings(run_id, findings, store)?;
-        Ok(((), findings.len()))
+        Ok(((), findings.len(), status))
     })?;
     Ok(())
 }

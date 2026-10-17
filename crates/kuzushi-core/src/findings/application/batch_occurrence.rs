@@ -115,6 +115,16 @@ pub struct BatchOccurrenceReport {
 }
 
 impl BatchOccurrenceReport {
+    pub(in crate::findings) fn retained_representative_fingerprints(
+        &self,
+        root: &Path,
+        store: &FindingStore,
+        policy: IdentityFoldPolicy,
+    ) -> Result<std::collections::BTreeSet<String>> {
+        let runs = load::observation_run_refs(root, &self.all_attempt_run_ids())?;
+        store.finding_fingerprints_observed_in_runs(&runs, policy)
+    }
+
     /// Ledger membership from every recorded attempt, including incomplete work.
     /// Recurrence rows and completed-pass counts remain separate.
     pub fn retained_observation_fingerprints(

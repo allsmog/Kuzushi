@@ -1,6 +1,95 @@
 use super::*;
 
 #[test]
+fn large_commands_fold_in_logs_without_changing_original_history_or_plain_output() {
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    let command = format!(
+        "run fixture:read {{\"owned\":\"{}\"}}",
+        "owned payload café ".repeat(100)
+    );
+    app.replace_log_for_test(vec![
+        log_line(">", &command, 1),
+        log_line("error", "Owned failure remains visible", 2),
+    ]);
+    let original = app.log_lines().to_vec();
+    let folded = logs_model(&app);
+    assert_eq!(folded.rows.len(), 2);
+    assert!(folded.rows[0].body.contains("run fixture:read"));
+    assert!(folded.rows[0].body.contains("1 line ·"));
+    assert!(
+        folded.rows[0].body.contains("command folded") && folded.rows[0].body.contains("z, then c")
+    );
+    assert!(!folded.rows[0].body.contains("owned payload"));
+    assert_eq!(app.log_lines(), original);
+    assert_eq!(
+        transcript_model_from_log_index(&app, 0).rows[0].body,
+        command
+    );
+    app.router.logs_mut().expand_reader();
+    app.router.logs_mut().toggle_command_text();
+    assert_eq!(logs_model(&app).rows[0].body, command);
+    app.router.logs_mut().close_reader();
+    assert!(logs_model(&app).rows[0].body.contains("command folded"));
+}
+
+#[test]
+fn filter_matches_full_folded_commands_and_multiline_reading_is_lossless() {
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    let command = "context edit\n  owned first line\n\n  owned hidden marker\n  owned last line\n";
+    app.replace_log_for_test(vec![
+        log_line(">", command, 1),
+        log_line("tool", "short result", 2),
+    ]);
+    for ch in "hidden marker".chars() {
+        app.router.logs_mut().push_filter_char(ch);
+    }
+    let folded = logs_model(&app);
+    assert_eq!(folded.rows.len(), 1);
+    assert!(
+        folded.rows[0].body.contains("filter match")
+            && folded.rows[0].body.contains("command folded")
+    );
+    app.router.logs_mut().expand_reader();
+    app.router.logs_mut().toggle_command_text();
+    let expanded = logs_model(&app);
+    assert_eq!(
+        expanded
+            .rows
+            .iter()
+            .map(|row| row.body.as_str())
+            .collect::<Vec<_>>(),
+        command.lines().collect::<Vec<_>>()
+    );
+    assert_eq!(app.log_lines()[0].body, command);
+}
+
+#[test]
+fn plain_logs_ignore_interactive_folding_and_scroll_but_keep_filter_and_full_text() {
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    let command = format!(
+        "run fixture:read {{\"owned\":\"head {} tail-marker\"}}",
+        "owned payload café ".repeat(100)
+    );
+    app.replace_log_for_test(vec![
+        log_line(">", &command, 1),
+        log_line("error", "Owned later failure", 2),
+    ]);
+    app.set_shell_view(crate::ShellView::Logs);
+    app.router.logs_mut().set_scroll(usize::MAX);
+    assert!(logs_model(&app).rows[0].body.contains("command folded"));
+    let text = crate::renderer::render_plain_app(&app, 40);
+    let joined = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(joined.contains("owned payload café") && joined.contains("tail-marker"));
+    assert!(joined.contains("Owned later failure"));
+    assert!(!joined.contains("command folded") && !joined.contains("c reads"));
+    for ch in "tail-marker".chars() {
+        app.router.logs_mut().push_filter_char(ch);
+    }
+    let text = plain_logs_lines(&app).join("\n");
+    assert!(text.contains(&command) && !text.contains("Owned later failure"));
+}
+
+#[test]
 fn transcript_model_splits_multiline_log_entries() {
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
     app.replace_log_for_test(vec![log_line("tool", "first\nsecond", 42)]);

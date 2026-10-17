@@ -165,12 +165,20 @@ fn saved_build_status(input: &BuildInput, persisted: bool, has_concrete_content:
 }
 
 fn randori_pasta_header_lines(input: &BuildInput, has_concrete_content: bool) -> Vec<String> {
-    let mut lines = vec![format!(
-        "randori:pasta {} for {} ({})",
-        evidence_status(has_concrete_content),
-        input.repo_name,
-        input.workspace_root().display()
-    )];
+    let mut lines = vec![
+        if has_concrete_content {
+            "PASTA draft ready; context unchanged."
+        } else {
+            "PASTA draft partial; context unchanged."
+        }
+        .to_string(),
+        format!(
+            "  Repository: {} ({})",
+            input.repo_name,
+            input.workspace_root().display()
+        ),
+        "  Import and accept the draft before scanning.".to_string(),
+    ];
     append_pasta_stages(&mut lines, input);
     lines.push(format!("  Artifact: {}", input.output_dir));
     lines

@@ -23,6 +23,8 @@ mod iac_scan_options;
 #[cfg(test)]
 mod identity_tests;
 mod output;
+mod rule_policy;
+pub(crate) use rule_policy::enabled_rule_ids;
 mod scan_accumulator;
 mod scanner;
 mod terraform_block_path;

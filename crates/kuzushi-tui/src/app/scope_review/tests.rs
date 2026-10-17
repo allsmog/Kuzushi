@@ -3,6 +3,7 @@ use crate::app::{FieldEditor, ShellEffect, ShellView};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use kuzushi_core::{ToolExecutionContext, V2Config, WorkspaceTarget};
 use ratatui::{backend::TestBackend, Terminal};
+mod action_search;
 mod additions;
 mod file_boundaries;
 mod source;

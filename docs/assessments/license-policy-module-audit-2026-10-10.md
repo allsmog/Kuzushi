@@ -35,9 +35,11 @@ inventory is not a total inspected-byte or latency ceiling.
 Actual SAST dispatch selects the same engine and persists its scoped findings.
 A child-directory test excludes an invalid parent manifest, and exact-file
 scope requests fail instead of widening. SAST publishes a completed engine
-coverage receipt. Direct tools retain source and findings but still lack that
-composite coverage receipt, so a later direct empty result cannot establish a
-covered observation gap. This remains a coverage/interface parity gap.
+coverage receipt. At this checkpoint, direct tools retained source and findings
+but lacked composite coverage and per-run observation snapshots. The later
+[license reassessment increment](license-reassessment-2026-10-16.md) adds those
+artifacts, explicit enabled-rule policy and guarded direct covered absence.
+Its evidence remains scoped to the named cases.
 
 The shell's prerequisite planner explicitly asks before indexing or reusing
 context for SAST. Its observed approval/reuse actions execute this ordering;
@@ -105,6 +107,6 @@ they do not establish operator verification or legal interpretation.
 License recognition is heuristic. Header comparison still uses the first
 declared manifest in path order; mixed-license monorepos require component
 targets and owner review. Aggregate read limits, cancellation during a large
-read, every supported ecosystem, direct covered-absence parity and full live
+read, every supported ecosystem, broader policy/scope parity and full live
 investigation acceptance remain open. No module is promoted or retired. All
 nine broad delivery milestones remain unchecked, with work uncommitted on main.

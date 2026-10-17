@@ -12,6 +12,7 @@ use std::path::Path;
 pub(super) struct IacScanAccumulator {
     pub findings: Vec<IacScanFinding>,
     pub files_scanned: usize,
+    pub inspected_files: std::collections::BTreeSet<String>,
     pub files_skipped: usize,
     pub coverage_gaps: CoverageGaps,
     pub inspection: IacInspection,
@@ -49,6 +50,10 @@ impl IacScanAccumulator {
         raw: &str,
     ) {
         self.files_scanned += 1;
+        if let Ok(relative) = file.strip_prefix(target) {
+            self.inspected_files
+                .insert(relative.to_string_lossy().replace('\\', "/"));
+        }
         self.findings
             .extend(analyze_enabled_iac_file(target, file, options, raw));
     }

@@ -1,6 +1,9 @@
 use super::*;
 use crate::ui_view_models::footer_keybindings;
 
+mod dfd_navigation;
+mod replay_navigation;
+
 pub(crate) fn justify_prefer_right(left: String, right: String, width: usize) -> String {
     if width == 0 {
         return String::new();
@@ -24,33 +27,29 @@ pub(crate) fn render_keybind_footer(frame: &mut Frame<'_>, area: Rect, app: &She
     if area.height == 0 {
         return;
     }
+    let compact = crate::ui_view_models::compact_replay_reading(app, frame.area().height);
+    let separator = area.height > 1 && !compact;
     let mut lines = Vec::new();
-    lines.push(Line::styled(
-        theme::RULE_CHAR.repeat(area.width as usize),
-        theme::subtle(),
-    ));
-
-    // M4 §4.2: when the area is tall enough for two keybinding rows
-    // (`keybind_footer_height` returns 3 on narrow widths), wrap the
-    // binding list across both lines so nothing truncates. Otherwise
-    // keep the single-line layout that the wide-terminal snapshot has
-    // pinned for years.
-    if area.height >= 3 {
-        let (top, bottom) = split_keybindings_for_wrap(app);
-        let (top, top_overflow) =
-            keybindings_line_for_wrapped_row(top, area.width as usize, OverflowHint::Defer);
-        let (bottom, _) = keybindings_line_for_wrapped_row(
-            bottom,
-            area.width as usize,
-            OverflowHint::ShowIf(top_overflow),
-        );
-        lines.push(top);
-        lines.push(bottom);
-    } else if area.height > 1 {
-        lines.push(keybindings_line(app, area.width as usize));
+    if separator {
+        lines.push(Line::styled(
+            theme::RULE_CHAR.repeat(area.width as usize),
+            theme::subtle(),
+        ));
     }
-
+    let key_rows = area.height - u16::from(separator);
+    lines.extend(keybinding_rows(app, area.width as usize, key_rows));
     render_lines(frame, area, lines);
+}
+
+fn keybinding_rows(app: &ShellApp, width: usize, rows: u16) -> Vec<Line<'static>> {
+    if rows < 2 {
+        return vec![keybindings_line(app, width)];
+    }
+    let (top, bottom) = split_keybindings_for_wrap(app);
+    let (top, overflow) = keybindings_line_for_wrapped_row(top, width, OverflowHint::Defer);
+    let (bottom, _) =
+        keybindings_line_for_wrapped_row(bottom, width, OverflowHint::ShowIf(overflow));
+    vec![top, bottom]
 }
 
 fn split_keybindings_for_wrap(app: &ShellApp) -> (Vec<(String, String)>, Vec<(String, String)>) {
@@ -58,13 +57,22 @@ fn split_keybindings_for_wrap(app: &ShellApp) -> (Vec<(String, String)>, Vec<(St
         .into_iter()
         .map(|binding| (binding.key, binding.label))
         .collect();
-    if crate::ui_view_models::review_queue_navigation_footer(app)
-        && has_review_queue_bindings(&bindings)
-    {
+    if review_navigation_applies(app, &bindings) {
         return review_navigation_rows(bindings);
+    }
+    if dfd_navigation::has_findings_link(&bindings) {
+        return dfd_navigation::rows(bindings);
+    }
+    if replay_navigation::applies(app, &bindings) {
+        return replay_navigation::rows(bindings);
     }
     bindings.sort_by_key(|binding| wrapped_binding_priority((&binding.0, &binding.1)));
     distribute_wrapped_bindings(bindings)
+}
+
+fn review_navigation_applies(app: &ShellApp, bindings: &[(String, String)]) -> bool {
+    crate::ui_view_models::review_queue_navigation_footer(app)
+        && has_review_queue_bindings(bindings)
 }
 
 fn has_review_queue_bindings(bindings: &[(String, String)]) -> bool {
@@ -85,8 +93,16 @@ fn review_navigation_rows(
     const READER_KEYS: [&str; 3] = ["Esc", "Enter", "End"];
     let (mut reader, mut actions): (Vec<_>, Vec<_>) = bindings
         .into_iter()
-        .partition(|(key, _)| READER_KEYS.contains(&key.as_str()));
-    reader.sort_by_key(|(key, _)| READER_KEYS.iter().position(|candidate| candidate == key));
+        .partition(|(key, label)| label == "diagram" || READER_KEYS.contains(&key.as_str()));
+    reader.sort_by_key(|(key, label)| {
+        if label == "diagram" {
+            return 0;
+        }
+        1 + READER_KEYS
+            .iter()
+            .position(|candidate| candidate == key)
+            .unwrap_or(READER_KEYS.len())
+    });
     let reader = reader.into_iter().map(compact_reader_binding).collect();
     actions.sort_by_key(|(key, _)| match key.as_str() {
         "Ctrl+F" => 0,
@@ -493,6 +509,33 @@ mod tests {
         let text = [line_text(&top), line_text(&bottom)].join("\n");
         assert!(text.contains("PgUp/PgDn scroll"), "{text}");
         assert!(text.contains("Esc prompt"), "{text}");
+    }
+
+    #[test]
+    fn compact_review_keeps_the_diagram_return_visible_with_its_actual_key() {
+        for key in ["q", "Ctrl+B"] {
+            let bindings = [
+                ("Esc", "prompt"),
+                ("Enter", "detail"),
+                ("End", "last"),
+                ("Ctrl+F", "filter"),
+                ("G", "groups"),
+                (key, "diagram"),
+            ]
+            .into_iter()
+            .map(|(key, label)| (key.into(), label.into()))
+            .collect();
+            let (top, bottom) = review_navigation_rows(bindings);
+            let (top, overflow) = keybindings_line_for_wrapped_row(top, 40, OverflowHint::Defer);
+            let (bottom, _) =
+                keybindings_line_for_wrapped_row(bottom, 40, OverflowHint::ShowIf(overflow));
+            let text = [line_text(&top), line_text(&bottom)].join("\n");
+            assert!(text.contains(&format!("{key} diagram")), "{text}");
+            assert!(
+                text.contains("Esc prompt") && text.contains("Ctrl+F filter"),
+                "{text}"
+            );
+        }
     }
 
     #[test]

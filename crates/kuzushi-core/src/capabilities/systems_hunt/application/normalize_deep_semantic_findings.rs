@@ -58,10 +58,7 @@ fn normalized_deep_semantic_item(
 
 fn deep_semantic_fields(object: &serde_json::Map<String, Value>) -> Option<DeepSemanticFields> {
     let title = first_string_field(object, &["title", "name"]);
-    let file_path = normalize_relative_path(first_string_field(
-        object,
-        &["filePath", "file_path", "path", "file"],
-    ));
+    let file_path = deep_semantic_path(object);
     let message = collect_finding_body(object, &title);
     if title.is_empty() || file_path.is_empty() || message.is_empty() {
         return None;
@@ -80,6 +77,13 @@ fn deep_semantic_fields(object: &serde_json::Map<String, Value>) -> Option<DeepS
             &["reasoningChain", "reasoning", "rationale"],
         )),
     })
+}
+
+fn deep_semantic_path(object: &serde_json::Map<String, Value>) -> String {
+    if let Some(path) = object.get("filePath").and_then(Value::as_str) {
+        return path.to_owned();
+    }
+    normalize_relative_path(first_string_field(object, &["file_path", "path", "file"]))
 }
 
 fn deep_semantic_start_line(object: &serde_json::Map<String, Value>) -> u32 {
@@ -177,6 +181,8 @@ fn deep_semantic_artifact(
         "reasoning": fields.reasoning,
         "analysisPath": object.get("analysisPath").cloned().unwrap_or_else(|| json!([])),
         "corroborationStatus": "deep-semantic",
+        "verificationStatus": "unverified-source-only",
+        "analysisMethod": "deep-semantic",
     })
 }
 

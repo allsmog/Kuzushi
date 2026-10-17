@@ -36,6 +36,23 @@ pub fn rank_worklist_for_target(
     options: &WorklistOptions,
     findings_store: Option<&FindingStore>,
 ) -> Result<Worklist> {
+    rank_worklist_observed(target, options, findings_store, &mut |_| {}, &|| false)
+        .map(|report| report.worklist)
+}
+
+pub(crate) struct InspectedWorklist {
+    pub worklist: Worklist,
+    pub systems_inspection: Option<serde_json::Value>,
+}
+
+pub(crate) fn rank_worklist_observed(
+    target: &Path,
+    options: &WorklistOptions,
+    findings_store: Option<&FindingStore>,
+    progress: &mut dyn FnMut(usize),
+    canceled: &dyn Fn() -> bool,
+) -> Result<InspectedWorklist> {
+    anyhow::ensure!(!canceled(), "worklist ranking canceled");
     anyhow::ensure!(
         !options.include_fan_in,
         "call-graph fan-in is not implemented"
@@ -46,19 +63,24 @@ pub fn rank_worklist_for_target(
     );
     let (surfaces, surface_reason) = load_surfaces(target);
     let coverage = gather_coverage(target, findings_store);
-    let systems = gather_systems(target, options)?;
+    let systems = gather_systems(target, options, progress, canceled)?;
+    let (surfaces_systems, systems_inspection) = systems.unzip();
     let mut worklist = rank(&WorklistInputs {
         surfaces: &surfaces,
         recommendations: &coverage.recommendations,
         recommendations_status: coverage.status,
         scope_paths: &coverage.scope_paths,
-        systems: systems.as_deref(),
+        systems: surfaces_systems.as_deref(),
         prefilter: None,
         fan_in: None,
         limit: options.limit,
     });
     apply_surface_degradation(&mut worklist, surface_reason);
-    Ok(worklist)
+    apply_systems_inspection(&mut worklist, systems_inspection.as_ref());
+    Ok(InspectedWorklist {
+        worklist,
+        systems_inspection,
+    })
 }
 
 /// When a context snapshot exists but its attack-surface records were
@@ -150,9 +172,33 @@ fn load_surfaces(target: &Path) -> (Vec<AttackSurface>, Option<String>) {
 fn gather_systems(
     target: &Path,
     options: &WorklistOptions,
-) -> Result<Option<Vec<RankedSystemsSurface>>> {
+    progress: &mut dyn FnMut(usize),
+    canceled: &dyn Fn() -> bool,
+) -> Result<Option<(Vec<RankedSystemsSurface>, serde_json::Value)>> {
     if !options.deep {
         return Ok(None);
     }
-    Ok(Some(rank_systems_surfaces_lite(target, options.limit)?))
+    Ok(Some(rank_systems_surfaces_lite(
+        target,
+        options.limit,
+        progress,
+        canceled,
+    )?))
+}
+
+fn apply_systems_inspection(worklist: &mut Worklist, receipt: Option<&serde_json::Value>) {
+    let Some(receipt) = receipt else {
+        return;
+    };
+    if receipt["status"] != "partial" {
+        return;
+    }
+    let reason = "Deep inspection is partial; some source or evidence was omitted.".to_string();
+    worklist.contributors.insert(
+        Contributor::SystemsHunt,
+        ContributorState::Degraded {
+            reason: reason.clone(),
+        },
+    );
+    worklist.degraded.push(reason);
 }

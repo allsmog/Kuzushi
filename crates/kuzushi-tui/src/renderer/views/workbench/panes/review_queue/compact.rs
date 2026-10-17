@@ -23,7 +23,7 @@ fn chrome(model: &ReviewQueueModel, width: usize, height: usize) -> Vec<Line<'st
     let mut summaries = active_filter_lines(model, width);
     // Finding identity and title retain two rows even in a tiny viewport.
     let budget = height.saturating_sub(2);
-    disclose_hidden_filters(&mut summaries, budget);
+    disclose_hidden_filters(&mut summaries, budget, model.path_history);
     summaries
         .into_iter()
         .take(budget)
@@ -31,14 +31,19 @@ fn chrome(model: &ReviewQueueModel, width: usize, height: usize) -> Vec<Line<'st
         .collect()
 }
 
-fn disclose_hidden_filters(lines: &mut Vec<String>, budget: usize) {
+fn disclose_hidden_filters(lines: &mut Vec<String>, budget: usize, path_history: bool) {
     if lines.len() <= budget || budget == 0 {
         return;
     }
     // Full filter chips and facet counts remain available in plain output.
     // Never imply that a clipped summary is the complete filter state.
     lines.truncate(budget);
-    lines[budget - 1] = "filters active · / inspect".into();
+    lines[budget - 1] = if path_history {
+        "saved revisions · / inspect"
+    } else {
+        "filters active · / inspect"
+    }
+    .into();
 }
 
 fn card(row: &ReviewQueueRow, width: usize, height: usize, selected: bool) -> Vec<Line<'static>> {

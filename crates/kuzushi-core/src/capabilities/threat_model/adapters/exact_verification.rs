@@ -32,16 +32,14 @@ fn finish_exact_check(
     output: Value,
     source_scope: &ScopeRef,
 ) -> Value {
-    let mut output = finish_revision_output(
+    finish_revision_output(
         snapshot,
         ctx,
         root,
         output,
         source_scope,
         "threat-model:verify",
-    );
-    output["data"]["sourceCheckCurrent"] = json!(output["status"] != "partial");
-    output
+    )
 }
 
 pub(super) fn finish_revision_output(

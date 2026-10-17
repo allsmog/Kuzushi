@@ -39,6 +39,7 @@ fn position_schema(required: &[&str]) -> Value {
         "additionalProperties": false,
         "properties": {
             "repoPath": {"type": "string", "minLength": 1, "maxLength": 16384},
+            "compileCommandsPath": {"type":"string","minLength":1,"maxLength":16384,"description":"Optional compiler database within the granted read roots. Relative paths are resolved under repoPath. Its bounded contents are frozen for navigation; no build or driver probing runs."},
             "file": {"type": "string", "minLength": 1, "maxLength": 16384, "description": "Relative child path; absolute paths and parent traversal are rejected."},
             "line": {"type": "integer", "minimum": 1},
             "column": {"type": "integer", "minimum": 1}

@@ -58,3 +58,6 @@ pub(in crate::modules) use accepted_scope::{
     bind_accepted_sast_scope_input, scope_scan_options, validate_exact_scope_request,
     SastScanOptions,
 };
+
+#[cfg(test)]
+mod stage_alias_tests;

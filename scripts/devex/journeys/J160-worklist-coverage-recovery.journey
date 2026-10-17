@@ -34,47 +34,74 @@ live-snap: worklist-80x24
 resize: 60x20
 live-snap: worklist-60x20
 resize: 40x12
-live-snap: worklist-40x12
+live-snap: worklist-reading-000-40x12
 expect: RISK WORKLIST
-expect: PgUp/PgDn page
+expect: q back
 keys: NPage
-live-snap: worklist-page-1-40x12
+live-snap: worklist-reading-001-40x12
 expect: RISK WORKLIST
+expect: q back
 keys: NPage
-live-snap: worklist-page-2-40x12
+live-snap: worklist-reading-002-40x12
 expect: RISK WORKLIST
+expect: q back
 keys: NPage
-live-snap: worklist-page-3-40x12
+live-snap: worklist-reading-003-40x12
 expect: RISK WORKLIST
+expect: q back
 keys: NPage
-live-snap: worklist-page-4-40x12
+live-snap: worklist-reading-004-40x12
 expect: RISK WORKLIST
+expect: q back
 keys: NPage
-live-snap: worklist-page-5-40x12
+live-snap: worklist-reading-005-40x12
 expect: RISK WORKLIST
+expect: q back
 keys: NPage
-live-snap: worklist-page-6-40x12
+live-snap: worklist-reading-006-40x12
 expect: RISK WORKLIST
+expect: q back
 keys: NPage
-live-snap: worklist-page-7-40x12
-keys: NPage
-live-snap: worklist-page-8-40x12
-keys: NPage
-live-snap: worklist-page-9-40x12
-keys: NPage
-live-snap: worklist-page-10-40x12
-keys: NPage
-live-snap: worklist-page-11-40x12
-keys: NPage
-live-snap: worklist-page-12-40x12
-keys: NPage
-live-snap: worklist-page-13-40x12
-keys: NPage
-live-snap: worklist-page-14-40x12
-keys: NPage
-live-snap: worklist-tail-40x12
+live-snap: worklist-reading-007-40x12
 expect: RISK WORKLIST
-expect: not requested
+expect: q back
+keys: NPage
+live-snap: worklist-reading-008-40x12
+expect: RISK WORKLIST
+expect: q back
+keys: NPage
+live-snap: worklist-reading-009-40x12
+expect: RISK WORKLIST
+expect: q back
+keys: NPage
+live-snap: worklist-reading-010-40x12
+expect: RISK WORKLIST
+expect: q back
+keys: NPage
+live-snap: worklist-reading-011-40x12
+expect: RISK WORKLIST
+expect: q back
+keys: NPage
+live-snap: worklist-reading-012-40x12
+expect: RISK WORKLIST
+expect: q back
+keys: PPage
+live-snap: worklist-reading-013-40x12
+expect: RISK WORKLIST
+expect: q back
+keys: PPage
+live-snap: worklist-reading-014-40x12
+expect: RISK WORKLIST
+expect: q back
+keys: PPage
+live-snap: worklist-reading-015-40x12
+expect: RISK WORKLIST
+expect: q back
+keys: PPage
+live-snap: worklist-reading-016-40x12
+expect: RISK WORKLIST
+expect: q back
+require-shell: python3 -B @REPO/scripts/devex/fixtures/worklist_reading.py @TMP_TARGET @ART worklist-reading default
 ask: Are complete paths, raw contributor values, uncertainty and contributor status readable through keyboard paging at all six sizes?
 resize: 120x36
 require-shell: python3 -B @REPO/scripts/devex/fixtures/worklist_audit.py @TMP_TARGET @ART child-context @TMP_HOME @REPO/target/debug/kuzushi

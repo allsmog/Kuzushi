@@ -13,6 +13,8 @@ pub use campaign_binding::CampaignAllowanceReport;
 mod domain;
 pub(super) mod persistence;
 mod reference;
+mod run_context;
+pub use run_context::RunAllowanceContext;
 mod run_usage;
 pub use run_usage::ProviderRunUsage;
 mod settlement;

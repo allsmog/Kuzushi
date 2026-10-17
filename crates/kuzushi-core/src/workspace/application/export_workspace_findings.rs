@@ -735,6 +735,7 @@ fn effective_review_contexts(
 pub struct WorkspaceReviewCompletion {
     pub reviewed: usize,
     pub confirmed: usize,
+    pub decisions: crate::findings::ReviewDecisionCounts,
     pub reassessment_required: usize,
     pub source_applicabilities:
         std::collections::BTreeMap<String, super::WorkspaceReviewSourceApplicability>,
@@ -784,6 +785,7 @@ fn update_review_completion(
         completion.reassessment_required += 1;
         return;
     }
+    completion.decisions.record(review.decision.verdict);
     completion.reviewed += 1;
     if review.triage_verdict == Some(crate::findings::TriageVerdict::TruePositive) {
         completion.confirmed += 1;

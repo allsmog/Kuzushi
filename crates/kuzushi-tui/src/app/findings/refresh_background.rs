@@ -199,18 +199,27 @@ impl ShellApp {
     }
 
     pub(crate) fn findings_refresh_status(&self) -> Option<String> {
+        self.findings_read_feedback()
+            .map(|feedback| feedback.message)
+    }
+
+    pub(crate) fn findings_read_feedback(
+        &self,
+    ) -> Option<crate::ui_view_models::ReviewReadFeedback> {
+        use crate::ui_view_models::ReviewReadFeedback;
         let state = &self.runtime_state.findings_refresh;
+        let study = self.router.campaign().active_batch_id.is_some();
         if let Some(pending) = &state.pending {
-            return Some(match &pending.request.filter {
-                Some(filter) => format!("Reading filter {filter:?} · previous results below"),
-                None => "Reading ledger · previous results below".into(),
-            });
+            return Some(ReviewReadFeedback::loading(
+                study,
+                pending.request.filter.as_deref(),
+            ));
         }
         state
             .failed_target
             .as_deref()
             .is_some_and(|target| self.target() == Some(target))
-            .then(|| "Refresh failed · previous results below · retry findings".into())
+            .then(|| ReviewReadFeedback::failed(study))
     }
 
     pub(crate) fn apply_findings_projection_drain(
@@ -238,7 +247,7 @@ impl ShellApp {
                 self.finish_findings_refresh(
                     &failure.target,
                     request,
-                    Err("Ledger reader stopped; retry findings".into()),
+                    Err("Ledger reader stopped; retry findings refresh".into()),
                 );
             } else {
                 remaining.failures.push(failure);
@@ -269,24 +278,31 @@ impl ShellApp {
                 self.apply_findings_read_snapshot(snapshot, request, pending.announce);
                 self.resume_findings_refresh_presentation(pending);
             }
-            Err(error) => self.fail_findings_refresh(target, request, error),
+            Err(error) => self.fail_findings_refresh(request, error),
         }
     }
 
-    fn fail_findings_refresh(
-        &mut self,
-        target: &Path,
-        request: &FindingsReadRequest,
-        error: String,
-    ) {
-        self.runtime_state.findings_refresh.failed_target = Some(target.to_owned());
+    fn fail_findings_refresh(&mut self, request: &FindingsReadRequest, error: String) {
+        self.record_findings_read_failure();
         if failed_refresh_requires_qualification_reset(request) {
             self.invalidate_findings_review_completion();
         }
         self.set_error_notice(
             "findings",
-            with_next_step(format!("Ledger refresh failed: {error}"), "findings"),
+            with_next_step(
+                format!("Ledger refresh failed: {error}"),
+                "findings refresh",
+            ),
         );
+    }
+
+    pub(crate) fn record_findings_read_failure(&mut self) {
+        self.runtime_state.findings_refresh.failed_target = self.target_path_buf().cloned();
+        let deck = self.router.campaign_mut();
+        if deck.active_batch_id.is_some() {
+            deck.active_batch_report = None;
+            deck.active_batch_observation_fingerprints.clear();
+        }
     }
 
     fn findings_refresh_request_is_current(&self, pending: &PendingFindingsRefresh) -> bool {

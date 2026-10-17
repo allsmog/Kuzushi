@@ -232,7 +232,10 @@ impl ShellApp {
                     })
                     .map(|confirm| patch_validation_confirm(confirm, request))
             })
-            .map(|confirm| {
+            .map(|mut confirm| {
+                if request.tool_name == "taint-iris-next:catalog-accept" {
+                    confirm.target = request.workspace.root().display().to_string();
+                }
                 crate::app::approval::allowance::with_accounting_terms(
                     self,
                     request.input.value(),

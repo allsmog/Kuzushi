@@ -75,10 +75,9 @@ pub(crate) fn render_chunk_prompt(root: &Path, chunk: &ChunkPlan) -> Result<Stri
     let mut body = String::with_capacity(chunk.est_tokens * 4);
     body.push_str("Files in this chunk:\n\n");
     for fb in &chunk.files {
-        let Some(contents) = bucket_contents(root, fb) else {
-            continue;
-        };
-        if fb.is_window() {
+        let (contents, windowed) = bucket_contents(root, fb)
+            .with_context(|| format!("could not read planned chunk file {}", fb.path))?;
+        if windowed {
             // The model reports lines as counted within what it sees; the
             // chunk executor restores absolute lines from `start_line`.
             body.push_str(&format!(
@@ -97,17 +96,28 @@ pub(crate) fn render_chunk_prompt(root: &Path, chunk: &ChunkPlan) -> Result<Stri
     Ok(body)
 }
 
-fn bucket_contents(root: &Path, fb: &crate::capabilities::full_mode_multi::domain::FileBucket) -> Option<String> {
-    let abs = root.join(&fb.path);
-    if !fb.is_window() {
-        return crate::bounded_file::read_utf8_text(&abs, fb.bytes.min(MAX_FILE_BYTES)).ok();
-    }
-    // Window bucket: read through the end of the window, then slice. Window
-    // boundaries are line-aligned byte offsets produced by walk_files.
-    let end = fb.start_byte.checked_add(fb.bytes)?;
-    let text = crate::bounded_file::read_utf8_text(&abs, end).ok()?;
-    text.get(fb.start_byte..end.min(text.len()))
-        .map(str::to_owned)
+fn bucket_contents(
+    root: &Path,
+    fb: &crate::capabilities::full_mode_multi::domain::FileBucket,
+) -> Result<(String, bool)> {
+    anyhow::ensure!(
+        fb.bytes <= MAX_FILE_BYTES,
+        "planned file window exceeds the per-window read limit"
+    );
+    let offset =
+        u64::try_from(fb.start_byte).context("planned file offset exceeds platform capacity")?;
+    let prefix = crate::bounded_file::read_utf8_text_window_within(
+        root,
+        Path::new(&fb.path),
+        offset,
+        fb.bytes,
+    )?;
+    anyhow::ensure!(
+        prefix.text.len() == fb.bytes,
+        "planned file window changed or is not valid UTF-8"
+    );
+    let windowed = fb.is_window() || prefix.truncated;
+    Ok((prefix.text, windowed))
 }
 
 pub(crate) fn parse_chunk_value(value: serde_json::Value) -> Result<Vec<Finding>> {

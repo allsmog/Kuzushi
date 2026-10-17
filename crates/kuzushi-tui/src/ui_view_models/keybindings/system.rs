@@ -57,11 +57,12 @@ fn report_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     vec![
         bind("Esc/q", "return"),
         bind("Enter", "export/retry"),
+        bind("r", "refresh report"),
         bind("PgUp/PgDn", "read"),
         bind("j/k", "format"),
         bind("c", "completeness"),
         bind("s", "study/history"),
-        bind("p", "provenance"),
+        bind("p", "details"),
         bind("e", "edit path"),
         bind("S", "save choices"),
         bind("o", "reveal"),
@@ -397,6 +398,17 @@ fn interruption_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
 // The security-viz gallery is fully interactive but its controls live only in
 // the key handler; surface them so Tab/orbit/pause are discoverable.
 fn scene_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    if crate::ui_view_models::compact_gallery_reading(app, app.viewport().rows) {
+        return vec![
+            bind("PgUp/PgDn", "page"),
+            bind("q", "back"),
+            bind("/keys", "all"),
+        ];
+    }
+    qualify_scene_escape(app, scene_page_keybindings(app))
+}
+
+fn scene_page_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     let page = app.router.scene().page();
     if matches!(page, crate::scene3d::VizPage::Summary) {
         return summary_keybindings(app);
@@ -410,6 +422,19 @@ fn scene_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
         return entry_point_keybindings(app);
     }
     non_dfd_scene_keybindings(app, page)
+}
+
+fn qualify_scene_escape(
+    app: &ShellApp,
+    mut bindings: Vec<FooterKeybinding>,
+) -> Vec<FooterKeybinding> {
+    if !app.notice_captures_escape() {
+        return bindings;
+    }
+    bindings.retain(|binding| !matches!(binding.key.as_str(), "Esc" | "Esc/q" | "q"));
+    bindings.push(bind("Esc", "dismiss notice"));
+    bindings.push(bind("q", "leave"));
+    bindings
 }
 
 // Summary is reachable before a threat model exists. With no model there are no
@@ -482,6 +507,7 @@ fn push_scene_cycle_and_exit(bindings: &mut Vec<FooterKeybinding>, app: &ShellAp
 fn push_dfd_keybindings(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp) {
     if app.router.scene().dfd_focused() {
         bindings.push(bind("j/k/↑/↓", "context"));
+        bindings.push(bind("f", "findings at paths"));
         bindings.push(bind("g", "regenerate scope"));
         bindings.push(bind("Enter", "topology"));
         bindings.push(bind("Esc", "collapse"));
@@ -500,6 +526,7 @@ fn push_dfd_keybindings(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp) {
         return;
     }
     bindings.push(bind("j/k/↑/↓", "select"));
+    bindings.push(bind("f", "findings at paths"));
     bindings.push(bind("g", "regenerate scope"));
     if model.link_state == crate::ui_view_models::DfdLinkState::LegacyNeedsRebuild {
         bindings.push(bind("Enter", "rebuild linked context"));

@@ -204,6 +204,7 @@ fn recorded_error_precedes_cost_and_continuation_without_changing_outcome() {
     let mut model = replay_model(&app, RUN);
     let original = model.presentation.clone();
     model.issue = Some(crate::ui_view_models::ReplayIssueModel {
+        source_key: None,
         label: "Recorded error",
         message: "Git inventory failed; prior context remains. 資料/my  project".into(),
         tool: Some("Build project context".into()),
@@ -233,6 +234,7 @@ fn compact_partial_outcome_promotes_warning_before_a_long_summary_without_losing
     );
     set_fixture_terminal_summary(&mut model, RunItemStatus::Partial, &summary);
     model.issue = Some(crate::ui_view_models::ReplayIssueModel {
+        source_key: None,
         label: "Recorded warning",
         message: "Coverage is incomplete; review required.".into(),
         tool: Some("Owned query observations".into()),
@@ -311,7 +313,7 @@ fn replay_reader_pages_by_its_body_and_recovers_immediately_from_the_tail() {
     );
     let max = replay_lines(&app, area, RUN)
         .len()
-        .saturating_sub(area.height as usize);
+        .saturating_sub(area.height.saturating_sub(1) as usize);
     for _ in 0..20 {
         press(&mut app, KeyCode::PageDown);
     }
@@ -326,7 +328,7 @@ fn replay_reader_pages_by_its_body_and_recovers_immediately_from_the_tail() {
     let area = body(&app);
     let max = replay_lines(&app, area, RUN)
         .len()
-        .saturating_sub(area.height as usize);
+        .saturating_sub(area.height.saturating_sub(1) as usize);
     press(&mut app, KeyCode::PageUp);
     assert!(app.router.default_scroll().offset() as usize <= max);
 }
@@ -485,4 +487,27 @@ fn visible_row(buffer: &ratatui::buffer::Buffer, area: Rect, y: u16) -> String {
 
 fn without_spaces(text: &str) -> String {
     text.chars().filter(|ch| !ch.is_whitespace()).collect()
+}
+
+#[test]
+fn requested_context_never_splits_a_wrapped_status_qualifier() {
+    for width in [40, 60, 80, 96, 120, 160] {
+        let raw = vec![
+            Line::raw("REPLAY"),
+            Line::raw("Outcome · failed · cost unavailable (metering incomplete)"),
+            Line::raw("Saved evidence"),
+        ];
+        let rows = wrap_replay_with_request(raw, "Requested app · calls 1/5 at read", width);
+        let text = rows.iter().map(|row| row.to_string()).collect::<Vec<_>>();
+        let context = text
+            .iter()
+            .position(|row| row.contains("Requested"))
+            .unwrap();
+        let qualifier = text
+            .iter()
+            .position(|row| row.contains("(metering incomplete)"))
+            .unwrap();
+        assert!(qualifier < context, "{width}: {text:?}");
+        assert!(rows.iter().all(|row| row.width() <= usize::from(width)));
+    }
 }

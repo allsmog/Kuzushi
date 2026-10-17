@@ -30,12 +30,45 @@ impl FilterToken {
 ///   an explicit error rather than a silent drop.
 /// - The first `:` splits a keyed token into key + CSV values; a keyed token
 ///   with no non-empty value is an error.
+/// - `files:` accepts a JSON string array to retain spaces, commas and escapes
+///   inside each path. The next token must be separated by whitespace.
 /// - A token without `:` is a free-text term.
 pub fn tokenize_filter_expression(expr: &str) -> Result<Vec<FilterToken>> {
-    expr.split_whitespace()
-        .filter(|token| !token.trim().is_empty())
-        .map(parse_token)
-        .collect()
+    let mut remaining = expr.trim_start();
+    let mut tokens = Vec::new();
+    while !remaining.is_empty() {
+        let (token, rest) = take_filter_token(remaining)?;
+        tokens.push(parse_token(token)?);
+        remaining = rest.trim_start();
+    }
+    Ok(tokens)
+}
+
+fn take_filter_token(input: &str) -> Result<(&str, &str)> {
+    let end = match json_value_start(input) {
+        Some(start) => json_token_end(input, start)?,
+        None => input.find(char::is_whitespace).unwrap_or(input.len()),
+    };
+    Ok(input.split_at(end))
+}
+
+fn json_value_start(input: &str) -> Option<usize> {
+    let colon = input.find(':')?;
+    if !input[..colon].eq_ignore_ascii_case("files") {
+        return None;
+    }
+    input[colon + 1..].starts_with('[').then_some(colon + 1)
+}
+
+fn json_token_end(input: &str, start: usize) -> Result<usize> {
+    let mut values = serde_json::Deserializer::from_str(&input[start..]).into_iter::<Vec<String>>();
+    values.next().transpose()?;
+    let end = start + values.byte_offset();
+    anyhow::ensure!(
+        input[end..].chars().next().is_none_or(char::is_whitespace),
+        "JSON filter values must be followed by whitespace"
+    );
+    Ok(end)
 }
 
 fn parse_token(token: &str) -> Result<FilterToken> {
@@ -49,7 +82,7 @@ fn parse_token(token: &str) -> Result<FilterToken> {
             raw: token.to_string(),
         });
     };
-    let values = split_csv(raw_value);
+    let values = parse_values(key, raw_value)?;
     if values.is_empty() {
         anyhow::bail!("filter {key:?} requires a value");
     }
@@ -58,6 +91,17 @@ fn parse_token(token: &str) -> Result<FilterToken> {
         values,
         raw: token.to_string(),
     })
+}
+
+fn parse_values(key: &str, value: &str) -> Result<Vec<String>> {
+    if key.eq_ignore_ascii_case("files") && value.starts_with('[') {
+        let values: Vec<String> = serde_json::from_str(value)?;
+        return Ok(values
+            .into_iter()
+            .filter(|value| !value.is_empty())
+            .collect());
+    }
+    Ok(split_csv(value))
 }
 
 fn split_csv(value: &str) -> Vec<String> {
@@ -113,5 +157,32 @@ mod tests {
     #[test]
     fn empty_expression_yields_no_tokens() {
         assert!(tokenize_filter_expression("   ").unwrap().is_empty());
+    }
+
+    #[test]
+    fn json_values_preserve_literal_paths_and_following_filters() {
+        let paths = vec!["src/a b.rs", "src/a,b.rs", "src/α\\quoted\".rs"];
+        let expression = format!("files:{} severity:high", serde_json::json!(paths));
+        let tokens = tokenize_filter_expression(&expression).unwrap();
+        assert_eq!(tokens[0].key.as_deref(), Some("files"));
+        assert_eq!(tokens[0].values, paths);
+        assert_eq!(tokens[1].values, ["high"]);
+    }
+
+    #[test]
+    fn invalid_json_values_are_errors() {
+        for input in ["files:[", "files:[]", "files:[1]", "files:[\"a\"]tail"] {
+            assert!(tokenize_filter_expression(input).is_err(), "{input}");
+        }
+    }
+
+    #[test]
+    fn legacy_csv_and_unquoted_backslashes_are_unchanged() {
+        let tokens =
+            tokenize_filter_expression(r"file:src\legacy.rs rank:high,medium file:[a-z].rs")
+                .unwrap();
+        assert_eq!(tokens[0].values, [r"src\legacy.rs"]);
+        assert_eq!(tokens[1].values, ["high", "medium"]);
+        assert_eq!(tokens[2].values, ["[a-z].rs"]);
     }
 }

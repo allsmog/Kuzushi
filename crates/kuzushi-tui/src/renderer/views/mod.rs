@@ -97,3 +97,5 @@ pub(in crate::renderer) fn journey_phase_tone_style(tone: JourneyPhaseTone) -> S
         JourneyPhaseTone::Subtle => theme::subtle(),
     }
 }
+
+pub(crate) use scene::{capture_gallery_reading, gallery_line_offset, restore_gallery_reading};

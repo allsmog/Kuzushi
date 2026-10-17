@@ -38,7 +38,12 @@ impl ShellApp {
             .drafts
             .remove(&(tool.clone(), spec.name.clone()))
             .unwrap_or_else(|| {
-                FieldEditor::new(value.as_ref().map(format_option_value).unwrap_or_default())
+                FieldEditor::new(
+                    value
+                        .as_ref()
+                        .map(|value| format_option_value_for_spec(&spec, value))
+                        .unwrap_or_default(),
+                )
             });
         let edit = ToolOptionEdit {
             tool,

@@ -40,6 +40,31 @@ fn fixture() -> tempfile::TempDir {
 }
 
 #[test]
+fn failed_exact_check_keeps_its_cause_and_an_unverified_source_marker() {
+    let root = fixture();
+    let selected = import(root.path(), "Owned context", false);
+    let scope = checked_revision_request(root.path(), &selected, None)
+        .unwrap()
+        .scope;
+    let workspace = crate::WorkspaceTarget::new(root.path()).unwrap();
+    let config = crate::V2Config::default();
+    let ctx = ToolExecutionContext {
+        config: &config,
+        workspace: Some(&workspace),
+        findings_store: None,
+        trace: None,
+        cancellation: None,
+        authorization: Default::default(),
+    };
+    let snapshot = SourceSnapshot::capture(&ctx, "threat-model:verify", root.path()).unwrap();
+    let output = json!({"ok":false,"status":"failed","summary":"Owned context check failed", "data":{"document":{}}});
+    let result = finish_exact_check(snapshot, &ctx, root.path(), output, &scope);
+    assert_eq!(result["status"], "failed");
+    assert_eq!(result["summary"], "Owned context check failed");
+    assert_eq!(result["data"]["sourceCheckCurrent"], false);
+}
+
+#[test]
 fn exact_check_preserves_active_mirror_original_and_revision_scope() {
     let root = fixture();
     let selected = import(root.path(), "Selected context", false);

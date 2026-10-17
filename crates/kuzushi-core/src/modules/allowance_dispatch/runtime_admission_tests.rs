@@ -3,6 +3,10 @@ use super::*;
 use crate::{AgentQueryRequest, AgentQueryResponse, V2Config, WorkspaceTarget};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+mod inherited_category;
+mod inherited_receipt;
+mod repository_preparation;
+
 const MODEL: &str = "openai-codex:gpt-5.5";
 
 #[derive(Clone, Default)]

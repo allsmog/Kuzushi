@@ -146,10 +146,7 @@ mod tests {
     }
 
     #[test]
-    fn likely_true_no_score_falls_back_to_0_85() {
-        // Mock that returns likely:true with score:0 — classifier must
-        // not interpret 0 as "definitely false"; should fall back to a
-        // sensible default for likely=true.
+    fn explicit_zero_score_is_preserved_even_with_a_legacy_likely_flag() {
         struct Q;
         impl AgentRuntime for Q {
             fn query_blocking(&self, _: AgentQueryRequest) -> Result<AgentQueryResponse> {
@@ -173,7 +170,7 @@ mod tests {
         );
         let gate = LikelyVulnClassifier::new(&runtime, ClassifierConfig::default()).unwrap();
         let s = scored(&gate);
-        assert!((s - 0.85).abs() < 1e-6, "got {s}");
+        assert_eq!(s, 0.0);
     }
 
     /// A runtime whose answer the classifier gate cannot read.
@@ -271,3 +268,6 @@ mod tests {
             .expect("classifier returned a parseable score")
     }
 }
+
+#[path = "tests/contracts.rs"]
+mod contracts;

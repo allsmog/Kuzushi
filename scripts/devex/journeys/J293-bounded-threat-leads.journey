@@ -1,0 +1,94 @@
+name: Bounded legacy hints disclose context limits and repair stale summaries without rescanning
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_AGENT_MCPS
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/threat_leads.py @TMP_TARGET @ART prepare @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: run threat-leads:build
+submit: logs
+require-live-snap: 30 partial source inspection | bounded-result
+require-shell: python3 -B @REPO/scripts/devex/fixtures/threat_leads.py @TMP_TARGET @ART built
+require-live-snap: 25 Prefix-limited source: large.rs | prefix-disclosed
+keys: Escape
+require-live-snap: 25 Context omissions: | context-limits
+resize: 160x48
+live-snap: result-160x48
+resize: 96x89
+live-snap: result-96x89
+resize: 80x24
+live-snap: result-80x24
+resize: 60x20
+live-snap: result-60x20
+resize: 40x12
+live-snap: result-40x12
+keys: Escape PPage PPage PPage
+live-snap: result-limits-40x12
+keys: PPage
+live-snap: result-receipt-40x12
+keys: z
+require-live-snap: 25 READ TRANSCRIPT | expanded-40x12
+keys: PPage
+live-snap: expanded-page-1-40x12
+keys: PPage
+live-snap: expanded-page-2-40x12
+keys: PPage
+live-snap: expanded-page-3-40x12
+keys: PPage
+live-snap: expanded-page-4-40x12
+keys: PPage
+live-snap: expanded-page-5-40x12
+keys: PPage
+live-snap: expanded-page-6-40x12
+keys: PPage
+live-snap: expanded-page-7-40x12
+keys: Escape
+ask: Can the operator read partial source and context limits, prefix and omitted-path details, the consumed context receipt and guidance status at all six sizes by paging?
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/threat_leads.py @TMP_TARGET @ART remove-context
+require-shell: python3 -B @REPO/scripts/devex/fixtures/threat_leads.py @TMP_TARGET @ART stale
+submit: run threat-leads:read
+submit: logs
+require-live-snap: 25 Markdown summary: stale | stale-summary
+require-shell: python3 -B @REPO/scripts/devex/fixtures/threat_leads.py @TMP_TARGET @ART stale-read
+submit: run threat-leads:build {"repairSummary":true}
+submit: logs
+require-live-snap: 25 Markdown summary: current | repaired-summary
+require-shell: python3 -B @REPO/scripts/devex/fixtures/threat_leads.py @TMP_TARGET @ART repaired
+ask: Does the stale summary offer a clear explicit repair action, and does repair restore the saved cards without current context, a rescan or a model request?
+submit: run threat-leads:build
+submit: logs
+require-live-snap: 25 Could not read workspace file | missing-context
+require-shell: python3 -B @REPO/scripts/devex/fixtures/threat_leads.py @TMP_TARGET @ART failed
+submit: run threat-leads:read
+submit: logs
+require-live-snap: 25 partial source inspection | saved-result
+require-shell: python3 -B @REPO/scripts/devex/fixtures/threat_leads.py @TMP_TARGET @ART saved
+ask: Does missing context fail without replacing the prior hints, while reading saved hints retains their receipt without claiming current-source equivalence or publishing accepted Map?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/threat_leads.py @TMP_TARGET @ART legacy
+submit: run threat-leads:read
+submit: logs
+require-live-snap: 25 legacy-unverified source inspection | legacy-result
+require-live-snap: 25 Indexed files: unrecorded | legacy-unknown-inspection
+require-shell: python3 -B @REPO/scripts/devex/fixtures/threat_leads.py @TMP_TARGET @ART legacy-read
+require-shell: python3 -B @REPO/scripts/devex/fixtures/threat_leads.py @TMP_TARGET @ART invalid
+submit: run threat-leads:read
+submit: logs
+require-live-snap: 25 requires a leads array | invalid-result
+ask: Are legacy inspection gaps labeled unrecorded, and malformed saved cards shown as a failure rather than a successful empty result?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/threat_leads.py @TMP_TARGET @ART restarted-state
+keys: C-c
+require-exit: 10
+env: NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: run threat-leads:read
+submit: logs
+require-live-snap: 25 requires a leads array | retained-invalid-result
+require-shell: python3 -B @REPO/scripts/devex/fixtures/threat_leads.py @TMP_TARGET @ART restarted
+keys: C-c
+require-exit: 10

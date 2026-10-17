@@ -40,14 +40,7 @@ fn source_model_lines(receipt: &ScopeStudyInvestigationReceipt) -> Vec<String> {
     let source = &first.equivalence.components;
     vec![
         source_components_label(source),
-        format!(
-            "Model: {} · {} worker(s)",
-            source
-                .model
-                .as_deref()
-                .unwrap_or("none recorded for discovery"),
-            receipt.workers
-        ),
+        discovery_model_line(source.model.as_deref(), receipt.workers),
     ]
 }
 
@@ -62,10 +55,15 @@ fn boundary_context_line(receipt: &ScopeStudyInvestigationReceipt, id: &str) -> 
 
 fn boundary_detail_lines(receipt: &ScopeStudyInvestigationReceipt) -> Vec<String> {
     receipt
-        .occurrence
         .cases
         .iter()
-        .flat_map(|boundary| scope::lines(&receipt.scope[&boundary.id], true))
+        .flat_map(|boundary| {
+            let mut lines = scope::lines(&receipt.scope[&boundary.id], true);
+            lines.extend(models::recorded_model_line(
+                boundary.equivalence.components.model.as_deref(),
+            ));
+            lines
+        })
         .collect()
 }
 

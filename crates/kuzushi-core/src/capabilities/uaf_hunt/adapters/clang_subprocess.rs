@@ -1,9 +1,12 @@
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
-use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::Command;
 use std::time::Duration;
+
+mod preflight;
+mod transport;
+use transport::RpcTransport;
 
 #[derive(Debug, Clone)]
 pub(crate) struct UnsupportedAdvisory {
@@ -33,44 +36,32 @@ impl UnsupportedAdvisory {
 /// not thread-safe; only one tool call may be in flight at a time
 /// (matching how the tool-loop driver invokes it sequentially).
 pub(crate) struct ClangMcpClient {
-    child: crate::scan::RegisteredChild,
-    stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
+    transport: RpcTransport,
     next_id: u64,
+    repo_root: PathBuf,
+    compile_database: kuzushi_mcp_common::compile_database::CompileDatabaseSnapshot,
 }
 
 impl ClangMcpClient {
-    /// Spawn `kuzushi-mcp-clang` with an explicit, canonical read capability.
-    pub(crate) fn spawn(repo_root: &Path, _compile_commands_path: &Path) -> Result<Self> {
+    pub(crate) fn spawn(
+        repo_root: &Path,
+        compile_commands_path: &Path,
+        timeout: Duration,
+        cancellation: Option<&crate::scan::ScanCancellation>,
+    ) -> Result<Self> {
+        let compile_database = super::compile_database::capture(repo_root, compile_commands_path)?;
         let binary = locate_mcp_clang_binary()?;
-        let mut command = mcp_clang_command(&binary, repo_root)?;
-        command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        let process_group = crate::scan::PreparedProcessGroup::configure(&mut command)
-            .context("uaf-hunt: could not guard mcp-clang process tree")?;
-        let mut child = command.spawn().with_context(|| {
-            format!(
-                "uaf-hunt: could not spawn mcp-clang at {} \
-                     (is `kuzushi-mcp-clang` in the same directory as `kuzushi` or on PATH?)",
-                binary.display()
-            )
-        })?;
-        let (stdin, stdout) = take_mcp_pipes(&mut child)?;
-        let child = crate::scan::ScanCancellation::default()
-            .register_prepared_child(child, process_group)
-            .context("uaf-hunt: could not supervise mcp-clang process tree")?;
+        let mut command = mcp_clang_command(&binary, repo_root, compile_database.directory())?;
+        let transport = RpcTransport::spawn(&mut command, cancellation, timeout)?;
         let mut client = Self {
-            child,
-            stdin,
-            stdout,
+            transport,
             next_id: 1,
+            repo_root: std::fs::canonicalize(repo_root)?,
+            compile_database,
         };
-        client.handshake().context(
-            "uaf-hunt: mcp-clang initialize handshake failed; check that clangd is on PATH and \
-             that the compile_commands.json path is valid",
-        )?;
+        client
+            .handshake()
+            .context("uaf-hunt: MCP helper preflight failed")?;
         Ok(client)
     }
 
@@ -83,15 +74,25 @@ impl ClangMcpClient {
                 "capabilities": {},
             }),
         )?;
+        let tools = self.request("tools/list", json!({}))?;
+        preflight::require_compiler_configuration(&tools)?;
+        let health = self.send_tool_request("clang.health", json!({}))?;
+        preflight::require_ready_helper(&health)?;
         Ok(())
     }
 
     /// Call an mcp-clang tool by name (e.g. `clang.callers`). The
-    /// `arguments` object is forwarded verbatim. Returns the parsed
+    /// Arguments use the bound target and frozen compiler configuration. Returns the parsed
     /// `structuredContent` (or the text content if structured is
     /// missing). Caller is responsible for serialising the result back
     /// to the LLM as JSON text.
     pub(crate) fn call_tool(&mut self, name: &str, arguments: Value) -> Result<Value> {
+        self.compile_database.verify_unchanged()?;
+        let arguments = self.bound_arguments(arguments)?;
+        self.send_tool_request(name, arguments)
+    }
+
+    fn send_tool_request(&mut self, name: &str, arguments: Value) -> Result<Value> {
         let response = self
             .request("tools/call", json!({"name": name, "arguments": arguments}))
             .with_context(|| format!("uaf-hunt: mcp-clang tools/call {name} failed"))?;
@@ -112,6 +113,24 @@ impl ClangMcpClient {
             .unwrap_or(Value::Null))
     }
 
+    fn bound_arguments(&self, mut arguments: Value) -> Result<Value> {
+        let object = arguments
+            .as_object_mut()
+            .context("mcp-clang arguments must be an object")?;
+        object.insert("repoPath".into(), serde_json::to_value(&self.repo_root)?);
+        object.insert(
+            "compileCommandsPath".into(),
+            serde_json::to_value(self.compile_database.path())?,
+        );
+        Ok(arguments)
+    }
+
+    pub(crate) fn compile_database_receipt(
+        &self,
+    ) -> &kuzushi_mcp_common::compile_database::CompileDatabaseReceipt {
+        self.compile_database.receipt()
+    }
+
     fn request(&mut self, method: &str, params: Value) -> Result<Value> {
         let id = self.next_id;
         self.next_id += 1;
@@ -121,17 +140,7 @@ impl ClangMcpClient {
             "method": method,
             "params": params,
         });
-        let mut line = serde_json::to_string(&request).context("uaf-hunt: encode JSON-RPC")?;
-        line.push('\n');
-        self.stdin
-            .write_all(line.as_bytes())
-            .context("uaf-hunt: mcp-clang stdin write failed")?;
-        self.stdin
-            .flush()
-            .context("uaf-hunt: mcp-clang stdin flush failed")?;
-        let response = self
-            .read_response_with_id(id)
-            .with_context(|| format!("uaf-hunt: reading mcp-clang response for {method}"))?;
+        let response = self.transport.request(&request, id)?;
         if let Some(error) = response.get("error") {
             let code = error.get("code").and_then(Value::as_i64).unwrap_or(0);
             let message = error
@@ -142,50 +151,9 @@ impl ClangMcpClient {
         }
         Ok(response.get("result").cloned().unwrap_or(Value::Null))
     }
-
-    fn read_response_with_id(&mut self, expected_id: u64) -> Result<Value> {
-        let mut line = String::new();
-        loop {
-            line.clear();
-            let n = self
-                .stdout
-                .read_line(&mut line)
-                .context("uaf-hunt: stdout read failed")?;
-            if n == 0 {
-                anyhow::bail!("uaf-hunt: mcp-clang closed stdout unexpectedly");
-            }
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let response: Value = serde_json::from_str(trimmed)
-                .with_context(|| format!("uaf-hunt: mcp-clang sent non-JSON line: {trimmed}"))?;
-            // The mcp server may surface a `notifications/...` reply
-            // we don't care about; skip anything not matching our id.
-            let id_matches = response
-                .get("id")
-                .and_then(Value::as_u64)
-                .is_some_and(|id| id == expected_id);
-            if id_matches {
-                return Ok(response);
-            }
-        }
-    }
 }
 
-fn take_mcp_pipes(child: &mut Child) -> Result<(ChildStdin, BufReader<ChildStdout>)> {
-    let stdin = child
-        .stdin
-        .take()
-        .context("uaf-hunt: mcp-clang spawned without a writable stdin pipe")?;
-    let stdout = child
-        .stdout
-        .take()
-        .context("uaf-hunt: mcp-clang spawned without a readable stdout pipe")?;
-    Ok((stdin, BufReader::new(stdout)))
-}
-
-fn mcp_clang_command(binary: &Path, repo_root: &Path) -> Result<Command> {
+fn mcp_clang_command(binary: &Path, repo_root: &Path, compiler_root: &Path) -> Result<Command> {
     let canonical_root = std::fs::canonicalize(repo_root).with_context(|| {
         format!(
             "uaf-hunt: could not canonicalize mcp-clang read root {}",
@@ -197,7 +165,7 @@ fn mcp_clang_command(binary: &Path, repo_root: &Path) -> Result<Command> {
         "uaf-hunt: mcp-clang read root is not a directory: {}",
         canonical_root.display()
     );
-    let read_roots = serde_json::to_string(&[&canonical_root])
+    let read_roots = serde_json::to_string(&[canonical_root.as_path(), compiler_root])
         .context("uaf-hunt: encode mcp-clang read capability")?;
     let path = std::env::var_os("PATH").context("uaf-hunt: PATH is required to locate clangd")?;
     let mut command = Command::new(binary);
@@ -213,34 +181,9 @@ fn mcp_clang_command(binary: &Path, repo_root: &Path) -> Result<Command> {
     Ok(command)
 }
 
-impl Drop for ClangMcpClient {
-    fn drop(&mut self) {
-        // Best-effort: send a shutdown so clangd exits cleanly, then
-        // kill the subprocess. We don't propagate errors here — by the
-        // time `drop` runs the hunt is finishing one way or another.
-        let _ = writeln!(
-            self.stdin,
-            r#"{{"jsonrpc":"2.0","id":999,"method":"shutdown","params":null}}"#
-        );
-        let _ = self.stdin.flush();
-        // Give the server a half-second to exit on its own before
-        // we send SIGKILL.
-        std::thread::sleep(Duration::from_millis(500));
-        let deadline = std::time::Instant::now() + Duration::from_millis(500);
-        while std::time::Instant::now() < deadline {
-            if self.child.try_wait().ok().flatten().is_some() {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(25));
-        }
-        let _ = self.child.kill_and_wait();
-    }
-}
-
 /// Find `kuzushi-mcp-clang` in three places, in order:
-/// 1. Sibling of the running `kuzushi` binary (same `target/release`
-///    or `target/debug` dir). This is the common case in development.
-/// 2. `KUZUSHI_MCP_CLANG_BIN` env var (operator override).
+/// 1. `KUZUSHI_MCP_CLANG_BIN` compatibility override, when explicitly set.
+/// 2. Sibling of the running `kuzushi` binary, such as `target/debug`.
 /// 3. `kuzushi-mcp-clang` on `$PATH`.
 ///
 /// Bails loudly if none of those resolve — silently degrading to a
@@ -371,9 +314,11 @@ mod tests {
     }
 
     #[test]
-    fn mcp_clang_command_grants_only_the_canonical_target_read_root() {
+    fn mcp_clang_command_grants_only_target_and_private_compiler_roots() {
         let root = tempfile::tempdir().unwrap();
-        let command = mcp_clang_command(Path::new("/bin/true"), root.path()).unwrap();
+        let compiler = tempfile::tempdir().unwrap();
+        let command =
+            mcp_clang_command(Path::new("/bin/true"), root.path(), compiler.path()).unwrap();
         let expected_root = std::fs::canonicalize(root.path()).unwrap();
         let env = command
             .get_envs()
@@ -388,7 +333,9 @@ mod tests {
         assert_eq!(command.get_current_dir(), Some(expected_root.as_path()));
         assert_eq!(
             env.get(kuzushi_mcp_common::MCP_READ_ROOTS_ENV),
-            Some(&Some(serde_json::to_string(&[expected_root]).unwrap()))
+            Some(&Some(
+                serde_json::to_string(&[expected_root, compiler.path().to_path_buf()]).unwrap()
+            ))
         );
         assert!(env.contains_key("PATH"));
         assert!(!env.contains_key("KUZUSHI_MCP_WRITE_ROOTS"));
@@ -402,7 +349,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let missing = root.path().join("missing");
 
-        let error = mcp_clang_command(Path::new("/bin/true"), &missing).unwrap_err();
+        let error = mcp_clang_command(Path::new("/bin/true"), &missing, root.path()).unwrap_err();
 
         assert!(error.to_string().contains("could not canonicalize"));
     }

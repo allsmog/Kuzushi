@@ -1152,6 +1152,9 @@ fn persist_recovered_interruption(target: &Path, mut repaired: RunSummary) -> Re
         .unwrap_or_else(|| "run interrupted".to_string());
     let artifact = preserve_or_write_recovered_result(target, &repaired.run_id, &reason)?;
     repaired = repaired.with_artifact(artifact);
+    for artifact in super::load_run_artifacts(target, &repaired.run_id)? {
+        repaired = repaired.with_artifact(artifact);
+    }
     ensure_canonical_run_files(target, &repaired.run_id, "interrupted")?;
     crate::run_lifecycle::emit_recovered_interruption(
         target,
@@ -1180,7 +1183,7 @@ fn preserve_or_write_recovered_result(
         run_id,
         "result.json",
         "tool result",
-        &recovered_interruption_result(reason),
+        &super::prepared_model_input::attach(target, run_id, recovered_interruption_result(reason)),
     )
 }
 

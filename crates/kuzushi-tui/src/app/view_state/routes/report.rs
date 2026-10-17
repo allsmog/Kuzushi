@@ -14,6 +14,7 @@ pub struct ReportRouteState {
     origin: Option<ReportOrigin>,
     receipt: Option<ReportReceipt>,
     reveal_error: Option<String>,
+    export_read_error: bool,
     study: Option<ReportStudyRef>,
     choices_target: Option<PathBuf>,
     choices_error: Option<String>,
@@ -33,6 +34,7 @@ impl Default for ReportRouteState {
             origin: None,
             receipt: None,
             reveal_error: None,
+            export_read_error: false,
             study: None,
             choices_target: None,
             choices_error: None,
@@ -110,6 +112,10 @@ impl ReportRouteState {
             return "Saved for this target; S updates choices without exporting.".into();
         }
         "Session choices; S saves them for restart. Export also saves choices.".into()
+    }
+
+    pub(crate) fn choices_error(&self) -> Option<&str> {
+        self.choices_error.as_deref()
     }
 
     pub(crate) fn study(&self) -> Option<&ReportStudyRef> {
@@ -271,6 +277,14 @@ impl ReportRouteState {
 
     pub(crate) fn set_reveal_error(&mut self, error: Option<String>) {
         self.reveal_error = error;
+        self.export_read_error = false;
+    }
+
+    pub(crate) fn mark_export_read_error(&mut self) {
+        self.export_read_error = true;
+    }
+    pub(crate) fn export_read_error(&self) -> bool {
+        self.export_read_error && self.reveal_error.is_some()
     }
 }
 

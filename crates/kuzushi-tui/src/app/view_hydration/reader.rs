@@ -89,6 +89,7 @@ fn read_artifact_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydr
         })
         .or_else(|| read_completion_value(target, key))
         .or_else(|| read_report_value(target, key))
+        .or_else(|| read_result_document_value(target, key))
         .or_else(|| read_run_value(target, key))
         .or_else(|| read_project_value(target, key))
         .or_else(|| read_workspace_file_value(target, key))
@@ -102,6 +103,39 @@ fn read_lesson_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydrat
         .and_then(|workspace| kuzushi_core::workspace::load_finding_lessons(&workspace, *offset))
         .map_err(|error| format!("{error:#}"));
     Some(ViewHydrationValue::FindingLessons(result))
+}
+
+fn read_result_document_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydrationValue> {
+    match key {
+        ViewHydrationKey::InvestigationAllowance { run_refs } => {
+            Some(ViewHydrationValue::InvestigationAllowance(
+                kuzushi_core::run_artifacts::load_investigation_allowance_for_runs(
+                    target, run_refs,
+                )
+                .map(|snapshot| snapshot.map(Arc::new))
+                .map_err(|error| format!("{error:#}")),
+            ))
+        }
+        ViewHydrationKey::RunRequestContext { run_id } => {
+            Some(ViewHydrationValue::RunRequestContext(
+                kuzushi_core::run_artifacts::load_run_request_context(target, run_id)
+                    .map(Arc::new)
+                    .map_err(|error| format!("{error:#}")),
+            ))
+        }
+        ViewHydrationKey::RunResultDocument {
+            run_id,
+            producer,
+            digest,
+        } => Some(ViewHydrationValue::RunResultDocument(
+            kuzushi_core::run_artifacts::load_correlated_result_document(
+                target, run_id, *producer, digest,
+            )
+            .map(Arc::new)
+            .map_err(|error| format!("{error:#}")),
+        )),
+        _ => None,
+    }
 }
 
 fn read_run_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydrationValue> {
@@ -145,6 +179,18 @@ fn read_run_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydration
 
 fn read_report_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydrationValue> {
     match key {
+        ViewHydrationKey::WorkspaceReportReview { findings_watermark } => {
+            Some(ViewHydrationValue::WorkspaceReportReview(
+                kuzushi_core::WorkspaceTarget::new(target)
+                    .and_then(|workspace| {
+                        kuzushi_core::workspace::load_workspace_review_summary(
+                            &workspace,
+                            *findings_watermark,
+                        )
+                    })
+                    .map_err(|error| format!("{error:#}")),
+            ))
+        }
         ViewHydrationKey::InvestigationReport { run_refs, .. } => {
             Some(read_investigation_report(target, run_refs))
         }
@@ -486,4 +532,23 @@ fn health_checks(credential_env: &str) -> ViewHealthChecks {
 
 fn env_is_set(name: &str) -> bool {
     std::env::var_os(name).is_some_and(|value| !value.is_empty())
+}
+
+#[cfg(test)]
+mod report_ledger_tests {
+    use super::*;
+
+    #[test]
+    fn a_known_report_ledger_disappearing_is_unavailable_not_empty() {
+        let root = tempfile::tempdir().unwrap();
+        let key = ViewHydrationKey::WorkspaceReportReview {
+            findings_watermark: Some(1),
+        };
+        let result = read_report_value(root.path(), &key).unwrap();
+        assert!(
+            matches!(result, ViewHydrationValue::WorkspaceReportReview(Err(_))),
+            "{result:?}"
+        );
+        assert!(!root.path().join(".kuzushi").exists());
+    }
 }

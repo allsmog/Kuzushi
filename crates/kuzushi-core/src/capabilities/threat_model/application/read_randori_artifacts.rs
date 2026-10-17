@@ -1,17 +1,5 @@
 use super::*;
 
-pub(crate) fn read_randori_artifacts(root: &Path, output_dir: &str) -> RandoriArtifacts {
-    let dir = resolve_output_dir(root, output_dir);
-    RandoriArtifacts {
-        state: read_json_optional(&dir.join("randori-state.json")),
-        s1_objectives: read_json_optional(&dir.join("pasta-s1.json")),
-        s2_scope: read_json_optional(&dir.join("pasta-s2.json")),
-        s3_decomposition: read_json_optional(&dir.join("pasta-s3.json")),
-        s4_threats: read_json_optional(&dir.join("pasta-s4.json")),
-        narrative: read_json_optional(&dir.join("pasta-narrative.json")),
-    }
-}
-
 pub(crate) fn convert_randori_artifacts_to_document(
     artifacts: &RandoriArtifacts,
     methodology: &str,

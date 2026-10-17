@@ -14,6 +14,22 @@ impl ScanEngine for GovulncheckScanner {
         "govulncheck"
     }
 
+    fn rebind_scoped_finding(&self, finding: &mut Finding, file_path: String) {
+        let rebound = Finding::new_tool(
+            &finding.tool,
+            &finding.rule_id,
+            file_path,
+            finding.start_line,
+            finding.end_line,
+            finding.severity,
+            &finding.message,
+        );
+        finding.file_path = rebound.file_path;
+        finding.fingerprint = rebound.fingerprint;
+        finding.dedup_key = rebound.dedup_key;
+        finding.source_signature = rebound.source_signature;
+    }
+
     fn preflight(&self) -> Result<()> {
         ensure_govulncheck_available()
     }

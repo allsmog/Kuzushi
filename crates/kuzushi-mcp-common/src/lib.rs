@@ -1,6 +1,7 @@
 mod bundle_identity;
 pub mod cache;
 mod codeql_bundle_root;
+pub mod compile_database;
 pub mod doctor;
 pub mod jsonrpc;
 pub mod process;

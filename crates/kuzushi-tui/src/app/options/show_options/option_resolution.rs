@@ -37,9 +37,14 @@ impl ShellApp {
     /// tool. Operators think in modules, so `options semgrep` must work.
     fn resolve_requested_options_tool(&self, tool_name: String) -> Result<String> {
         if tool_name == "." {
+            let module = self
+                .focused_module()
+                .context("`options .` requires a focused module. Next: use <module>")?;
             return self
-                .default_tool_for_focused_module()
-                .context("`options .` requires a focused module. Next: use <module>");
+                .default_tool_for_module(module)
+                .with_context(|| format!(
+                    "Module {module} requires an exact tool. Next: tools module:{module}, then options {module}:<action>"
+                ));
         }
         self.lookup_options_tool(&tool_name).with_context(|| {
             format!("unknown tool {tool_name:?}. Next: `tools` to list, or `options {tool_name}:<verb>`")
@@ -67,3 +72,6 @@ impl ShellApp {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

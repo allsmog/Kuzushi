@@ -10,9 +10,9 @@
 //! attack-surface artifact identity *and* the scan-recommendations state so
 //! coverage citations appear the moment recommendations hydrate.
 
-use crate::ui_view_models::{
-    attack_surface_artifact_state, attack_surface_artifact_version, AttackSurfaceArtifactState,
-};
+#[cfg(test)]
+use crate::ui_view_models::attack_surface_artifact_version;
+use crate::ui_view_models::{attack_surface_artifact_state, AttackSurfaceArtifactState};
 use crate::{ShellApp, WorklistCacheKey};
 use kuzushi_core::capabilities::scan_recommender::ScanRecommendation;
 use kuzushi_core::capabilities::worklist::{
@@ -23,7 +23,9 @@ use kuzushi_core::workspace::AttackSurfaceMap;
 use std::collections::BTreeMap;
 
 mod context_artifact;
+mod history;
 mod snapshot;
+pub(crate) use history::saved_worklist_run_id;
 
 use context_artifact::worklist_artifact_state;
 pub(crate) use context_artifact::worklist_artifact_version;
@@ -38,6 +40,8 @@ pub(crate) struct WorklistViewModel {
     pub rows: Vec<WorklistRowModel>,
     pub legend: Vec<LegendEntry>,
     pub degraded: Vec<String>,
+    pub inspection: Vec<String>,
+    pub history_notice: Option<String>,
     pub unranked_count: usize,
     /// The true ranked population before the row cap, so the Map pane reports
     /// "run worklist for all {ranked_total}" honestly instead of the capped
@@ -87,18 +91,28 @@ pub(crate) fn worklist_model(app: &ShellApp) -> WorklistViewModel {
     // same artifact version. C-4: probe the snapshot identity in O(1) here so
     // the memo check happens BEFORE any snapshot clone+parse; the (large)
     // snapshot body is projected only on a cache miss, never per frame.
+    let saved_run = match history::saved_run(app) {
+        Ok(saved) => saved,
+        Err(message) => return history::notice(message),
+    };
     let snapshot_generation = worklist_snapshot_generation(app, artifact_version);
     let key = WorklistCacheKey::from_parts(
         artifact_version,
         recommendations_identity(&recommendations),
         snapshot_generation,
-    );
+    )
+    .with_saved_run(saved_run.clone());
     if let Some(cached) = app.workbench_cache().borrow().worklist(&key) {
         return cached;
     }
     // Cache miss only: project the captured snapshot (parse), or — when no
     // snapshot backs this engagement — pay the full artifact parse to fold.
     let model = worklist_snapshot_model(app, artifact_version)
+        .or_else(|| {
+            saved_run
+                .as_ref()
+                .and_then(|(id, _)| history::project_saved(app, id))
+        })
         .unwrap_or_else(|| build_worklist_model(worklist_artifact_state(app), &recommendations));
     app.workbench_cache()
         .borrow_mut()
@@ -256,6 +270,8 @@ fn project_worklist(worklist: &Worklist) -> WorklistViewModel {
             .map(|(contributor, state)| legend_entry(*contributor, state))
             .collect(),
         degraded: worklist.degraded.clone(),
+        inspection: Vec::new(),
+        history_notice: None,
         unranked_count: worklist.unranked.len(),
         ranked_total: worklist.ranked_total,
         empty_hint: empty_hint_for(
@@ -360,8 +376,7 @@ fn legend_entry(contributor: Contributor, state: &ContributorState) -> LegendEnt
 /// fan-in / prefilter history are unimplemented, not merely unrequested.
 fn not_requested_word(contributor: Contributor) -> &'static str {
     match contributor {
-        Contributor::CallGraphFanIn => "not implemented (Phase B)",
-        Contributor::PrefilterHistory => "not tracked (Phase A)",
+        Contributor::CallGraphFanIn | Contributor::PrefilterHistory => "not supported",
         _ => "not requested",
     }
 }
@@ -468,18 +483,12 @@ mod tests {
 
         // Fan-in / prefilter are unimplemented, not merely unrequested.
         let fan_in = legend_entry(Contributor::CallGraphFanIn, &ContributorState::NotRequested);
-        assert_eq!(
-            fan_in.state_word.as_deref(),
-            Some("not implemented (Phase B)")
-        );
+        assert_eq!(fan_in.state_word.as_deref(), Some("not supported"));
         let prefilter = legend_entry(
             Contributor::PrefilterHistory,
             &ContributorState::NotRequested,
         );
-        assert_eq!(
-            prefilter.state_word.as_deref(),
-            Some("not tracked (Phase A)")
-        );
+        assert_eq!(prefilter.state_word.as_deref(), Some("not supported"));
     }
 
     #[test]

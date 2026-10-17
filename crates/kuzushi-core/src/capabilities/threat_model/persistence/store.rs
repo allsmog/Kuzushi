@@ -188,15 +188,6 @@ pub(crate) fn write_markdown_artifact(
     Ok(path)
 }
 
-pub(crate) fn read_json_optional(path: &Path) -> Option<Value> {
-    let read =
-        crate::bounded_file::read_utf8_text_prefix(path, MAX_THREAT_MODEL_JSON_BYTES).ok()?;
-    if read.truncated {
-        return None;
-    }
-    serde_json::from_str::<Value>(&read.text).ok()
-}
-
 fn checked_persistent_threat_model_path(root: &Path) -> Result<PathBuf> {
     let path = persistent_threat_model_path(root);
     let relative = path
@@ -211,6 +202,18 @@ fn checked_normalized_artifact_path(root: &Path, output_dir: &str) -> Result<Pat
 
 fn checked_output_artifact_path(root: &Path, output_dir: &str, file_name: &str) -> Result<PathBuf> {
     let workspace = WorkspaceTarget::new(root)?;
+    let path = preflight_output_artifact_path(workspace.root(), output_dir, file_name)?;
+    let artifact = path.strip_prefix(workspace.root())?;
+    ensure_artifact_parent(workspace.root(), artifact)?;
+    preflight_output_artifact_path(workspace.root(), output_dir, file_name)
+}
+
+pub(crate) fn preflight_output_artifact_path(
+    root: &Path,
+    output_dir: &str,
+    file_name: &str,
+) -> Result<PathBuf> {
+    let workspace = WorkspaceTarget::new(root)?;
     let directory = resolve_output_dir(workspace.root(), output_dir);
     let relative = directory.strip_prefix(workspace.root()).with_context(|| {
         format!(
@@ -220,8 +223,27 @@ fn checked_output_artifact_path(root: &Path, output_dir: &str, file_name: &str) 
         )
     })?;
     let artifact = relative.join(file_name);
-    ensure_artifact_parent(workspace.root(), &artifact)?;
     crate::workspace::validated_workspace_descendant(workspace.root(), artifact)
+}
+
+pub(crate) fn write_new_normalized_artifact(
+    root: &Path,
+    output_dir: &str,
+    document: &Value,
+) -> Result<PathBuf> {
+    let body = format!("{}\n", serde_json::to_string_pretty(document)?);
+    write_new_output_artifact(root, output_dir, "normalized-threat-model.json", &body)
+}
+
+pub(crate) fn write_new_output_artifact(
+    root: &Path,
+    output_dir: &str,
+    file_name: &str,
+    body: &str,
+) -> Result<PathBuf> {
+    let path = checked_output_artifact_path(root, output_dir, file_name)?;
+    crate::fs_atomic::write_new_atomic(&path, body)?;
+    Ok(path)
 }
 
 fn ensure_artifact_parent(root: &Path, artifact: &Path) -> Result<()> {

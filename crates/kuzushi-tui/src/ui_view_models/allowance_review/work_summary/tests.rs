@@ -50,8 +50,21 @@ fn summary_uses_frozen_conditions_instead_of_mutable_form_fields() {
     assert!(lines.contains("Engines: agentic"));
     assert!(lines.contains("Scope: whole repository"));
     assert!(lines.contains("Threat context: explicitly omitted"));
-    assert!(lines.contains("Execution model: openai-codex:gpt-5.5"));
+    assert!(lines.contains("Execution model: openai-oauth:gpt-5.5"));
     assert!(!lines.contains("secret-scan") && !lines.contains("other"));
+    assert!(!lines.contains("openai-codex:"));
+    assert_eq!(
+        config
+            .study
+            .receipt
+            .as_ref()
+            .unwrap()
+            .equivalence
+            .components
+            .model
+            .as_deref(),
+        Some("openai-codex:gpt-5.5")
+    );
 }
 
 #[test]
@@ -107,7 +120,7 @@ fn overview_uses_frozen_work_and_keeps_receipts_in_details() {
     assert!(preview
         .overview
         .iter()
-        .any(|line| line == "Model: openai-codex:gpt-5.5"));
+        .any(|line| line == "Model: openai-oauth:gpt-5.5"));
     assert!(!preview.overview.join("\n").contains("Threat context"));
     assert!(preview
         .details
@@ -208,7 +221,7 @@ fn an_existing_context_generation_does_not_hide_the_selected_scan_plan() {
         .unwrap()
         .details
         .join("\n")
-        .contains("Execution model: openai-codex:gpt-5.5"));
+        .contains("Execution model: openai-oauth:gpt-5.5"));
     assert!(summary(&config, &context_input)
         .unwrap()
         .details
@@ -268,7 +281,7 @@ fn review_preview_uses_the_frozen_strategy_and_workload() {
     let text = summary(&config, &input).unwrap().details.join("\n");
     assert!(text.contains("Review: 0 frozen observations · 1 worker"));
     assert!(text.contains("Strategy: standard"));
-    assert!(text.contains("Execution model: openai-codex:gpt-5.5"));
+    assert!(text.contains("Execution model: openai-oauth:gpt-5.5"));
     assert!(text.contains("Threat context: explicitly omitted"));
     assert!(!text.contains("Scan: 3 passes"));
 }

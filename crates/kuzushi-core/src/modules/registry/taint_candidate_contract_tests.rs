@@ -127,3 +127,17 @@ fn undeclared_scan_context_cannot_claim_scoped_candidate_support() {
         .unwrap_err();
     assert!(error.to_string().contains("scanContextRef"));
 }
+
+#[test]
+fn bundled_hunt_keeps_exact_dispatch_without_claiming_core_or_scan_completion() {
+    let registry = ModuleRegistry::with_v2_builtins();
+    let tool = registry.resolve_tool("taint-iris-next:hunt").unwrap();
+    assert!(tool.hidden);
+    assert_eq!(tool.discovery_maturity, Some(ModuleMaturity::Labs));
+    assert!(!tool.phase_result);
+    assert!(!registry.tool_is_discoverable(&tool.name));
+    assert!(tool.description.contains("repair session"));
+    assert!(tool
+        .description
+        .contains("Accepted discovery scopes are unsupported"));
+}

@@ -1,5 +1,7 @@
 use serde::{Deserialize, Deserializer, Serialize};
 
+mod document;
+
 pub const RUN_ITEM_REDACTION_POLICY_VERSION: u16 = 1;
 const MAX_SAFE_TEXT_CHARS: usize = 6_000;
 pub const MAX_PREVIEW_LINE_CHARS: usize = 500;
@@ -9,6 +11,12 @@ pub const MAX_PREVIEW_LINE_CHARS: usize = 500;
 pub struct SafeText(String);
 
 impl SafeText {
+    /// Preserve document whitespace and long lines without truncating safe text.
+    /// The caller owns the document's aggregate byte and row limits.
+    pub fn document_lines(value: impl AsRef<str>) -> Vec<Self> {
+        document::lines(value.as_ref())
+    }
+
     pub fn operator_visible(value: impl AsRef<str>) -> Self {
         let redacted = crate::session_transcript::redaction::redact_text(value.as_ref());
         Self(bound_text(&escape_controls(&redacted)))
@@ -80,9 +88,7 @@ fn exact_half<'a>(text: &'a str, separator: &str) -> Option<&'a str> {
         let index = start + position;
         let left = text[..index].trim();
         let right = text[index + separator.len()..].trim();
-        if !left.is_empty()
-            && left.trim_end_matches('.') == right.trim_end_matches('.')
-        {
+        if !left.is_empty() && left.trim_end_matches('.') == right.trim_end_matches('.') {
             return Some(left);
         }
         start = index + separator.len();

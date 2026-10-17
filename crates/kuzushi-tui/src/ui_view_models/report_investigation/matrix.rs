@@ -46,15 +46,9 @@ fn source_lines(receipt: &ContextMatrixInvestigationReceipt) -> Vec<String> {
     };
     vec![
         source_components_label(&baseline.equivalence.components),
-        format!(
-            "Model: {} · {} worker(s)",
-            baseline
-                .equivalence
-                .components
-                .model
-                .as_deref()
-                .unwrap_or("none recorded for discovery"),
-            receipt.workers
+        discovery_model_line(
+            baseline.equivalence.components.model.as_deref(),
+            receipt.workers,
         ),
     ]
 }
@@ -91,6 +85,7 @@ fn provenance_lines(receipt: &ContextMatrixInvestigationReceipt) -> Vec<String> 
             case.label, case.equivalence.sha256
         ));
         lines.push(format!("Recorded content: {}", source.workspace_identity));
+        lines.extend(models::recorded_model_line(source.model.as_deref()));
         lines.push(format!(
             "Context reference: {}",
             source

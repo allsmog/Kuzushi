@@ -3,6 +3,7 @@ use super::*;
 #[allow(unused_imports)]
 use self::agentic_sast::run_agentic_sast_report;
 #[allow(unused_imports)]
+#[cfg(test)]
 use self::options::validate_tool_input_options;
 #[allow(unused_imports)]
 use self::pipeline::{run_pipeline_approval_gate, run_pipeline_task_selector};
@@ -50,6 +51,8 @@ mod coverage_contract_tests;
 mod cpg_contract_tests;
 #[cfg(test)]
 mod dependency_hygiene_contract_tests;
+#[cfg(test)]
+mod direct_scan_coverage_contract_tests;
 mod dispatch_catalog_tool;
 mod dispatch_plugin_prompt_tool;
 mod executable_requirements;
@@ -58,7 +61,13 @@ mod findings_chains_contract_tests;
 #[cfg(test)]
 mod iac_contract_tests;
 #[cfg(test)]
+mod license_reassessment_contract_tests;
+#[cfg(test)]
 mod recon_import_contract_tests;
+#[cfg(all(test, unix))]
+mod scan_source_settlement_contract_tests;
+#[cfg(test)]
+mod worklist_inspection_contract_tests;
 pub use executable_requirements::{missing_executable_requirements, ExecutableRequirement};
 #[cfg(test)]
 mod actor_discovery_contract_tests;
@@ -68,6 +77,10 @@ mod advisory_catalog_contract_tests;
 mod android_pipeline_contract_tests;
 #[cfg(test)]
 mod chain_hunt_contract_tests;
+#[cfg(test)]
+mod chunked_input_contract_tests;
+#[cfg(test)]
+mod classifier_contract_tests;
 #[cfg(test)]
 mod external_recon_contract_tests;
 #[cfg(test)]
@@ -82,10 +95,14 @@ mod ndiff_pattern_contract_tests;
 #[cfg(test)]
 mod operational_contract_tests;
 #[cfg(test)]
+mod pipeline_selection_contract_tests;
+#[cfg(test)]
 mod recommendation_contract_tests;
 mod run_taint_iris_tool;
 #[cfg(test)]
 mod scan_scope_proposal_tests;
+#[cfg(test)]
+mod shinsa_allowance_contract_tests;
 #[cfg(test)]
 mod sink_import_contract_tests;
 #[cfg(test)]
@@ -99,9 +116,13 @@ mod threat_intel_inventory_contract_tests;
 #[cfg(test)]
 mod threat_intel_preview_contract_tests;
 #[cfg(test)]
+mod threat_leads_contract_tests;
+#[cfg(test)]
 mod triage_contract_tests;
 #[cfg(test)]
 mod variant_draft_contract_tests;
 #[cfg(test)]
 mod variant_hunt_contract_tests;
+#[cfg(test)]
+mod vendor_context_contract_tests;
 pub use module_registry::ModuleRegistry;

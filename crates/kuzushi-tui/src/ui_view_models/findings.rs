@@ -115,6 +115,7 @@ pub(crate) struct FindingListRow {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct FindingDetailModel {
     pub(crate) observation_gap: Option<String>,
+    pub(crate) observation_reference: Option<String>,
     pub(crate) alias: Option<String>,
     pub(crate) identity_label: String,
     pub(crate) severity_tone: SeverityTone,
@@ -921,6 +922,23 @@ fn batch_scoped_finding_alias_indices(
     app: &ShellApp,
     candidates: Vec<(String, usize)>,
 ) -> Vec<(String, usize)> {
+    if app.domain().findings_page().is_none() {
+        return unpaged_batch_finding_alias_indices(app, candidates);
+    }
+    let deck = app.router.campaign();
+    if app.domain().findings_batch_id() != deck.active_batch_id.as_deref() {
+        return Vec::new();
+    }
+    if deck.active_batch_id.is_some() && deck.active_batch_report.is_none() {
+        return Vec::new();
+    }
+    candidates
+}
+
+fn unpaged_batch_finding_alias_indices(
+    app: &ShellApp,
+    candidates: Vec<(String, usize)>,
+) -> Vec<(String, usize)> {
     let deck = app.router.campaign();
     let Some(report) = deck.active_batch_report() else {
         if deck.active_batch_id.is_some() {
@@ -1600,7 +1618,7 @@ fn clean_scan_empty_state(
 
 fn latest_scan_summary(runs: &BTreeMap<String, RunSummary>) -> Option<&RunSummary> {
     runs.values()
-        .filter(|summary| summary.kind == "scan")
+        .filter(|summary| super::scan_summary::has_scan_phase_result(summary))
         .max_by_key(|summary| summary.completed_at_unix.unwrap_or(summary.started_at_unix))
 }
 
@@ -1961,6 +1979,10 @@ impl FindingDetailModel {
         let confidence = ProofConfidence::classify(finding);
         Self {
             observation_gap: kuzushi_core::findings::observation_gap_note(finding),
+            observation_reference: finding
+                .id
+                .filter(|id| *id > 0)
+                .map(|_| kuzushi_core::findings::finding_page_anchor(finding)),
             alias: projection.alias,
             identity_label: finding_identity_label(finding),
             severity_tone: SeverityTone::from_severity(projection.severity),
@@ -2198,10 +2220,7 @@ impl FindingEvidenceRow {
     fn from_evidence(evidence: &kuzushi_core::FindingEvidence) -> Self {
         Self {
             origin: evidence_origin_label(evidence).to_string(),
-            header: format!(
-                "{} · conf {} · {}:{}",
-                evidence.kind, evidence.confidence, evidence.file_path, evidence.line
-            ),
+            header: evidence_row_header(evidence),
             snippet: evidence.snippet.clone(),
             rationale: evidence.rationale.clone(),
             capture: evidence_capture_summary(evidence),
@@ -2210,16 +2229,48 @@ impl FindingEvidenceRow {
 }
 
 fn evidence_origin_label(evidence: &kuzushi_core::FindingEvidence) -> &'static str {
-    if evidence.kind.trim().eq_ignore_ascii_case("reasoning") {
+    if evidence.is_model_generated_reasoning() {
         return "model-generated reasoning";
     }
-    if evidence.request_blob.is_some() || evidence.response_blob.is_some() {
+    if evidence_has_capture(evidence) {
         return "observed capture evidence";
     }
-    if !evidence.file_path.trim().is_empty() || !evidence.snippet.trim().is_empty() {
+    if evidence_has_source_location(evidence) {
         return "observed code evidence";
     }
     "observed evidence"
+}
+
+fn evidence_has_capture(evidence: &kuzushi_core::FindingEvidence) -> bool {
+    evidence.request_blob.is_some() || evidence.response_blob.is_some()
+}
+
+fn evidence_has_source_location(evidence: &kuzushi_core::FindingEvidence) -> bool {
+    !evidence.file_path.trim().is_empty() || !evidence.snippet.trim().is_empty()
+}
+
+fn evidence_row_header(evidence: &kuzushi_core::FindingEvidence) -> String {
+    let confidence = if evidence.has_unscored_confidence() {
+        "unscored".into()
+    } else {
+        format!("conf {}", evidence.confidence)
+    };
+    format!(
+        "{} · {confidence} · {}:{}",
+        evidence_kind_label(evidence),
+        evidence.file_path,
+        evidence.line
+    )
+}
+
+fn evidence_kind_label(evidence: &kuzushi_core::FindingEvidence) -> &str {
+    if evidence.is_unscored_model_claim() {
+        return "model claim";
+    }
+    if evidence.is_unscored_source_citation() {
+        return "source citation";
+    }
+    &evidence.kind
 }
 
 fn evidence_capture_summary(evidence: &kuzushi_core::FindingEvidence) -> Option<String> {

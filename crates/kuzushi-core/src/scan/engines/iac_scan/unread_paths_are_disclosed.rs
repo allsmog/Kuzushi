@@ -64,6 +64,7 @@ fn a_gap_reaches_both_the_output_and_the_tool_json() {
         kind: IacScanOptions::default().kind,
         findings: Vec::new(),
         files_scanned: 0,
+        inspected_files: None,
         files_skipped: 0,
         coverage_gaps,
         inspection: IacInspection::default(),

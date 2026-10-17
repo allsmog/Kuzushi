@@ -4,7 +4,6 @@ use crate::runtime::{AgentQueryRequest, AgentRuntime};
 use crate::structured_output::{
     query_required_structured_json_with_cost, CostedStructuredJson, StructuredJsonContract,
 };
-use crate::whitebox_static::agent_tool_policy_for_input_and_target;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};

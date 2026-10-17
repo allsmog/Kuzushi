@@ -29,7 +29,8 @@ pub(crate) use entry_points::{
     EntryPointReceipt, EntryPointTarget,
 };
 pub(crate) use worklist::{
-    worklist_artifact_version, worklist_model, LegendEntry, WorklistRowModel, WorklistViewModel,
+    saved_worklist_run_id, worklist_artifact_version, worklist_model, LegendEntry,
+    WorklistRowModel, WorklistViewModel,
 };
 
 // ── Risk by module (shared by heatmap + terrain) ──────────────────────────

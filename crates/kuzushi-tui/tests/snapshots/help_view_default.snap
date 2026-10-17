@@ -27,6 +27,8 @@ modules - open phase-native capabilities (press e for expert engines)
   aliases / examples: /modules, /m, m, show modules
 recommend - open phase-native recommended capabilities
   aliases / examples: /recommend, rec, /rec
+recommendations - read generated module suggestions; r refreshes deterministic ranking
+  aliases / examples: /recommendations
 tools [query] - list or filter routed Rust tools
   aliases / examples: /tools, show tools, tools semgrep, tools --fav
 find [query] - open the Tools view grammar-first (alias for tools [query])
@@ -119,6 +121,8 @@ tasks - choose SAST scanner tasks
   aliases / examples: /tasks
 strategy - show proposed phase strategies
   aliases / examples: /strategy, strategies, strategy queue
+strategy inspect <id> - read one proposal's recorded approval, outcome and source without execution
+  aliases / examples: /strategy inspect <id>
 strategy approve <id> - approve/keep a queued strategy proposal
   aliases / examples: /strategy approve <id>, strategy keep <id>
 strategy reject <id> - reject/skip a queued strategy proposal
@@ -173,6 +177,8 @@ workspace scope init - write an editable .kuzushi/scope.toml scaffold
   aliases / examples: /workspace scope init
 
 FINDINGS / EVIDENCE — browse findings, evidence, and report output
+findings refresh - reload findings while keeping filters, study selection and the current view
+  aliases / examples: /findings refresh, /f refresh
 findings - open persisted findings
   aliases / examples: /f, f, /findings
 findings filter <expr> - filter findings by severity, confidence, decision, or completeness; use clear to reset
@@ -204,6 +210,14 @@ batch <id>|clear - open a scan-batch occurrence report and retain or clear its R
   aliases / examples: /batch <id>
 coverage - coverage matrix: shards x threat sources with campaign progress + finding counts
   aliases / examples: /coverage
+relationships - review and undo finding relationships while preserving finding verdicts
+  aliases / examples: /relationships
+goals - review goal relevance against a saved brief with goals [brief-id]
+  aliases / examples: /goals
+lessons - draft, review and selectively reuse lessons from confirmed findings
+  aliases / examples: /lessons
+groups - browse accepted duplicate groups and their independent observations
+  aliases / examples: /groups
 jobs -k <runId> - cancel a running job or drop a pending one
   aliases / examples: jobs kill <runId>, jobs cancel <runId>
 runs diff <left> <right> - compare findings snapshots from two runs
@@ -232,7 +246,7 @@ threats [1-4] - threat model views
   aliases / examples: /threats [1-4], threats summary, threats stride, threats stories, threats scope
 threats edit - open the editable threat model view
   aliases / examples: /threats edit
-threats regen - Haiku-driven threat-model patch; review then /threats apply
+threats regen - choose context text for an approved, budgeted inactive copy
   aliases / examples: /threats regen
 threats ask [--whole-model] <question> - ask the agent about the current threat model
   aliases / examples: /threats ask <question>
@@ -240,7 +254,7 @@ threats apply - apply the pending threat-model patch
   aliases / examples: /threats apply
 threats reject - discard the pending threat-model patch
   aliases / examples: /threats reject
-threats models - list immutable threat-model lineages and their active head
+threats models - browse saved context revisions, inspect documents and compare a selected baseline
   aliases / examples: /threats models
 threats diff - inspect compatibility-mirror edits against the active immutable revision
   aliases / examples: /threats diff, threats inspect diff
@@ -308,7 +322,7 @@ tune - module controls
   aliases / examples: /tune, /t, t
 actor <n> - actor transcript detail
   aliases / examples: /actor <n>
-plan <english> - Haiku natural-language planner; review then /yes or /no
+plan <english> - Prepare a budgeted workflow proposal; /plan reopens a kept draft
   aliases / examples: /plan <english>
 yes - apply pending plan
   aliases / examples: /yes, y

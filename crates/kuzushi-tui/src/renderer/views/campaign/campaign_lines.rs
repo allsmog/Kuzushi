@@ -503,7 +503,7 @@ const PAUSED_FIXED_WORK_COMMANDS: &[&str] = &[
     "a plan/allowance",
     "work paused",
     "L resume after review",
-    "workbench partial/report",
+    "R report",
     "r refresh",
     "q list",
 ];
@@ -548,6 +548,7 @@ fn settled_fixed_work_commands(deck: &CampaignRouteState) -> &'static [&'static 
             "Enter inspect",
             "a plan/allowance",
             "work finished",
+            "R report",
             "r refresh",
             "q list",
         ]
@@ -558,7 +559,7 @@ fn settled_fixed_work_commands(deck: &CampaignRouteState) -> &'static [&'static 
             "a plan/allowance",
             "work ended",
             "new work needs a new plan",
-            "workbench partial/report",
+            "R report",
             "r refresh",
             "q list",
         ]
@@ -865,7 +866,7 @@ mod tests {
         let commands = deck_commands(&deck);
         assert!(commands.contains(&"work paused"));
         assert!(commands.contains(&"a plan/allowance"));
-        assert!(commands.contains(&"workbench partial/report"));
+        assert!(commands.contains(&"R report"));
         assert!(!commands.contains(&"work finished"));
     }
 

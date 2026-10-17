@@ -64,11 +64,14 @@ fn build_agentic_threat_model(
     flavor: BuildFlavor,
 ) -> Result<Value> {
     let mut input = parse_build_input(&input, ctx, flavor)?;
+    preflight_randori_outputs(flavor, &input)?;
     preflight_agentic_build_lineage(&input)?;
     let verb = threat_model_build_verb(flavor);
     emit_threat_model_start(ctx, verb, flavor, &input);
     let snapshot = register_result_snapshot(ctx, verb, input.workspace_root());
-    input.captured_source_tree_hash = snapshot.as_ref().map(|source| source.hashes().1.to_string());
+    input.captured_source_tree_hash = snapshot
+        .as_ref()
+        .map(|source| source.hashes().1.to_string());
     let target = input.workspace_root().to_path_buf();
     let result = if input.is_refine() {
         refine_threat_model(runtime, ctx, flavor, verb, input)
@@ -420,7 +423,7 @@ fn finish_threat_model_build(
     version_warning: Option<String>,
     reconciliation: BuildReconciliation,
 ) -> Result<Value> {
-    let findings = take_threat_model_findings(&input, &mut generated);
+    let findings = take_threat_model_findings(flavor, &input, &mut generated);
     let summary = threat_model_summary(&generated.document);
     let (lines, warnings) = finished_build_lines(
         flavor,
@@ -615,9 +618,13 @@ pub(crate) fn record_persisted_version(
 }
 
 fn take_threat_model_findings(
+    flavor: BuildFlavor,
     input: &BuildInput,
     generated: &mut GeneratedThreatModel,
 ) -> Vec<Value> {
+    if matches!(flavor, BuildFlavor::RandoriPasta) && !input.emit_findings {
+        return Vec::new();
+    }
     threat_model_findings(input, generated.bridge_findings.take(), &generated.document)
 }
 
@@ -968,19 +975,22 @@ pub(crate) fn query_threat_model_document(
     prompt: String,
 ) -> Result<crate::structured_output::CostedStructuredJson<Value>> {
     let _llm_scope = begin_threat_model_llm_scope(ctx, verb);
-    // The prompt embeds every input (source bundle, grounding, previous
-    // document), so an unchanged workspace replays the synthesis for free.
+    // Eligible closed requests may replay identical inputs. The isolated
+    // Randori draft policy does not qualify for semantic-cache reuse.
     let cache = crate::semantic_cache::SemanticCache::open_for_target(input.workspace_root());
     let costed = crate::structured_output::query_cached_structured_json_with_cost(
         cache.as_ref(),
         runtime,
-        AgentQueryRequest::new(
-            input.model.clone(),
-            input.analysis_root().to_path_buf(),
-            threat_model_system_prompt(),
-            prompt,
-        )
-        .with_max_output_tokens(input.max_output_tokens),
+        bounded_draft_request(
+            AgentQueryRequest::new(
+                input.model.clone(),
+                input.analysis_root().to_path_buf(),
+                threat_model_system_prompt(),
+                prompt,
+            )
+            .with_max_output_tokens(input.max_output_tokens),
+            flavor,
+        ),
         StructuredJsonContract::new(
             flavor.tool_name(),
             "ThreatModelDocument",
@@ -992,6 +1002,18 @@ pub(crate) fn query_threat_model_document(
     .costed;
     drop(_llm_scope);
     Ok(costed)
+}
+
+fn bounded_draft_request(request: AgentQueryRequest, flavor: BuildFlavor) -> AgentQueryRequest {
+    if matches!(flavor, BuildFlavor::RandoriPasta) {
+        return request
+            .with_tool_policy(crate::runtime::AgentToolPolicy::new(
+                "randori-draft",
+                std::iter::empty::<&str>(),
+            ))
+            .with_max_model_turns(Some(1));
+    }
+    request
 }
 
 fn begin_threat_model_llm_scope(
@@ -1045,19 +1067,14 @@ fn write_threat_model_outputs(
     has_concrete_content: bool,
     run_id: Option<&str>,
 ) -> Result<ThreatModelArtifacts> {
-    let normalized_artifact =
-        write_normalized_artifact(input.workspace_root(), &input.output_dir, document)?;
+    preflight_randori_outputs(flavor, input)?;
+    let normalized_artifact = write_normalized_build_artifact(flavor, input, document)?;
     let markdown = render_schema_markdown(
         document,
         &input.repo_name,
         &input.workspace_root().display().to_string(),
     );
-    let markdown_artifact = write_markdown_artifact(
-        input.workspace_root(),
-        &input.output_dir,
-        "THREAT_MODEL.md",
-        &markdown,
-    )?;
+    let markdown_artifact = write_markdown_build_artifact(flavor, input, &markdown)?;
     let model_ref =
         persist_threat_model_document(flavor, input, document, has_concrete_content, run_id)?;
     Ok(ThreatModelArtifacts {
@@ -1066,6 +1083,42 @@ fn write_threat_model_outputs(
         persisted: model_ref.is_some(),
         model_ref,
     })
+}
+
+fn preserve_draft_outputs(flavor: BuildFlavor, input: &BuildInput) -> bool {
+    matches!(flavor, BuildFlavor::RandoriPasta) && input.preserve_user_edits
+}
+
+fn write_normalized_build_artifact(
+    flavor: BuildFlavor,
+    input: &BuildInput,
+    document: &Value,
+) -> Result<PathBuf> {
+    if preserve_draft_outputs(flavor, input) {
+        return write_new_normalized_artifact(input.workspace_root(), &input.output_dir, document);
+    }
+    write_normalized_artifact(input.workspace_root(), &input.output_dir, document)
+}
+
+fn write_markdown_build_artifact(
+    flavor: BuildFlavor,
+    input: &BuildInput,
+    markdown: &str,
+) -> Result<PathBuf> {
+    if preserve_draft_outputs(flavor, input) {
+        return write_new_output_artifact(
+            input.workspace_root(),
+            &input.output_dir,
+            "THREAT_MODEL.md",
+            markdown,
+        );
+    }
+    write_markdown_artifact(
+        input.workspace_root(),
+        &input.output_dir,
+        "THREAT_MODEL.md",
+        markdown,
+    )
 }
 
 fn persist_threat_model_document(

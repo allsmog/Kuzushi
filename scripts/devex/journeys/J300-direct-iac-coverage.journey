@@ -1,0 +1,70 @@
+name: Direct configuration coverage distinguishes enabled rules and inspected files
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/direct_iac_coverage.py @TMP_TARGET @ART prepare
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+submit: run iac-scan:scan {"target":"selected","kind":"all"}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/direct_iac_coverage.py @TMP_TARGET @ART all
+require-live-snap: 30 iac-scan: 2 findings | all-rules
+submit: open F-0001
+require-live-snap: 25 Viewing Review | opened-finding
+submit: decision deferred Owned policy metadata requires owner review
+require-live-snap: 25 recorded: deferred | retained-decision
+require-shell: python3 -B @REPO/scripts/devex/fixtures/direct_iac_coverage.py @TMP_TARGET @ART deferred
+submit: report
+require-live-snap: 25 inspected files | scoped-report
+expect: Displayed Scan: completed
+expect: paths selected
+expect: paths selected · 2
+expect: does not establish complete repository coverage
+ask: Does Report show the selected directory and two inspected files without implying complete repository coverage or a verified vulnerability?
+submit: logs
+submit: run iac-scan:scan {"target":"selected","kind":"dockerfile"}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/direct_iac_coverage.py @TMP_TARGET @ART docker
+paste-file: @ART/docker-compare.txt
+keys: Enter
+require-live-snap: 25 1 not reassessed | disabled-family
+expect: 0 not observed
+expect: Absence does not establish a fix.
+resize: 160x48
+live-snap: comparison-160x48
+resize: 96x89
+live-snap: comparison-96x89
+resize: 80x24
+live-snap: comparison-80x24
+resize: 60x20
+live-snap: comparison-60x20
+resize: 40x12
+live-snap: comparison-40x12
+expect: 1 not reassessed
+ask: Across six sizes, is the comparison readable and does it distinguish the excluded workflow file from the Dockerfile that was reassessed?
+resize: 120x36
+keys: Escape
+submit: logs
+submit: run iac-scan:scan {"target":"empty","kind":"dockerfile"}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/direct_iac_coverage.py @TMP_TARGET @ART empty
+paste-file: @ART/empty-compare.txt
+keys: Enter
+require-live-snap: 25 2 not reassessed | empty-scope
+expect: 0 not observed
+keys: Escape
+submit: open F-0001
+require-live-snap: 25 recorded: deferred | retained-after-empty
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: open F-0001
+require-live-snap: 25 recorded: deferred | restarted-review
+require-shell: python3 -B @REPO/scripts/devex/fixtures/direct_iac_coverage.py @TMP_TARGET @ART restarted
+ask: After no-color restart, are all three finite direct jobs, the exact scope and the earlier deferral retained with no model calls or source execution?
+keys: C-c
+require-exit: 10

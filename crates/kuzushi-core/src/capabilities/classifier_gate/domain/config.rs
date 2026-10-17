@@ -12,6 +12,22 @@ pub struct ClassifierConfig {
     pub state_db: Option<std::path::PathBuf>,
 }
 
+impl ClassifierConfig {
+    pub(crate) fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.target_percentile.is_finite()
+                && self.target_percentile > 0.0
+                && self.target_percentile < 1.0,
+            "targetPercentile must be finite and strictly between 0 and 1"
+        );
+        anyhow::ensure!(
+            self.cold_start_floor.is_finite() && (0.0..=1.0).contains(&self.cold_start_floor),
+            "Classifier cold-start floor must be finite and within 0 to 1"
+        );
+        Ok(())
+    }
+}
+
 impl Default for ClassifierConfig {
     fn default() -> Self {
         Self {

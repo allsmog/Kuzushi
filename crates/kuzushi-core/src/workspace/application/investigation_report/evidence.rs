@@ -25,6 +25,8 @@ pub(super) fn collect_evidence(
         finding_count: findings.len(),
         reviewed_count: review.reviewed,
         confirmed_count: review.confirmed,
+        review_decision_counts: review.decisions,
+        reassessment_required_count: review.reassessment_required,
         attempts,
     })
 }

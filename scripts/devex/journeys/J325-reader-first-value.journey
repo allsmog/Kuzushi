@@ -1,0 +1,124 @@
+name: Result first value, explicit scope and folded command history
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_AGENT_MCPS
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/reader_first_value.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+paste-file: @ART/unbound-command.txt
+keys: Enter
+require-live-snap: 25 approved investigation allowance | unbound-refused
+expect: command folded
+keys: Escape
+live-snap: notice-dismissed
+keys: Escape
+live-snap: navigate-for-filter
+keys: /
+keys: owned_omitted_context Enter
+keys: z
+require-live-snap: 20 READ TRANSCRIPT | folded-command
+expect: command folded
+expect: filter match
+expect: c read commands
+keys: c
+keys: End
+require-live-snap: 20 owned_omitted_context | full-command
+expect: c fold commands
+keys: c
+require-live-snap: 20 command folded | refolded-command
+expect: c read commands
+require-shell: python3 -B @REPO/scripts/devex/fixtures/reader_first_value.py @TMP_TARGET @ART echo
+keys: z
+require-live-snap: 20 z expand | logs-restored
+keys: /
+keys: Escape
+keys: G
+keys: Escape
+keys: c
+require-live-snap: 20 kz> c | composer-owns-c
+keys: BSpace
+ask: Does the folded echo keep the refusal visible, expose complete command text through z then c, and restore reading without stealing normal typing or starting work?
+paste-file: @ART/approval-command.txt
+keys: Enter
+require-live-snap: 25 REVIEW ALLOWANCE | allowance
+keys: y
+require-live-snap: 25 Allowance approved | approved
+paste-file: @ART/invalid-command.txt
+keys: Enter
+require-live-snap: 30 Invariant context draft failed | paid-failure
+expect: command folded
+expect: No repair request
+require-shell: python3 -B @REPO/scripts/devex/fixtures/reader_first_value.py @TMP_TARGET @ART invalid
+paste-file: @ART/generate-command.txt
+keys: Enter
+require-live-snap: 30 Invariant context drafts: 1; partial | generated
+require-shell: python3 -B @REPO/scripts/devex/fixtures/reader_first_value.py @TMP_TARGET @ART generated
+keys: Escape
+paste-file: @ART/replay-command.txt
+keys: Enter
+require-live-snap: 25 SAVED OUTPUT | result-120x36
+expect: Scope not recorded
+resize: 160x48
+live-snap: result-160x48
+resize: 96x89
+live-snap: result-96x89
+resize: 80x24
+live-snap: result-80x24
+resize: 60x20
+keys: Home
+require-live-snap: 20 owned-assumption | result-60x20
+expect: Invariant context drafts: 1
+expect: Outcome · partial
+expect: cost unavailable
+resize: 40x12
+keys: Home
+require-live-snap: 20 owned-assumption | result-40x12
+expect: Invariant context drafts: 1
+expect: Outcome · partial
+expect: cost unavailable
+expect: calls 2/3 at read
+expect: Scope not recorded
+keys: End
+require-live-snap: 20 Safe terminal display | result-tail-40x12
+keys: Tab
+require-live-snap: 20 REPLAY · Inputs | inputs-40x12
+expect: Source: owned café.c
+keys: Tab
+require-live-snap: 20 REPLAY · Receipt | receipt-40x12
+keys: Tab
+keys: Home
+require-live-snap: 20 owned-assumption | result-restored-40x12
+expect: Invariant context drafts: 1
+ask: Is the candidate visible immediately while partial status, uncertain cost and current call accounting remain clear at all six sizes, with the complete summary and original text still reachable?
+resize: 120x36
+submit: logs
+paste-file: @ART/exhausted-command.txt
+keys: Enter
+require-live-snap: 25 allowance exhausted: 2 calls committed | exhausted
+require-shell: python3 -B @REPO/scripts/devex/fixtures/reader_first_value.py @TMP_TARGET @ART exhausted
+keys: C-c
+require-exit: 15
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: logs
+paste-file: @ART/replay-command.txt
+keys: Enter
+require-live-snap: 25 SAVED OUTPUT | restarted-result
+resize: 40x12
+require-live-snap: 20 REPLAY · Result | restarted-result-40x12
+keys: Home
+require-live-snap: 20 owned-assumption | no-color-first-result
+expect: Invariant context drafts: 1
+expect: Outcome · partial
+expect: cost unavailable
+expect: calls 2/3 at read
+require-shell: python3 -B @REPO/scripts/devex/fixtures/reader_first_value.py @TMP_TARGET @ART restarted
+ask: Does no-color restart keep the first result readable, preserve accounting and protected Review, and leave further work unapproved?
+keys: C-c
+require-exit: 15

@@ -26,7 +26,7 @@ fn allowance_effect_supported(tool: &ToolDescriptor) -> bool {
     }
     matches!(
         tool.effect,
-        ToolEffect::TargetWrite | ToolEffect::ExternalAction
+        ToolEffect::TargetWrite | ToolEffect::ExternalAction | ToolEffect::RepositoryExecute
     ) && tool.allowance_category.is_some()
 }
 
@@ -156,27 +156,45 @@ fn require_inherited_runtime_allowance(
     let inherited = runtime.allowance_binding().with_context(|| format!(
         "{} needs an approved investigation allowance before model work. Prepare and approve the investigation plan first; no model request started.", descriptor.name))?;
     let ledger = open_ledger(ctx)?;
+    inherited.require_ledger(&ledger)?;
+    retain_inherited_context(ctx, inherited)?;
     let expected = AllowanceBinding::new(Arc::clone(&ledger), inherited.work().clone())?;
     inherited.require_same_work(&expected)?;
-    require_declared_effect_category(descriptor, inherited)?;
+    require_inherited_work_category(descriptor, inherited)?;
     inherited.validate_model(&model)?;
     ledger
         .allowance_snapshot(&inherited.work().investigation_id)?
         .require_call_capacity(inherited.work().work)
 }
 
-fn require_declared_effect_category(
+fn retain_inherited_context(
+    ctx: &ToolExecutionContext<'_>,
+    inherited: &AllowanceBinding,
+) -> Result<()> {
+    let Some((target, run_id)) = ctx.run_artifact_location() else {
+        return Ok(());
+    };
+    let workspace = ctx
+        .workspace
+        .context("Inherited accounting requires an active workspace")?;
+    anyhow::ensure!(
+        std::fs::canonicalize(&target)? == std::fs::canonicalize(workspace.root())?,
+        "Inherited accounting receipt belongs to another target"
+    );
+    crate::run_artifacts::retain_inherited_allowance(&target, &run_id, inherited.work())
+        .context("Could not retain inherited accounting context; no model request started")
+}
+
+fn require_inherited_work_category(
     descriptor: &ToolDescriptor,
     inherited: &AllowanceBinding,
 ) -> Result<()> {
-    if !matches!(
-        descriptor.effect,
-        ToolEffect::TargetWrite | ToolEffect::ExternalAction
-    ) {
+    let Some(required) = descriptor_work(descriptor) else {
         return Ok(());
-    }
-    anyhow::ensure!(descriptor_work(descriptor) == Some(inherited.work().work),
-        "This action requires its declared investigation category; it cannot borrow a parent Review allowance");
+    };
+    anyhow::ensure!(inherited.work().work == required,
+        "{} requires {required:?} investigation accounting; it cannot borrow a parent {:?} allowance. Approve this work in its own finite plan; no model request started.",
+        descriptor.name, inherited.work().work);
     Ok(())
 }
 

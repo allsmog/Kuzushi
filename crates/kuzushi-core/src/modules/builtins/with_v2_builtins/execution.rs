@@ -324,7 +324,9 @@ impl ModuleRegistry {
         let Some(tool) = tool else {
             return Ok(input);
         };
-        let input = validate_tool_input_options(tool, input)?;
+        let canonical_options = validate_tool_options_with_sources(tool, input)?;
+        let input =
+            crate::modules::agentic_sast::prepare_strategy_options(tool, canonical_options)?;
         crate::modules::allowance_dispatch::validate_tool_reference(tool, &input)?;
         validate_tool_prompt_inputs(tool, &input)?;
         Ok(input)
@@ -946,7 +948,8 @@ fn bind_repository_execution_contract(
     if patch_validation {
         crate::remediation::patch::bind_patch_validation_plan(workspace_root, input)?;
     }
-    crate::remediation::patch::bind_repository_source_snapshot(workspace_root, input)?;
+    crate::remediation::patch::bind_repository_source_snapshot(workspace_root, input)
+        .map_err(|error| crate::modules::support::source_guard_error(name, error))?;
     if operation_builds_codeql_database(name) {
         crate::codeql_repository_execution::bind_codeql_launcher(name, workspace_root, input)?;
     }
@@ -965,12 +968,14 @@ fn verify_repository_execution_input(
     let workspace = ctx
         .workspace
         .context("repository execution requires an active workspace")?;
-    let source_binding = crate::remediation::patch::repository_source_binding(input)?;
+    let source_binding = crate::remediation::patch::repository_source_binding(input)
+        .map_err(|error| crate::modules::support::source_guard_error(name, error))?;
     crate::remediation::patch::verify_repository_source_binding(
         workspace.root(),
         &source_binding,
         crate::remediation::patch::unattended_patch_control(),
-    )?;
+    )
+    .map_err(|error| crate::modules::support::source_guard_error(name, error))?;
     if operation_builds_codeql_database(name) {
         crate::codeql_repository_execution::verify_codeql_launcher(name, workspace.root(), input)?;
     }
@@ -1680,7 +1685,10 @@ fn input_with_declared_prompt_defaults(
         return Ok(input);
     };
     for prompt in &descriptor.prompts {
-        input = apply_declared_prompt_file_default(input, ctx, prompt)?;
+        if crate::modules::agentic_sast::strategy_supports_option(name, &input, &prompt.option_key)
+        {
+            input = apply_declared_prompt_file_default(input, ctx, prompt)?;
+        }
     }
     Ok(input)
 }

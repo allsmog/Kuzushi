@@ -1,3 +1,3 @@
 mod git_diff;
 
-pub(crate) use git_diff::changed_files;
+pub(crate) use git_diff::compare_committed_paths;

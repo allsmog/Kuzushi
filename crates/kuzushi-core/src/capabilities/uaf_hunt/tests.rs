@@ -165,6 +165,26 @@ fn missing_compile_commands_json_bails_loudly() {
 }
 
 #[test]
+fn custom_alloc_free_pairs_reject_non_arrays_instead_of_using_defaults() {
+    let dir = tempdir().unwrap();
+    std::fs::write(dir.path().join("compile_commands.json"), "[]").unwrap();
+    for field in ["allocFreePairs", "extraAllocFreePairs"] {
+        for value in [
+            json!(null),
+            json!({"alloc":"owned_alloc","free":"owned_free"}),
+            json!("owned_alloc"),
+        ] {
+            let error = parse_uaf_hunt_input(&json!({field:value}), dir.path()).unwrap_err();
+            let message = format!("{error:#}");
+            assert!(
+                message.contains(field) && message.contains("must be an array"),
+                "{message}"
+            );
+        }
+    }
+}
+
+#[test]
 fn compile_commands_found_under_build_subdir() {
     let dir = tempdir().unwrap();
     let build_dir = dir.path().join("build");
@@ -330,6 +350,10 @@ while IFS= read -r line; do
     exit 0
   elif printf '%s' "$line" | grep -q '"method":"initialize"'; then
     printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+  elif printf '%s' "$line" | grep -q '"method":"tools/list"'; then
+    printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"clang.definition","inputSchema":{"properties":{"compileCommandsPath":{"type":"string"}}}},{"name":"clang.references","inputSchema":{"properties":{"compileCommandsPath":{"type":"string"}}}},{"name":"clang.type_at","inputSchema":{"properties":{"compileCommandsPath":{"type":"string"}}}},{"name":"clang.callers","inputSchema":{"properties":{"compileCommandsPath":{"type":"string"}}}},{"name":"clang.callees","inputSchema":{"properties":{"compileCommandsPath":{"type":"string"}}}}]}}\n' "$id"
+  elif printf '%s' "$line" | grep -q '"name":"clang.health"'; then
+    printf '{"jsonrpc":"2.0","id":%s,"result":{"structuredContent":{"ready":true,"missing":[]}}}\n' "$id"
   else
     printf '{"jsonrpc":"2.0","id":%s,"result":{"isError":false,"structuredContent":{"definition":"src.c:1"}}}\n' "$id"
   fi
@@ -417,12 +441,22 @@ done
     let read = crate::run_lifecycle::read_run_items(dir.path(), "uaf-hunt-trace")
         .unwrap()
         .unwrap();
-    let labels = read.items.iter().filter_map(|item| match &item.item {
-        crate::run_lifecycle::RunItemV1::DiagnosticNotice { message, .. } => Some(message.as_str()),
-        crate::run_lifecycle::RunItemV1::SafeReasoningSummary { text, .. } => Some(text.as_str()),
-        crate::run_lifecycle::RunItemV1::ToolCallProgress { message, .. } => Some(message.as_str()),
-        _ => None,
-    }).collect::<Vec<_>>();
+    let labels = read
+        .items
+        .iter()
+        .filter_map(|item| match &item.item {
+            crate::run_lifecycle::RunItemV1::DiagnosticNotice { message, .. } => {
+                Some(message.as_str())
+            }
+            crate::run_lifecycle::RunItemV1::SafeReasoningSummary { text, .. } => {
+                Some(text.as_str())
+            }
+            crate::run_lifecycle::RunItemV1::ToolCallProgress { message, .. } => {
+                Some(message.as_str())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
     assert!(labels
         .iter()
         .any(|label| label.contains("agent · preflight")));
@@ -432,12 +466,18 @@ done
         .iter()
         .any(|label| label.contains("complete · 1 findings")));
     let start_step = read.items[0].item_id;
-    assert!(read.items
+    assert!(read
+        .items
         .iter()
         .skip(1)
         .any(|item| item.parent_item_id == Some(start_step)));
     assert!(read.items.last().is_some_and(|item| {
-        matches!(item.item, crate::run_lifecycle::RunItemV1::DiagnosticNotice { .. })
-            && item.parent_item_id.is_none()
+        matches!(
+            item.item,
+            crate::run_lifecycle::RunItemV1::DiagnosticNotice { .. }
+        ) && item.parent_item_id.is_none()
     }));
 }
+
+#[cfg(unix)]
+mod resource_controls;

@@ -39,6 +39,8 @@ pub(crate) fn render_plain_lines(app: &ShellApp, width: usize) -> Vec<String> {
     let mut lines = match mode {
         PlainRenderMode::Activity => plain_line_based_view_lines(app, width, false),
         PlainRenderMode::RunDiff => plain_run_diff_lines(app, width),
+        PlainRenderMode::Replay => plain_replay_lines(app, width),
+        PlainRenderMode::Logs => plain_logs_view_lines(app, width),
         PlainRenderMode::Options(view) => plain_options_lines(app, width, view),
         PlainRenderMode::SastTasks => plain_sast_tasks_lines(app, width),
         PlainRenderMode::Context => plain_context_lines(app, width),
@@ -175,9 +177,24 @@ fn plain_line_based_view_lines(
     lines
 }
 
+fn plain_logs_view_lines(app: &ShellApp, width: usize) -> Vec<String> {
+    let mut lines = plain_context_strip(app, width);
+    lines.push(String::new());
+    lines.extend(crate::ui_view_models::plain_logs_lines(app));
+    lines
+}
+
 fn plain_run_diff_lines(app: &ShellApp, width: usize) -> Vec<String> {
     let area = Rect::new(0, 0, width.min(u16::MAX as usize) as u16, u16::MAX);
     crate::renderer::run_diff_document_lines(app, area)
+        .into_iter()
+        .map(line_to_unstyled_text)
+        .collect()
+}
+
+fn plain_replay_lines(app: &ShellApp, width: usize) -> Vec<String> {
+    let area = Rect::new(0, 0, width.min(u16::MAX as usize) as u16, u16::MAX);
+    crate::renderer::replay_receipt_lines(app, area)
         .into_iter()
         .map(line_to_unstyled_text)
         .collect()
@@ -235,6 +252,7 @@ fn plain_activity_prefix(
         optional_plain_retry_lines(app, width),
         optional_plain_run_lines(app, width, include_run_projection),
         optional_plain_prereq_lines(app, width),
+        optional_plain_allowance_lines(app, width),
     ]
     .concat()
 }
@@ -243,6 +261,15 @@ fn optional_plain_retry_lines(app: &ShellApp, width: usize) -> Vec<String> {
     retry_card_model(app)
         .map(|model| with_trailing_blank(plain_retry_card_lines(model, width)))
         .unwrap_or_default()
+}
+
+fn optional_plain_allowance_lines(app: &ShellApp, width: usize) -> Vec<String> {
+    let Some(model) = crate::ui_view_models::investigation_allowance_model(app) else {
+        return Vec::new();
+    };
+    let mut lines = vec![plain_section_divider("INVESTIGATION ALLOWANCE", width)];
+    lines.extend(model.rows);
+    with_trailing_blank(lines)
 }
 
 fn optional_plain_run_lines(

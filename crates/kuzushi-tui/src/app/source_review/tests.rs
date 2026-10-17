@@ -1,6 +1,8 @@
 use super::*;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+mod identity_header;
+
 fn fixture() -> (tempfile::TempDir, ShellApp) {
     let root = tempfile::tempdir().unwrap();
     std::fs::write(root.path().join("note.txt"), "Owned inert code read.\n").unwrap();

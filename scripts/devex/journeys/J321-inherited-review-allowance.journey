@@ -1,0 +1,52 @@
+name: Refused context work preserves the parent Review allowance
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_AGENT_MCPS
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/allowance_inheritance.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/replay-command.txt
+keys: Enter
+require-live-snap: 25 parent Review allowance | refused-context
+expect: Context investigation accounting
+expect: no model request started
+resize: 160x48
+live-snap: refused-160x48
+resize: 96x89
+live-snap: refused-96x89
+resize: 80x24
+live-snap: refused-80x24
+resize: 60x20
+live-snap: refused-60x20
+resize: 40x12
+live-snap: refused-40x12
+keys: NPage
+live-snap: refusal-reading-40x12
+keys: End
+live-snap: refusal-tail-40x12
+ask: Does this refusal explain that Context work cannot consume the parent Review allowance and give a deliberate next step without implying a paid request or a completed phase?
+resize: 120x36
+submit: logs
+paste-file: @ART/allowance-command.txt
+keys: Enter
+require-live-snap: 25 Calls committed: 0/1 | unchanged-allowance
+expect: protected review remaining: 1
+expect: Calls available for context, scopes, scans and lessons: 0
+require-shell: python3 -B @REPO/scripts/devex/fixtures/allowance_inheritance.py @TMP_TARGET @ART unchanged
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/replay-command.txt
+keys: Enter
+require-live-snap: 25 parent Review allowance | restarted-refusal
+resize: 40x12
+keys: End
+live-snap: restarted-refusal-tail-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/allowance_inheritance.py @TMP_TARGET @ART restarted
+ask: Does no-color restart preserve the refusal and untouched Review allocation with no automatic retry or new job?
+keys: C-c
+require-exit: 10

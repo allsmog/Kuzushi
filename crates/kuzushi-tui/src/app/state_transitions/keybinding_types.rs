@@ -115,6 +115,9 @@ pub(crate) enum ViewHotkeyAction {
     /// `/` on Logs: open the incremental transcript filter capture.
     LogsFilter,
     RunDiffToggleSources,
+    ReplayNextPage,
+    ReplayPreviousPage,
+    ReplayRefreshContext,
     /// One-key backlog decision; payload is the review verdict keyword fed
     /// through the ordinary `decision <verdict> <reason>` path.
     WorkbenchBacklogDecide(&'static str),

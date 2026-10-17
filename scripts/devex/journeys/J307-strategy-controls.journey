@@ -1,0 +1,109 @@
+name: Unsupported strategy controls stop before discovery and preserve explicit recovery
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/strategy_controls.py @TMP_TARGET @ART prepare @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+submit: run agentic-sast:scan {"dryRun":true}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/strategy_controls.py @TMP_TARGET @ART dry-run
+paste-file: @ART/dry-replay.txt
+keys: Enter
+require-live-snap: 25 Outcome · blocked | dry-run-refusal
+expect: REPLAY · Summary
+expect: requires strategy=chunked
+expect: No model request started.
+expect-not: sha256:
+require-shell: python3 -B @REPO/scripts/devex/fixtures/strategy_controls.py @TMP_TARGET @ART reading
+resize: 160x48
+live-snap: refusal-160x48
+resize: 96x89
+live-snap: refusal-96x89
+resize: 80x24
+live-snap: refusal-80x24
+resize: 60x20
+live-snap: refusal-60x20
+resize: 40x12
+live-snap: refusal-40x12
+expect: Tab receipt
+keys: NPage
+wait: 0.2
+live-snap: refusal-reading-40x12
+keys: NPage
+wait: 0.2
+live-snap: refusal-reading-40x12-2
+keys: Tab
+resize: 120x36
+require-live-snap: 25 REPLAY · Full receipt | full-receipt
+expect: sha256:
+resize: 160x48
+live-snap: full-receipt-160x48
+resize: 96x89
+live-snap: full-receipt-96x89
+resize: 80x24
+live-snap: full-receipt-80x24
+resize: 60x20
+live-snap: full-receipt-60x20
+resize: 40x12
+live-snap: full-receipt-40x12
+expect: Tab summary
+keys: NPage
+wait: 0.2
+live-snap: full-receipt-reading-40x12
+keys: BTab
+wait: 0.2
+live-snap: restored-summary-40x12
+ask: Across six sizes, is the failure summary readable, does Tab expose the complete receipt and does Shift+Tab restore the exact summary reading position?
+resize: 120x36
+keys: PPage PPage PPage
+paste-file: @ART/draft.txt
+keys: Tab
+require-live-snap: 20 retained 資料 draft | prompt-draft-retained
+expect-not: REPLAY · Full receipt
+keys: C-u
+keys: Escape
+submit: use agentic-sast
+submit: options agentic-sast:scan
+submit: setg dryRun true
+submit: logs
+submit: run agentic-sast:scan {}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/strategy_controls.py @TMP_TARGET @ART stored
+require-live-snap: 25 option dryRun requires strategy=chunked | stored-refusal
+submit: options agentic-sast:scan
+submit: unsetg dryRun
+submit: logs
+submit: run agentic-sast:scan {"scopeFile":"scope.txt"}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/strategy_controls.py @TMP_TARGET @ART scope
+require-live-snap: 25 option scopeFile requires strategy=chunked | scope-refusal
+submit: run agentic-sast:scan {"budgetUsd":0.01}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/strategy_controls.py @TMP_TARGET @ART budget
+require-live-snap: 25 option budgetUsd requires strategy=chunked | budget-refusal
+require-shell: python3 -B @REPO/scripts/devex/fixtures/strategy_controls.py @TMP_TARGET @ART cleared
+submit: report
+require-live-snap: 25 Displayed Scan: blocked | blocked-report
+expect: 0 findings
+expect-not: Displayed Scan: completed
+ask: Is removing the stored setting an explicit recovery action, with all four refusals retained and no strategy change, scan or spending implied?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: logs
+paste-file: @ART/dry-replay.txt
+keys: Enter
+require-live-snap: 25 Outcome · blocked | restarted-refusal
+expect: REPLAY · Summary
+expect: No model request started.
+keys: Tab
+require-live-snap: 25 REPLAY · Full receipt | restarted-full-receipt
+expect: sha256:
+require-shell: python3 -B @REPO/scripts/devex/fixtures/strategy_controls.py @TMP_TARGET @ART restarted
+ask: Does no-color restart retain the refusal history and cleared setting without granting work or calls?
+keys: C-c
+require-exit: 10

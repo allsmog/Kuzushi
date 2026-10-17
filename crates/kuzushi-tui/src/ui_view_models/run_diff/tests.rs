@@ -603,6 +603,47 @@ fn write_scan_receipt(root: &std::path::Path, run: &str) {
 }
 
 #[test]
+fn run_diff_discloses_disabled_license_checks_even_at_the_same_revision() {
+    let root = tempfile::tempdir().unwrap();
+    write_run(
+        root.path(),
+        "run-left",
+        "same-sha",
+        json!([finding_with_rule(
+            "header",
+            "license-scan/missing-spdx-header",
+            "Missing header",
+            "low",
+            "src/a.rs",
+            1,
+            "license-scan",
+        )]),
+    );
+    write_run(root.path(), "run-right", "same-sha", json!([]));
+    write_scan_receipt(root.path(), "run-right");
+    let path = crate::ui_view_models::ui_run_dir(Some(root.path()), "run-right")
+        .join("phase-stages.jsonl");
+    let mut receipt: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    receipt["scan"]["plan"]["engines"] = json!(["license-scan"]);
+    receipt["scan"]["engines"] = json!([{"engine":"license-scan","outcome":"complete", "ruleIds":["license-scan/missing-license"]}]);
+    std::fs::write(path, receipt.to_string()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(root.path().to_path_buf()));
+    hydrate_diff(&mut app, "run-left", "run-right");
+    let model = run_diff_model(&app, "run-left", "run-right");
+    assert_eq!(model.left_revision, model.right_revision);
+    assert_eq!(
+        model.not_seen[0].rule_id,
+        "license-scan/missing-spdx-header"
+    );
+    assert_eq!(
+        model.not_seen[0].reassessment_block.as_deref(),
+        Some("finding rule was not enabled in the later scan")
+    );
+}
+
+#[test]
 fn run_diff_never_infers_absence_from_a_missing_findings_snapshot() {
     let temp = tempfile::tempdir().unwrap();
     write_run(

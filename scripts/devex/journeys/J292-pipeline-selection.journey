@@ -1,0 +1,70 @@
+name: Source-class preparation respects allowance and never completes a Scan
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_SKIP_ONBOARDING KUZUSHI_AGENT_MCPS
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/pipeline_selection.py @TMP_TARGET @ART prepare @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 SETUP | fresh-setup
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: run pipeline:taint-cwe-select {"cwes":["CWE-20"]}
+submit: logs
+require-live-snap: 25 selected 1 CWE class | supplied-selection
+require-shell: python3 -B @REPO/scripts/devex/fixtures/pipeline_selection.py @TMP_TARGET @ART supplied
+submit: run pipeline:taint-cwe-select
+require-live-snap: 25 approved investigation allowance | unbound-refused
+require-shell: python3 -B @REPO/scripts/devex/fixtures/pipeline_selection.py @TMP_TARGET @ART unbound
+ask: Do supplied classes complete without model work, while model selection refuses unapproved work without creating Scan completion?
+paste-file: @ART/approve-command.txt
+keys: Enter
+require-live-snap: 25 REVIEW ALLOWANCE | allowance-review
+expect: Total provider calls: 2
+expect: Protected review calls: 1
+resize: 160x48
+live-snap: allowance-160x48
+resize: 96x89
+live-snap: allowance-96x89
+resize: 80x24
+live-snap: allowance-80x24
+resize: 60x20
+live-snap: allowance-60x20
+resize: 40x12
+live-snap: allowance-40x12
+keys: End
+require-live-snap: 20 y approve | allowance-controls-40x12
+ask: Are the finite proposal allowance, protected Review call, selected model, unknown dollars and no-scan boundary readable by paging at all six sizes?
+keys: y
+resize: 120x36
+require-live-snap: 25 Allowance approved | allowance-approved
+paste-file: @ART/select-command.txt
+keys: Enter
+submit: logs
+require-live-snap: 35 Owned source marker | proposed-selection
+require-shell: python3 -B @REPO/scripts/devex/fixtures/pipeline_selection.py @TMP_TARGET @ART completed
+paste-file: @ART/status-command.txt
+keys: Enter
+submit: logs
+require-live-snap: 25 Calls committed: 1/2 | retained-accounting
+expect: protected review remaining: 1
+paste-file: @ART/select-command.txt
+keys: Enter
+require-live-snap: 25 allowance exhausted | next-request-refused
+require-shell: python3 -B @REPO/scripts/devex/fixtures/pipeline_selection.py @TMP_TARGET @ART exhausted
+submit: workbench
+require-live-snap: 25 Map | no-scan-completion
+ask: Does one class proposal retain its request cost without findings, new Scan jobs or primary completion, and does a second request preserve protected Review capacity?
+keys: C-c
+require-exit: 10
+env: NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/status-command.txt
+keys: Enter
+submit: logs
+require-live-snap: 25 Calls committed: 1/2 | recovered-accounting
+expect: protected review remaining: 1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/pipeline_selection.py @TMP_TARGET @ART restarted
+keys: C-c
+require-exit: 10

@@ -6,6 +6,7 @@ import sqlite3
 import subprocess
 import sys
 from pathlib import Path
+from gallery_capture import complete_text
 
 
 def save(evidence, name, value):
@@ -51,7 +52,10 @@ def change_source(root, evidence, action):
 
 def no_investigation_work(root):
     index = root / ".kuzushi/v3/index.sqlite3"
-    with sqlite3.connect(index.as_uri() + "?mode=ro", uri=True) as db:
+    # SQLite may need WAL coordination files even for a SELECT. Open only
+    # the existing database, then forbid SQL writes before inspecting it.
+    with sqlite3.connect(index.as_uri() + "?mode=rw", uri=True) as db:
+        db.execute("pragma query_only=on")
         tables = {row[0] for row in db.execute("select name from sqlite_master where type='table'")}
         for name in ["finding_observations", "review_decisions", "investigation_call_reservations", "investigation_work_attempts"]:
             if name in tables:
@@ -96,30 +100,23 @@ def check_completed(completed):
 
 def inspect_pages(evidence):
     captures = sorted(evidence.glob("*-components-page-*-40x12.txt"))
-    assert len(captures) == 12, "Missing narrow keyboard-page captures"
-    pages = []
-    for path in captures:
-        lines = path.read_text().splitlines()
-        end = next(index for index, line in enumerate(lines) if line.startswith("⛭"))
-        pages.extend(line for line in lines[3:end] if not line.strip().startswith("rows "))
-    text = "".join("".join(pages).split())
+    assert len(captures) == 8, "Missing narrow keyboard-page captures"
+    captures = sorted(evidence.glob("*-components-40x12.txt")) + captures
+    text = "".join(complete_text(captures, "COMPONENTS").split())
     for value in ["Source freshness is unverified.", "declared ^2.0", "repo versions 2.2.3", "resolved 2.2.3"]:
-        assert "".join(value.split()) in text, (value, pages)
+        assert "".join(value.split()) in text, (value, text)
     save(evidence, "narrow-pages-check", {"capturedPages": len(captures), "completeVersionAndFreshnessText": True})
 
 
 def inspect_failure_pages(evidence):
     captures = sorted(evidence.glob("*-failure-page-*-40x12.txt"))
     assert len(captures) == 6, "Missing narrow failure pages"
-    rows = []
+    captures = sorted(evidence.glob("*-failure-40x12.txt")) + captures
     for path in captures:
-        lines = path.read_text().splitlines()
-        end = next(index for index, line in enumerate(lines) if line.startswith("⛭"))
-        rows.extend(line for line in lines[3:end] if not line.strip().startswith("rows "))
         assert "ERROR" in path.read_text(), "Error badge must remain visible"
-    text = "".join("".join(rows).split())
+    text = "".join(complete_text(captures, "COMPONENTS").split())
     for value in ["Component inventory failed", "key must be a string at line 1 column 2", "run sbom-scan:scan"]:
-        assert "".join(value.split()) in text, (value, rows)
+        assert "".join(value.split()) in text, (value, text)
     save(evidence, "narrow-failure-check", {"capturedPages": len(captures), "fullCauseAndRecoveryReadable": True})
 
 

@@ -1,0 +1,89 @@
+name: Refused children retain readable inherited grants without borrowing them
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_AGENT_MCPS
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/inherited_grant_context.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/replay-command.txt
+keys: Enter
+require-live-snap: 25 inherited Review | inherited-summary
+expect: parent Review allowance
+keys: Tab
+require-live-snap: 25 Inherited Review grant: | original-grant
+expect: owned-inherited r1; 1 call total
+expect: Accounting run: owned-parent-review
+expect: not isolated child charges
+expect: does not approve or start child work
+require-shell: python3 -B @REPO/scripts/devex/fixtures/inherited_grant_context.py @TMP_TARGET @ART revise
+live-snap: before-explicit-refresh
+expect: calls 0/1 at read
+keys: r
+require-live-snap: 25 calls 0/3 at read | revised-read
+expect: Inherited Review grant: owned-inherited r1; 1 call total
+expect: Latest ledger at read: r2; 0/3 calls committed
+expect: 1 protected Review
+resize: 160x48
+live-snap: inherited-160x48
+expect: Inherited Review grant r1
+expect: At read r2: 0/3 calls
+resize: 96x89
+live-snap: inherited-96x89
+resize: 80x24
+live-snap: inherited-80x24
+resize: 60x20
+live-snap: inherited-60x20
+resize: 40x12
+live-snap: inherited-40x12
+keys: NPage
+live-snap: inherited-reading-40x12
+keys: NPage
+live-snap: inherited-reading-02-40x12
+keys: NPage
+live-snap: inherited-reading-03-40x12
+keys: NPage
+live-snap: inherited-reading-04-40x12
+keys: NPage
+live-snap: inherited-reading-05-40x12
+keys: NPage
+live-snap: inherited-reading-06-40x12
+keys: NPage
+live-snap: inherited-reading-07-40x12
+keys: NPage
+live-snap: inherited-reading-08-40x12
+keys: NPage
+live-snap: inherited-reading-09-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/inherited_grant_context.py @TMP_TARGET @ART narrow
+ask: Are the inherited Review grant, its accounting run and the latest three-call ledger distinct, including narrow paging, without implying the refused Context child was approved or individually charged?
+resize: 120x36
+keys: Home
+require-shell: python3 -B @REPO/scripts/devex/fixtures/inherited_grant_context.py @TMP_TARGET @ART damage
+keys: r
+require-live-snap: 25 limits unavailable | damaged-context
+expect: Inherited accounting changed since retention
+ask: Does damaged retained context produce an honest read error while preserving the original refusal, rather than showing the old grant as current or granting new work?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/inherited_grant_context.py @TMP_TARGET @ART restore
+keys: r
+require-live-snap: 25 calls 0/3 at read | restored-context
+expect: Inherited Review grant: owned-inherited r1; 1 call total
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/replay-command.txt
+keys: Enter
+require-live-snap: 25 inherited Review | restarted-summary
+expect: calls 0/3 at read
+keys: Tab
+require-live-snap: 25 Inherited Review grant: | restarted-grant
+expect: Latest ledger at read: r2; 0/3 calls committed
+resize: 40x12
+keys: NPage
+live-snap: restarted-reading-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/inherited_grant_context.py @TMP_TARGET @ART restarted
+ask: Does no-color restart preserve the original input, blocked result, inherited grant and unused protected Review capacity, with no provider request or new job?
+keys: C-c
+require-exit: 10

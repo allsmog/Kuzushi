@@ -33,7 +33,9 @@ def native(root, evidence, name, inputs, succeeds=True, partial=False):
 def assert_no_work(root):
     path = root / ".kuzushi/v3/index.sqlite3"
     if path.is_file():
-        with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as db:
+        # Allow SQLite to initialize missing WAL sidecars, but keep queries read-only.
+        with sqlite3.connect(path.as_uri() + "?mode=rw", uri=True) as db:
+            db.execute("pragma query_only=on")
             tables = {row[0] for row in db.execute("select name from sqlite_master where type='table'")}
             for table in ["finding_observations", "review_decisions", "investigation_call_reservations", "investigation_work_attempts"]:
                 if table in tables:

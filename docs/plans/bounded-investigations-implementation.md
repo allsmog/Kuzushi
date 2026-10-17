@@ -1,5 +1,403 @@
 # Bounded investigations implementation
 
+Report retains a labeled previous read during refresh, requires current data
+for export, and keeps repeated metadata in `p details`. Its
+[qualification](../assessments/report-reader-2026-10-17.md) has 212 focused passes,
+a workspace build, ten passing gates and J121 with 170 machine passes, zero
+failures and 108 capture pairs. Twelve final terminal-cell replays were
+inspected; eighteen human judgments remain open. All broad milestones stay
+open. Publication stays a draft on main, with no new live model request.
+
+The [viewed-context repair](../assessments/screen-context-2026-10-17.md) separates
+the viewed page and run group from the next phase and hidden finding selection.
+Report uses approval's OAuth selector while retaining stored identities.
+All 85 focused checks, the workspace build and ten gates pass. Final J121 has
+166 machine passes, zero failures, 108 capture pairs and twelve inspected
+terminal-cell replays, with settled Report frames at the size matrix.
+Eighteen human judgments for this case and all nine broad milestones remain
+open. Publication stays a draft on main; no live model request is added.
+
+The [captured-source identity repair](../assessments/source-identity-header-2026-10-17.md)
+keeps the cited location and captured SHA visible through human verdict entry,
+reason editing and confirmation. The cited line fits the first 40-column code
+frame after duplicate text is removed. All 28 focused checks, the build and
+ten gates pass. Current sequential J196/J199 has 90 machine passes, zero
+failures and 53 capture pairs; seventeen terminal-cell replays were inspected.
+The owned fixture imports two existing real commits without creating new ones,
+distinguishes dirty content from SHA identity and preserves source-qualified
+decisions in four export formats. Five human judgments for this pair remain
+open. Other scanner bindings, nondeterministic usefulness and full UX/phase
+acceptance remain open. All nine broad milestones remain open. Publication
+stays a draft on main; no new live request, commit or push is added.
+
+The [shared allowance repair](../assessments/shared-allowance-chrome-2026-10-17.md)
+shows durable investigation calls in Map/Scan/Review, including compact Review
+and no-color restart. All 143 focused checks, the build and ten gates pass.
+Qualified J121 has 154 machine passes, zero failures and 108 capture pairs;
+twelve terminal-cell replays were inspected and eighteen human judgments remain
+open. Two failed native candidates retain the footer defects that led to the
+repair. Historical membership passes the three-run regression under all three
+identity policies. Actual cross-commit comparisons, scope/provider labeling,
+real-model usefulness and complete UX acceptance remain open. All nine broad
+milestones remain open. Publication stays a draft on main, with no new live
+request, project commit or push.
+
+The [partial Scan count repair](../assessments/partial-scan-counts-2026-10-17.md)
+keeps distinct findings separate from observations after cancellation and keeps
+selected Scan readers visible across resize. All 107 focused checks, the build
+and ten gates pass. Final J121 has 142 machine passes, zero failures, 106 capture
+pairs and eighteen pending human judgments; eighteen terminal-cell replays were
+inspected. The complete controlled journey preserves fixed jobs, decisions,
+unknown cost and protected Review capacity. Real-model usefulness, historical
+membership, shared-accounting visibility and full UX acceptance remain open.
+Publication stays a draft; no live request, project commit or push is added.
+
+The [compiler-input repair](../assessments/clang-database-selection-2026-10-17.md)
+binds selected configuration to bounded private copies, checks helper API/health
+before model work and retains readable compiler identity. All 101 focused checks,
+the workspace build and ten gates pass. Final J329/J328/J279 have 116 machine
+passes, zero failures, 111 captures and eleven pending human judgments. Eighteen
+terminal-cell replays were inspected.
+UAF stays auxiliary Labs work, with full input recovery and detector quality
+open. All nine broad milestones remain open. Publication stays a draft.
+
+The [selected-result reading repair](../assessments/replay-selected-result-2026-10-17.md)
+keeps both the selected count and candidate in the first compact frame and names
+the separate workspace total. All 200 focused checks, the workspace build and
+ten gates pass. Final J328/J279/J325 have 122 machine passes, zero failures,
+102 captures and eleven pending human judgments. Eighteen cell replays were
+inspected. Full investigation acceptance and all nine broad milestones remain
+open. No new live request, project commit or push is added; publication stays a draft.
+
+The [UAF resource repair](../assessments/uaf-resource-controls-2026-10-17.md)
+enforces local deadlines, cancellation and output bounds, and retains partial
+finding history. UAF is now auxiliary Labs Scan work; compiler-database choice,
+source grounding and full engine value remain open. There are 51 focused passes,
+a passing workspace build, ten passing gates and 65 final tmux machine passes with zero failures,
+74 captures and eight pending human judgments. Fourteen cell replays were
+inspected. No hidden action remains in Core awaiting curation, but all nine
+broad milestones and full functional qualification remain open. No new live
+request, project commit or push is added; publication stays a draft.
+
+The [source-prefix and context handoff repair](../assessments/source-prefix-fidelity-2026-10-17.md)
+preserves exact UTF-8 and raw-byte accounting, then projects realistic default
+context into source anchors plus current source. All 133 focused checks,
+the workspace build and ten gates pass. Final sequential J314/J324 have 54
+machine passes, zero failures, 102 capture pairs and seven pending human
+judgments. Fourteen terminal-cell replays were inspected. The deterministic
+context producer is qualified for that bounded auxiliary role. One hidden Core
+action, `uaf-hunt:hunt`, and all nine broad milestones remain open. Reference
+parity and model usefulness remain unqualified. No new live request, project
+commit or push is added; publication stays a draft.
+
+The [Report decision repair](../assessments/report-decision-summary-2026-10-17.md)
+separates pending, TP, FP and other effective decisions from original severity.
+Selected study and full workspace history have independent counts. Visible `r`
+refresh preserves scope, format, scroll and drafts. Missing or regressed known
+ledgers remain unavailable. All 332 focused checks, the workspace build and ten
+gates pass. Final J279/J199 have 77 machine passes, zero failures, 66 captures and
+eight pending human judgments. Fourteen terminal-cell replays were inspected.
+Two hidden Core qualifications and all nine broad milestones remain open. No
+new live request, project commit or push is added; publication stays a draft.
+
+The [committed-path review repair](../assessments/changed-path-review-2026-10-17.md)
+replaces filename-derived vulnerability findings with bounded auxiliary Labs Map
+hints, exact base/merge-base/HEAD identities and partial-path disclosure. Shared
+preparation rejects standalone stages that previously expanded into a larger
+systems workflow. Two trigger-generation paths are classified as excluded and
+are not executed. All 59 focused Rust checks, the workspace build, risk gate
+and ten summary gates pass. Final sequential J327/J279 have 54 machine passes,
+zero failures, 59 captures and eight pending human judgments. Fourteen terminal-cell
+replays were inspected. Two in-scope hidden Core qualifications and all nine broad
+milestones remain open. No live request, project commit or push is added.
+
+The [taint failure repair](../assessments/taint-hunt-outcomes-2026-10-17.md)
+keeps malformed model review failed even when structural candidates are
+explicitly retained. The bundled action is auxiliary Labs Scan work; neither
+planning nor candidates complete Scan. Authenticated failed results remain
+readable despite omitted progress updates. All 324 focused checks, the workspace
+build and ten gates pass. Final sequential J326/J304 have 81 machine passes,
+zero failures, 77 captures and nine pending human judgments. Twelve terminal-cell
+replays were inspected. Five hidden Core qualifications and all
+nine broad milestones remain open. No live request, commit or push is added.
+
+The [reader first-value repair](../assessments/reader-first-value-2026-10-17.md)
+puts actual saved content in the first narrow Result frame, explicitly labels
+scope/accounting and keeps full summaries and original artifacts. Large command
+echoes fold behind visible read controls; session history and plain output stay
+complete. There are 74 focused passes, a passing workspace build and ten gates.
+Final sequential J325/J324/J320 have 116 machine passes, zero failures, 104
+captures and eight pending human judgments. Fourteen terminal-cell replays were
+inspected. Six hidden Core qualifications and all nine broad milestones remain
+open. No live request, project commit or push is added; publication stays a draft.
+
+The [bounded invariant context repair](../assessments/bounded-invariant-context-2026-10-17.md)
+replaces the standalone action's tool-assisted repair loop with explicit
+context, bounded current source and one tool-free Context request. Hidden Labs
+Map drafts accept no context or findings and complete no phase. Source-first
+Inputs and file/line anchors make supplied evidence easier to read. There are
+82 focused passes, a passing workspace build and ten gates. Final J324/J317
+have 71 machine passes, zero failures, 99 captures and eight pending human
+judgments; every narrow Result/Input row is reached. Six hidden Core
+qualifications and all nine broad milestones remain open. No live request,
+commit or push is added; publication stays a draft.
+
+The [inherited grant reader](../assessments/inherited-grant-context-2026-10-17.md)
+retains offered parent accounting without changing original input or admitting
+child work. Original grant, accounting-run totals and read-time ledger are
+separate; damaged metadata is unavailable. There are 99 focused passes, a
+passing build and ten gates. Final J323/J320 have 57 machine passes, zero
+failures, 43 captures and five pending human judgments. Narrow grant paging is
+verified directly. Seven hidden Core qualifications and all broad milestones
+remain open. No live request, commit or push is added.
+
+The [repository preparation repair](../assessments/repository-preparation-allowance-2026-10-17.md)
+adds Context accounting to model-assisted database preparation while retaining
+separate execution consent. Hidden auxiliary Labs Map replaces a Core Scan
+completion claim. Seven hidden Core actions and all nine broad milestones
+remain open. No target build or new live request is added; publication stays a draft.
+
+The [inherited allowance repair](../assessments/inherited-allowance-2026-10-17.md)
+prevents model-backed child work from borrowing a differently categorized parent
+runtime, including protected Review capacity. Model-free work and matching
+categories retain their paths. There are 47 focused passes and a passing build;
+final gates and native receipt evidence are recorded with that assessment.
+This is accounting evidence. Eight hidden Core actions and all broad milestones
+remain open. Publication stays a draft, with no new live requests.
+
+The [recorded request reader](../assessments/recorded-run-context-2026-10-17.md)
+separates requested scope, original grant and read-time ledger totals. It has
+172 focused passes, a passing build, ten gates and 95 native machine passes.
+Nine human judgments remain pending for its final pair. No broad milestone is
+closed by that scoped evidence.
+
+The [prepared-input recovery increment](../assessments/prepared-input-recovery-2026-10-16.md)
+retains the original runtime request before inference and restores its document
+in failed, canceled and recovered-interruption receipts. Missing or changed
+retained bytes are explicit. There are 131 focused Rust passes, a passing build
+and ten passing quick gates. Final J319/J318 have 85 machine passes, zero failures,
+82 capture pairs and nine pending human judgments. Two calls remain committed
+across the owned crash, including one unsettled reservation; Review stays unused.
+Narrow chrome, scope references, repeated error copy, other adapters and all nine
+broad milestones remain open. No live request, project commit or push is added.
+
+The [real source-revision check](../assessments/real-sha-workflow-2026-10-16.md)
+replaces an expired fixture dependency with an owned two-commit Git history.
+Sequential J196/J199 have 60 machine passes, zero failures, 50 capture pairs
+and four pending human judgments. They distinguish changed commits, same-SHA
+dirty content, covered absence and excluded scope; frozen source review and
+four report formats retain explicit human decisions. Thirty focused Rust
+checks, the workspace build and ten quick gates pass. This qualifies one
+deterministic policy-observation journey. Other scanner bindings, model quality,
+human UX, eight hidden Core actions and all nine broad milestones remain open.
+The earlier fourteen reader/learning judgments remain pending. No live request,
+project commit or push is added; publication remains **Keep as draft**.
+
+The [supplied-input reader increment](../assessments/supplied-input-reader-2026-10-16.md)
+separates Result, Inputs and Receipt, preserves independent reading positions
+and moves candidate titles ahead of source details. Historical input remains
+authenticated and read-only; invalid input documents keep the primary result
+available. All 121 focused Rust checks, the workspace build and ten quick gates
+pass. Final J318/J304 have 118 machine passes, zero failures, 118 capture pairs
+and fourteen pending human judgments. No live request, project commit or push
+is added. Scope/reference formatting, source-revision UX, remaining scanner
+bindings, eight hidden Core actions and all nine broad milestones remain open.
+
+The [source-readiness increment](../assessments/source-readiness-2026-10-16.md)
+checks ledger ownership and bounded source membership before inference, reuses
+the prepared tree and makes result guidance reflect actual insertion. An empty
+later pass preserves an earlier human FP decision. There are 418 distinct focused
+Rust passes, a passing workspace build and ten passing quick gates. Sequential
+J318/J304 have 99 machine passes, zero failures, 111 capture pairs and fourteen
+pending human judgments on one frozen build. Ten terminal-cell replays were
+inspected; dense result reading still needs work. Larger-tree support, other
+scanner bindings, the SHA-change TUI flow and reference parity remain open.
+Eight hidden Core actions and all nine broad milestones remain open. Publication
+stays a draft, with no live request, project commit or push added.
+
+The [captured observation-source increment](../assessments/captured-observation-sources-2026-10-16.md)
+binds deep-discovery observations to the original authenticated snapshot and
+retained bytes. A separate declared capture limit can withhold candidates
+without another request. There are 434 distinct focused Rust passes, including
+a two-revision owned Git fixture, a passing workspace build and ten passing
+quick gates. Final sequential J318/J304 have 96 machine passes, zero failures,
+111 capture pairs and fourteen pending human judgments on one frozen build.
+Native failure reading covers a paid capture refusal followed by a separately
+invoked successful request, with protected Review capacity intact.
+Other adapters still use insertion-time source capture. Complete large-tree
+readiness, source-revision UX and reference parity remain open. Eight hidden
+Core actions and all nine broad milestones remain open. No live request,
+project commit or push is added; publication remains a draft.
+
+The [bounded deep-discovery increment](../assessments/bounded-deep-discovery-2026-10-16.md)
+requires explicit selected classes, exact scope/context and a shared Discovery
+allowance. Model claims and actual supplied source quotes reach Review as
+unscored evidence while observations remain unverified. There are 481 distinct
+focused Rust passes, a passing workspace build and ten passing quick gates.
+Final sequential J318/J304 have 91 machine passes, zero failures,
+108 capture pairs and thirteen pending human judgments on one frozen build.
+The no-color tail now waits for a resized frame and asserts actual tail content.
+Eight hidden Core actions, including three descriptor-only actions, remain
+unqualified. This count reduction reflects Labs curation, not broad completion.
+Atomic source publication, dense narrow-screen inputs, live detection quality
+and reference parity remain open. All nine broad milestones stay open.
+Publication remains a draft; no live request, commit or push is added.
+
+The [bounded CWE proposal increment](../assessments/bounded-cwe-proposals-2026-10-16.md)
+replaces recursive collection with shared bounded inventory, honors declared
+limits and preserves exact supplied inputs. It is auxiliary Labs Map planning
+under Scope allowance and cannot complete a phase or create discovery jobs.
+There are 108 focused Rust passes, a passing workspace build and ten passing
+summary gates. Final sequential J317/J304 have 85 machine passes, zero failures,
+95 capture pairs and twelve pending human judgments on one frozen build.
+Nine hidden Core actions, including four with descriptor-only evidence, still
+need full qualification. The downstream discovery collector remains a separate
+audit. All nine broad milestones remain open; publication stays a draft and no
+live request, commit or push is added.
+
+The [Replay orientation increment](../assessments/reader-orientation-2026-10-16.md)
+keeps headings, row positions and receipt controls visible during narrow reading,
+uses the remaining body for paging, and folds exact diagnostic duplicates.
+There are 265 distinct focused Rust passes, a passing build and ten passing
+summary gates. Sequential J316/J304 have 116 machine passes, zero failures,
+150 capture pairs and thirteen pending human judgments on one frozen build.
+No live request, commit or push is added. Ten hidden Core actions and all nine
+broad milestones remain open. That checkpoint left the CWE selector's
+recursive inventory and declared resource/scope controls for the next audit. Publication stays a draft.
+
+The [focused saved-result increment](../assessments/focused-saved-results-2026-10-16.md)
+adds authenticated complete output to Replay, a retained full receipt, background
+hydration, exact catalog base-version labels and confirmation recovery. There
+are 262 distinct focused Rust passes, a passing build and ten passing summary
+gates. Sequential J316/J304 have 100 machine passes, zero failures, 123 capture
+pairs and thirteen pending human judgments on one frozen build. Narrow shortcut
+visibility and reading orientation still need work; reference parity remains
+unqualified. No live request, commit or push is added. Ten hidden Core actions
+and all nine broad milestones remain open; publication stays a draft.
+
+The [catalog draft increment](../assessments/taint-catalog-drafts-2026-10-16.md)
+separates budgeted generation, historical inspection and explicit source-checked
+acceptance. Exact consumer pins survive active edits; the shell cannot generate
+a catalog implicitly. There are 122 focused Rust passes, three prerequisite
+checks, a passing build and ten passing summary gates. Final sequential
+J315/J304 have ninety machine passes, zero failures, 117 capture pairs and
+thirteen pending human judgments. The terminal replays expose further UX work;
+reference parity and live catalog quality remain unqualified. No live request
+is added. Ten hidden Core actions and all nine broad milestones remain open;
+publication stays a draft.
+
+The [bounded systems-context increment](../assessments/bounded-systems-context-2026-10-16.md)
+replaces standalone recursive/index-backed collection with bounded source prefixes,
+reused evidence packs, explicit limits and compact partial-coverage text. It is
+auxiliary Context work and cannot complete Map or Scan. There are 85 focused
+passes, a passing final workspace build and ten passing summary gates. Final
+sequential J314/J304 have 68 machine passes, zero failures, 98 capture pairs and
+eleven pending human judgments. No live request is added. Eleven hidden Core
+actions and all nine broad milestones remain open; publication stays a draft.
+
+The [study read-recovery increment](../assessments/study-read-recovery-2026-10-16.md)
+adds `findings refresh`, honest unavailable states and one shared snapshot for
+findings and study details. All 327 focused checks, the workspace build and ten
+summary gates pass. Final J313/J304 record 101 machine passes, zero failures,
+82 capture pairs and eleven pending human judgments. Both retry commands fit
+at 40 columns, and filter/selection recovery works without reopening the study.
+The compatibility tests now respect curated defaults. Eleven hidden Core actions
+and all nine broad milestones remain open. No live request, commit or push is
+added; the publication remains a draft.
+
+The [study Review paging increment](../assessments/study-review-paging-2026-10-16.md)
+filters study membership before paging, preserves global aliases and decisions,
+and keeps unreadable selected studies from widening to workspace history.
+There are 402 focused passes, a passing workspace build and ten passing summary
+checks. Final sequential J313/J304 have 87 machine passes, zero failures,
+74 capture pairs and ten pending human judgments. The compatibility chain-screen
+test remains open. Eleven hidden Core actions and all nine broad milestones
+still need qualification. The 366-file checkpoint remains a draft at the
+operator's request. No new live request, commit or push is added.
+
+The [draft artifact increment](../assessments/randori-artifacts-2026-10-16.md)
+preserves operator files, suppresses unsolicited draft findings and discloses
+bad or incomplete artifact reads. Generation is auxiliary Labs Context; the
+reader is Compatibility with a canonical replacement. All 635 focused Core
+checks, workspace build and ten summary gates pass. Sequential J312/J304 have
+73 native machine passes, zero failures, eighty capture pairs and ten pending
+human judgments. A further 40-column reading check reaches source uncertainty
+without another model request. Eleven hidden Core actions and all nine broad
+milestones remain open. No new live request, commit or push is added.
+
+The [classifier review increment](../assessments/classifier-review-2026-10-16.md)
+preserves exact scores, separates percentile histories and keeps metadata
+ranking from changing saved reviews or completing Review. Malformed responses
+stay partial. The narrow receipt names that state immediately. There are 327
+focused Core passes; the final build and ten summary gates pass. Sequential
+J311/J304 have 79 machine passes, zero failures, 89 capture pairs and ten pending
+human judgments. No new live request is added. Thirteen hidden Core actions and
+all original broad milestones still need qualification.
+
+The [bounded chunk-planning increment](../assessments/bounded-chunk-inventory-2026-10-16.md)
+replaces recursive traversal and whole-file window planning with shared inventory,
+explicit source bounds, streaming windows and readable partial receipts. Typed
+enumeration state separates missing membership from prefix inspection. Partial
+plans cannot reach model requests. All 498 focused Core checks, workspace build
+and ten summary gates pass. Final J309/J306/J304 record 103 native machine passes,
+zero failures and fourteen pending human judgments on one frozen build. This
+adds zero live requests and closes no broad delivery milestone.
+
+The [chunked consumer repair](../assessments/chunked-strategy-consumers-2026-10-16.md)
+refuses supplied standard-only controls, including aliases, stored settings and
+explicit values equal to defaults. Unsupported injected defaults and prompt
+files stay outside chunked input. Native testing also exposed and repaired an
+auxiliary planning result hiding a blocked Scan in Report. All 296 Core checks,
+135 TUI checks, workspace build and ten summary gates pass. Final J308/J304
+record 78 machine passes, zero failures and ten pending human judgments on one
+frozen build. Zero live requests are added; all original milestones remain open.
+
+The [Replay reading increment](../assessments/replay-failure-summary-2026-10-16.md)
+adds concise failure summaries and explicit full receipts with independent
+scroll, prompt ownership and visible narrow-screen controls. Eighty-five focused
+TUI checks pass. Final J307/J304 have 82 machine passes, zero failures and ten
+pending human judgments on one frozen build. Stored receipts and the full local
+learning workflow survive restart. The original milestones remain open.
+
+The [strategy-control repair](../assessments/strategy-controls-2026-10-16.md)
+prevents standard discovery from ignoring chunked planning, scope or spending
+settings. All 144 focused Core checks and the workspace build pass. Sequential
+J307 and J304 record 71 machine passes, zero failures and ten pending human
+judgments. The full learning journey retains exact accepted context, six fixed
+local jobs, historical decisions, export and retirement through restart, with
+zero live requests. Failure-reader hierarchy and full acceptance remain open.
+
+The [chunked source-contract increment](../assessments/chunked-source-contracts-2026-10-16.md)
+repairs retry selection, explicit cache policy, outside/empty scope refusal and
+exact bounded source-window delivery. The hidden alias remains Compatibility
+and auxiliary; standard discovery owns accepted scope/context. Planning stays
+separate from scanning and spending. Whole-operation resource bounds, live
+chunked quality, remaining module qualification and human UX acceptance remain
+open. Seventy focused Core checks and the workspace build pass. J306 records
+30 machine passes, zero failures, 37 capture pairs and four pending human
+judgments across six sizes, resource reading, export and no-color recovery.
+The original delivery milestones are unchanged.
+
+The [internal settings and finding-limit increment](../assessments/internal-tool-limits-2026-10-16.md)
+repairs advertised structured options, protects workflow-owned JSON references
+and preserves partial tool/ledger status at a selected finding cap. The
+Chromium text heuristic is Labs. Fifty-nine focused checks and the workspace
+build pass. J305 has 27 machine passes, zero failures, 33 capture pairs and four
+pending human judgments across six sizes, export and no-color restart. UAF
+evidence remains input-only; hidden action qualification, human UI acceptance
+and the original delivery milestones remain open. This work adds no live model
+request and stays outside the earlier
+366-file publication proposal.
+
+The [Report authority wording](../assessments/report-decision-authority-2026-10-15.md)
+now qualifies the totals exposed by the actual supporting-code opinion. The
+headline uses TP rather than confirmed, and the body names human/automatic
+decisions with separate author/proof details. Compatible stored decisions and
+export totals are unchanged. All 186 focused Report checks, workspace build and
+the risk gate pass. J287 has 20 machine passes, zero failures, 15 capture pairs
+and two pending human judgments across six sizes, history, export and no-color
+restart. It adds no provider requests. All nine broad milestones remain open.
+
 The [actual supporting-code Review](../assessments/live-supporting-review-2026-10-15.md)
 now completes its separately approved one-request job. The model uses the route
 and eight chosen files to give a source-level true-positive opinion at 0.85
@@ -4912,3 +5310,86 @@ The two final journeys have 133 machine passes, no failures and 111 capture pair
 Their 18 human judgments remain pending. Configured reasoning now overrides
 catalog suggestions. No new live allowance was spent and no broad milestone
 closes from these simulated transports.
+
+### Auxiliary source settlement, October 16, 2026
+
+The [auxiliary scanner assessment](../assessments/auxiliary-scan-settlement-2026-10-16.md)
+records direct Go/CodeQL source settlement, canonical observation snapshots,
+retained untraced run identity and source-safe static indexing. J303 exposed and
+verified a shared Go executor-routing correction. Its 17 machine passes leave
+three human judgments open. Fifty focused Core checks, the workspace build and
+ten summary checks pass. Installed Go execution remains unavailable; real CodeQL
+query compilation succeeds, while database preparation on the existing source
+is refused. No provider call, source execution, module promotion or broad delivery
+closure follows. All nine delivery items retain their original scope.
+
+### Exact observation reopening, October 16, 2026
+
+The [observation-reference assessment](../assessments/observation-reference-2026-10-16.md)
+records a Review action for reopening the exact persisted generation within its
+workspace. Positional aliases remain compatible and their changing lifetime is
+disclosed. Enhanced J301 shows the same command before and after an alias change
+and after no-color restart: 33 machine passes, zero failures and four pending
+human judgments. Eleven focused TUI checks cover generation identity, source
+replacement and six-width rendering. No provider call or broad milestone
+completion follows. All nine delivery items remain open at their original scope.
+
+### Search scope actions, October 16, 2026
+
+The [scope action search assessment](../assessments/scope-action-search-2026-10-16.md)
+records local filtering over canonical actions, safe no-match selection, retained
+query on refusal and preserved source status. Forty-four focused scope checks,
+the workspace build and ten summary checks pass. Enhanced complete J206 has
+87 machine passes, zero failures, 66 capture pairs and six pending human
+judgments, including actual search at six sizes and paging at 40x12. Its nine
+fixed local jobs retain nine observations and three decisions through export and
+restart. There is no new model request, broad milestone closure or reference UX
+parity claim. All nine delivery items remain open at their original scope.
+
+### Reviewed learning loop, October 16, 2026
+
+The [reviewed learning assessment](../assessments/reviewed-learning-loop-2026-10-16.md)
+connects actual local observations, explicit human policy confirmation, lesson
+acceptance, an inactive context copy and a separately approved three-pass
+experiment. All three candidate adapter requests contain the exact frozen
+lesson text; transport is intercepted and produces no model findings. J304 has
+51 machine passes, zero failures, 47 capture pairs and six pending human
+judgments through export, retirement, blocked future use and no-color restart.
+Thirty-four Core checks, seven TUI checks, five framing checks and the workspace
+build pass. A real unversioned scan exposed cached source appearing as duplicate
+evidence; shared Semgrep execution now excludes and discloses `.kuzushi` paths.
+Six observations, the original decision and six intercepted reservations remain.
+This adds no live request, generated-lesson quality claim or broad milestone
+closure. The original plan remains the completion target.
+
+### Source reassessment in Report, October 16, 2026
+
+The [Report source assessment](../assessments/report-source-reassessment-2026-10-16.md)
+adds the existing reassessment count to the headline and shared investigation
+receipt, explaining retained decisions separately from current review totals.
+There are 130 distinct focused Rust passes, a workspace build and ten passing
+summary commands. Enhanced J304 has 55 machine passes, zero failures, 54 capture
+pairs and seven pending human judgments through six Report sizes, export and
+no-color restart. Source and runtime hashes stay unchanged during the case.
+No live request or decision is added. Next is a finite set of 17 descriptor-only
+hidden Core actions and three held source boundaries. Their contracts need
+audit before claiming the original matrix complete; excluded operations remain
+outside the work.
+
+### Vendor document context, October 16, 2026
+
+The [vendor context assessment](../assessments/vendor-context-2026-10-16.md)
+repairs saved-profile replacement, unreachable clear input, undisclosed partial
+captures and incorrect repository phase ownership. Three local actions remain
+hidden Core auxiliary operations. Assessment is a Labs Review opinion requiring
+Review capacity; it cannot manufacture repository progress or an empty-evidence
+risk report. Exact local packet consumption and scripted request/report delivery
+are checked separately from live usefulness. Four hundred nine distinct focused
+Core checks, the workspace build, architecture, risk and ten summary gates pass.
+Native J310 and J304 evidence is retained in the linked assessment.
+
+The hidden Core remainder is fourteen actions: ten descriptor-only, UAF's
+input-only qualification and three held source-only boundaries. This is a
+readiness correction, not complete module qualification. All original nine
+delivery items, useful live-model coverage and human UX acceptance remain open.
+This increment adds no live requests, module deletion or publication.

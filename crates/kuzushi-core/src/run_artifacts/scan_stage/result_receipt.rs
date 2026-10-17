@@ -19,7 +19,7 @@ pub(super) fn load(target: &Path, run_id: &str) -> Result<ScanReceiptSource> {
     let calls = projection
         .calls
         .values()
-        .filter(|call| call.kind == CallKind::Tool && call.label.as_str() == "sast:scan")
+        .filter(|call| call.kind == CallKind::Tool && owns_scan_coverage(call.label.as_str()))
         .collect::<Vec<_>>();
     let call = match calls.as_slice() {
         [] => return Ok(source_without_scan_call(&projection)),
@@ -36,7 +36,38 @@ pub(super) fn load(target: &Path, run_id: &str) -> Result<ScanReceiptSource> {
         reference.producing_item_id,
         reference,
     )?;
-    scan_receipt(&result).map(ScanReceiptSource::Typed)
+    let receipt = scan_receipt(&result)?;
+    validate_direct(
+        target,
+        run_id,
+        call.label.as_str(),
+        &result,
+        receipt.as_ref(),
+    )?;
+    Ok(ScanReceiptSource::Typed(receipt))
+}
+
+fn validate_direct(
+    target: &Path,
+    run: &str,
+    tool: &str,
+    result: &Value,
+    receipt: Option<&PhaseStageReceipt>,
+) -> Result<()> {
+    match tool {
+        "license-scan:scan" => direct_license::validate(result, receipt),
+        "iac-scan:scan" | "cargo-audit:scan" => {
+            direct_native::validate(target, run, tool, result, receipt)
+        }
+        _ => Ok(()),
+    }
+}
+
+fn owns_scan_coverage(tool: &str) -> bool {
+    matches!(
+        tool,
+        "sast:scan" | "license-scan:scan" | "iac-scan:scan" | "cargo-audit:scan"
+    )
 }
 
 fn source_without_scan_call(projection: &crate::run_lifecycle::RunProjection) -> ScanReceiptSource {
@@ -70,3 +101,6 @@ fn scan_receipt(result: &Value) -> Result<Option<PhaseStageReceipt>> {
 
 #[cfg(test)]
 mod tests;
+
+mod direct_license;
+mod direct_native;

@@ -5,13 +5,35 @@ impl ScanStageScope {
     /// Pure containment check against the recorded discovery scope. Unknown,
     /// escaping, and absolute outside-target paths cannot establish coverage.
     pub fn covers_file(&self, file_path: &str) -> bool {
-        scan_paths_cover_file(&self.target, &self.paths, file_path)
+        scan_scope_covers_file(
+            &self.target,
+            &self.paths,
+            self.inspected_files.as_ref(),
+            file_path,
+        )
     }
 }
 
-pub(crate) fn scan_paths_cover_file(target: &str, paths: &[String], file: &str) -> bool {
-    let Some(relative) = target_relative(target, file) else { return false; };
-    paths.is_empty() || paths.iter().any(|scope| path_is_within(&relative, scope))
+#[cfg(test)]
+fn scan_paths_cover_file(target: &str, paths: &[String], file: &str) -> bool {
+    scan_scope_covers_file(target, paths, None, file)
+}
+
+pub(crate) fn scan_scope_covers_file(
+    target: &str,
+    paths: &[String],
+    inspected: Option<&std::collections::BTreeSet<String>>,
+    file: &str,
+) -> bool {
+    let Some(relative) = target_relative(target, file) else {
+        return false;
+    };
+    paths_cover_relative(&relative, paths)
+        && inspected.is_none_or(|files| files.contains(&relative))
+}
+
+fn paths_cover_relative(relative: &str, paths: &[String]) -> bool {
+    paths.is_empty() || paths.iter().any(|scope| path_is_within(relative, scope))
 }
 
 fn target_relative(target: &str, file: &str) -> Option<String> {
@@ -28,8 +50,10 @@ fn lexically_normalized(path: &str) -> Option<String> {
     let mut segments = Vec::new();
     for segment in path.split('/') {
         match segment {
-            "" | "." => {},
-            ".." => { segments.pop()?; },
+            "" | "." => {}
+            ".." => {
+                segments.pop()?;
+            }
             other => segments.push(other),
         }
     }
@@ -37,9 +61,16 @@ fn lexically_normalized(path: &str) -> Option<String> {
 }
 
 fn path_is_within(path: &str, scope: &str) -> bool {
-    if scope == "." { return true; }
-    let Some(scope) = lexically_normalized(scope) else { return false; };
-    path == scope || path.strip_prefix(&scope).is_some_and(|rest| rest.starts_with('/'))
+    if scope == "." {
+        return true;
+    }
+    let Some(scope) = lexically_normalized(scope) else {
+        return false;
+    };
+    path == scope
+        || path
+            .strip_prefix(&scope)
+            .is_some_and(|rest| rest.starts_with('/'))
 }
 
 #[cfg(test)]
@@ -53,7 +84,37 @@ mod tests {
                 assert!(!scan_paths_cover_file("/repo", &paths, file), "{file}");
             }
         }
-        assert!(!scan_paths_cover_file("/repo", &["lib".into()], "library/x.rs"));
+        assert!(!scan_paths_cover_file(
+            "/repo",
+            &["lib".into()],
+            "library/x.rs"
+        ));
         assert!(!scan_paths_cover_file("/repo", &["lib/..".into()], "x.rs"));
+    }
+    #[test]
+    fn exact_membership_distinguishes_empty_unknown_and_excluded_files() {
+        let mut scope = ScanStageScope {
+            target: "/repo".into(),
+            paths: vec![],
+            inspected_files: Some(Default::default()),
+        };
+        assert!(!scope.covers_file("Dockerfile"));
+        scope
+            .inspected_files
+            .as_mut()
+            .unwrap()
+            .insert("selected/Dockerfile".into());
+        assert!(scope.covers_file("selected/Dockerfile"));
+        assert!(scope.covers_file("/repo/selected/Dockerfile"));
+        for file in [
+            "Dockerfile",
+            "selected/linked/Dockerfile",
+            "selected/other",
+            "../selected/Dockerfile",
+        ] {
+            assert!(!scope.covers_file(file), "{file}");
+        }
+        scope.inspected_files = None;
+        assert!(scope.covers_file("Dockerfile"));
     }
 }

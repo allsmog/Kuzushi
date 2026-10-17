@@ -49,6 +49,7 @@ mod tests {
 
     fn inspection() -> InventoryInspection {
         InventoryInspection {
+            enumeration_complete: None,
             files: vec!["source.rs".into()],
             enumeration: "git-index".into(),
             entries: 1,

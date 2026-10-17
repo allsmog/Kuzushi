@@ -1,4 +1,5 @@
 use super::*;
+mod source_binding;
 use crate::content_store::ContentStore;
 use crate::event_log::EventKind;
 use crate::identity::{compute_observation_hash_v3, hash_parts, ObservationHashInput};
@@ -6,6 +7,7 @@ use crate::storage_v3::writer_actor::{
     DecisionCommand, FileFactWrite, FindingLifecycleWrite, ObservationWrite, SnapshotWrite,
     StorageWriterSession, WatcherCommand, WriteReceipt, WriterCommand,
 };
+pub(crate) use source_binding::{CapturedFindingSources, FindingSourceSnapshot};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -131,9 +133,7 @@ impl FindingStore {
         for finding in findings {
             let id = self.insert_finding_with_writer(scan_id, finding, &mut writer)?;
             row_ids.push(id);
-            let row_was_present = rows
-                .entry(id)
-                .or_insert_with(|| stored_rows.contains(&id));
+            let row_was_present = rows.entry(id).or_insert_with(|| stored_rows.contains(&id));
             *row_was_present |= reobserved.contains(finding.fingerprint.as_str());
         }
         let updated = rows.values().filter(|present| **present).count() as u64;
@@ -182,6 +182,16 @@ impl FindingStore {
         finding: &Finding,
         writer: &mut StorageWriterSession,
     ) -> Result<i64> {
+        self.insert_finding_at_source(scan_id, finding, writer, None)
+    }
+
+    fn insert_finding_at_source(
+        &self,
+        scan_id: &str,
+        finding: &Finding,
+        writer: &mut StorageWriterSession,
+        source: Option<&CapturedFindingSources>,
+    ) -> Result<i64> {
         // Identity bookkeeping stays transactional while the mutable finding
         // view is projected by the v3 writer after the observation event is
         // appended. This keeps current finding state behind the event log.
@@ -189,10 +199,10 @@ impl FindingStore {
             .conn
             .unchecked_transaction()
             .context("Could not open findings write transaction")?;
-        let outcome = self.insert_finding_statements(&tx, scan_id, finding)?;
+        let outcome = self.insert_finding_statements(&tx, scan_id, finding, source)?;
         tx.commit()
             .context("Could not commit findings write transaction")?;
-        self.record_v3_observation(scan_id, finding, outcome, writer)
+        self.record_v3_observation(scan_id, finding, outcome, writer, source)
     }
 
     fn insert_finding_statements(
@@ -200,6 +210,7 @@ impl FindingStore {
         tx: &Connection,
         scan_id: &str,
         finding: &Finding,
+        source: Option<&CapturedFindingSources>,
     ) -> Result<FindingInsertOutcome> {
         // Cross-channel dedup is scoped to one scan run. A rediscovered
         // vulnerability in a later run must still get its own row under that
@@ -209,15 +220,20 @@ impl FindingStore {
                 self.find_collision(tx, scan_id, dedup_key, &finding.fingerprint)?
             {
                 if dedup_collision_can_merge(&existing, finding) {
-                    return self.merge_finding_collision(tx, existing, scan_id, finding);
+                    return self.merge_finding_collision(tx, existing, scan_id, finding, source);
                 }
             }
         }
 
-        let identity = self.identity_assignment_for_finding(tx, scan_id, finding)?;
+        let identity = self.identity_assignment_for_finding(
+            tx,
+            scan_id,
+            finding,
+            captured_identity_text(source, finding)?,
+        )?;
         let id = projected_finding_id(scan_id, &finding.fingerprint);
         let projected = projected_seed(scan_id, id, finding, &identity);
-        let evidence = self.verified_finding_evidence(tx, scan_id, &finding.evidence)?;
+        let evidence = self.evidence_at_source(tx, scan_id, &finding.evidence, source)?;
         let identity_link =
             ProjectionIdentityLink::from_assignment(&identity, &finding.fingerprint);
         Ok(FindingInsertOutcome {
@@ -234,16 +250,15 @@ impl FindingStore {
         existing: Finding,
         scan_id: &str,
         finding: &Finding,
+        source: Option<&CapturedFindingSources>,
     ) -> Result<FindingInsertOutcome> {
         let merge_id = existing.id.expect("existing finding always has id");
         let existing_had_identity = existing.identity_id.is_some();
         let merged_tool = merge_tool_list(&existing.tool, &finding.tool);
         let merged_source = merge_vuln_source(existing.vuln_source, finding.vuln_source);
-        let evidence = self.collision_projection_evidence(tx, scan_id, &existing, finding)?;
-        let identity = match collision_identity_assignment(&existing) {
-            Some(identity) => identity,
-            None => self.identity_assignment_for_finding(tx, scan_id, finding)?,
-        };
+        let evidence =
+            self.collision_projection_evidence(tx, scan_id, &existing, finding, source)?;
+        let identity = self.identity_for_collision(tx, scan_id, &existing, finding, source)?;
         let identity_link = ProjectionIdentityLink::collision(
             &identity,
             &finding.fingerprint,
@@ -266,14 +281,34 @@ impl FindingStore {
         })
     }
 
+    fn identity_for_collision(
+        &self,
+        tx: &Connection,
+        scan_id: &str,
+        existing: &Finding,
+        finding: &Finding,
+        source: Option<&CapturedFindingSources>,
+    ) -> Result<FindingIdentityAssignment> {
+        match collision_identity_assignment(existing) {
+            Some(identity) => Ok(identity),
+            None => self.identity_assignment_for_finding(
+                tx,
+                scan_id,
+                finding,
+                captured_identity_text(source, finding)?,
+            ),
+        }
+    }
+
     fn collision_projection_evidence(
         &self,
         tx: &Connection,
         scan_id: &str,
         existing: &Finding,
         incoming: &Finding,
+        source: Option<&CapturedFindingSources>,
     ) -> Result<Vec<FindingEvidence>> {
-        let incoming_evidence = self.verified_finding_evidence(tx, scan_id, &incoming.evidence)?;
+        let incoming_evidence = self.evidence_at_source(tx, scan_id, &incoming.evidence, source)?;
         merge_collision_evidence(existing, incoming, incoming_evidence)
     }
 
@@ -312,8 +347,9 @@ impl FindingStore {
         finding: &Finding,
         outcome: FindingInsertOutcome,
         writer: &mut StorageWriterSession,
+        source: Option<&CapturedFindingSources>,
     ) -> Result<i64> {
-        let commit = self.v3_observation_commit(scan_id, finding, outcome)?;
+        let commit = self.v3_observation_commit(scan_id, finding, outcome, source)?;
         let reopen = self.reopen_write_for(scan_id, &commit.observation)?;
         self.commit_v3_observation(commit, reopen, writer)
     }
@@ -349,10 +385,14 @@ impl FindingStore {
         scan_id: &str,
         finding: &Finding,
         outcome: FindingInsertOutcome,
+        source: Option<&CapturedFindingSources>,
     ) -> Result<ObservationCommit> {
         let identity_link = outcome.identity_link.clone();
-        let projected = self.projected_observation_finding(scan_id, finding, outcome)?;
-        let provenance = self.observation_provenance(scan_id, &projected)?;
+        let projected = self.projected_observation_finding(scan_id, finding, outcome, source)?;
+        let provenance = match source {
+            Some(source) => Some(source.provenance(&projected)?),
+            None => self.observation_provenance(scan_id, &projected)?,
+        };
         let stable_fp = projected
             .identity_id
             .clone()
@@ -370,6 +410,7 @@ impl FindingStore {
         scan_id: &str,
         finding: &Finding,
         outcome: FindingInsertOutcome,
+        source: Option<&CapturedFindingSources>,
     ) -> Result<Finding> {
         let mut projected = outcome.projected;
         projected.corroboration_count = projected.corroboration_count.max(1);
@@ -379,9 +420,15 @@ impl FindingStore {
             self.projected_finding_sources(previous_projection.as_ref(), scan_id, finding);
         apply_projected_sources(&mut projected, sources);
         projected.evidence = outcome.evidence;
-        projected.grounding = Some(super::finding_evidence::ground_primary_anchor(
-            &self.conn, scan_id, &projected,
-        )?);
+        if let Some(source) = source {
+            projected.evidence = source.evidence(&projected.evidence)?;
+        }
+        projected.grounding = Some(match source {
+            Some(source) => source.grounding(&projected)?,
+            None => {
+                super::finding_evidence::ground_primary_anchor(&self.conn, scan_id, &projected)?
+            }
+        });
         Ok(projected)
     }
 
@@ -393,6 +440,19 @@ impl FindingStore {
     ) -> Result<i64> {
         let receipts = writer.commit_many(observation_commands(commit, reopen))?;
         projected_finding_id_from_receipts(receipts)
+    }
+
+    fn evidence_at_source(
+        &self,
+        tx: &Connection,
+        scan_id: &str,
+        rows: &[FindingEvidence],
+        source: Option<&CapturedFindingSources>,
+    ) -> Result<Vec<FindingEvidence>> {
+        match source {
+            Some(source) => source.evidence(rows),
+            None => self.verified_finding_evidence(tx, scan_id, rows),
+        }
     }
 
     fn observation_provenance(
@@ -972,4 +1032,13 @@ mod evidence_union_tests {
         }
         assert_eq!(unions[0], unions[1]);
     }
+}
+
+fn captured_identity_text<'a>(
+    source: Option<&'a CapturedFindingSources>,
+    finding: &Finding,
+) -> Result<Option<&'a str>> {
+    source
+        .map(|source| source.text(&finding.file_path))
+        .transpose()
 }

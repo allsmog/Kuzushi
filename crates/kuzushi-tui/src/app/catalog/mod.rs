@@ -29,6 +29,12 @@ impl ShellApp {
         self.keep_catalog_selection_visible();
     }
 
+    pub(crate) fn page_catalog_cursor(&mut self, delta: i32) {
+        let count = self.catalog_module_count();
+        self.router.catalog_mut().page_cursor(delta, count);
+        self.keep_catalog_selection_visible();
+    }
+
     /// The overlay reserves rows for the cockpit chrome, capability header,
     /// NEXT action, and category rails; the rest is the action-row budget that
     /// keeps the selection inside the modal and sizes one page of paging.

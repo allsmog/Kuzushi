@@ -171,6 +171,33 @@ Notes:
 
 ## Relationship to the docs
 
+- `J327` checks model-free committed-path review with divergent owned Git
+  history, exact comparison identities, nested targets and preserved unusual
+  filenames. It verifies zero findings, no automatic prerequisite scan,
+  partial path limits, all narrow result rows, six sizes and no-color restart.
+  No source executes and human judgments stay pending. `J279` provides the
+  sequential three-pass, zero-provider-call investigation regression.
+
+- `J326` checks failed taint model review with explicitly retained structural
+  candidates, actual model-free prerequisites and cached reuse, two accounted
+  intercepted Discovery sessions, protected Review, six Result sizes and
+  no-color restart. It runs no target source or model tools and leaves human
+  judgments pending. Engine usefulness and complete source-only behavior are
+  unqualified.
+
+- `J325` checks first-frame Result content and explicit scope/accounting labels
+  at six sizes, large-command folding with full read/return, retained session
+  text, composer ownership, paid failure without repair, protected Review and
+  no-color restart. Its two provider requests are intercepted. `J324` and `J320`
+  provide sequential context and accepted-scope/accounting regressions.
+
+- `J324` exercises bounded invariant context using actual deterministic context
+  output and intercepted model transport. It covers refusal without allowance,
+  paid malformed output without repair, partial source and omitted surfaces,
+  separate Result/Inputs reading at six sizes, exhausted Context capacity,
+  protected Review and no-color restart. It executes no target source, makes
+  no live provider request and preserves human UX judgments as pending.
+
 - Journey intent, personas, and known risks: `docs/devex/tui-devex-audit-journeys.md`
   (read-only source of truth — update it first, then mirror here).
 - Judgment rubric for REVIEW items: `docs/devex/tui-devex-audit-kickoff-prompt.md`
@@ -178,3 +205,9 @@ Notes:
 - Claude Code wrapper: `.claude/skills/tui-devex-audit/SKILL.md` runs this
   harness and then judges the REVIEW items; the harness stays fully usable
   standalone.
+
+J279 additionally checks FP counts in Report at all six sizes, original severity
+in JSON export, workspace-history versus selected-study reading, explicit Report
+refresh and no-color restart. J199 checks Report while an earlier FP needs source
+review, then after an explicitly captured-source deferral and restart. These
+journeys use no model transport and never execute target source.

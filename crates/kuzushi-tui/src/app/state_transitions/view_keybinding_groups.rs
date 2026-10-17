@@ -53,6 +53,7 @@ pub(super) fn campaign_keybindings() -> Vec<ViewKeybinding> {
             ViewHotkeyAction::CampaignOpenObservations,
         ),
         bind_char('r', "r", "refresh", ViewHotkeyAction::CampaignRefresh),
+        bind_char('R', "R", "Scan report", ViewHotkeyAction::WorkbenchReport),
     ]);
     bindings
 }
@@ -394,7 +395,7 @@ fn workbench_layout_keybindings(
         page,
         crate::ui_view_models::review_backlog_active(app),
     ));
-    bindings.extend(workbench_return_keybindings(plan));
+    bindings.extend(workbench_return_keybindings(app, plan));
     bindings
 }
 
@@ -509,15 +510,23 @@ fn workbench_phase_plan(app: &ShellApp) -> Option<crate::ui_view_models::PhasePr
 }
 
 fn workbench_return_keybindings(
+    app: &ShellApp,
     plan: Option<&crate::ui_view_models::PhasePresentationPlan>,
 ) -> Vec<ViewKeybinding> {
     let is_review_detail = plan.is_some_and(|plan| {
         plan.effective_focus == crate::ui_view_models::PhaseSurfaceId::ReviewDetail
     });
     if !is_review_detail {
-        return Vec::new();
+        return diagram_return_keybindings(app);
     }
     vec![bind_char('q', "q", "review list", ViewHotkeyAction::Back)]
+}
+
+fn diagram_return_keybindings(app: &ShellApp) -> Vec<ViewKeybinding> {
+    if app.dfd_review_return_is_available() {
+        return vec![bind_char('q', "q", "diagram", ViewHotkeyAction::Back)];
+    }
+    Vec::new()
 }
 
 fn workbench_primary_pane_keybindings() -> [ViewKeybinding; 1] {

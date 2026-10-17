@@ -11,7 +11,7 @@ pub(crate) fn read_threat_model(
     if let Some(result) = exact_context::read_exact_context(&input, ctx)? {
         return Ok(result);
     }
-    let Some(output_dir) = read_string(&input, &["outputDir", "output_dir"]) else {
+    let Some(output_dir) = read_output_dir(&input) else {
         return read_persistent_fallback(&input, ctx, flavor);
     };
     anyhow::ensure!(
@@ -22,13 +22,9 @@ pub(crate) fn read_threat_model(
     let target = resolve_target(&input, ctx)?;
     let repo_name = repo_name(&target);
     let fallback = requested_or_default_methodology(&input, flavor);
-    let artifacts = read_randori_artifacts(&target, &output_dir);
-    let Some(document) = read_threat_model_document(&target, &output_dir, &fallback, &artifacts)?
-    else {
-        return Ok(missing_threat_model_artifacts_response(
-            &target,
-            &output_dir,
-        ));
+    let mut inspected = inspect_randori_artifacts(&target, &output_dir, ctx.cancellation)?;
+    let Some(document) = read_inspected_document(&mut inspected, &fallback)? else {
+        return Ok(artifact_read_failure(&target, &output_dir, inspected));
     };
     let methodology = resolve_document_methodology(&input, &document, flavor);
     let document = apply_methodology(normalize_document(document, &methodology)?, &methodology)?;
@@ -39,7 +35,9 @@ pub(crate) fn read_threat_model(
         output_dir,
         methodology,
         document,
-        artifacts,
+        artifacts: inspected.artifacts,
+        artifact_read: Some(inspected.receipt),
+        ignored_model: input.get("model").is_some(),
         model_ref: None,
     }))
 }
@@ -109,6 +107,8 @@ fn read_persistent_fallback(
         methodology,
         document,
         artifacts: empty_randori_artifacts(),
+        artifact_read: None,
+        ignored_model: input.get("model").is_some(),
         model_ref,
     });
     result["data"]["resolvedFrom"] = json!("persistent");
@@ -126,28 +126,38 @@ fn empty_randori_artifacts() -> RandoriArtifacts {
     }
 }
 
-fn read_threat_model_document(
-    target: &Path,
-    output_dir: &str,
+fn read_inspected_document(
+    inspected: &mut RandoriArtifactInspection,
     methodology: &str,
-    artifacts: &RandoriArtifacts,
 ) -> Result<Option<Value>> {
-    let normalized_path =
-        resolve_output_dir(target, output_dir).join("normalized-threat-model.json");
-    if normalized_path.exists() {
-        return read_normalized_threat_model(target, &normalized_path).map(Some);
+    if inspected.normalized_present {
+        return Ok(inspected.normalized.take());
     }
-    if artifacts.has_any_artifact() {
-        return convert_randori_artifacts_to_document(artifacts, methodology);
+    if inspected.artifacts.has_any_artifact() {
+        return convert_randori_artifacts_to_document(&inspected.artifacts, methodology);
     }
     Ok(None)
 }
 
-fn read_normalized_threat_model(target: &Path, path: &Path) -> Result<Value> {
-    let raw = crate::bounded_file::read_utf8_text_within(target, path, 8 * 1024 * 1024)
-        .with_context(|| format!("Could not read {}", path.display()))?;
-    serde_json::from_str::<Value>(&raw)
-        .with_context(|| format!("Could not parse {}", path.display()))
+fn artifact_read_failure(
+    target: &Path,
+    output_dir: &str,
+    inspected: RandoriArtifactInspection,
+) -> Value {
+    let warnings = inspected.warnings();
+    let mut result = missing_threat_model_artifacts_response(target, output_dir);
+    if !warnings.is_empty() || inspected.artifacts.has_any_artifact() {
+        result["summary"] = json!("No usable model artifact; context unchanged.");
+        result["output"] = json!(format!(
+            "No usable model artifact; context unchanged.\n{}",
+            warnings.join("\n")
+        ));
+        result["data"]["reason"] = json!("unusable-artifacts");
+    }
+    result["warnings"] = json!(warnings);
+    result["data"]["artifactRead"] = json!(inspected.receipt);
+    result["data"]["artifacts"] = inspected.artifacts.to_json();
+    result
 }
 
 fn requested_or_default_methodology(input: &Value, flavor: ReadFlavor) -> String {
@@ -200,6 +210,8 @@ struct ReadThreatModelResponse {
     methodology: String,
     document: Value,
     artifacts: RandoriArtifacts,
+    artifact_read: Option<RandoriArtifactReadReceipt>,
+    ignored_model: bool,
     model_ref: Option<ThreatModelRef>,
 }
 
@@ -208,7 +220,7 @@ fn read_threat_model_response(response: ReadThreatModelResponse) -> Value {
     let threat_count = array_len(response.document.pointer("/threats"));
     let node_count = array_len(response.document.pointer("/dfd/nodes"));
     let flow_count = array_len(response.document.pointer("/dfd/flows"));
-    let output = read_threat_model_output(
+    let mut output = read_threat_model_output(
         response.flavor,
         &response.methodology,
         &response.repo_name,
@@ -217,6 +229,13 @@ fn read_threat_model_response(response: ReadThreatModelResponse) -> Value {
         node_count,
         flow_count,
     );
+    let warnings = artifact_read_warnings(&response, node_count);
+    if response.artifact_read.is_some() {
+        output.push_str("\nHistorical artifact; source revision unverified. No context accepted.");
+    }
+    if response.ignored_model {
+        output.push_str("\nLegacy model option ignored; reading artifacts makes no model request.");
+    }
     let data = json!({
         "target": response.target.display().to_string(),
         "repoName": response.repo_name,
@@ -224,10 +243,46 @@ fn read_threat_model_response(response: ReadThreatModelResponse) -> Value {
         "methodology": response.methodology,
         "document": response.document,
         "artifacts": response.artifacts.to_json(),
+        "artifactRead": response.artifact_read,
+        "ignoredModelOption": response.ignored_model,
         "modelRef": response.model_ref,
         "goalState":goal_state,
     });
+    if !warnings.is_empty() {
+        return crate::module_result::partial_output_result(
+            "Partial model artifact; context unchanged.",
+            output,
+            warnings,
+            data,
+        );
+    }
     crate::module_result::completed_output_result(output.clone(), output, data)
+}
+
+fn artifact_read_warnings(response: &ReadThreatModelResponse, node_count: usize) -> Vec<Value> {
+    let Some(receipt) = &response.artifact_read else {
+        return Vec::new();
+    };
+    let mut warnings: Vec<Value> = receipt
+        .files
+        .iter()
+        .filter_map(|row| {
+            row.issue
+                .as_ref()
+                .map(|issue| json!(format!("{issue} ({})", row.file)))
+        })
+        .collect();
+    if node_count == 0 {
+        warnings.push(json!(
+            "No DFD nodes found; this artifact is incomplete context."
+        ));
+    }
+    if receipt.cancelled && warnings.is_empty() {
+        warnings.push(json!(
+            "Artifact reading cancelled; completed observations were retained."
+        ));
+    }
+    warnings
 }
 
 fn read_threat_model_output(

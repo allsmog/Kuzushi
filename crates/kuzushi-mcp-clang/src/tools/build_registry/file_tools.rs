@@ -37,6 +37,7 @@ fn file_tool(name: &'static str, description: &'static str) -> Tool {
             "additionalProperties": false,
             "properties": {
                 "repoPath": {"type": "string", "minLength": 1, "maxLength": 16384},
+                "compileCommandsPath": {"type":"string","minLength":1,"maxLength":16384,"description":"Optional bounded compiler database within the granted read roots; relative paths use repoPath."},
                 "file": {"type": "string", "minLength": 1, "maxLength": 16384, "description": "Relative child path; absolute paths and parent traversal are rejected."}
             }
         }),

@@ -7,8 +7,11 @@ pub(crate) struct ScreenContext {
     pub(crate) focused_pane: Option<String>,
     pub(crate) selected_item: Option<ScreenSelectedItem>,
     pub(crate) selected_run: Option<String>,
+    pub(crate) selected_runs: Vec<String>,
+    pub(crate) selected_run_count: usize,
     pub(crate) selected_revision: Option<ScreenRevision>,
     pub(crate) active_phase: Option<String>,
+    pub(crate) displayed_phase: Option<String>,
     pub(crate) active_filters: Vec<String>,
     pub(crate) selected_scope: Option<String>,
     pub(crate) finding_summary: Option<ScreenFindingSummary>,
@@ -107,7 +110,11 @@ impl ScreenContext {
     pub(crate) fn scope_chip(&self) -> Option<String> {
         let mut parts = Vec::new();
         push_primary_scope_part(&mut parts, self);
-        if let Some(phase) = self.active_phase.as_deref() {
+        if let Some(phase) = self
+            .displayed_phase
+            .as_deref()
+            .or(self.active_phase.as_deref())
+        {
             parts.push(active_phase_chip(phase));
         }
         if let Some(revision) = &self.selected_revision {
@@ -122,8 +129,12 @@ impl ScreenContext {
             "focusedPane": self.focused_pane,
             "selectedItem": self.selected_item.as_ref().map(ScreenSelectedItem::as_json_value),
             "selectedRun": self.selected_run,
+            "selectedRuns": self.selected_runs,
+            "selectedRunCount": self.selected_run_count,
+            "selectedRunsTruncated": self.selected_run_count > self.selected_runs.len(),
             "selectedRevision": self.selected_revision.as_ref().map(ScreenRevision::as_json_value),
             "activePhase": self.active_phase,
+            "displayedPhase": self.displayed_phase,
             "activeFilters": self.active_filters,
             "selectedScope": self.selected_scope,
             "scopeLabel": self.scope_chip(),
@@ -285,6 +296,7 @@ fn active_phase_chip(phase: &str) -> String {
         "review" => "Review",
         "prove" | "confirm" => "Prove",
         "fix" => "Fix",
+        "report" => "Report",
         other => other,
     }
     .to_string()

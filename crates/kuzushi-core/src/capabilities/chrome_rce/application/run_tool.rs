@@ -1,16 +1,34 @@
 use super::collect_findings::collect_findings;
-use crate::capabilities::chrome_rce::adapters::changed_files;
-use crate::capabilities::chrome_rce::domain::hot_path_finding;
-use crate::findings::{persist_tool_findings_to, Finding, ToolFindingsSink};
+use crate::findings::{persist_tool_findings_to_with_status, Finding, ToolFindingsSink};
+use crate::run_lifecycle::RunItemStatus;
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::Path;
 
-pub(crate) fn run_scan(target: &Path, persistence: ToolFindingsSink<'_>) -> Result<Value> {
+pub(crate) fn run_scan(
+    target: &Path,
+    persistence: ToolFindingsSink<'_>,
+    max_findings: usize,
+) -> Result<Value> {
+    anyhow::ensure!(
+        max_findings > 0,
+        "chrome-rce:scan maxFindings must be positive"
+    );
     require_scan_target(target)?;
-    let findings = scan_target(target)?;
-    let persisted = persist_chrome_rce_findings(target, &findings, persistence)?;
-    Ok(scan_response(target, findings, persisted))
+    let (findings, limited) = scan_target(target, max_findings)?;
+    let status = if limited {
+        RunItemStatus::Partial
+    } else {
+        RunItemStatus::Completed
+    };
+    let persisted = persist_chrome_rce_findings(target, &findings, persistence, status)?;
+    Ok(scan_response(
+        target,
+        findings,
+        persisted,
+        max_findings,
+        limited,
+    ))
 }
 
 fn require_scan_target(target: &Path) -> Result<()> {
@@ -23,107 +41,51 @@ fn require_scan_target(target: &Path) -> Result<()> {
     Ok(())
 }
 
-fn scan_target(target: &Path) -> Result<Vec<Finding>> {
+fn scan_target(target: &Path, limit: usize) -> Result<(Vec<Finding>, bool)> {
     let mut findings = Vec::new();
-    collect_findings(target, target, &mut findings)?;
-    Ok(findings)
+    let limited = collect_findings(target, target, &mut findings, limit)?;
+    Ok((findings, limited))
 }
 
 fn persist_chrome_rce_findings(
     target: &Path,
     findings: &[Finding],
     persistence: ToolFindingsSink<'_>,
+    status: RunItemStatus,
 ) -> Result<Option<crate::findings::GenericPersistedRun>> {
-    persist_tool_findings_to(persistence, target, findings)
+    persist_tool_findings_to_with_status(persistence, target, findings, status)
 }
 
-fn scan_response(target: &Path, findings: Vec<Finding>, persisted: impl serde::Serialize) -> Value {
+fn scan_response(
+    target: &Path,
+    findings: Vec<Finding>,
+    persisted: impl serde::Serialize,
+    max_findings: usize,
+    limited: bool,
+) -> Value {
     let summary = format!(
         "chrome-rce:scan found {} finding{} under {}",
         findings.len(),
         if findings.len() == 1 { "" } else { "s" },
         target.display()
     );
-    crate::module_result::completed_output_result(
-        summary.clone(),
-        summary,
-        json!({
-            "target": target.display().to_string(),
-            "count": findings.len(),
-            "findings": findings,
-            "persisted": persisted,
-        }),
-    )
-}
-
-pub(crate) fn run_review_trigger(
-    target: &Path,
-    diff_base: Option<&str>,
-    persistence: ToolFindingsSink<'_>,
-) -> Result<Value> {
-    let Some(diff_base) = diff_base else {
-        return Ok(skipped_review_response(target));
-    };
-    review_trigger_with_diff_base(target, diff_base, persistence)
-}
-
-fn review_trigger_with_diff_base(
-    target: &Path,
-    diff_base: &str,
-    persistence: ToolFindingsSink<'_>,
-) -> Result<Value> {
-    let changed = changed_files(target, diff_base)?;
-    let findings = hot_path_findings(&changed);
-    let persisted = persist_chrome_rce_findings(target, &findings, persistence)?;
-    Ok(review_response(
-        target, diff_base, changed, findings, persisted,
-    ))
-}
-
-fn hot_path_findings(changed: &[String]) -> Vec<Finding> {
-    changed
-        .iter()
-        .filter_map(|file| hot_path_finding(file))
-        .collect()
-}
-
-fn skipped_review_response(target: &Path) -> Value {
-    let summary = "chrome-rce:review-trigger skipped: pass diffBase to enable PR hot-path review.";
-    crate::module_result::skipped_output_result(
-        summary,
-        summary,
-        Vec::new(),
-        json!({
-            "target": target.display().to_string(),
-            "count": 0,
-            "findings": [],
-        }),
-    )
-}
-
-fn review_response(
-    target: &Path,
-    diff_base: &str,
-    changed: Vec<String>,
-    findings: Vec<Finding>,
-    persisted: impl serde::Serialize,
-) -> Value {
-    let summary = format!(
-        "chrome-rce:review-trigger matched {} hot path{} vs {}",
-        findings.len(),
-        if findings.len() == 1 { "" } else { "s" },
-        diff_base
-    );
-    crate::module_result::completed_output_result(
-        summary.clone(),
-        summary,
-        json!({
-            "target": target.display().to_string(),
-            "diffBase": diff_base,
-            "changedFiles": changed,
-            "count": findings.len(),
-            "findings": findings,
-            "persisted": persisted,
-        }),
-    )
+    let data = json!({
+        "target": target.display().to_string(),
+        "count": findings.len(),
+        "findings": findings,
+        "persisted": persisted,
+        "inspection": {"maxFindings":max_findings, "findingLimitReached":limited},
+    });
+    if limited {
+        let warning =
+            format!("Finding limit {max_findings} reached; remaining source was not inspected.");
+        let summary = format!("chrome-rce:scan partial: {warning}");
+        return crate::module_result::partial_output_result(
+            summary.clone(),
+            summary,
+            vec![json!(warning)],
+            data,
+        );
+    }
+    crate::module_result::completed_output_result(summary.clone(), summary, data)
 }

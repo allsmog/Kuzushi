@@ -1,5 +1,237 @@
 # TUI DevEx Audit Journeys
 
+## J327: Committed path review without finding pollution
+
+Use an owned divergent Git history and inert path markers. Exact dispatch works
+without a model, finding store, prior scanner or allowance. Check missing and
+invalid baselines, exact base/merge-base/HEAD identities, nested target restriction,
+NUL-delimited filenames, dirty/untracked exclusions, honest path truncation,
+Result/receipt reading at six sizes and no-color restart. Every narrow full-result
+row must be reachable. No vulnerability finding, accepted context, phase result,
+provider reservation or scan job may be created. Human UX judgments stay pending.
+
+
+## J326: Failed taint review and retained structural candidates
+
+Exercise the bundled hidden experimental taint action with actual model-free
+context preparation and explicit cached-prerequisite reuse. Refusal without
+allowance precedes two intercepted Discovery requests: initial and repair.
+Malformed output stays failed while an explicitly requested structural
+candidate remains unverified. Check saved output at six sizes, full receipt,
+unknown dollars, exhausted Discovery capacity, protected Review and no-color
+restart. No target source or model tools execute; human judgments stay pending.
+This qualifies failure reporting and accounting, not useful detection, accepted
+scope isolation, immutable context delivery or the engine's source-only policy.
+
+## J325: Result first value and command disclosure
+
+Read a real bounded context draft at six sizes. The first 40x12 Result frame
+must show the candidate alongside partial status, unavailable dollars and
+current call accounting. The complete summary, source input and receipt remain
+reachable. Inspect a folded large command through `z` and `c`, return to the
+previous reader position and verify the complete command survives in the
+session transcript. Normal `c` typing stays with the composer. Intercepted
+malformed and valid responses consume exactly two Context calls, preserve
+protected Review and survive no-color restart without more jobs or live calls.
+Human UX judgments remain separate from machine checks.
+
+## J324: Bounded invariant context drafts
+
+Consume actual deterministic systems context, then separately invoke two
+intercepted Context requests: malformed output first, a source-quoted draft
+second. No automatic repair follows the paid failure. Review the unverified
+assumption, partial source and omitted surface through Result, Inputs and
+Receipt at six viewport sizes. Exhaustion must preserve the protected Review
+call. A no-color restart retains both accounting and authenticated source input.
+No target source is executed, no live provider is called, no findings or jobs
+are created and no phase or context is accepted. Human quality judgments remain
+separate from machine assertions and terminal-cell replays.
+
+## J309: Bounded chunk inventory and explicit recovery
+
+An owned deep-tree fixture includes symlink cycles, a vendor source and a sparse
+file larger than the source planning cap. Review partial local planning at six
+sizes, then explicitly plan only the vendor source. Export zero findings and
+restart without color. Both plans remain auxiliary, with zero jobs, observations,
+decisions or provider reservations. The sparse file is authenticated by metadata
+only; small fixture sources retain exact hashes. Human readability and workflow
+judgments remain separate from machine assertions.
+
+## J308: Chunked consumers and auxiliary scope planning
+
+Refuse standard-only inclusion/exclusion filters, an explicit default-valued
+turn limit and a stored default-valued inspection limit on chunked work. Read
+the cause across six sizes, explicitly clear the stored value, and plan exactly
+one selected owned file through the compatibility alias without model work.
+The later completed planning action must remain auxiliary to the blocked Scan
+in Report. Export and no-color restart retain the refusals, scope plan and
+cleared setting with no scan jobs or provider requests. Human judgments remain
+separate from machine assertions.
+
+## J307: Unsupported strategy controls and explicit recovery
+
+Refuse standard discovery with a chunked dry-run setting before model work.
+Read the summary and full receipt across six sizes with visible Tab controls.
+Restore each reading position and keep an unsent Unicode prompt draft. Persist
+the unsupported setting visibly, confirm its refusal and explicitly remove it.
+Refuse unused scope and dollar settings too. Report retains four blocked
+requests without completed coverage. No-color restart preserves the exact
+canonical receipt hashes, history and cleared setting. The case starts no scan,
+model request or target execution. Human judgments remain open.
+
+## J306: Chunk reuse, selected planning and source refusals
+
+Disable cache reuse through visible settings, persist the choice, then plan one
+selected chunk from two owned comment-only files. Read planning and dollar
+uncertainty at six sizes. Refuse empty/unknown retry IDs, an empty scope list,
+an outside file and unsupported accepted scope. Report retains blocked work
+without claiming completed discovery. Export and no-color restart preserve the
+setting, plan and refusals. No scan job, provider request, source execution or
+Git commit is included. Human judgments remain separate from machine assertions.
+
+## J305: Structured settings and capped internal inspection
+
+Persist a declared allocation/free JSON array through the visible advanced
+option editor without invoking the UAF scanner. Run one Chromium heuristic on
+three owned inert comment lines with a finding limit of one. Check the actual
+partial envelope, ledger and single raw observation, read the receipt at all
+six sizes, record a scripted deferral and export. No-color restart retains the
+structured setting, partial result and decision. No live provider request,
+target execution or Git commit is included. Detector usefulness and human UX
+judgments remain separate from these contract assertions.
+
+## J304: Reviewed lessons in a finite context experiment
+
+Run three actual local Semgrep passes alongside intercepted agentic requests.
+Confirm the owned literal policy marker, draft and accept a lesson, then create
+an inactive context copy through visible controls. Plan three separate context
+experiment jobs against the exact baseline under the same six-call allowance.
+Assert the actual request's decoded untrusted-data frame matches the frozen
+preview, including Unicode. Export recorded decisions without claiming present
+applicability or attaching lessons to other generations. Retire the lesson,
+refuse new context use and retain historical work through no-color restart.
+The editor is captured at all six sizes. Helpers seed inert source and inspect
+durable state; no live provider request, source execution or Git commit occurs.
+
+The enhanced Report section also captures all six sizes, retains the historical
+confirmation separately from `source review needed`, exports
+`reassessmentRequiredCount` and reopens the same explanation after no-color
+restart. A later unversioned observation never acquires current source approval
+from that earlier decision.
+
+## J206: Searchable scope actions in the complete monorepo journey
+
+The enhanced journey searches existing scope actions instead of stepping through
+13 or 14 rows. It proves no-match Enter performs no action, waits for Esc recovery,
+reads search at six sizes and pages its actual description at 40x12. Source
+status stays visible. Existing scope acceptance, nine installed-scanner jobs,
+Review, export and no-color restart remain part of the same case. Restart also
+reopens the picker without approving more work. Helpers seed and inspect owned
+inert text; no provider request or target execution is included.
+
+## J303: Missing Go scanner and honest failure recovery
+
+Use the actual environment's missing Govulncheck binary, without masking PATH or
+loading Go packages. Invoke one experimental action through prepared shell
+dispatch. Read its failed receipt at six sizes, keep Report from interpreting
+zero findings as clean coverage, then reopen the same cause after no-color
+restart. The inert fixture has no Go program. No model request, scanner download,
+target execution or Git commit is included.
+
+## J300: Direct configuration file and rule coverage
+
+Run three explicit direct jobs against owned inert configuration: all families
+in a selected directory, Dockerfile only in that directory, then an empty
+directory. Report must hydrate the saved receipt without first visiting Scan.
+Read the requested scope and inspected-file count, compare excluded work as not
+reassessed, resize through six sizes and retain a scripted deferral after
+no-color restart. The parent Dockerfile and symlink cycle remain excluded.
+No model request, source execution or Git commit is included.
+
+## J301: Separate lockfile identities and unknown advisory policy
+
+Use installed cargo-audit offline with a copied local advisory database. Inspect
+`a/Cargo.lock` and `b/Cargo.lock` as separate finite jobs; nested lockfiles are
+excluded from discovery. A third job uses a separate owned database copy with
+one advisory deliberately omitted, while target metadata stays unchanged. Read
+unknown policy even for completed jobs, compare absence as not reassessed, then
+reopen the original exact observation after display aliases change. Retain its
+scripted deferral through six sizes and no-color restart. This executes no
+target source and creates no provider request or Git commit.
+
+The enhanced case pages to Review actions before and after the alias changes
+and after restart. Its displayed `open generation:<id>` command must continue to
+name the original observation, with workspace and alias-lifetime guidance. These
+reference captures are at 120x36; width-specific rendering checks remain separate
+from the six-size native comparison matrix.
+
+## J298: Offline audit outcomes and failure causes
+
+Use installed cargo-audit and a copy of the existing local advisory database,
+with fetching and yanked-package checks disabled. Inspect owned hypothetical
+lockfile metadata, save a scripted deferral, change an inert file during an audit
+and trigger a controlled adapter failure during another source change. Filter
+the transcript through visible controls and page to its actual cause at 40
+columns. Read failed work in Report, explicitly repeat stable work and recover
+without color. Four direct audit actions are separate from the initial local
+dependency probe. No model request, target execution or Git commit is included.
+
+## J299: Selected configuration inspection and restart
+
+Inspect only a selected directory with explicit file, entry and aggregate read
+limits. Retain the omitted oversized file, excluded symlink and untouched parent
+configuration. Read one signal and a scripted deferral at six sizes, then open
+Report with explicit coverage limitations and recorded selected-file scope. Remove the
+oversized inert fixture before an explicitly requested repeat. Restart without
+color and retain both observations and the decision. This native case qualifies
+ordinary direct dispatch and consumers; controlled in-flight IaC source changes
+are separate Rust tests using the internal IO adapter. It creates no Git commit,
+model request or target execution.
+
+## J297: Direct Scan source settlement
+
+Run installed Semgrep directly with an owned local marker rule. Save a scripted
+deferral, remove the marker, then perform a planned inert source edit while a
+second scan is active. Check partial tool and ledger status, retained Review
+data, six terminal sizes and hydrated Report coverage limitations. Request a
+third stable scan explicitly, then recover all three outcomes without color.
+Helpers coordinate inert edits and inspect state; they execute no target source
+or model work. This exercises direct dispatch, not a repeated-scan campaign or
+scanner precision. Human judgments remain separate from assertions.
+
+## J296: Source changes during Scan
+
+Use installed Semgrep with an owned local marker rule and inert source. Save a
+scripted deferral, remove the marker before another scan, then edit an unrelated
+source file while that scan is active. Inspect partial coverage, the retained
+observation and decision, six terminal sizes and a hydrated workspace-history
+Report. A separately requested stable scan can record covered absence; it does
+not establish a fix. Restart without color and retain all three run outcomes.
+The helper coordinates planned inert edits and inspects persisted state. No
+target source execution or provider requests occur. Human judgments remain
+separate from the machine assertions.
+
+## J295: License policy and covered absence
+
+Run three actual local license scans on owned inert metadata. Enable the
+header check, save a human deferral through scripted controls, then disable
+that check over identical content. Compare the two runs at six sizes and read
+the explicit not-reassessed reason. After a planned inert header edit, enable
+the same check again and compare covered absence. Recover the original signal
+and decision without color. The helper inspects source, policy receipts and
+ledger counts; it starts no tools or provider work and executes no source.
+Human judgments assess distinction, reading controls and recovery separately.
+
+## J287: Report decision authority
+
+Read the completed invoice case with one automatic TP decision and no human
+decisions. Check the qualified headline at six sizes and page through the
+authority guidance at 40x12. Export, switch to workspace history and restart
+without color. The existing read-only helper verifies compatible export fields,
+retained discovery/decisions and six settled calls, with no new provider request.
+Report owns its visible shortcuts directly; an extra Escape closes the page.
+Human judgments assess whether authority and proof remain understandable.
+
 ## J286: Actual Review with selected supporting code
 
 Read the separately approved, completed invoice Review with 3,336 frozen bytes
@@ -555,14 +787,14 @@ strings were aspirational — these are what the code actually renders):
   `guard@…`; the cpg-mined origin reads `deep auditor (cpg-rs path)`, NOT
   "cpg-rs witness"; guard notes are prefixed `falsifying evidence · `
   (`findings/presentation/detail/dataflow_evidence.rs`, `detail_pane.rs`).
-- Worklist legend words: fan-in → `not implemented (Phase B)`, prefilter →
-  `not tracked (Phase A)`, systems → `not requested`; empty panel title
+- Worklist legend words: fan-in and prefilter → `not supported`,
+  systems → `not requested`; empty panel title
   `no risk worklist` with CTAs `context:build` / `worklist:rank`; rows carry the
   RAW `92/100` display (`viz_data/worklist.rs`, `scene/worklist.rs`).
 - **Known gap (filed, not blocked):** the worklist `⚠ degraded — no cpg graph`
   banner and the F (call-graph fan-in) citation appearing after `cpg:build` are
   Phase-B wiring — the render-path fold passes `fan_in: None`, so the fan-in
-  contributor is `NotRequested` ("not implemented (Phase B)"), never `Degraded`,
+  contributor is `NotRequested` (displayed as "not supported"), never `Degraded`,
   and `cpg:build` does not yet feed the worklist. J43/J44 assert the shipped
   honest representation (dim legend, contiguous ranks, raw display, unranked
   footer) and do NOT assert the unwired banner/F-appears.
@@ -612,10 +844,10 @@ strings were aspirational — these are what the code actually renders):
 ### J43 — degraded worklist: honest states, contiguous ranks  ⭐ release-blocking
 - **Journey (keyless, seeded snapshot):** with an attack-surface snapshot but no
   cpg graph, `worklist` shows contiguous `#1..#N` ranks, RAW `92/100` glyph rows
-  (never a laundered float), and the CONTRIBUTORS legend distinguishing three
-  states: `not requested` (systems), `not implemented (Phase B)` (fan-in),
-  `not tracked (Phase A)` (prefilter).
-- **Judge:** the three non-live states render distinctly (word, not color); the
+  (never a laundered float), and the CONTRIBUTORS legend distinguishing optional
+  `not requested` (systems) from `not supported` (fan-in and prefilter).
+- **Judge:** unsupported contributors are distinct from optional work by words;
+  the
   unranked footer counts zero-signal files. (See Known gap re: the fan-in
   degraded banner.)
 
@@ -1899,3 +2131,90 @@ outside protected Review/Report and disclose unavailable legacy run evidence.
 Verify unchanged source, exact approval, zero observations/reservations/work
 attempts/decisions and absent dispatcher queues. Keep genuine Map acceptance
 uncreated. Judge the three screen questions separately from machine checks.
+
+## J310: Vendor context capture and retained packets
+
+Use an isolated home without credentials or a selected model and owned UTF-8
+document text. Inspect Labs readiness for model assessment. Set a draft profile,
+inspect it without changing saved bytes, and refuse a missing attachment without
+applying its proposed metadata. Capture a bounded Unicode prefix and inspect its
+receipt at six sizes, including narrow paging. Record a URL without fetching,
+generate three packets and check their exact scope against the saved draft.
+Clear the draft while retaining earlier packets and capture receipts. Export
+zero findings and restart without color. Verify unchanged source, zero provider
+requests, queues, observations, decisions and repository phase attempts. This
+case does not test model accuracy. Its three human judgments remain separate
+from machine checks. The driver stays unchanged.
+
+## J311: Classifier scores preserve review authority
+
+Use a real deterministic observation of an owned public example string, an
+isolated home and fully intercepted model transport. Record the human false
+positive decision before scoring. Inspect Labs readiness and refusal without an
+allowance, then approve four explicit metadata queries in the Review category.
+Inspect the allowance and partial-score reader across six sizes. Switch from
+the failure summary to the full receipt and page at 40 columns. Verify empty
+and invalid scores remain partial, exact zero remains zero, and changing
+percentile starts a separate history. A fifth request must refuse before
+transport. Export and no-color restart retain the same observation and human
+decision, four settled reservations, two single-sample streams and no follow-up
+queue or new phase attempt. This tests contracts, not live model calibration.
+The three human judgments remain pending. The driver stays unchanged.
+
+## J312: Draft generation, preserved edits and artifact consumption
+
+Use owned inert source and an isolated home with fully intercepted transport.
+Inspect Labs readiness, refuse an unbound draft, and approve two Context calls
+within a four-call allowance that protects two Review calls. Generate a draft,
+refuse implicit replacement, then explicitly replace it. Read the literal
+directory through both legacy and canonical paths. Inspect malformed stage and
+empty-context partial results, refuse an unusable primary, and import the actual
+produced artifact as an inactive immutable revision for the exact context
+reader. Check six viewport sizes and 40-column receipt paging. Restart without
+color and verify two settled Context reservations, unchanged source, zero
+observations, zero decisions and no auxiliary phase or follow-up queue. The protocol
+document is labeled synthetic and does not test model quality. Three human
+judgments remain separate from machine checks. The driver stays unchanged.
+
+## J313: Study membership, unavailable reads and filter-preserving recovery
+
+Seed explicitly synthetic history through the shared Rust store: three study
+members behind 500 unrelated findings, including cancelled and superseded
+attempts and a later observation outside the study. Read the three members at
+six terminal sizes. Page in both directions, clear study selection while
+retaining the ordinary page-size filter, and reach the same global aliases on
+the final workspace page.
+
+Select a named finding with an ordinary severity/page-size filter. Temporarily
+hide the plan and use `findings refresh`. Check the unavailable heading, retained
+study/filter chips, absence of a zero-match claim, and both retry and explicit
+workspace-history controls at six sizes. Restore the exact plan and retry
+without reopening the study; the selected finding, filter and study summary
+must recover together. Repeat failure/recovery after a no-color restart.
+Shared headless dispatch independently checks 503 global rows, three study
+rows and matching aliases. Source, plan, queue and 504 raw observations remain
+unchanged; decisions, reservations and work attempts stay empty. No discovery
+engine, source program or live provider is invoked. Four human judgments remain
+separate from machine checks. The driver stays unchanged.
+
+## J314: Bounded standalone systems context
+
+Inspect owned, inert systems-source metadata with explicit file, aggregate-byte,
+prefix and surface bounds. Read the actual partial context and coverage receipt
+through the shared transcript reader at six terminal sizes, including keyboard
+paging at 40 columns. Verify a loose root file, omitted source, ranking caps,
+unchanged source and no findings, decisions, reservations or work attempts.
+Invalid limits and unsupported compatibility options must fail clearly.
+
+A separate headless child-target invocation checks whole-child context without
+parent inclusion, model credentials, a code-index build or source execution.
+Restart in no-color mode and inspect a fresh bounded receipt. Four human UX
+judgments remain separate from machine checks. The driver is unchanged. This
+journey qualifies deterministic inspection and receipt access only, not model
+quality, complete Map/Scan or reference-interface parity.
+
+The final Report decision increment extends J279 with six Report sizes, selected
+study versus workspace-history counts, visible `r` refresh, original severity
+in export and restart. J199 now reads Report before and after source-qualified
+human review and after restart. These cases use no model transport. See
+[Report decision evidence](../assessments/report-decision-summary-2026-10-17.md).

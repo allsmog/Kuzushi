@@ -134,7 +134,14 @@ impl ShellApp {
             self.start_context_draft_recovery(&key);
             return;
         };
-        let result = projection::restore(draft, &drafts[*cursor]);
+        let result = drafts
+            .get(*cursor)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Saved draft selection is unavailable. Start a new draft or return."
+                )
+            })
+            .and_then(|saved| projection::restore(draft, saved));
         match result {
             Ok(draft) => {
                 self.runtime_state.context_edit_drafts.insert(key, draft);
@@ -161,7 +168,7 @@ fn move_recovery_cursor(cursor: &mut usize, count: usize, code: crossterm::event
     use crossterm::event::KeyCode;
     match code {
         KeyCode::Up => *cursor = cursor.saturating_sub(1),
-        KeyCode::Down => *cursor = (*cursor + 1).min(count.saturating_sub(1)),
+        KeyCode::Down => *cursor = cursor.saturating_add(1).min(count.saturating_sub(1)),
         _ => {}
     }
 }

@@ -7,6 +7,24 @@ require-shell: python3 -B @REPO/scripts/devex/fixtures/recommendation_audit.py @
 require-wrapper-flow:
 launch: --target @TMP_TARGET
 require-live-snap: 30 SETUP · READY THE MAP RUN | setup
+submit: findings
+require-live-snap: 20 no findings loaded for review | empty-review
+expect: findings full queue
+expect-not: open heatmap
+resize: 160x48
+live-snap: empty-review-160x48
+resize: 96x89
+live-snap: empty-review-96x89
+resize: 80x24
+live-snap: empty-review-80x24
+resize: 60x20
+live-snap: empty-review-60x20
+resize: 40x12
+live-snap: empty-review-40x12
+ask: Does empty Review offer queue recovery without advertising a data-free heatmap, with an honest empty state at all six sizes?
+resize: 120x36
+submit: setup
+require-live-snap: 20 SETUP · READY THE MAP RUN | setup-after-empty-review
 submit: recommendations
 require-live-snap: 25 deterministic; no model request | deterministic-reader
 expect: GENERATED SUGGESTIONS
@@ -76,6 +94,10 @@ expect: partial;
 expect: deterministic; no model request
 require-shell: python3 -B @REPO/scripts/devex/fixtures/recommendation_audit.py @TMP_TARGET @ART restarted
 ask: Do refusal, Setup return and no-color restart retain generated partial suggestions, unapproved work and zero provider/scanner requests?
+submit: findings
+require-live-snap: 20 no findings loaded for review | no-color-empty-review
+expect: findings full queue
+expect-not: open heatmap
 keys: C-c
 require-live-snap: 10 CONFIRM SESSION EXIT | explicit-restart-quit
 keys: y

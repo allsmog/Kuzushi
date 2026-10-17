@@ -58,8 +58,36 @@ type: services/b
 keys: F2
 require-live-snap: 25 r3 | three-boundaries
 expect: Root files
-keys: Down Down Enter Down Down Down Down Down Down Down Down Down Down Down Down Down
+keys: Down Down Enter /
+type: no matching scope action
+keys: Enter
+require-live-snap: 20 No matching actions | unmatched-action
+expect: Search: no matching scope action
+expect: Enter does nothing
+keys: Escape
+require-live-snap: 15 SCOPE ACTIONS | cleared-action-search
+keys: /
+type: shared context
 require-live-snap: 20 ▸ Use boundary as shared context | share-action
+expect: Search: shared context
+resize: 160x48
+require-live-snap: 15 Search: shared context | action-search-160x48
+resize: 96x89
+require-live-snap: 15 Search: shared context | action-search-96x89
+resize: 80x24
+require-live-snap: 15 Search: shared context | action-search-80x24
+resize: 60x20
+require-live-snap: 15 Search: shared context | action-search-60x20
+resize: 40x12
+require-live-snap: 15 Search: shared context | action-search-40x12
+expect: shared context
+expect: Esc clear search
+expect: PgUp/Dn
+keys: NPage
+require-live-snap: 15 Every selected | action-detail-40x12
+keys: PPage
+ask: Can the operator filter existing scope actions, see the query at every size and recover from no matches without starting work or losing the selected boundary?
+resize: 120x36
 keys: Enter
 require-live-snap: 25 r4 | shared-copy
 require-shell: python3 -B @REPO/scripts/devex/fixtures/shared_monorepo.py @TMP_TARGET @ART shared
@@ -169,7 +197,8 @@ require-live-snap: 25 EXPORTED | exported
 require-shell: python3 -B @REPO/scripts/devex/fixtures/shared_monorepo.py @TMP_TARGET @ART exported
 submit: scopes
 require-live-snap: 25 ACCEPTED SCOPES | old-scope
-keys: Enter Down Down Down Down Down Down Down Down Down Down Down Down Down Down
+keys: Enter /
+type: remove shared context
 require-live-snap: 20 ▸ Remove shared context | remove-action
 keys: Enter
 require-live-snap: 25 DRAFT SCOPES · r6 | removed-context
@@ -190,5 +219,11 @@ submit: report
 require-live-snap: 25 Scope study: | recovered-report
 require-shell: python3 -B @REPO/scripts/devex/fixtures/shared_monorepo.py @TMP_TARGET @ART restarted
 ask: Does no-color restart retain the original accepted scope study, nine observations and three decisions after a newer unaccepted scope edit, with no extra job or model request?
+submit: scopes
+require-live-snap: 25 DRAFT SCOPES | recovered-scopes
+keys: Enter /
+type: shared context
+require-live-snap: 20 Search: shared context | restarted-action-search
+expect: Esc clear search
 keys: C-c
 require-exit: 10

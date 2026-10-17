@@ -2,6 +2,11 @@ use super::*;
 use crate::query::{tokenize_filter_expression, FilterToken};
 use crate::run_artifacts::RunSummary;
 use std::collections::BTreeMap;
+mod batch_filter;
+use batch_filter::bind_batch_filter;
+
+#[cfg(test)]
+mod exact_file_paths_tests;
 
 impl FindingListFilter {
     pub const MAX_LIMIT: usize = 500;
@@ -21,12 +26,17 @@ impl FindingListFilter {
 
     fn apply_filter_input(&mut self, input: &Value) -> Result<()> {
         self.apply_filter_expression_input(input)?;
+        self.batch_id = bind_batch_filter(
+            self.batch_id.take(),
+            string_values_any(input, &["batchId", "batch_id", "batch"])?,
+        )?;
         self.severity
             .extend(parsed_severities(string_values(input, "severity")?)?);
         self.apply_review_filter_input(input)?;
         self.name =
             merge_optional_field(self.name.take(), normalized_optional_string(input, "name")?);
         self.file_path = merge_optional_field(self.file_path.take(), file_path_input(input)?);
+        self.file_paths.extend(literal_file_paths_input(input)?);
         self.run_id.extend(
             string_values_any(input, &["runId", "run_id", "run"])?
                 .into_iter()
@@ -76,10 +86,11 @@ impl FindingListFilter {
     }
 
     fn apply_filter_expression_input(&mut self, input: &Value) -> Result<()> {
-        if let Some(expr) = normalized_optional_string(input, "filter")? {
-            self.apply_filter_expression(&expr)?;
+        match input.get("filter") {
+            Some(Value::String(expression)) => self.apply_filter_expression(expression),
+            Some(_) => anyhow::bail!("findings:list filter must be a string"),
+            None => Ok(()),
         }
-        Ok(())
     }
 
     pub fn from_parts(
@@ -115,6 +126,7 @@ impl FindingListFilter {
         limit: usize,
     ) -> Result<Self> {
         Ok(Self {
+            batch_id: None,
             severity: parsed_part_severities(severity)?,
             verdict: parsed_part_verdicts(verdict)?,
             triage_state: Vec::new(),
@@ -125,6 +137,7 @@ impl FindingListFilter {
             name: normalize_string(name),
             text_terms: Vec::new(),
             file_path: normalize_string(file_path),
+            file_paths: Vec::new(),
             run_id: Vec::new(),
             revision_sha: Vec::new(),
             branch: Vec::new(),
@@ -156,6 +169,14 @@ impl FindingListFilter {
     }
 
     fn apply_filter_token(&mut self, token: FilterToken) -> Result<()> {
+        if token
+            .key
+            .as_deref()
+            .is_some_and(|key| key.eq_ignore_ascii_case("files"))
+        {
+            self.file_paths.extend(token.values);
+            return Ok(());
+        }
         match token.key {
             None => {
                 self.text_terms.push(normalize_filter_value(token.raw));
@@ -190,6 +211,7 @@ impl FindingListFilter {
                 .run_id
                 .extend(values.into_iter().map(normalize_filter_value)),
             FilterKey::Limit => self.limit = parse_limit_token(values)?,
+            FilterKey::Batch => self.batch_id = bind_batch_filter(self.batch_id.take(), values)?,
         }
         Ok(())
     }
@@ -455,13 +477,26 @@ fn source_matches(filter: &FindingListFilter, finding: &Finding) -> bool {
 }
 
 fn file_path_matches(filter: &FindingListFilter, finding: &Finding) -> bool {
-    match &filter.file_path {
+    let substring_matches = match &filter.file_path {
         Some(file_path) => finding
             .file_path
             .to_ascii_lowercase()
             .contains(&file_path.to_ascii_lowercase()),
         None => true,
+    };
+    substring_matches && exact_file_paths_match(&filter.file_paths, &finding.file_path)
+}
+
+fn exact_file_paths_match(paths: &[String], file: &str) -> bool {
+    if paths.is_empty() {
+        return true;
     }
+    let file = normalized_exact_path(file);
+    paths.iter().any(|path| normalized_exact_path(path) == file)
+}
+
+fn normalized_exact_path(path: &str) -> String {
+    path.replace('\\', "/").trim_start_matches("./").to_string()
 }
 
 fn run_id_matches(filter: &FindingListFilter, finding: &Finding) -> bool {
@@ -538,6 +573,14 @@ fn file_path_input(input: &Value) -> Result<Option<String>> {
         .or(normalized_optional_string(input, "file_path")?))
 }
 
+fn literal_file_paths_input(input: &Value) -> Result<Vec<String>> {
+    let Some(value) = input.get("filePaths").or_else(|| input.get("file_paths")) else {
+        return Ok(Vec::new());
+    };
+    serde_json::from_value(value.clone())
+        .context("filePaths must be an array of literal file path strings")
+}
+
 fn parsed_severities(values: Vec<String>) -> Result<Vec<Severity>> {
     values
         .into_iter()
@@ -596,6 +639,7 @@ fn parsed_sources(values: Vec<String>) -> Result<Vec<VulnSource>> {
 }
 
 enum FilterKey {
+    Batch,
     Rank,
     Verdict,
     State,
@@ -616,6 +660,7 @@ enum FilterKey {
 impl FilterKey {
     fn parse(key: &str) -> Result<Self> {
         match normalize_filter_key(key).as_str() {
+            "batch" | "batchid" => Ok(Self::Batch),
             "rank" | "severity" => Ok(Self::Rank),
             "verdict" | "decision" | "conf" | "confirmation" => Ok(Self::Verdict),
             "state" | "triage" => Ok(Self::State),

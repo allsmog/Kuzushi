@@ -7,6 +7,8 @@ use kuzushi_core::{
 };
 use std::path::PathBuf;
 
+mod selection;
+
 fn app() -> ShellApp {
     ShellApp::new(V2Config::default(), None)
 }
@@ -79,7 +81,11 @@ fn workbench_context_includes_focus_selected_item_and_visible_rows() {
 
     assert_eq!(context.view, "Workbench");
     assert_eq!(context.focused_pane.as_deref(), Some("Selected Finding"));
-    assert_eq!(context.selected_run.as_deref(), Some("scan-run-1"));
+    assert!(
+        context.selected_run.is_none(),
+        "a transient scan is not a selected attempt"
+    );
+    assert!(context.selected_runs.is_empty());
     assert_eq!(context.visible_rows.len(), 1);
     let selected = context.selected_item.as_ref().expect("selected item");
     assert_eq!(selected.file, "src/lib.rs");
@@ -126,12 +132,15 @@ fn prompt_json_is_structured_and_bounded() {
         focused_pane: Some("Findings".to_string()),
         selected_item: None,
         selected_run: Some("run-1".to_string()),
+        selected_runs: vec!["run-1".to_string()],
+        selected_run_count: 1,
         selected_revision: Some(ScreenRevision {
             sha: "abc123".to_string(),
             branch: Some("main".to_string()),
             dirty: true,
         }),
         active_phase: Some("hunt".to_string()),
+        displayed_phase: Some("scan".to_string()),
         active_filters: vec!["state:new".to_string()],
         selected_scope: Some("repo".to_string()),
         finding_summary: None,
@@ -177,12 +186,15 @@ fn scope_chip_prefers_selected_finding_then_phase_and_revision() {
             evidence: Vec::new(),
         }),
         selected_run: None,
+        selected_runs: Vec::new(),
+        selected_run_count: 0,
         selected_revision: Some(ScreenRevision {
             sha: "abc1234fedcba".to_string(),
             branch: Some("main".to_string()),
             dirty: true,
         }),
         active_phase: Some("confirm".to_string()),
+        displayed_phase: None,
         active_filters: Vec::new(),
         selected_scope: Some("repo".to_string()),
         finding_summary: None,

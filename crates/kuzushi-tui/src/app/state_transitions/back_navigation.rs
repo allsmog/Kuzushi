@@ -6,10 +6,7 @@ impl ShellApp {
     /// command after boot). The stack is maintained by `sync_view_change`
     /// — every transition into a new view pushes the prior view here.
     pub(crate) fn go_back(&mut self) {
-        if self.close_model_picker_if_open() {
-            return;
-        }
-        if self.restore_contextual_surface_origin() {
+        if self.restore_navigation_origin() {
             return;
         }
         match self.router.navigation_mut().pop_history() {
@@ -29,5 +26,11 @@ impl ShellApp {
         self.router
             .navigation_mut()
             .accept_back_transition(destination);
+    }
+
+    fn restore_navigation_origin(&mut self) -> bool {
+        self.close_model_picker_if_open()
+            || self.restore_dfd_review_origin()
+            || self.restore_contextual_surface_origin()
     }
 }

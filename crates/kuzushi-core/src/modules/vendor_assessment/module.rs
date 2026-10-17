@@ -38,17 +38,26 @@ fn vendor_assessment_tools() -> Vec<ToolDescriptor> {
             RuntimeRequirement::Never,
             FindingStoreRequirement::Optional,
         )),
-        tool_with_options(
-            "vendor-assessment:assess",
-            "Assess attached vendor evidence against the configured product scope and produce a risk summary.",
-            vendor_assessment_assess_options(),
-        )
-        .with_policy(workspace_policy(
-            ToolPhase::Scan,
-            RuntimeRequirement::Always,
-            FindingStoreRequirement::Optional,
-        )),
+        vendor_assessment_opinion_tool(),
     ]
+    .into_iter()
+    .map(ToolDescriptor::without_phase_result)
+    .collect()
+}
+
+fn vendor_assessment_opinion_tool() -> ToolDescriptor {
+    tool_with_options(
+        "vendor-assessment:assess",
+        "Experimental model opinion over attached document text. Requires parsed evidence and a Review allowance; grants no repository Scan or Map progress.",
+        vendor_assessment_assess_options(),
+    )
+    .with_policy(workspace_policy(
+        ToolPhase::Review,
+        RuntimeRequirement::Always,
+        FindingStoreRequirement::Optional,
+    ))
+    .with_allowance_category(AllowanceCategory::Review)
+    .with_discovery_maturity(ModuleMaturity::Labs)
 }
 
 fn vendor_assessment_attach_tool() -> ToolDescriptor {
@@ -61,9 +70,19 @@ fn vendor_assessment_attach_tool() -> ToolDescriptor {
 
 fn vendor_assessment_attach_options() -> Vec<OptionSpec> {
     let mut options = vec![
-        opt("source", OptionType::String, "Evidence source path or URL."),
+        opt(
+            "source",
+            OptionType::String,
+            "Operator-owned evidence source path or URL reference.",
+        )
+        .external_read(),
         opt("path", OptionType::Path, "Evidence document path.").external_read(),
-        opt("url", OptionType::String, "Evidence document URL."),
+        opt(
+            "url",
+            OptionType::String,
+            "Operator-owned document URL reference; not fetched.",
+        )
+        .external_read(),
         deprecated_target_option(),
         opt("kind", OptionType::String, "Evidence kind.").advanced(),
         opt("title", OptionType::String, "Evidence title.").advanced(),
@@ -78,11 +97,25 @@ fn deprecated_target_option() -> OptionSpec {
         OptionType::String,
         "Legacy evidence source alias.",
     )
+    .external_read()
     .deprecated_aliases(&["input"])
     .advanced()
 }
 
 fn vendor_assessment_scope_options() -> Vec<OptionSpec> {
+    let mut options = vendor_assessment_metadata_options();
+    options.push(
+        opt(
+            "clear",
+            OptionType::Bool,
+            "Clear draft vendor scope and attachments; keep earlier reports.",
+        )
+        .default(json!(false)),
+    );
+    options
+}
+
+fn vendor_assessment_metadata_options() -> Vec<OptionSpec> {
     vec![
         vendor_name_option(),
         opt("productName", OptionType::String, "Product name.").aliases(&["product_name"]),
@@ -90,7 +123,11 @@ fn vendor_assessment_scope_options() -> Vec<OptionSpec> {
         use_case_option(),
         data_classes_option(),
         integrations_option(),
-        opt("profile", OptionType::String, "Assessment profile.").default(json!("enterprise-ai")),
+        opt(
+            "profile",
+            OptionType::String,
+            "Assessment profile; an omitted value preserves the saved profile.",
+        ),
     ]
 }
 
@@ -150,14 +187,14 @@ fn integrations_option() -> OptionSpec {
 }
 
 fn vendor_assessment_prompt_options() -> Vec<OptionSpec> {
-    let mut options = vendor_assessment_scope_options();
+    let mut options = vendor_assessment_metadata_options();
     options.push(vendor_assessment_run_id_option());
     options
 }
 
 fn vendor_assessment_assess_options() -> Vec<OptionSpec> {
     let mut options = vec![model_option()];
-    options.extend(vendor_assessment_scope_options());
+    options.extend(vendor_assessment_metadata_options());
     options.push(vendor_assessment_run_id_option());
     options
 }
@@ -271,7 +308,10 @@ fn assess_tool(
     Ok(result)
 }
 
-fn emit_vendor_assessment_start(ctx: &ToolExecutionContext<'_>, root: &Path) -> Option<crate::run_lifecycle::RunItemId> {
+fn emit_vendor_assessment_start(
+    ctx: &ToolExecutionContext<'_>,
+    root: &Path,
+) -> Option<crate::run_lifecycle::RunItemId> {
     ctx.trace.map(|trace| {
         trace
             .step(

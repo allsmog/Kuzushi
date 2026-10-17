@@ -71,3 +71,42 @@ fn notice_banner_model_copies_source_message_and_severity() {
     assert_eq!(model.severity, NoticeSeverity::Error);
     assert!(model.dismiss_on_escape);
 }
+
+fn owned_confirmation() -> crate::PendingConfirm {
+    crate::PendingConfirm {
+        kind: crate::ConfirmKind::DescriptorEffect,
+        tool: "taint-iris-next:catalog-accept".into(),
+        target: "owned target".into(),
+        rationale: None,
+        allowlist: None,
+        actor: None,
+        remembered: false,
+    }
+}
+
+#[test]
+fn older_notice_yields_to_confirmation_without_losing_history_or_cancel_recovery() {
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    app.set_error_notice("tool", "Owned previous source drift");
+    let original = app.advisory().notice.clone();
+    app.request_confirm(owned_confirmation());
+    assert!(notice_banner_model(&app).is_none());
+    assert_eq!(app.advisory().notice, original);
+    assert!(!app.notice_captures_escape());
+    app.resolve_confirm(false, false).unwrap();
+    assert_eq!(
+        notice_banner_model(&app).unwrap().message,
+        "Owned previous source drift"
+    );
+    assert!(app.notice_captures_escape());
+}
+
+#[test]
+fn a_new_error_during_confirmation_stays_visible_without_claiming_escape() {
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    app.request_confirm(owned_confirmation());
+    app.set_error_notice("storage", "Owned current persistence failure");
+    let notice = notice_banner_model(&app).unwrap();
+    assert_eq!(notice.message, "Owned current persistence failure");
+    assert!(!notice.dismiss_on_escape);
+}

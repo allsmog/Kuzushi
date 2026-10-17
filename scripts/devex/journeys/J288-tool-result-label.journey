@@ -1,0 +1,19 @@
+name: Read finding groups with an operator label and no model work
+size: 120x36
+cwd: @TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE KUZUSHI_AGENT_MCPS NODE_OPTIONS NO_COLOR
+env: HOME=@TARGET/../home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_supporting_review_receipts.py @TARGET @ART initial
+require-wrapper-flow:
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: run findings:groups {}
+require-live-snap: 30 Show finding groups: | completed-groups
+expect: member decisions remain independent
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_supporting_review_receipts.py @TARGET @ART group-result
+ask: Does the completion notice explain the group query while keeping individual finding decisions, authority and proof distinct?
+submit: report
+require-live-snap: 25 TP: 1 | unchanged-report
+expect: Reviewed and TP totals include human and automatic decisions.
+keys: C-c
+require-exit: 10

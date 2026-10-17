@@ -1,0 +1,79 @@
+name: Repository preparation needs funding and separate execution consent
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_AGENT_MCPS
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/repository_allowance.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: options taint-iris-next:codeql-db
+require-live-snap: 25 Experimental | experimental-preparation
+expect: preparation for the whole
+expect: bound target.
+expect: Context allowance
+expect: repository-execution
+expect: consent.
+expect: No Map or Scan completion.
+submit: logs
+paste-file: @ART/unfunded-command.txt
+keys: Enter
+require-live-snap: 25 needs an approved investigation allowance | unfunded-preparation
+resize: 160x48
+live-snap: unfunded-160x48
+resize: 96x89
+live-snap: unfunded-96x89
+resize: 80x24
+live-snap: unfunded-80x24
+resize: 60x20
+live-snap: unfunded-60x20
+resize: 40x12
+live-snap: unfunded-40x12
+keys: NPage
+live-snap: unfunded-reading-40x12
+ask: Can the operator understand that execution consent alone does not fund preparation, including at narrow sizes, without interpreting the refusal as a completed Map or Scan?
+resize: 120x36
+keys: Escape
+paste-file: @ART/unapproved-command.txt
+keys: Enter
+require-live-snap: 25 requires explicit operator authorization | unapproved-preparation
+resize: 160x48
+live-snap: unapproved-160x48
+resize: 96x89
+live-snap: unapproved-96x89
+resize: 80x24
+live-snap: unapproved-80x24
+resize: 60x20
+live-snap: unapproved-60x20
+resize: 40x12
+live-snap: unapproved-40x12
+keys: NPage
+live-snap: unapproved-reading-40x12
+ask: Does the second refusal explain that available allowance does not grant permission to run a repository build, without offering an automatic retry?
+resize: 120x36
+submit: logs
+paste-file: @ART/allowance-command.txt
+keys: Enter
+require-live-snap: 25 Calls committed: 0/2 | unchanged-allowance
+expect: protected review remaining: 1
+expect: Calls available for context, scopes, scans and lessons: 1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/repository_allowance.py @TMP_TARGET @ART unchanged
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/unfunded-command.txt
+keys: Enter
+require-live-snap: 25 needs an approved investigation allowance | restarted-unfunded
+keys: Escape
+paste-file: @ART/unapproved-command.txt
+keys: Enter
+require-live-snap: 25 requires explicit operator authorization | restarted-unapproved
+resize: 40x12
+keys: NPage
+live-snap: restarted-reading-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/repository_allowance.py @TMP_TARGET @ART restarted
+ask: Does no-color restart preserve both refusals and untouched capacity, with no database, target execution, new job or provider request?
+keys: C-c
+require-exit: 10

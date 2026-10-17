@@ -1,0 +1,54 @@
+name: Report qualifies automatic TP decisions without changing stored authority or proof
+size: 120x36
+cwd: @TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE KUZUSHI_AGENT_MCPS NODE_OPTIONS NO_COLOR
+env: HOME=@TARGET/../home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_supporting_review_receipts.py @TARGET @ART initial
+require-wrapper-flow:
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: report
+require-live-snap: 25 1 finding · 1 reviewed · TP: 1 | report-decisions
+expect: Reviewed and TP totals include human and automatic decisions.
+expect: Finding details show author and proof.
+expect-not: 1 reviewed · 1 confirmed
+resize: 160x48
+live-snap: report-160x48
+resize: 96x89
+live-snap: report-96x89
+resize: 80x24
+live-snap: report-80x24
+resize: 60x20
+live-snap: report-60x20
+resize: 40x12
+keys: Home
+require-live-snap: 20 TP: 1 | report-40x12
+keys: PgDn
+require-live-snap: 20 automatic | authority-40x12
+keys: PgDn
+live-snap: allowance-40x12
+ask: Is the headline readable at every size, with automatic decisions and separate proof understandable through visible paging at 40x12?
+resize: 120x36
+keys: Home
+require-live-snap: 20 6 committed / 6 calls | exhausted-report
+expect: 0 protected review remaining
+require-live-snap: 20 format json (4/6) | json-format
+keys: Enter
+require-live-snap: 25 EXPORTED | exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_supporting_review_receipts.py @TARGET @ART exported
+keys: s
+require-live-snap: 25 History · current source unassessed | history-report
+expect: Reviewed and TP totals include human and automatic decisions.
+expect: TP: 1
+ask: Does the authority guidance remain clear for both the selected study and workspace history, without turning a model opinion into human confirmation or runtime proof?
+keys: C-c
+require-exit: 10
+env: HOME=@TARGET/../home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: report
+require-live-snap: 25 TP: 1 | recovered-report
+expect: Reviewed and TP totals include human and automatic decisions.
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_supporting_review_receipts.py @TARGET @ART restarted
+keys: C-c
+require-exit: 10

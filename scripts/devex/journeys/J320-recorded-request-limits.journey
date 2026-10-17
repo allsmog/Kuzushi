@@ -1,0 +1,77 @@
+name: Recorded scope and original grant remain distinct from refreshed limits
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_AGENT_MCPS
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/run_request_context.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+paste-file: @ART/approval-command.txt
+keys: Enter
+require-live-snap: 25 REVIEW ALLOWANCE | allowance
+expect: Total provider calls: 3
+expect: Protected review calls: 1
+keys: y
+require-live-snap: 25 Allowance approved | approved
+paste-file: @ART/failure-command.txt
+keys: Enter
+require-live-snap: 35 failed | failed-request
+require-shell: python3 -B @REPO/scripts/devex/fixtures/run_request_context.py @TMP_TARGET @ART before
+paste-file: @ART/failed-replay-command.txt
+keys: Enter
+require-live-snap: 25 Scope app | recorded-request
+expect: calls 1/3 at read
+keys: Tab Tab
+require-live-snap: 25 RECORDED REQUEST AND LIMITS | original-receipt
+expect: Run grant: owned-deep-discovery r1; 3 calls total
+expect: Latest ledger at read: r1; 1/3 calls committed
+expect: 1 protected Review
+require-shell: python3 -B @REPO/scripts/devex/fixtures/run_request_context.py @TMP_TARGET @ART revise @TMP_HOME
+live-snap: limits-before-refresh
+expect: calls 1/3 at read
+keys: r
+require-live-snap: 25 calls 1/5 at read | refreshed-receipt
+expect: Run grant: owned-deep-discovery r1; 3 calls total
+expect: Latest ledger at read: r2; 1/5 calls committed
+expect: 1 protected Review
+resize: 160x48
+live-snap: request-160x48
+expect: Run grant r1: 3 calls
+expect: At read r2: 1/5 calls
+expect: 1 Review protected
+resize: 96x89
+live-snap: request-96x89
+resize: 80x24
+live-snap: request-80x24
+resize: 60x20
+live-snap: request-60x20
+resize: 40x12
+keys: Home
+require-live-snap: 25 calls 1/5 at read | request-40x12
+keys: End
+live-snap: receipt-tail-40x12
+ask: Are the requested app scope, original three-call grant and refreshed five-call totals understandable without implying new work or complete coverage?
+resize: 120x36
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/failed-replay-command.txt
+keys: Enter
+require-live-snap: 25 Scope app | restarted-request
+expect: calls 1/5 at read
+keys: Tab Tab
+require-live-snap: 25 Run grant: owned-deep-discovery r1; 3 calls total | restarted-receipt
+expect: Latest ledger at read: r2; 1/5 calls committed
+require-shell: python3 -B @REPO/scripts/devex/fixtures/run_request_context.py @TMP_TARGET @ART restarted
+resize: 40x12
+keys: Home
+require-live-snap: 25 calls 1/5 at read | restarted-request-40x12
+ask: Does plain-color restart retain the historical scope and grant while showing the latest read with protected Review intact?
+keys: C-c
+require-exit: 10

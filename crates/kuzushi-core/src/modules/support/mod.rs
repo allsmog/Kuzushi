@@ -1,3 +1,6 @@
+mod source_failure;
+pub(in crate::modules) use source_failure::{contextualize_source_failure, source_guard_error};
+
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -77,8 +80,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let resolved = resolve_tool_target(
@@ -100,8 +103,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let resolved = resolve_tool_target(&Value::Null, &ctx).unwrap();

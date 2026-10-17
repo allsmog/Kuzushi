@@ -84,7 +84,15 @@ The SAST umbrella additionally owns four declared pipeline artifacts:
 | `verify.jsonl` | Verification-stage records only. |
 | `patch.jsonl` | Patch-stage records only; patch records are never multiplexed into `verify.jsonl`. |
 
-`report.sarif` and `stages.jsonl` are optional. A producer may return SARIF in
+`inherited-allowance.json` is optional shared admission metadata. Its version 1
+document binds the run, offered grant reference, accounting run and work category,
+within 8 KiB. Identical retention is idempotent; different metadata cannot replace
+it. It preserves original input and grants no work. Replay authenticates retained
+bytes before reading the original grant and current ledger. Accounting-run totals
+are not isolated child usage. Missing legacy metadata is not recorded; damaged,
+missing retained or conflicting data is unavailable.
+
+`report.sarif` and `stages.jsonl` are also optional. A producer may return SARIF in
 `reportSarif` or `data.reportSarif`; `kuzushi scan --sarif <path>` instead
 exports the findings observed by that scan's parent/child run-id union and
 excludes older workspace findings. `stages.jsonl` is written through the

@@ -57,6 +57,12 @@ impl ShellApp {
         self.refresh_phase_attempt_projection();
         let (campaigns, unreadable) = load_campaign_snapshots(&target);
         self.refresh_campaign_trend(&target, &campaigns, unreadable);
+        self.replace_campaign_snapshots(campaigns, unreadable);
+        self.refresh_active_batch_report();
+        self.restore_dispatcher_failure_notice();
+    }
+
+    fn replace_campaign_snapshots(&mut self, campaigns: Vec<CampaignSnapshot>, unreadable: usize) {
         let deck = self.router.campaign_mut();
         deck.campaigns = campaigns;
         deck.selected_campaign = deck
@@ -66,18 +72,6 @@ impl ShellApp {
         deck.sync_selected_batch_workers();
         deck.notice =
             (unreadable > 0).then(|| format!("{unreadable} campaign dir(s) had no readable plan"));
-        let active_batch_exists = deck.active_batch_id.as_deref().is_some_and(|active| {
-            deck.campaigns
-                .iter()
-                .any(|campaign| campaign.campaign_id == active && is_scan_batch_snapshot(campaign))
-        });
-        if deck.active_batch_id.is_some() && !active_batch_exists {
-            deck.clear_active_batch();
-        }
-        if active_batch_exists {
-            self.refresh_active_batch_report();
-        }
-        self.restore_dispatcher_failure_notice();
     }
 
     fn refresh_campaign_trend(

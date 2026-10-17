@@ -5,10 +5,11 @@ pub(super) fn render_threat_leads_markdown(report: &Value) -> String {
         "# Threat Leads".to_string(),
         String::new(),
         format!(
-            "Generated {} lead cards from threat model, X-Ray, and bounded source evidence.",
+            "Generated {} experimental lead cards from the legacy threat model and bounded source prefixes.",
             report["leadCount"].as_u64().unwrap_or_default()
         ),
     ];
+    lines.extend(super::output::coverage_lines(report));
     append_priority_leads(&mut lines, report);
     append_lead_details(&mut lines, report);
     lines.push(String::new());

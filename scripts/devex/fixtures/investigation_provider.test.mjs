@@ -33,6 +33,21 @@ test("request verification refuses missing framing and mismatched byte counts", 
   assert.throws(() => decodedThreatContext(body("Owned context", 1)));
 });
 
+test("request verification rejects ambiguous duplicate contexts", () => {
+  const value = body("Owned context");
+  value.input.push(...body("A different context").input);
+  assert.throws(() => decodedThreatContext(value));
+});
+
+test("request verification rejects malformed UTF-8 framing", () => {
+  const value = body("Owned context");
+  value.input[0].content[0].text = value.input[0].content[0].text.replace(
+    "content=Owned context",
+    "content=%C3",
+  );
+  assert.throws(() => decodedThreatContext(value), URIError);
+});
+
 test("a canceled request consumes a call without becoming a discovery response", () => {
   assert.deepEqual(
     [0, 1, 2, 3].map((count) => responseOrdinal(count, false)),

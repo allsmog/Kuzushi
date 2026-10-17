@@ -31,7 +31,11 @@ mod manifest_package_tokens;
 mod python_route_frameworks;
 mod repository_inventory;
 mod route_item;
+mod source_prefixes;
 mod source_text_scan;
+pub(crate) use source_prefixes::{
+    collect_source_prefixes, SourcePrefix, SourcePrefixLimits, SourcePrefixes,
+};
 mod target_kind;
 #[cfg(test)]
 mod tests;

@@ -5,10 +5,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from catalog_dependencies import SOURCE, SHA, git, source_files
+from catalog_dependencies import source_files
+from owned_source_revisions import create, git
 from secret_settings import ledger, save
 
-LATER_SHA = "30baa1f1a56bae4cbb431ba0d453a59a8108a71b"
+SHA = "7cac9e253984e19ccc6aaeee3eb157de049ba667"
+LATER_SHA = "c557cdbf94b931ecc250b33d33d793f79036a908"
 BASE = "revision-base-003"
 LATER = "revision-later"
 ABSENT = "revision-absent"
@@ -48,10 +50,7 @@ def scan(root, evidence, run_id, paths=None):
 def seed(parent, evidence, home):
     root = parent / "repository"
     assert not root.exists() and home == (evidence / "home").resolve()
-    assert git(SOURCE, "branch", "--show-current") == "main" and git(SOURCE, "rev-parse", "HEAD") == SHA
-    subprocess.run(["git", "clone", "--local", "--no-hardlinks", "--branch", "main",
-                    str(SOURCE), str(root)], capture_output=True, check=True)
-    assert git(root, "rev-parse", "origin/revision-reading-20261010") == LATER_SHA
+    assert create(root) == (SHA, LATER_SHA)
     config = home / ".kuzushi/v3/config.toml"
     config.parent.mkdir(parents=True, exist_ok=True)
     config.write_text('model = "openai-codex:gpt-5.5"\n[runtime]\nthinking_level = "medium"\n')
@@ -124,7 +123,8 @@ def verify(parent, evidence):
     assert basis["sourceApplicability"] == "reassessment_required"
     assert finding["provenance"]["sourceHistory"]
     save(evidence,"recorded-report",report)
-    save(evidence,"transition-invariants",{"counts":counts,"providerRequests":0,"sourceExecuted":False,"newCommits":0})
+    save(evidence,"transition-invariants",{"counts":counts,"providerRequests":0,"sourceExecuted":False,
+        "fixtureCommitsImported":2,"fixtureCommitsCreated":0,"projectCommitsCreated":0,"newCommitsAfterSeed":0})
 
 
 if __name__ == "__main__":

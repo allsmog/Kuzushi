@@ -10,16 +10,9 @@ pub const DEFAULT_MAX_TOKENS_PER_CHUNK: usize = 12_000;
 /// runtime tokenizer.
 pub const BYTES_PER_TOKEN: f64 = 3.6;
 
-/// Hard cap on per-file size before we silently skip the file. The
-/// intent is "if this file's token estimate exceeds MAX_FILE_TOKENS,
-/// it's too big for a single chunk and gets dropped". Computing the
-/// byte cap as `MAX_FILE_TOKENS * BYTES_PER_TOKEN as usize` was a
-/// silent truncation bug: `BYTES_PER_TOKEN` is `3.6` but `as usize`
-/// rounds toward zero, so the cap collapsed to `80_000 * 3 = 240_000`
-/// bytes. A 250 KB `fs/smb/server/smb2pdu.c` (≈68k est-tokens, well
-/// under MAX_FILE_TOKENS) was silently skipped from every kernel
-/// scan. Use the float multiplication path so the cap matches its
-/// documented intent.
+/// Maximum bytes in a source window. Larger files use contiguous line-aligned
+/// windows; a line larger than this bound is disclosed as an omitted source.
+/// Float multiplication preserves the original 288,000-byte contract.
 pub const MAX_FILE_BYTES: usize = (MAX_FILE_TOKENS as f64 * BYTES_PER_TOKEN) as usize;
 
 pub(crate) const MAX_FILE_TOKENS: usize = 80_000;
@@ -204,6 +197,18 @@ pub struct FullModePlan {
     pub total_files: usize,
     pub total_bytes: usize,
     pub total_tokens: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coverage: Option<super::PlanningCoverage>,
+}
+
+impl FullModePlan {
+    pub(crate) fn ensure_execution_ready(&self) -> anyhow::Result<()> {
+        let coverage = self.coverage.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("source planning receipt is missing; replan before execution")
+        })?;
+        anyhow::ensure!(!coverage.is_partial(), "source plan is partial or canceled; inspect its omissions and approve a smaller explicit scope. No model request started.");
+        Ok(())
+    }
 }
 
 /// A chunk the cheap-tier router scored below the deep-scan threshold.

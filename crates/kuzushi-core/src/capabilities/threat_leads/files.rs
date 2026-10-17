@@ -1,104 +1,11 @@
 use super::patterns::LeadPattern;
-use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-const MAX_SCAN_FILES: usize = 6000;
-const MAX_FILE_BYTES: u64 = 512 * 1024;
 const MAX_CANDIDATE_FILES_PER_THREAT: usize = 12;
 
-#[derive(Debug, Clone)]
-pub(super) struct IndexedFile {
-    pub(super) relative: String,
-    text: String,
-}
-
-pub(super) fn collect_scan_files(target: &Path) -> Result<Vec<PathBuf>> {
-    let canonical_root = fs::canonicalize(target)
-        .with_context(|| format!("Could not resolve {}", target.display()))?;
-    let mut canonical_files = Vec::new();
-    collect_scan_files_inner(&canonical_root, &canonical_root, &mut canonical_files)?;
-    let mut out = logical_scan_paths(target, &canonical_root, canonical_files);
-    out.sort();
-    out.truncate(MAX_SCAN_FILES);
-    Ok(out)
-}
-
-fn logical_scan_paths(target: &Path, canonical_root: &Path, paths: Vec<PathBuf>) -> Vec<PathBuf> {
-    paths
-        .into_iter()
-        .filter_map(|path| {
-            path.strip_prefix(canonical_root)
-                .ok()
-                .map(|relative| target.join(relative))
-        })
-        .collect()
-}
-
-fn collect_scan_files_inner(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
-    let entries = crate::bounded_file::read_dir_within(root, dir)
-        .with_context(|| format!("Could not read {}", dir.display()))?;
-    for entry in entries {
-        let Some((path, file_type)) = visible_scan_entry(entry?)? else {
-            continue;
-        };
-        collect_entry(root, path, file_type, out)?;
-        if out.len() >= MAX_SCAN_FILES {
-            break;
-        }
-    }
-    Ok(())
-}
-
-fn visible_scan_entry(entry: fs::DirEntry) -> Result<Option<(PathBuf, fs::FileType)>> {
-    let file_type = entry.file_type()?;
-    let name = entry.file_name();
-    if should_skip_path(&name.to_string_lossy()) || file_type.is_symlink() {
-        return Ok(None);
-    }
-    Ok(Some((entry.path(), file_type)))
-}
-
-fn collect_entry(
-    root: &Path,
-    path: PathBuf,
-    file_type: fs::FileType,
-    out: &mut Vec<PathBuf>,
-) -> Result<()> {
-    if file_type.is_dir() {
-        return collect_scan_files_inner(root, &path, out);
-    }
-    if scan_file_is_eligible(root, &path, file_type)? {
-        out.push(path);
-    }
-    Ok(())
-}
-
-fn scan_file_is_eligible(root: &Path, path: &Path, file_type: fs::FileType) -> Result<bool> {
-    if !file_type.is_file() || !is_interesting_source_path(root, path) {
-        return Ok(false);
-    }
-    let metadata = fs::symlink_metadata(path)?;
-    Ok(metadata.file_type().is_file() && metadata.len() <= MAX_FILE_BYTES)
-}
-
-pub(super) fn index_files(root: &Path, files: &[PathBuf]) -> Vec<IndexedFile> {
-    files
-        .iter()
-        .filter_map(|path| {
-            let text =
-                crate::bounded_file::read_utf8_text_within(root, path, MAX_FILE_BYTES as usize)
-                    .ok()?;
-            let relative = path.strip_prefix(root).ok()?.display().to_string();
-            Some(IndexedFile {
-                relative: relative.replace('\\', "/"),
-                text,
-            })
-        })
-        .collect()
-}
+pub(super) use crate::workspace::inventory::SourcePrefix as IndexedFile;
 
 pub(super) fn candidate_files(
     pattern: &LeadPattern,
@@ -193,30 +100,31 @@ fn wildcard_path_match(path: &str, pattern: &str) -> bool {
 }
 
 fn classify_path(path: &str) -> &'static str {
-    if path.starts_with("docs/examples/") || path.contains("/examples/") {
+    if path_in_section(path, "examples") {
         "example-code"
-    } else if path.starts_with("tests/") || path.contains("/tests/") {
+    } else if path_in_section(path, "tests") {
         "test-code"
-    } else if path.starts_with("docs/") {
+    } else if is_documentation(path) {
         "documentation"
     } else {
         "production-code"
     }
 }
 
-fn is_interesting_source_path(root: &Path, path: &Path) -> bool {
-    let Ok(relative) = path.strip_prefix(root) else {
-        return false;
-    };
-    if relative
-        .display()
-        .to_string()
-        .replace('\\', "/")
-        .starts_with(".kuzushi/")
-    {
-        return false;
-    }
-    is_interesting_extension(path) || is_interesting_filename(path)
+fn path_in_section(path: &str, section: &str) -> bool {
+    path.starts_with(&format!("{section}/")) || path.contains(&format!("/{section}/"))
+}
+
+fn is_documentation(path: &str) -> bool {
+    path_in_section(path, "docs") || path.ends_with(".md")
+}
+
+pub(super) fn is_lead_source_path(relative: &str) -> bool {
+    let path = Path::new(relative);
+    !path
+        .components()
+        .any(|part| should_skip_path(&part.as_os_str().to_string_lossy()))
+        && (is_interesting_extension(path) || is_interesting_filename(path))
 }
 
 fn is_interesting_extension(path: &Path) -> bool {
@@ -276,6 +184,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn loose_markdown_is_documentation_while_examples_and_tests_keep_their_role() {
+        assert_eq!(classify_path("README.md"), "documentation");
+        assert_eq!(classify_path("docs/examples/reader.rs"), "example-code");
+        assert_eq!(classify_path("tests/README.md"), "test-code");
+        assert_eq!(classify_path("src/reader.rs"), "production-code");
+    }
+
+    #[test]
     fn path_patterns_match_simple_globs() {
         assert!(path_matches_pattern(
             "docs/examples/ftp-wildcard.c",
@@ -286,28 +202,5 @@ mod tests {
             ".github/workflows/*.yml"
         ));
         assert!(!path_matches_pattern("src/tool.c", "docs/*"));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn scan_and_index_skip_symlinks_outside_target() {
-        use std::os::unix::fs::symlink;
-        let temp = tempfile::tempdir().unwrap();
-        let target = temp.path().join("target");
-        let outside = temp.path().join("outside");
-        fs::create_dir_all(target.join("src")).unwrap();
-        fs::create_dir_all(&outside).unwrap();
-        fs::write(target.join("src/safe.rs"), "fn safe() {}\n").unwrap();
-        fs::write(outside.join("secret.rs"), "OUTSIDE_THREAT_LEAD_TOKEN\n").unwrap();
-        symlink(&outside, target.join("linked-dir")).unwrap();
-        symlink(outside.join("secret.rs"), target.join("linked.rs")).unwrap();
-
-        let mut files = collect_scan_files(&target).unwrap();
-        assert_eq!(files, vec![target.join("src/safe.rs")]);
-        files.push(target.join("linked.rs"));
-        let indexed = index_files(&target, &files);
-
-        assert_eq!(indexed.len(), 1);
-        assert!(!indexed[0].text.contains("OUTSIDE_THREAT_LEAD_TOKEN"));
     }
 }

@@ -1,5 +1,7 @@
 use super::*;
 
+#[cfg(test)]
+mod catalog_pin_tests;
 mod partition_inventory;
 use partition_inventory::count_partition_sources;
 
@@ -25,7 +27,10 @@ pub(crate) fn build_taint_iris_next_plan(
     let structural_queries = build_taint_iris_next_structural_queries(&catalog);
     let prompt_catalog = render_taint_iris_next_catalog(&catalog);
     let backend = configure_taint_iris_next_backend(
-        &roots.repo_root, &options, &planning.languages, &source_inventories.repo,
+        &roots.repo_root,
+        &options,
+        &planning.languages,
+        &source_inventories.repo,
     )?;
     Ok(finalize_taint_iris_next_plan(
         target,
@@ -216,7 +221,7 @@ fn select_taint_iris_next_catalog(
     planning: &TaintIrisNextPlanningContext,
     source_paths: &[TaintIrisNextSourcePath],
 ) -> Result<TaintIrisNextCatalogSelection> {
-    let catalog = initial_taint_iris_next_catalog(repo_root, options, planning);
+    let catalog = initial_taint_iris_next_catalog(repo_root, options, planning)?;
     let discovered_signals =
         discover_taint_iris_next_plan_signals(repo_root, options, &catalog, source_paths)?;
     let catalog = finalize_taint_iris_next_catalog(catalog, options, planning, &discovered_signals);
@@ -230,9 +235,13 @@ fn initial_taint_iris_next_catalog(
     repo_root: &Path,
     options: &TaintIrisNextInput,
     planning: &TaintIrisNextPlanningContext,
-) -> Vec<TaintIrisNextRankedCatalogEntry> {
-    let ranked = ranked_taint_iris_next_catalog(repo_root, options, planning);
-    focused_limited_taint_iris_next_catalog(ranked, &options.cwe_focus, options.caps.max_catalog_entries)
+) -> Result<Vec<TaintIrisNextRankedCatalogEntry>> {
+    let ranked = ranked_taint_iris_next_catalog(repo_root, options, planning)?;
+    Ok(focused_limited_taint_iris_next_catalog(
+        ranked,
+        &options.cwe_focus,
+        options.caps.max_catalog_entries,
+    ))
 }
 
 /// Apply the CWE focus before the entry cap, so a focused CWE that ranks
@@ -251,28 +260,35 @@ fn ranked_taint_iris_next_catalog(
     repo_root: &Path,
     options: &TaintIrisNextInput,
     planning: &TaintIrisNextPlanningContext,
-) -> Vec<TaintIrisNextRankedCatalogEntry> {
-    let mut ranked = target_or_static_taint_iris_next_catalog(repo_root, planning);
+) -> Result<Vec<TaintIrisNextRankedCatalogEntry>> {
+    let mut ranked = target_or_static_taint_iris_next_catalog(
+        repo_root,
+        planning,
+        options.catalog_digest_ref.as_deref(),
+    )?;
     if !options.extra_catalog_entries.is_empty() {
         ranked = merge_taint_iris_next_extra_entries(ranked, &options.extra_catalog_entries);
     }
-    ranked
+    Ok(ranked)
 }
 
 fn target_or_static_taint_iris_next_catalog(
     repo_root: &Path,
     planning: &TaintIrisNextPlanningContext,
-) -> Vec<TaintIrisNextRankedCatalogEntry> {
-    match load_taint_iris_next_target_catalog(repo_root) {
-        Some(custom) => sorted_taint_iris_next_catalog(custom),
-        None => rank_taint_iris_next_catalog(
-            &planning.languages,
-            &planning.threat_cwes,
-            &planning.context_keywords,
-        )
-        .into_iter()
-        .collect::<Vec<_>>(),
-    }
+    expected: Option<&str>,
+) -> Result<Vec<TaintIrisNextRankedCatalogEntry>> {
+    Ok(
+        match super::catalog_draft::selected_catalog(repo_root, expected)? {
+            Some(custom) => sorted_taint_iris_next_catalog(custom),
+            None => rank_taint_iris_next_catalog(
+                &planning.languages,
+                &planning.threat_cwes,
+                &planning.context_keywords,
+            )
+            .into_iter()
+            .collect::<Vec<_>>(),
+        },
+    )
 }
 
 fn sorted_taint_iris_next_catalog(
@@ -948,10 +964,13 @@ mod phantom_focus_entry_tests {
 
     #[test]
     fn cwe_focus_selects_before_the_entry_cap() {
-        let ranked = vec![entry("CWE-79", 95), entry("CWE-89", 88), entry("CWE-22", 70)];
+        let ranked = vec![
+            entry("CWE-79", 95),
+            entry("CWE-89", 88),
+            entry("CWE-22", 70),
+        ];
 
-        let catalog =
-            focused_limited_taint_iris_next_catalog(ranked, &["cwe-89".to_string()], 1);
+        let catalog = focused_limited_taint_iris_next_catalog(ranked, &["cwe-89".to_string()], 1);
 
         assert_eq!(catalog.len(), 1);
         assert_eq!(catalog[0].cwe, "CWE-89");
@@ -1474,16 +1493,32 @@ fn load_selected_taint_threat_model(
     root: &Path,
     selection: &crate::capabilities::threat_model::ThreatModelSelection,
 ) -> Result<TaintIrisNextArtifactLoad> {
-    use crate::capabilities::threat_model::{load_selected_threat_model, threat_model_object_path, ThreatModelSelection};
-    if !selection.is_bound() { return Ok(load_taint_iris_next_threat_model(root)); }
+    use crate::capabilities::threat_model::{
+        load_selected_threat_model, threat_model_object_path, ThreatModelSelection,
+    };
+    if !selection.is_bound() {
+        return Ok(load_taint_iris_next_threat_model(root));
+    }
     let value = load_selected_threat_model(root, selection)?;
     let path = match selection {
-        ThreatModelSelection::Revision(reference) => Some(threat_model_object_path(root, &reference.sha256)?.display().to_string()),
+        ThreatModelSelection::Revision(reference) => Some(
+            threat_model_object_path(root, &reference.sha256)?
+                .display()
+                .to_string(),
+        ),
         _ => None,
     };
-    let reason = if value.is_some() { "selected immutable revision" } else { "explicitly omitted by scan context" };
+    let reason = if value.is_some() {
+        "selected immutable revision"
+    } else {
+        "explicitly omitted by scan context"
+    };
     Ok(TaintIrisNextArtifactLoad {
-        status: TaintIrisNextArtifactStatus { ok: value.is_some(), path, reason: reason.to_string() },
+        status: TaintIrisNextArtifactStatus {
+            ok: value.is_some(),
+            path,
+            reason: reason.to_string(),
+        },
         value,
     })
 }
@@ -1495,19 +1530,27 @@ mod bound_context_tests {
     #[test]
     fn planning_consumes_bound_context_and_reports_explicit_omissions() {
         let root = tempfile::tempdir().unwrap();
-        let first = crate::capabilities::threat_model::commit_test_model(root.path(), "ACCEPTED_ALPHA");
+        let first =
+            crate::capabilities::threat_model::commit_test_model(root.path(), "ACCEPTED_ALPHA");
         crate::capabilities::threat_model::commit_test_model(root.path(), "ACTIVE_BETA");
-        let options = TaintIrisNextInput::from_tool_input(&json!({"threatModelRef": first})).unwrap();
-        let plan = load_taint_iris_next_planning_context(root.path(), root.path(), &options, &[]).unwrap();
+        let options =
+            TaintIrisNextInput::from_tool_input(&json!({"threatModelRef": first})).unwrap();
+        let plan =
+            load_taint_iris_next_planning_context(root.path(), root.path(), &options, &[]).unwrap();
         assert_eq!(plan.threat_model.value.unwrap()["title"], "ACCEPTED_ALPHA");
-        assert_eq!(plan.threat_model.status.reason, "selected immutable revision");
+        assert_eq!(
+            plan.threat_model.status.reason,
+            "selected immutable revision"
+        );
         assert!(plan.threat_model.status.path.unwrap().contains("objects"));
         let none = crate::capabilities::threat_model::ThreatModelSelection::None;
         let omitted = load_selected_taint_threat_model(root.path(), &none).unwrap();
         assert!(omitted.value.is_none());
         assert!(omitted.status.path.is_none());
         assert_eq!(omitted.status.reason, "explicitly omitted by scan context");
-        let path = crate::capabilities::threat_model::threat_model_object_path(root.path(), &first.sha256).unwrap();
+        let path =
+            crate::capabilities::threat_model::threat_model_object_path(root.path(), &first.sha256)
+                .unwrap();
         std::fs::write(path, b"{}").unwrap();
         assert!(load_selected_taint_threat_model(root.path(), &options.threat_model).is_err());
     }

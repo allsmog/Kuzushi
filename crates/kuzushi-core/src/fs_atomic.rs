@@ -7,6 +7,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(test)]
+#[path = "fs_atomic/no_clobber_tests.rs"]
+mod no_clobber_tests;
+
 #[cfg(any(windows, test))]
 #[path = "fs_atomic/replacement_retry.rs"]
 mod replacement_retry;
@@ -79,6 +83,26 @@ pub(crate) fn inject_atomic_write_fault(
 /// best-effort because ordinary directory handles are not portable there.
 pub(crate) fn write_atomic(path: &Path, contents: &str) -> Result<()> {
     write_atomic_bytes(path, contents.as_bytes())
+}
+
+/// Publish a complete new file without replacing an existing destination.
+pub(crate) fn write_new_atomic(path: &Path, contents: &str) -> Result<()> {
+    let parent = path
+        .parent()
+        .context("New artifact has no parent directory")?;
+    fs::create_dir_all(parent).with_context(|| format!("Could not create {}", parent.display()))?;
+    let mut temp = tempfile::NamedTempFile::new_in(parent)?;
+    temp.write_all(contents.as_bytes())?;
+    temp.as_file().sync_all()?;
+    temp.persist_noclobber(path)
+        .map_err(|error| error.error)
+        .with_context(|| {
+            format!(
+                "Could not publish {}; existing file was preserved",
+                path.display()
+            )
+        })?;
+    sync_parent_dir(path).with_context(|| format!("Could not sync parent of {}", path.display()))
 }
 
 pub(crate) fn write_atomic_bytes(path: &Path, contents: &[u8]) -> Result<()> {

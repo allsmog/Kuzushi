@@ -10,7 +10,7 @@ pub(crate) fn run_taint_cwe_select_value(
         return Ok(operator_cwe_selection(cwes));
     }
 
-    query_taint_cwe_selection(input, target, runtime, model)
+    query_taint_cwe_selection(target, runtime, model)
 }
 
 fn operator_cwe_selection(
@@ -25,7 +25,6 @@ fn operator_cwe_selection(
 }
 
 fn query_taint_cwe_selection(
-    input: &Value,
     target: &Path,
     runtime: Option<&dyn AgentRuntime>,
     model: Option<&str>,
@@ -38,17 +37,9 @@ fn query_taint_cwe_selection(
         model.map(str::to_string),
         None,
     )?;
-    let inventory = collect_agentic_repo_inventory(target, 60, 1024)?;
-    let request = AgentQueryRequest::new(
-        model,
-        target.to_path_buf(),
-        TAINT_CWE_SELECT_SYSTEM_PROMPT.to_string(),
-        build_taint_cwe_select_prompt(target, &inventory),
-    )
-    .with_tool_policy(agent_tool_policy_for_input_and_target(input, target)?);
     let raw = query_required_structured_json_with_cost(
         runtime,
-        request,
+        prepare_cwe_selection_request(target, model)?,
         StructuredJsonContract::new(
             "pipeline:taint-cwe-select",
             "TaintCweSelection",
@@ -62,6 +53,20 @@ fn query_taint_cwe_selection(
         cost_usd_exact: raw.cost_usd_exact,
         estimated_cost_usd: raw.estimated_cost_usd,
     })
+}
+
+fn prepare_cwe_selection_request(target: &Path, model: String) -> Result<AgentQueryRequest> {
+    let inventory = collect_agentic_repo_inventory(target, 60, 1024)?;
+    Ok(AgentQueryRequest::new(
+        model,
+        target.to_path_buf(),
+        TAINT_CWE_SELECT_SYSTEM_PROMPT.to_string(),
+        build_taint_cwe_select_prompt(target, &inventory),
+    )
+    .with_tool_policy(crate::runtime::AgentToolPolicy::new(
+        "cwe-selection",
+        std::iter::empty::<&str>(),
+    )))
 }
 
 pub(crate) fn parse_taint_cwes_from_input(input: &Value) -> Result<Option<Vec<TaintCweSelection>>> {
@@ -88,10 +93,7 @@ fn parse_taint_cwe_text(text: &str) -> Vec<TaintCweSelection> {
 }
 
 fn parse_taint_cwe_array(items: &[Value]) -> Result<Vec<TaintCweSelection>> {
-    items
-        .iter()
-        .filter_map(nonempty_taint_cwe_item)
-        .collect()
+    items.iter().filter_map(nonempty_taint_cwe_item).collect()
 }
 
 fn nonempty_taint_cwe_item(item: &Value) -> Option<Result<TaintCweSelection>> {
@@ -109,8 +111,8 @@ fn parse_taint_cwe_object(object: &Map<String, Value>) -> Result<TaintCweSelecti
     let id = read_object_string(object, &["id", "cwe"])
         .context("taint-iris cwes entries require id or cwe")?;
     let name = read_object_string(object, &["name"]).unwrap_or_else(|| id.clone());
-    let reason = read_object_string(object, &["reason"])
-        .unwrap_or_else(|| "operator-supplied".to_string());
+    let reason =
+        read_object_string(object, &["reason"]).unwrap_or_else(|| "operator-supplied".to_string());
     Ok(TaintCweSelection { id, name, reason })
 }
 

@@ -3,6 +3,8 @@ mod answers;
 mod options_browser;
 mod pickers;
 mod report;
+mod run_artifact;
+pub use run_artifact::RunArtifactRouteState;
 #[cfg(test)]
 mod run_artifact_tests;
 pub(crate) use answers::{AnswerFocus, AnswersRouteState};
@@ -963,6 +965,7 @@ fn is_overlay_view(view: &crate::app::ShellView) -> bool {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SceneRouteState {
+    dfd_review_origin: Option<crate::app::state_transitions::DfdReviewOrigin>,
     page: crate::scene3d::VizPage,
     /// A Map-origin zoom stays inside the four Map projections. Explicit
     /// `scene` access restores the complete security-visualization gallery.
@@ -992,6 +995,7 @@ pub struct SceneRouteState {
 impl Default for SceneRouteState {
     fn default() -> Self {
         Self {
+            dfd_review_origin: None,
             page: crate::scene3d::VizPage::default(),
             map_only: false,
             yaw: 0.6,
@@ -1007,6 +1011,27 @@ impl Default for SceneRouteState {
             entry_point_selection: 0,
             entry_point_detail_scroll: 0,
         }
+    }
+}
+
+impl SceneRouteState {
+    pub(crate) fn dfd_review_origin(
+        &self,
+    ) -> Option<&crate::app::state_transitions::DfdReviewOrigin> {
+        self.dfd_review_origin.as_ref()
+    }
+
+    pub(crate) fn set_dfd_review_origin(
+        &mut self,
+        origin: crate::app::state_transitions::DfdReviewOrigin,
+    ) {
+        self.dfd_review_origin = Some(origin);
+    }
+
+    pub(crate) fn take_dfd_review_origin(
+        &mut self,
+    ) -> Option<crate::app::state_transitions::DfdReviewOrigin> {
+        self.dfd_review_origin.take()
     }
 }
 
@@ -1329,6 +1354,13 @@ impl CatalogRouteState {
 
     pub(crate) fn jump_end(&mut self, len: usize) {
         self.cursor = len.saturating_sub(1);
+    }
+
+    pub(crate) fn page_cursor(&mut self, delta: i32, len: usize) {
+        self.cursor = self
+            .cursor
+            .saturating_add_signed(delta as isize)
+            .min(len.saturating_sub(1));
     }
 
     pub(crate) fn recommend_cursor(&self) -> usize {
@@ -1682,6 +1714,8 @@ pub struct LogsRouteState {
     filter_capture: bool,
     following: bool,
     reader_origin: Option<(usize, bool)>,
+    command_text: bool,
+    command_scroll: (usize, bool),
 }
 
 impl LogsRouteState {
@@ -1695,10 +1729,26 @@ impl LogsRouteState {
     }
 
     pub(crate) fn close_reader(&mut self) {
+        if self.command_text {
+            self.toggle_command_text();
+        }
         if let Some((scroll, following)) = self.reader_origin.take() {
             self.scroll.set_scroll(scroll);
             self.following = following;
         }
+    }
+
+    pub(crate) fn command_text_expanded(&self) -> bool {
+        self.command_text
+    }
+
+    pub(crate) fn toggle_command_text(&mut self) {
+        if !self.reader_open() {
+            return;
+        }
+        std::mem::swap(self.scroll.scroll_mut(), &mut self.command_scroll.0);
+        std::mem::swap(&mut self.following, &mut self.command_scroll.1);
+        self.command_text = !self.command_text;
     }
 
     pub(crate) fn open(&mut self) {
@@ -2101,28 +2151,6 @@ impl RunDiffRouteState {
 
     pub(crate) fn label(&self) -> String {
         format!("{} -> {}", self.left, self.right)
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct RunArtifactRouteState {
-    run_id: String,
-    scroll_reset_pending: bool,
-}
-
-impl RunArtifactRouteState {
-    pub(crate) fn open(&mut self, run_id: impl Into<String>) {
-        let run_id = run_id.into();
-        self.scroll_reset_pending |= self.run_id != run_id;
-        self.run_id = run_id;
-    }
-
-    pub(crate) fn run_id(&self) -> &str {
-        &self.run_id
-    }
-
-    pub(crate) fn run_id_owned(&self) -> String {
-        self.run_id.clone()
     }
 }
 

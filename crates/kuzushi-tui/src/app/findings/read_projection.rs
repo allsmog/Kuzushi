@@ -16,6 +16,7 @@ pub(crate) struct FindingsReadRequest {
     pub(crate) operator_state: PathBuf,
     pub(crate) identity_fold: Option<String>,
     pub(crate) filter: Option<String>,
+    pub(crate) batch_id: Option<String>,
     pub(crate) scan_run_refs: Option<Vec<String>>,
     pub(crate) page: kuzushi_core::findings::FindingPageRequest,
     pub(crate) prior_page_policy: String,
@@ -35,13 +36,15 @@ pub(crate) struct FindingsReadSnapshot {
     pub(crate) warnings: Vec<String>,
     pub(crate) page: kuzushi_core::findings::FindingPageMetadata,
     pub(crate) page_recovery_notice: Option<String>,
+    pub(crate) study: Option<kuzushi_core::findings::BatchOccurrenceReport>,
 }
 
 pub(crate) fn read_findings_projection(
     target: &Path,
     request: &FindingsReadRequest,
 ) -> Result<FindingsReadSnapshot> {
-    let filter = parse_read_filter(request.filter.as_deref())?;
+    let mut filter = parse_read_filter(request.filter.as_deref())?;
+    bind_review_batch(&mut filter, request.batch_id.as_deref())?;
     let target = target.to_path_buf();
     let (workspace, store, durable_projection) = open_projection_store(&target, request)?;
     let policy = read_identity_policy(workspace.root(), request)?;
@@ -93,6 +96,7 @@ fn read_projection_snapshot(
         warnings,
         page: page.metadata,
         page_recovery_notice: page.recovery_notice,
+        study: page.study,
     })
 }
 
@@ -137,6 +141,16 @@ fn parse_read_filter(expression: Option<&str>) -> Result<FindingListFilter> {
         Some(expression) => FindingListFilter::from_filter_expression(expression),
         None => Ok(FindingListFilter::with_limit(FindingListFilter::MAX_LIMIT)),
     }
+}
+
+fn bind_review_batch(filter: &mut FindingListFilter, selected: Option<&str>) -> Result<()> {
+    let Some(selected) = selected else {
+        return Ok(());
+    };
+    anyhow::ensure!(filter.batch_id.as_deref().is_none_or(|id| id == selected),
+        "Study filter differs from the selected Review study; use batch clear or choose the same batchId");
+    filter.batch_id = Some(selected.to_owned());
+    Ok(())
 }
 
 fn read_source_completion(

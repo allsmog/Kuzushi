@@ -238,7 +238,11 @@ fn plain_options_model_projects_ready_table() {
     assert_eq!(model.title, "OPTIONS");
     assert_eq!(
         model.summary_rows,
-        vec!["tool: sast:scan".to_string(), "view: options".to_string()]
+        vec![
+            "tool: sast:scan".to_string(),
+            "view: options".to_string(),
+            "purpose: Run the full SAST pipeline for the current target.".to_string(),
+        ]
     );
     let PlainOptionsBody::Table(table) = model.body else {
         panic!("expected ready options table");

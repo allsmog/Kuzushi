@@ -25,8 +25,8 @@ pub(crate) fn gallery_header_lines(app: &ShellApp, width: usize) -> Vec<Line<'st
     let page = app.router.scene().page();
     vec![
         responsive_header_line(
-            &format!("◆ KUZUSHI VIZ — {}", page.label().to_uppercase()),
-            &format!("◆ VIZ — {}", page.label().to_uppercase()),
+            &format!("◆ KUZUSHI VIZ · {}", page.label().to_uppercase()),
+            &format!("◆ VIZ · {}", page.label().to_uppercase()),
             width,
             theme::heading(),
         ),
@@ -38,6 +38,30 @@ pub(crate) fn gallery_header_lines(app: &ShellApp, width: usize) -> Vec<Line<'st
         ),
         responsive_nav_line("pages", &app.active_viz_pages(), page, width, "Tab cycles"),
     ]
+}
+
+pub(super) fn gallery_viewport_header_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    if area.height >= 12 {
+        return gallery_header_lines(app, area.width as usize);
+    }
+    let page = app.router.scene().page();
+    let pages = app.active_viz_pages();
+    let position = page_position_label(&pages, page);
+    vec![Line::styled(
+        fit_plain(
+            &format!("◆ {}{position} · Tab", page.label().to_uppercase(),),
+            area.width as usize,
+        ),
+        theme::heading(),
+    )]
+}
+
+fn line_page_header_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    let mut lines = gallery_viewport_header_lines(app, area);
+    if lines.len() > 1 {
+        lines.push(Line::from(String::new()));
+    }
+    lines
 }
 
 /// Compact header for the visualization embedded directly in Map. The
@@ -116,8 +140,7 @@ pub(crate) fn scene_line_page_viewport_lines(
     if page.is_frame_rendered() {
         return None;
     }
-    let mut lines = gallery_header_lines(app, area.width as usize);
-    lines.push(Line::from(String::new()));
+    let mut lines = line_page_header_lines(app, area);
     let body_height = scene_line_page_body_height(app, area);
     let rows = page_body_rows(app, area, page);
     match rows.window(body_height, scroll) {
@@ -133,9 +156,8 @@ pub(crate) fn scene_line_page_viewport_lines(
     Some(lines)
 }
 
-/// How far PgUp/PgDn move a full-frame line page's row offset: exactly to the
-/// adjacent window of rows, measured on the same body canvas the viewport
-/// draws. `None` for a frame-rendered page.
+/// Page through display lines on the same body canvas the viewport draws.
+/// `None` for a frame-rendered page.
 pub(super) fn scene_line_page_step(
     app: &ShellApp,
     area: Rect,
@@ -181,8 +203,8 @@ fn line_page_step(
 
 /// The display lines a full-frame line page leaves its rows (position label
 /// included) below the pinned gallery header and its blank separator.
-fn scene_line_page_body_height(app: &ShellApp, area: Rect) -> u16 {
-    let pinned = gallery_header_lines(app, area.width as usize).len() + 1;
+pub(super) fn scene_line_page_body_height(app: &ShellApp, area: Rect) -> u16 {
+    let pinned = line_page_header_lines(app, area).len();
     area.height.saturating_sub(pinned as u16)
 }
 
@@ -695,19 +717,24 @@ fn responsive_nav_line(
     if full.width() <= width {
         return full;
     }
-    let position = available
-        .iter()
-        .position(|candidate| *candidate == page)
-        .map_or(1, |index| index + 1);
+    let position = page_position_label(available, page);
     let label = page_nav_label(page);
-    let compact = format!("{prefix} [{label}] · {position}/{} · Tab", available.len());
+    let compact = format!("{prefix} [{label}]{position} · Tab");
     if compact.chars().count() <= width {
         return Line::styled(compact, theme::muted());
     }
     Line::styled(
-        fit_plain(&format!("[{label}] {position}/{}", available.len()), width),
+        fit_plain(&format!("[{label}]{position}"), width),
         theme::muted(),
     )
+}
+
+fn page_position_label(available: &[VizPage], page: VizPage) -> String {
+    available
+        .iter()
+        .position(|candidate| *candidate == page)
+        .map(|index| format!(" · {}/{}", index + 1, available.len()))
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -773,6 +800,28 @@ fn attack_surface_plain_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_empty_gallery_does_not_invent_a_tab_position() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.set_shell_view(crate::ShellView::Scene);
+        app.router.scene_mut().set_page(VizPage::Worklist);
+        assert!(!app.active_viz_pages().contains(&VizPage::Worklist));
+        let title = gallery_viewport_header_lines(&app, Rect::new(0, 0, 40, 10));
+        assert!(title[0].to_string().contains("RISK WORKLIST"));
+        assert!(!title[0].to_string().contains("1/2"));
+        let nav = responsive_nav_line(
+            "pages",
+            &app.active_viz_pages(),
+            VizPage::Worklist,
+            25,
+            "Tab cycles",
+        );
+        assert!(!nav.to_string().contains("1/2"));
+        app.router.scene_mut().set_page(VizPage::Dfd);
+        let title = gallery_viewport_header_lines(&app, Rect::new(0, 0, 40, 10));
+        assert!(title[0].to_string().contains("2/2"));
+    }
     use kuzushi_core::{save_persistent_threat_model, V2Config, WorkspaceTarget};
     use serde_json::json;
 

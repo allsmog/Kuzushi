@@ -5,7 +5,7 @@ assertion_line: 164
  KUZUSHI › workbench · shell route · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
 Kuzushi · VIEW REVIEW · target:no target · o idle · modules:all modules
- type Esc then B review decision backlog · type Enter finding details · type findings reset list · press z open heatmap
+ type Esc then B review decision backlog · type Enter finding details · type findings full queue · press z open heatmap
 
  -- FINDINGS -----------------------------------------------------------------------------------------------------------
 2 of 2 · [completeness:all]

@@ -14,6 +14,30 @@ mod tests {
     }
 
     #[test]
+    fn supplied_option_names_are_canonical_and_exclude_injected_defaults() {
+        let tool = tool_with_options(
+            "owned:options",
+            "Owned option provenance",
+            vec![
+                opt("limit", OptionType::Int, "Limit")
+                    .aliases(&["max_limit"])
+                    .default(json!(10)),
+                opt("enabled", OptionType::Bool, "Enabled").default(json!(false)),
+            ],
+        );
+        let explicit =
+            validate_tool_options_with_sources(&tool, json!({"max_limit":"10"})).unwrap();
+        assert_eq!(
+            explicit.supplied.into_iter().collect::<Vec<_>>(),
+            vec!["limit"]
+        );
+        assert_eq!(explicit.value, json!({"limit":10,"enabled":false}));
+        let defaults = validate_tool_options_with_sources(&tool, Value::Null).unwrap();
+        assert!(defaults.supplied.is_empty());
+        assert_eq!(defaults.value, explicit.value);
+    }
+
+    #[test]
     fn json_options_parse_structured_text_and_keep_other_values() {
         let spec = opt("payload", OptionType::Json, "structured option");
 

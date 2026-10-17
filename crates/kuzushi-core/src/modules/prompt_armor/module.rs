@@ -30,6 +30,7 @@ pub(in crate::modules) fn module() -> BuiltinModule {
         prompt_armor_tools(),
         vec![dag("prompt-armor:scan", "findings", &["context:build"])],
     )
+    .labs()
 }
 
 fn prompt_armor_tools() -> Vec<ToolDescriptor> {

@@ -22,6 +22,15 @@ pub fn report_to_tool_json(report: &FullModeReport) -> serde_json::Value {
         data[key] = value.clone();
     }
     let mut result = crate::module_result::completed_output_result(summary, output_text, data);
+    if report.dry_run
+        && report
+            .plan
+            .coverage
+            .as_ref()
+            .is_some_and(|coverage| coverage.is_partial())
+    {
+        result["status"] = serde_json::json!("partial");
+    }
     for (key, value) in claim {
         result[key] = value;
     }
@@ -40,7 +49,10 @@ fn cost_claim(report: &FullModeReport) -> serde_json::Map<String, serde_json::Va
             "observedCostUsd".to_string(),
             serde_json::json!(report.observed_cost_usd),
         );
-        claim.insert("providerSpendUnresolved".to_string(), serde_json::json!(true));
+        claim.insert(
+            "providerSpendUnresolved".to_string(),
+            serde_json::json!(true),
+        );
     } else if let Some(cost_usd) = report.cost_usd {
         claim.insert("costUsd".to_string(), serde_json::json!(cost_usd));
     }
@@ -48,6 +60,11 @@ fn cost_claim(report: &FullModeReport) -> serde_json::Map<String, serde_json::Va
 }
 
 fn full_mode_summary_text(report: &FullModeReport) -> String {
+    if report.dry_run {
+        if let Some(summary) = super::partial_planning_summary(&report.plan) {
+            return summary;
+        }
+    }
     let mut parts = vec![geometry_phrase(report)];
     parts.extend(findings_phrase(report));
     parts.extend(cached_chunks_phrase(report));
@@ -61,7 +78,11 @@ fn cached_chunks_phrase(report: &FullModeReport) -> Option<String> {
     if report.dry_run || report.chunks_from_cache == 0 {
         return None;
     }
-    let plural = if report.chunks_from_cache == 1 { "" } else { "s" };
+    let plural = if report.chunks_from_cache == 1 {
+        ""
+    } else {
+        "s"
+    };
     Some(format!(
         "{} chunk{plural} replayed from cache",
         report.chunks_from_cache
@@ -82,11 +103,23 @@ fn prefiltered_chunks_phrase(report: &FullModeReport) -> Option<String> {
 fn geometry_phrase(report: &FullModeReport) -> String {
     format!(
         "full-mode:hunt {} {} chunk{} over {} file{}",
-        if report.dry_run { "planned" } else { "completed" },
+        if report.dry_run {
+            "planned"
+        } else {
+            "completed"
+        },
         report.plan.chunks.len(),
-        if report.plan.chunks.len() == 1 { "" } else { "s" },
+        if report.plan.chunks.len() == 1 {
+            ""
+        } else {
+            "s"
+        },
         report.plan.total_files,
-        if report.plan.total_files == 1 { "" } else { "s" }
+        if report.plan.total_files == 1 {
+            ""
+        } else {
+            "s"
+        }
     )
 }
 
@@ -145,6 +178,7 @@ fn failed_chunks_phrase(report: &FullModeReport) -> Option<String> {
 
 fn full_mode_output_text(report: &FullModeReport) -> String {
     let mut lines = vec![full_mode_summary_text(report)];
+    lines.push(super::planning_coverage_detail(&report.plan));
     if !report.dry_run {
         lines.extend(failed_chunks_detail(report));
         append_top_findings(&mut lines, &report.findings);
@@ -226,6 +260,7 @@ mod tests {
         let report = FullModeReport {
             findings: Vec::new(),
             plan: FullModePlan {
+                coverage: None,
                 chunks: Vec::new(),
                 total_files: 2,
                 total_bytes: 128,
@@ -324,9 +359,7 @@ mod tests {
     fn live_output_clamps_top_findings_with_remaining_count() {
         let mut report = sample_report();
         report.findings = (0..12)
-            .map(|index| {
-                test_finding(&format!("rule-{index}"), crate::findings::Severity::High)
-            })
+            .map(|index| test_finding(&format!("rule-{index}"), crate::findings::Severity::High))
             .collect();
 
         let output = report_to_tool_json(&report);
@@ -381,7 +414,7 @@ mod tests {
     }
 
     #[test]
-    fn dry_run_summary_stays_geometry_only() {
+    fn dry_run_summary_stays_geometry_only_and_discloses_missing_coverage() {
         let mut report = sample_report();
         report.dry_run = true;
         report.findings = vec![test_finding("rule-a", crate::findings::Severity::High)];
@@ -392,7 +425,10 @@ mod tests {
             output["summary"],
             serde_json::json!("full-mode:hunt planned 0 chunks over 2 files")
         );
-        assert_eq!(output["output"], output["summary"]);
+        let text = output["output"].as_str().unwrap();
+        assert!(text.starts_with(output["summary"].as_str().unwrap()));
+        assert!(text.contains("Source inventory receipt unavailable."));
+        assert!(!text.contains("high"));
     }
 
     fn test_finding(rule_id: &str, severity: crate::findings::Severity) -> Finding {
@@ -411,6 +447,7 @@ mod tests {
         FullModeReport {
             findings: Vec::new(),
             plan: FullModePlan {
+                coverage: None,
                 chunks: Vec::new(),
                 total_files: 2,
                 total_bytes: 128,

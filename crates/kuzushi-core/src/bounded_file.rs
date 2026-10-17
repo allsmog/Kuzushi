@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, Read, Seek};
 use std::path::{Path, PathBuf};
 
 pub(crate) const BINARY_SNIFF_BYTES: usize = 4 * 1024;
@@ -95,7 +95,19 @@ pub(crate) fn read_utf8_text_prefix_within(
     path: &Path,
     max_bytes: usize,
 ) -> io::Result<BoundedText> {
-    let prefix = read_open_file_prefix(open_regular_file_within(root, path)?, max_bytes)?;
+    read_utf8_text_window_within(root, path, 0, max_bytes)
+}
+
+/// Read a bounded source window from the same contained, symlink-free handle.
+pub(crate) fn read_utf8_text_window_within(
+    root: &Path,
+    path: &Path,
+    offset: u64,
+    max_bytes: usize,
+) -> io::Result<BoundedText> {
+    let mut file = open_regular_file_within(root, path)?;
+    file.seek(io::SeekFrom::Start(offset))?;
+    let prefix = read_open_file_prefix(file, max_bytes)?;
     let text = decode_utf8_prefix(prefix.bytes)?;
     Ok(BoundedText {
         text,
@@ -251,7 +263,6 @@ pub(crate) fn open_regular_file_within(root: &Path, path: &Path) -> io::Result<f
     open_regular_file(&canonical_path_within(root, path)?)
 }
 
-#[cfg(any(unix, windows))]
 pub(crate) fn relative_path_within(
     root: &Path,
     canonical_root: &Path,
@@ -268,7 +279,6 @@ pub(crate) fn relative_path_within(
     Ok(relative.to_path_buf())
 }
 
-#[cfg(any(unix, windows))]
 fn validate_relative_path(root: &Path, path: &Path, relative: &Path) -> io::Result<()> {
     let valid = relative.components().all(|component| {
         matches!(
@@ -291,7 +301,6 @@ fn normal_component(component: std::path::Component<'_>) -> Option<&std::ffi::Os
     }
 }
 
-#[cfg(any(unix, windows))]
 fn workspace_escape_error(root: &Path, path: &Path) -> io::Error {
     io::Error::new(
         io::ErrorKind::PermissionDenied,

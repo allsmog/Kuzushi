@@ -35,17 +35,6 @@ pub(crate) fn findings_schema() -> Value {
     })
 }
 
-pub(crate) fn cwes_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["cwes"],
-        "additionalProperties": true,
-        "properties": {
-            "cwes": {"type": "array", "items": {"type": "object"}}
-        }
-    })
-}
-
 pub(crate) fn invariants_schema() -> Value {
     json!({
         "type": "object",

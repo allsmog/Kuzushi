@@ -58,28 +58,36 @@ live-snap: components-40x12
 expect: PgUp/PgDn page
 keys: NPage
 live-snap: components-page-1-40x12
+expect: COMPONENTS
+expect: q back
 keys: NPage
 live-snap: components-page-2-40x12
+expect: COMPONENTS
+expect: q back
 keys: NPage
 live-snap: components-page-3-40x12
+expect: COMPONENTS
+expect: q back
 keys: NPage
 live-snap: components-page-4-40x12
+expect: COMPONENTS
+expect: q back
 keys: NPage
 live-snap: components-page-5-40x12
+expect: COMPONENTS
+expect: q back
 keys: NPage
 live-snap: components-page-6-40x12
+expect: COMPONENTS
+expect: q back
 keys: NPage
 live-snap: components-page-7-40x12
+expect: COMPONENTS
+expect: q back
 keys: NPage
 live-snap: components-page-8-40x12
-keys: NPage
-live-snap: components-page-9-40x12
-keys: NPage
-live-snap: components-page-10-40x12
-keys: NPage
-live-snap: components-page-11-40x12
-keys: NPage
-live-snap: components-page-12-40x12
+expect: COMPONENTS
+expect: q back
 require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_inventory.py @TMP_TARGET @ART pages
 ask: Are the inventory receipt, source-freshness limitation, manifest constraints and lockfile versions readable through keyboard paging across six terminal sizes?
 resize: 120x36
@@ -111,6 +119,10 @@ live-snap: failure-page-5-40x12
 keys: NPage
 live-snap: failure-page-6-40x12
 require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_inventory.py @TMP_TARGET @ART failure-pages
+expect: Esc dismiss
+keys: Escape
+require-live-snap: 15 COMPONENTS | failure-notice-dismissed
+expect-not: Esc dismiss
 resize: 120x36
 ask: Does a real failed rerun clear current package claims while retaining previous successful receipts and a visible recovery action?
 keys: Escape

@@ -1,0 +1,130 @@
+name: Bounded UAF local navigation preserves partial coverage and protected Review
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_AGENT_MCPS KUZUSHI_MCP_CLANG_BIN
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/uaf_resources.py @TMP_TARGET @ART seed @TMP_HOME
+env: KUZUSHI_MCP_CLANG_BIN=@ART/clang-helper.py
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: options uaf-hunt:hunt
+require-live-snap: 20 uaf-hunt:hunt | resource-options
+keys: Down Down Down Down
+require-live-snap: 20 Key: clangTimeoutSecs | deadline-option
+ask: Are the explicit deadline and step limit understandable before experimental whole-repository analysis, with no implied Scan completion?
+submit: logs
+paste-file: @ART/unbound-command.txt
+keys: Enter
+require-live-snap: 25 approved investigation allowance | unbound-refused
+require-shell: python3 -B @REPO/scripts/devex/fixtures/uaf_resources.py @TMP_TARGET @ART unbound
+paste-file: @ART/approval-command.txt
+keys: Enter
+require-live-snap: 25 REVIEW ALLOWANCE | allowance
+expect: Total provider calls: 3
+expect: Protected review calls: 1
+resize: 40x12
+keys: End
+require-live-snap: 20 y approve | allowance-40x12
+keys: y
+resize: 120x36
+require-live-snap: 25 Allowance approved | approved
+paste-file: @ART/generate-command.txt
+keys: Enter
+require-live-snap: 35 partial local analysis | partial-result
+require-shell: python3 -B @REPO/scripts/devex/fixtures/uaf_resources.py @TMP_TARGET @ART generated
+keys: Escape
+paste-file: @ART/replay-command.txt
+keys: Enter
+require-live-snap: 25 SAVED OUTPUT | result
+expect: UAF source analysis: 0 candidates
+expect: Unverified source-analysis candidates
+expect: timed out
+resize: 160x48
+live-snap: result-160x48
+resize: 96x89
+live-snap: result-96x89
+resize: 80x24
+live-snap: result-80x24
+resize: 60x20
+live-snap: result-60x20
+expect: 0 candidates
+expect: Workspace 0 findings
+resize: 40x12
+keys: Home
+require-live-snap: 20 REPLAY · Result | result-40x12
+expect: 0 candidates
+expect: Outcome · partial
+expect: cost unavailable
+expect: Workspace 0 findings
+keys: NPage
+live-snap: reading-01-40x12
+keys: NPage
+live-snap: reading-02-40x12
+keys: NPage
+live-snap: reading-03-40x12
+keys: NPage
+live-snap: reading-04-40x12
+keys: NPage
+live-snap: reading-05-40x12
+keys: NPage
+live-snap: reading-06-40x12
+keys: NPage
+live-snap: reading-07-40x12
+keys: NPage
+live-snap: reading-08-40x12
+keys: NPage
+live-snap: reading-09-40x12
+keys: NPage
+live-snap: reading-10-40x12
+keys: NPage
+live-snap: reading-11-40x12
+keys: NPage
+live-snap: reading-12-40x12
+keys: NPage
+live-snap: reading-13-40x12
+keys: NPage
+live-snap: reading-14-40x12
+keys: NPage
+live-snap: reading-15-40x12
+keys: NPage
+live-snap: reading-16-40x12
+keys: NPage
+live-snap: reading-17-40x12
+keys: NPage
+live-snap: reading-18-40x12
+keys: End
+require-live-snap: 20 Safe terminal display | result-tail-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/uaf_resources.py @TMP_TARGET @ART narrow
+ask: Does the partial result clearly explain the failed navigation, bounds and unknown cost without suggesting a clean scan at all six sizes?
+resize: 120x36
+submit: logs
+paste-file: @ART/exhausted-command.txt
+keys: Enter
+require-live-snap: 25 allowance exhausted: 2 calls committed | exhausted
+require-shell: python3 -B @REPO/scripts/devex/fixtures/uaf_resources.py @TMP_TARGET @ART exhausted
+keys: C-c
+require-exit: 15
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1 KUZUSHI_MCP_CLANG_BIN=@ART/clang-helper.py
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: logs
+paste-file: @ART/status-command.txt
+keys: Enter
+require-live-snap: 25 Calls committed: 2/3 | recovered-budget
+require-shell: python3 -B @REPO/scripts/devex/fixtures/uaf_resources.py @TMP_TARGET @ART restarted
+paste-file: @ART/replay-command.txt
+keys: Enter
+require-live-snap: 25 SAVED OUTPUT | recovered-result
+resize: 40x12
+keys: Home
+require-live-snap: 20 REPLAY · Result | no-color-result-40x12
+expect: 0 candidates
+expect: Workspace 0 findings
+keys: End
+require-live-snap: 20 Safe terminal display | no-color-result-tail-40x12
+ask: Does no-color restart preserve the partial result, protected Review allocation and reaped helper without extra requests or work?
+keys: C-c
+require-exit: 15

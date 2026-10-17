@@ -104,6 +104,7 @@ fn boundary_context_counts_include_evidence_on_its_recorded_crossing_flows() {
             detail: String::new(),
             evidence: "reader.py:1".into(),
             evidence_paths: vec![],
+            file_paths: vec![],
             target_element_ids: vec!["request".into()],
         }],
         link_state: DfdLinkState::Complete,

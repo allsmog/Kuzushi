@@ -15,6 +15,8 @@ fn metadata_import_does_not_publish_a_scan_attempt() {
         "ndiff:hunt-variants",
         "android-apk:scan",
         "codeql:scan",
+        "pipeline:task-selector",
+        "pipeline:taint-cwe-select",
     ] {
         assert_eq!(
             background_tool_origin_phase(&registry, name, Some(WorkflowPhase::Scan), Some(name)),
@@ -30,6 +32,8 @@ fn mapping_preparation_cannot_replace_a_context_result_even_in_a_map_plan() {
         "context:build",
         "context-lite:index",
         "entry-points:extract",
+        "threat-leads:build",
+        "threat-leads:read",
     ] {
         assert_eq!(
             background_tool_origin_phase(&registry, name, Some(WorkflowPhase::Map), Some(name)),

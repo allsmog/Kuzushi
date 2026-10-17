@@ -332,11 +332,18 @@ impl ShellApp {
         deck.active_batch_report = None;
         deck.active_batch_observation_fingerprints.clear();
         self.refresh_active_batch_report();
+        self.reset_findings_page_request();
+        self.refresh_findings_preserving_active_filter(false);
     }
 
     pub(crate) fn clear_batch_scope(&mut self) {
         self.router.campaign_mut().clear_active_batch();
-        self.log("batch", "batch Review scope cleared");
+        self.reset_findings_page_request();
+        self.refresh_findings_preserving_active_filter(false);
+        self.log(
+            "batch",
+            "Study Review scope cleared. Existing filters remain.",
+        );
     }
 
     pub(crate) fn refresh_active_batch_report(&mut self) {

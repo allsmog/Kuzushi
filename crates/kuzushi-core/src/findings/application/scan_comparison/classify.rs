@@ -42,7 +42,9 @@ impl RetirementCoverage {
             base_target: store.run_target(base_run_id)?,
             scope,
             tools,
-            receipt: store.scan_reassessment_receipt(compare_run_id).unwrap_or(None),
+            receipt: store
+                .scan_reassessment_receipt(compare_run_id)
+                .unwrap_or(None),
         })
     }
 
@@ -56,10 +58,15 @@ impl RetirementCoverage {
     }
 
     fn reassessment_block(&self, finding: &Finding) -> Option<String> {
-        crate::findings::scan_reassessment_block(
-            self.base_target.as_deref(), &self.compare_status, self.receipt.as_ref(),
-            &finding.file_path, &finding.tool,
-        ).map(str::to_string)
+        crate::findings::scan_reassessment_block_for_rule(
+            self.base_target.as_deref(),
+            &self.compare_status,
+            self.receipt.as_ref(),
+            &finding.file_path,
+            &finding.tool,
+            &finding.rule_id,
+        )
+        .map(str::to_string)
     }
 
     /// The compare run's recorded scope, or the run-level reason the compare
@@ -91,6 +98,11 @@ fn engine_block(
     deterministic_block(&finding.tool)
         .or_else(|| evidence_block(&finding.tool, tools))
         .or_else(|| path_block(finding, scope))
+        .or_else(|| {
+            scope
+                .rule_coverage_block(&finding.tool, &finding.rule_id)
+                .map(str::to_string)
+        })
 }
 
 fn deterministic_block(tool: &str) -> Option<String> {

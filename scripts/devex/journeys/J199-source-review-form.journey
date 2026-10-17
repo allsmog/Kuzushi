@@ -13,6 +13,9 @@ keys: Enter
 submit: decision fp Owned public documentation example is intentional
 require-live-snap: 25 recorded observation revision-base-003 | original-human-decision
 require-shell: python3 -B @REPO/scripts/devex/fixtures/source_review_form.py @TMP_TARGET @ART advance
+submit: report
+require-live-snap: 30 1 finding · 1 pending · TP: 0 · FP: 0 | source-stale-report
+expect-not: 1 FP
 submit: findings
 nav-mode:
 keys: Enter
@@ -27,20 +30,26 @@ expect: Public documentation example
 expect: AWS_ACCESS_KEY_ID
 keys: Tab
 require-live-snap: 25 Source reference | source-receipt
-expect: 30baa1f1a56bae4cbb431ba0d453a59a8108a71b
+expect: c557cdbf94b931ecc250b33d33d793f79036a908
 expect: Dirty: true
 keys: Tab
 require-live-snap: 25 AWS_ACCESS_KEY_ID | returned-code
 resize: 160x48
-live-snap: source-form-160x48
+require-live-snap: 20 SHA c557cdbf94b9 | source-form-160x48
+expect: dirty
 resize: 96x89
-live-snap: source-form-96x89
+require-live-snap: 20 SHA c557cdbf94b9 | source-form-96x89
+expect: dirty
 resize: 80x24
-live-snap: source-form-80x24
+require-live-snap: 20 SHA c557cdbf94b9 | source-form-80x24
+expect: dirty
 resize: 60x20
-live-snap: source-form-60x20
+require-live-snap: 20 SHA c557cdbf94b9 | source-form-60x20
+expect: dirty
 resize: 40x12
-live-snap: source-form-40x12
+require-live-snap: 20 SHA c557cdbf94b9 | source-form-40x12
+expect: dirty
+expect: AWS_ACCESS_KEY_ID
 keys: NPage
 live-snap: source-form-40x12-code
 ask: Is the code clearly frozen to the capture, with readable resource limits, source identity, controls and narrow-terminal paging?
@@ -55,24 +64,32 @@ paste-file: @ART/review-reason.txt
 require-live-snap: 25 explicitly deferred | multiline-review-reason
 expect-not: Add a reason
 resize: 160x48
-live-snap: source-reason-160x48
+require-live-snap: 20 SHA c557cdbf94b9 | source-reason-160x48
+expect: dirty
 resize: 96x89
-live-snap: source-reason-96x89
+require-live-snap: 20 SHA c557cdbf94b9 | source-reason-96x89
+expect: dirty
 resize: 80x24
-live-snap: source-reason-80x24
+require-live-snap: 20 SHA c557cdbf94b9 | source-reason-80x24
+expect: dirty
 resize: 60x20
-live-snap: source-reason-60x20
+require-live-snap: 20 SHA c557cdbf94b9 | source-reason-60x20
+expect: dirty
 resize: 40x12
 require-live-snap: 25 Ctrl+S review | source-reason-40x12
+expect: SHA c557cdbf94b9
+expect: dirty
 resize: 120x36
 keys: C-s
 require-live-snap: 25 REVIEW SOURCE DECISION | reviewed-save
 expect: Deferred
 expect: Dirty: true
 resize: 40x12
-live-snap: source-confirm-40x12
+require-live-snap: 25 SHA c557cdbf94b9 | source-confirm-40x12
+expect: dirty
 keys: NPage NPage NPage NPage NPage
-require-live-snap: 25 Dirty: true | source-confirm-40x12-identity
+require-live-snap: 25 SHA c557cdbf94b9 | source-confirm-40x12-identity
+expect: dirty
 resize: 120x36
 keys: Enter
 require-live-snap: 30 SOURCE DECISION SAVED | durable-source-decision
@@ -80,6 +97,11 @@ expect: Decision #2 saved
 require-shell: python3 -B @REPO/scripts/devex/fixtures/source_review_form.py @TMP_TARGET @ART verify
 keys: Escape
 require-live-snap: 25 Viewing Review | returned-review-origin
+submit: report
+require-live-snap: 30 1 finding · 0 pending · TP: 0 · FP: 0 · 1 deferred | source-reviewed-report
+expect: 0 pending · 1 deferred
+ask: Does Report keep the earlier FP decision pending after source drift, then show only the explicitly source-reviewed deferral without changing severity or claiming a fix?
+submit: findings
 ask: Does the entire source review avoid JSON entry, preserve the prior decision and raw observations, and return to Review after one explicit save?
 keys: C-c
 require-exit: 10
@@ -91,5 +113,8 @@ keys: Enter
 require-live-snap: 30 explicitly reviewed source capture | recovered-source-review
 expect: dirty
 require-shell: python3 -B @REPO/scripts/devex/fixtures/source_review_form.py @TMP_TARGET @ART verify
+submit: report
+require-live-snap: 30 1 finding · 0 pending · TP: 0 · FP: 0 · 1 deferred | recovered-report-decisions
+expect: 0 pending · 1 deferred
 keys: C-c
 require-exit: 10

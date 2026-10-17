@@ -1,4 +1,4 @@
-use crate::{app::format_option_value, OptionsFilter, OptionsView, ShellApp};
+use crate::{app::format_option_value_for_spec, OptionsFilter, OptionsView, ShellApp};
 use kuzushi_core::modules::{OptionSpec, OptionType};
 use kuzushi_core::OptionScope;
 
@@ -161,6 +161,15 @@ fn options_model_with_support(
     let mut model = options_model_body(view, body);
     model.summary_rows.extend(tool_support_row(app, tool));
     model
+        .summary_rows
+        .push(options_summary_row("purpose", &tool.description));
+    model
+}
+
+pub(crate) fn options_tool_description(app: &ShellApp, view: &OptionsView) -> Option<String> {
+    app.registry()
+        .resolve_tool(&view.tool_name)
+        .map(|tool| tool.description.clone())
 }
 
 fn tool_support_row(
@@ -278,13 +287,13 @@ fn option_row(
     Some(OptionsTableRow {
         cells: [
             spec.name.clone(),
-            stored_value_label(current, scope),
+            stored_value_label(spec, current, scope),
             spec.default
                 .as_ref()
-                .map(format_option_value)
+                .map(|value| format_option_value_for_spec(spec, value))
                 .unwrap_or_else(dash),
             required_label(spec, current).to_string(),
-            option_type_label(spec.option_type).to_string(),
+            option_type_label(spec).to_string(),
             option_alias_label(spec),
             option_description(spec),
         ],
@@ -292,7 +301,11 @@ fn option_row(
     })
 }
 
-fn stored_value_label(current: Option<&serde_json::Value>, scope: Option<OptionScope>) -> String {
+fn stored_value_label(
+    spec: &OptionSpec,
+    current: Option<&serde_json::Value>,
+    scope: Option<OptionScope>,
+) -> String {
     let Some(current) = current else {
         return dash();
     };
@@ -302,7 +315,7 @@ fn stored_value_label(current: Option<&serde_json::Value>, scope: Option<OptionS
         Some(OptionScope::Session) => "session",
         None => "unknown source",
     };
-    format!("{} · {scope}", format_option_value(current))
+    format!("{} · {scope}", format_option_value_for_spec(spec, current))
 }
 
 fn options_filter_label(filter: OptionsFilter) -> &'static str {
@@ -355,8 +368,11 @@ fn required_label(spec: &OptionSpec, current: Option<&serde_json::Value>) -> &'s
     }
 }
 
-fn option_type_label(option_type: OptionType) -> &'static str {
-    match option_type {
+fn option_type_label(spec: &OptionSpec) -> &'static str {
+    if spec.option_type == OptionType::Json && spec.editable_json {
+        return "JSON";
+    }
+    match spec.option_type {
         OptionType::String => "text",
         OptionType::Bool => "yes/no",
         OptionType::Int => "whole number",

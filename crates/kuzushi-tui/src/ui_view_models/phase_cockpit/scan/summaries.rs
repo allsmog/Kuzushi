@@ -8,7 +8,9 @@ pub(super) fn terminal_scan_summary(entry: &RunSummaryEntry) -> Option<&RunSumma
     let RunSummaryEntryState::Ready(summary) = &entry.state else {
         return None;
     };
-    (summary_is_terminal(summary) && summary_is_scan(summary)).then_some(summary)
+    (summary_is_terminal(summary)
+        && crate::ui_view_models::scan_summary::has_scan_phase_result(summary))
+    .then_some(summary)
 }
 
 fn summary_is_terminal(summary: &RunSummary) -> bool {

@@ -1,0 +1,114 @@
+name: Study Review membership precedes pagination and retains workspace finding identities
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_AGENT_MCPS
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/study_review_paging.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: batch batch-test
+submit: findings
+require-live-snap: 25 canceled-member | study-review
+expect: batch:batch-test
+expect: completed-member
+expect: superseded-member
+expect-not: outside.0
+resize: 160x48
+live-snap: study-160x48
+resize: 96x89
+live-snap: study-96x89
+resize: 80x24
+live-snap: study-80x24
+resize: 60x20
+live-snap: study-60x20
+resize: 40x12
+live-snap: study-40x12
+nav-mode:
+keys: End
+live-snap: study-last-40x12
+ask: Are all three study findings reachable at all six sizes, with study membership distinct from the global history and completed-pass recurrence?
+submit: findings filter limit:2
+nav-mode:
+require-live-snap: 25 Ctrl+N | first-study-page
+keys: C-n
+require-live-snap: 25 Ctrl+P | last-study-page
+keys: C-p
+require-live-snap: 25 Ctrl+N | restored-study-page
+resize: 120x36
+submit: batch clear
+submit: findings
+require-live-snap: 25 outside. | workspace-restored
+expect-not: batch:batch-test
+expect: 2 of 503 matching findings loaded
+nav-mode:
+require-live-snap: 25 Ctrl+N | workspace-paging-controls
+submit: findings filter clear
+nav-mode:
+require-live-snap: 25 Ctrl+N | global-first-page
+keys: C-n
+require-live-snap: 25 canceled-member | global-tail
+expect: completed-member
+expect: superseded-member
+expect: Ctrl+P
+ask: Does clearing the study restore the workspace list while retaining ordinary filters, with the same finding aliases on the final global page?
+submit: batch batch-test
+submit: findings filter severity:info limit:3
+require-live-snap: 25 canceled-member | study-before-metadata-error
+nav-mode:
+keys: End
+require-live-snap: 25 F-0503 · FINDING | selected-before-metadata-error
+require-shell: python3 -B @REPO/scripts/devex/fixtures/study_review_paging.py @TMP_TARGET @ART hide-plan
+submit: findings refresh
+require-live-snap: 25 FINDINGS · study unavailable | unreadable-study
+expect: batch:batch-test
+expect: severity:info limit:3
+expect-not: outside.
+expect-not: canceled-member
+expect-not: 0 matches
+expect-not: previous results
+keys: Escape
+resize: 160x48
+live-snap: unavailable-160x48
+resize: 96x89
+live-snap: unavailable-96x89
+resize: 80x24
+live-snap: unavailable-80x24
+resize: 60x20
+live-snap: unavailable-60x20
+resize: 40x12
+require-live-snap: 20 batch clear | unavailable-40x12
+expect: findings refresh
+expect-not: 0 matches
+ask: Does an unavailable study retain its scope and show both retry and explicit workspace-history controls at every size without claiming zero findings?
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/study_review_paging.py @TMP_TARGET @ART restore-plan
+submit: findings refresh
+require-live-snap: 25 canceled-member | study-restored-after-error
+expect: severity:info limit:3
+expect: F-0503 · FINDING
+require-shell: python3 -B @REPO/scripts/devex/fixtures/study_review_paging.py @TMP_TARGET @ART read
+keys: C-c
+require-exit: 15
+env: NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: batch batch-test
+submit: findings
+require-live-snap: 25 canceled-member | recovered-study
+expect: batch:batch-test
+expect: completed-member
+expect: superseded-member
+require-shell: python3 -B @REPO/scripts/devex/fixtures/study_review_paging.py @TMP_TARGET @ART hide-plan
+submit: findings refresh
+require-live-snap: 25 FINDINGS · study unavailable | no-color-study-unavailable
+expect: findings refresh
+expect: batch clear
+expect-not: 0 matches
+require-shell: python3 -B @REPO/scripts/devex/fixtures/study_review_paging.py @TMP_TARGET @ART restore-plan
+submit: findings refresh
+require-live-snap: 25 canceled-member | no-color-study-restored
+require-shell: python3 -B @REPO/scripts/devex/fixtures/study_review_paging.py @TMP_TARGET @ART restarted
+ask: Does no-color restart preserve all raw observations and study membership without new jobs, decisions, requests or inferred fixes?
+keys: C-c
+require-exit: 15

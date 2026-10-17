@@ -10,5 +10,3 @@ pub(crate) use build_uaf_hunt_prompt::{build_uaf_hunt_user_prompt, UAF_HUNT_SYST
 pub(crate) use clang_tool_catalog::uaf_hunt_agent_tools;
 pub(crate) use normalize_findings::normalize_uaf_hunt_findings;
 pub use run_uaf_hunt_report::run_uaf_hunt_report;
-
-pub(crate) use crate::capabilities::uaf_hunt::persistence::persist_uaf_hunt_findings;

@@ -11,6 +11,19 @@ pub(crate) struct HygieneInspectionReceipt {
     pub gaps: Vec<String>,
 }
 
+impl HygieneInspectionReceipt {
+    fn to_json(&self) -> Value {
+        serde_json::json!({
+            "regularFilesEnumerated": self.regular_files_enumerated,
+            "manifestsDiscovered": self.manifests_discovered,
+            "manifestsAttempted": self.manifests_attempted,
+            "manifestsInspected": self.manifests_inspected,
+            "contentBytesReserved": self.content_bytes_reserved,
+            "gaps": self.gaps,
+        })
+    }
+}
+
 pub(crate) struct HygieneInspection {
     pub report: DepHygieneReport,
     pub receipt: HygieneInspectionReceipt,
@@ -46,8 +59,7 @@ impl HygieneInspection {
 
     pub(crate) fn to_tool_json(&self) -> Value {
         let mut result = self.report.to_tool_json();
-        result["data"]["inspection"] =
-            serde_json::to_value(&self.receipt).expect("inspection contains serializable values");
+        result["data"]["inspection"] = self.receipt.to_json();
         result["data"]["inspection"]["limits"] = json_limits();
         result["data"]["inspection"]["exclusions"] = serde_json::json!([
             "symlinks",
@@ -113,3 +125,6 @@ fn append_gaps(lines: &mut Vec<String>, gaps: &[String]) {
         lines.push("Further gaps remain in the structured inspection receipt.".into());
     }
 }
+
+#[cfg(test)]
+mod tests;

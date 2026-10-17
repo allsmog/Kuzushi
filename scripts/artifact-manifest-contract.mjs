@@ -12,6 +12,7 @@ import {
 import {
   rustArrayConstantBody,
   rustCanonicalRunArtifactSpecs,
+  rustFunctionBody,
   rustStringArrayConstant,
   rustStringConstants,
 } from "./rust-source-contracts.mjs";
@@ -893,13 +894,15 @@ export function checkOauthCredentialPathHelper(root) {
 export function checkThreatLeadsPathHelpers(root) {
   const sources = readThreatLeadsPathSources(root);
   if (Array.isArray(sources)) return sources;
-  const { file, outputFile, source, output } = sources;
+  const { file, outputFile, publicationFile, source, output, publication } = sources;
   return [
     ...threatLeadsConstantFailures(source),
+    ...threatLeadsPublicationChecks(source, publication),
     ...threatLeadsSourcePathFailures(source),
     ...threatLeadsOutputPathFailures(output),
     ...threatLeadsHardcodedPathFailures(file, source),
     ...threatLeadsHardcodedPathFailures(outputFile, output),
+    ...threatLeadsHardcodedPathFailures(publicationFile, publication),
   ];
 }
 
@@ -1062,20 +1065,17 @@ export function checkTuiPrereqChainPathHelpers(root) {
   if (!existsSync(sourcePath)) return [`TUI prereq chain path helper: missing ${file}`];
   const source = readFileSync(sourcePath, "utf8");
   const productionSource = source.split("#[cfg(test)]")[0];
-  const constants = rustStringConstants(source, ["TAINT_IRIS_NEXT_CATALOG_ARTIFACT"]);
   return [
-    constants.TAINT_IRIS_NEXT_CATALOG_ARTIFACT === "taint-iris-next-catalog.json"
+    source.includes("kuzushi_core::context_snapshot_path(target)")
       ? null
-      : "TUI prereq chain must name TAINT_IRIS_NEXT_CATALOG_ARTIFACT as taint-iris-next-catalog.json",
-    source.includes("kuzushi_core::workspace_state_root(target)")
-      ? null
-      : "TUI prereq chain must derive artifact paths from workspace_state_root",
+      : "TUI context prerequisite must use context_snapshot_path",
     source.includes("kuzushi_core::capabilities::persistent_threat_model_path(target)")
       ? null
-      : "TUI prereq chain threat-model step must use persistent_threat_model_path",
-    source.includes("prereq_workspace_root(target).join(TAINT_IRIS_NEXT_CATALOG_ARTIFACT)")
-      ? null
-      : "TUI prereq chain taint catalog step must use shared root helper",
+      : "TUI threat-model prerequisite must use persistent_threat_model_path",
+    productionSource.includes("fn taint_catalog_step(") ||
+    productionSource.includes("PrereqChainKind::TaintCatalog")
+      ? "TUI must not generate or accept a catalog as an implicit prerequisite"
+      : null,
     productionSource.includes('join(".kuzushi")') || productionSource.includes('join(".kuzushi/')
       ? "TUI prereq chain must not hardcode .kuzushi artifact paths"
       : null,
@@ -2206,9 +2206,14 @@ function readThreatLeadsPathSources(root) {
   const outputFile = "crates/kuzushi-core/src/capabilities/threat_leads/output.rs";
   const sourcePath = path.join(root, file);
   const outputPath = path.join(root, outputFile);
+  const publicationFile = "crates/kuzushi-core/src/capabilities/threat_leads/publication.rs";
+  const publicationPath = path.join(root, publicationFile);
   if (!existsSync(sourcePath)) return [`threat-leads path helper: missing ${file}`];
   if (!existsSync(outputPath)) return [`threat-leads output path consumer: missing ${outputFile}`];
+  if (!existsSync(publicationPath)) return [`threat-leads publication: missing ${publicationFile}`];
   return {
+    publicationFile,
+    publication: readFileSync(publicationPath, "utf8"),
     file,
     outputFile,
     source: readFileSync(sourcePath, "utf8"),
@@ -2248,13 +2253,36 @@ function threatLeadsSourcePathFailures(source) {
     source.includes("let path = threat_leads_artifact_path(target)")
       ? null
       : "threat-leads read/write must use threat_leads_artifact_path",
-    source.includes("let summary_path = threat_leads_summary_path(target)")
-      ? null
-      : "threat-leads write must use threat_leads_summary_path",
     source.includes("persistent_threat_model_path(target)")
       ? null
       : "threat-leads threat-model reader must use persistent_threat_model_path",
   ].filter(Boolean);
+}
+
+export function threatLeadsPublicationChecks(source, publication) {
+  const build = rustFunctionBody(source, "build_threat_leads_tool") ?? "";
+  const publish = rustFunctionBody(publication, "publish_with") ?? "";
+  const repair = rustFunctionBody(publication, "repair") ?? "";
+  return [
+    [
+      build.includes("publication::publish(&target, &report)"),
+      "threat-leads build must use its publisher",
+    ],
+    [
+      publish.includes("threat_leads_artifact_path(target)"),
+      "threat-leads write must use threat_leads_artifact_path",
+    ],
+    [
+      publish.includes("threat_leads_summary_path(target)"),
+      "threat-leads write must use threat_leads_summary_path",
+    ],
+    [
+      repair.includes("threat_leads_summary_path(target)"),
+      "threat-leads repair must use threat_leads_summary_path",
+    ],
+  ]
+    .filter(([present]) => !present)
+    .map(([, failure]) => failure);
 }
 
 function threatLeadsOutputPathFailures(output) {

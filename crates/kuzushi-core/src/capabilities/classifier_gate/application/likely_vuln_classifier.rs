@@ -2,6 +2,7 @@ use super::*;
 
 impl<'a> LikelyVulnClassifier<'a> {
     pub fn new(runtime: &'a RoutedRuntime<'a>, cfg: ClassifierConfig) -> Result<Self> {
+        cfg.validate()?;
         let quantile = match cfg.state_db.as_deref() {
             Some(db) => load_quantile(db, cfg.target_percentile)?,
             None => QuantileEstimator::new(cfg.target_percentile),
@@ -45,7 +46,7 @@ impl<'a> LikelyVulnClassifier<'a> {
         let cost = response.checked_cost_report()?;
         let assessment = match parsed_classifier_score(&response) {
             Some(score) => {
-                self.observe_score(score);
+                self.observe_score(score)?;
                 ClassifierAssessment::Scored(score)
             }
             None => {
@@ -64,19 +65,28 @@ impl<'a> LikelyVulnClassifier<'a> {
             model,
             cwd.to_path_buf(),
             CLASSIFIER_SYSTEM_PROMPT,
-            render_prompt(finding),
-        );
+            bounded_classifier_prompt(finding)?,
+        )
+        .with_stage("finding-classifier")
+        .with_tool_policy(crate::runtime::AgentToolPolicy::new(
+            "finding-metadata-opinion",
+            std::iter::empty::<&str>(),
+        ))
+        .with_max_model_turns(Some(1))
+        .with_max_output_tokens(512);
         crate::runtime::query_blocking_checked(self.runtime, request)
             .context("classifier gate query failed")
     }
 
-    fn observe_score(&self, score: Score) {
+    fn observe_score(&self, score: Score) -> Result<()> {
         let mut quantile = self.quantile.lock().expect("quantile mutex poisoned");
-        quantile.observe(score);
+        let mut next = quantile.clone();
+        next.observe(score);
         if let Some(ref db) = self.cfg.state_db {
-            // Best-effort: a persistence failure must not block the scan.
-            let _ = save_quantile(db, &quantile);
+            save_quantile(db, &next).context("Could not retain classifier sample")?;
         }
+        *quantile = next;
+        Ok(())
     }
 
     /// Whether an assessment graduates to the deep auditor.
@@ -146,29 +156,17 @@ impl<'a> LikelyVulnClassifier<'a> {
 }
 
 fn parsed_classifier_score(response: &AgentQueryResponse) -> Option<Score> {
-    let parsed = response
-        .structured
-        .as_ref()
-        .and_then(|v| serde_json::from_value::<ClassifierResponse>(v.clone()).ok())
-        .or_else(|| try_loose_parse(&response.text))?;
-    Some(classifier_response_score(parsed))
-}
-
-fn classifier_response_score(response: ClassifierResponse) -> Score {
-    let score = if response.score > 0.0 {
-        response.score
-    } else if response.likely {
-        0.85
-    } else {
-        0.15
+    let parsed = match &response.structured {
+        Some(value) => serde_json::from_value::<ClassifierResponse>(value.clone()).ok()?,
+        None => try_loose_parse(&response.text)?,
     };
-    score.clamp(0.0, 1.0)
+    (parsed.score.is_finite() && (0.0..=1.0).contains(&parsed.score)).then_some(parsed.score)
 }
 
 fn record_parse_degraded() {
     crate::runtime_diagnostics::record_runtime_diagnostic(
         "classifier",
-        "classifier gate response carried no usable verdict; escalating to deep audit \
-         without a score and without training the quantile",
+        "classifier response carried no usable score; preserving review eligibility \
+         without a score, quantile sample or follow-up request",
     );
 }

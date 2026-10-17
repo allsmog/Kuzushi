@@ -3,6 +3,28 @@ use crate::findings::application::project_finding_generations;
 use crate::findings::IdentityFoldPolicy;
 
 impl FindingStore {
+    pub(in crate::findings) fn finding_fingerprints_observed_in_runs(
+        &self,
+        runs: &[String],
+        policy: IdentityFoldPolicy,
+    ) -> Result<std::collections::BTreeSet<String>> {
+        let mut member_ids = std::collections::BTreeSet::new();
+        for run in runs {
+            member_ids.extend(
+                self.list_findings_for_scan_id(run)?
+                    .iter()
+                    .filter_map(|row| row.id),
+            );
+        }
+        Ok(
+            crate::findings::application::representative_fingerprints_for_members(
+                self.finding_generations_in_observation_order()?,
+                policy,
+                &member_ids,
+            ),
+        )
+    }
+
     pub fn list_findings(&self, limit: usize) -> Result<Vec<Finding>> {
         Ok(self
             .list_findings_filtered(&FindingListFilter::with_limit(limit))?
@@ -158,6 +180,10 @@ fn collect_filtered_findings(
     rows: Vec<Finding>,
     filter: &FindingListFilter,
 ) -> Result<FindingListReport> {
+    anyhow::ensure!(
+        filter.batch_id.is_none(),
+        "Study membership needs the workspace findings reader; use findings:list"
+    );
     // Aliases are positional over the sorted whole ledger, so they must be
     // assigned here — before filtering — and travel with the kept rows.
     let alias_by_row = ledger_aliases_by_row_index(&rows);
@@ -165,11 +191,7 @@ fn collect_filtered_findings(
     let mut findings = Vec::new();
     let mut aliases = Vec::new();
     let review_cache = store.latest_review_decisions_for_findings(&rows, false)?;
-    let human_review_cache = filter
-        .has_derived_triage_state_filter()
-        .then(|| store.latest_review_decisions_for_findings(&rows, true))
-        .transpose()?
-        .unwrap_or_default();
+    let human_review_cache = human_decisions_for_filter(store, &rows, filter)?;
     let stable_fps = rows.iter().map(finding_stable_key).collect::<Vec<_>>();
     let lifecycle_cache = store.current_statuses_for(&stable_fps)?;
     for (index, row) in rows.into_iter().enumerate() {
@@ -193,6 +215,18 @@ fn collect_filtered_findings(
         findings,
         aliases,
     })
+}
+
+fn human_decisions_for_filter(
+    store: &FindingStore,
+    rows: &[Finding],
+    filter: &FindingListFilter,
+) -> Result<std::collections::BTreeMap<String, ReviewDecision>> {
+    filter
+        .has_derived_triage_state_filter()
+        .then(|| store.latest_review_decisions_for_findings(rows, true))
+        .transpose()
+        .map(Option::unwrap_or_default)
 }
 
 fn review_decisions_by_fingerprint(

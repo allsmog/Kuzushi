@@ -7,6 +7,10 @@ initialized an existing database. The initial contract run failed all five
 checks. The corrected suite passes seven checks, including parent/child finding
 isolation and honest exhaustion of large coverage history.
 
+The later [bounded deep-worklist checkpoint](bounded-deep-worklist-2026-10-15.md)
+adds finite prefix inspection and labeled saved-result reading, and makes
+contributor degradation partial. Counts below describe the earlier checkpoint.
+
 ## Functional contracts
 
 `worklist:rank` is auxiliary Map work with `phase_result: false`. It resolves its

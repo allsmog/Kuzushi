@@ -10,6 +10,10 @@ use std::path::{Path, PathBuf};
 
 pub(crate) fn scope(root: &Path, update: ScopeUpdate, clear: bool) -> Result<Value> {
     if clear {
+        anyhow::ensure!(
+            update.is_empty(),
+            "clear cannot be combined with vendor scope updates; existing scope was preserved"
+        );
         return clear_scope(root);
     }
     update_scope(root, update)
@@ -45,7 +49,7 @@ fn document_count(scope: &Value) -> usize {
 
 fn scope_response(scope: Value, scope_path: PathBuf, docs: usize) -> Value {
     let output = format!(
-        "Vendor assessment scope\n  Vendor: {}\n  Product: {}\n  Documents: {}\n  Scope: {}",
+        "Vendor assessment scope\n  Vendor: {}\n  Product: {}\n  Profile: {}\n  Documents: {}\n  Scope: {}",
         scope
             .get("vendorName")
             .and_then(Value::as_str)
@@ -56,6 +60,7 @@ fn scope_response(scope: Value, scope_path: PathBuf, docs: usize) -> Value {
             .and_then(Value::as_str)
             .filter(|v| !v.is_empty())
             .unwrap_or("(unset)"),
+        scope.get("profile").and_then(Value::as_str).unwrap_or("(unset)"),
         docs,
         scope_path.display(),
     );

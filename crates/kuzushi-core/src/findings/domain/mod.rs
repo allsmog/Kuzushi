@@ -7,6 +7,7 @@ pub(crate) use goal_relevance::GOAL_RELEVANCE_SUBJECT;
 pub use goal_relevance::{FindingGoalAssessment, FindingGoalBasis, GoalRelevance};
 mod confidence_band;
 mod deterministic_scanners;
+mod evidence_kind;
 mod extract_cwe;
 mod finding_identity;
 mod finding_record;
@@ -24,6 +25,8 @@ mod persisted_results;
 mod proof_confidence;
 mod relationship;
 mod review_decision;
+mod review_decision_counts;
+pub use review_decision_counts::ReviewDecisionCounts;
 mod review_source_capture;
 pub use review_source_capture::{ReviewCapturedFile, ReviewCapturedFileState, ReviewSourceCapture};
 mod static_proof_state;
@@ -37,10 +40,12 @@ pub(crate) use deterministic_scanners::{
 pub use extract_cwe::extract_cwe;
 #[cfg(test)]
 pub(crate) use finding_identity::finding_identity_key_for_finding;
-pub(crate) use finding_identity::finding_identity_key_for_finding_at_target;
 pub use finding_identity::{
     compute_finding_identity_id, finding_identity_alias, finding_observation_identity,
     FindingIdentityBasis, FindingIdentityMatchTier,
+};
+pub(crate) use finding_identity::{
+    finding_identity_key_for_captured_source, finding_identity_key_for_finding_at_target,
 };
 pub use finding_record::{
     compute_class_dedup_key, compute_dedup_key, compute_root_cause_key, compute_source_signature,

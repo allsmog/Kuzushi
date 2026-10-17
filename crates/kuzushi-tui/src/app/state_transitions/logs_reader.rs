@@ -30,6 +30,7 @@ impl ShellApp {
 
     fn reduce_logs_reader_key(&mut self, code: KeyCode) -> InputUpdate {
         match code {
+            KeyCode::Char('c') => self.router.logs_mut().toggle_command_text(),
             KeyCode::Esc | KeyCode::Char('z') | KeyCode::Char('q') => {
                 self.router.logs_mut().close_reader()
             }

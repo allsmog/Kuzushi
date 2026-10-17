@@ -53,3 +53,17 @@ fn new_replay_preserves_draft_cursor_and_workflow_origin() {
     assert_eq!(app.input(), "retained\noperator draft");
     assert_eq!(app.cursor(), cursor);
 }
+
+#[test]
+fn a_new_run_resets_receipt_choice_and_both_scroll_positions() {
+    let mut router = RouterState::default();
+    open(&mut router, ShellView::Replay, "first");
+    router.replay_mut().toggle_receipt(3);
+    router.default_scroll_mut().set(17);
+    open(&mut router, ShellView::Replay, "first");
+    assert!(router.replay().full_receipt());
+    open(&mut router, ShellView::Replay, "second");
+    assert!(!router.replay().full_receipt());
+    assert_eq!(router.default_scroll().offset(), 0);
+    assert_eq!(router.replay_mut().toggle_receipt(0), 0);
+}

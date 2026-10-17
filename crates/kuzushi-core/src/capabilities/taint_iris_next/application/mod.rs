@@ -3,11 +3,15 @@ use super::*;
 mod agent;
 mod artifact_paths;
 mod backend;
+mod catalog_draft;
 mod codeql_build;
 mod codeql_dataflow;
 mod context_languages;
 mod cpgrs_dataflow;
 mod dynamic_catalog;
+pub(crate) use catalog_draft::{
+    accept_catalog_draft, read_catalog_draft, run_taint_iris_next_catalog_report,
+};
 mod entry_point_relevance;
 mod evidence;
 mod hunt_report;

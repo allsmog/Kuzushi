@@ -20,11 +20,7 @@ pub(crate) fn run_shinsa_assessment(
     emit_shinsa_done(ctx, &run, findings.len());
     let cost = raw.cost_report()?;
     Ok(shinsa_assessment_response(
-        &run,
-        artifacts,
-        findings,
-        persisted,
-        cost,
+        &run, artifacts, findings, persisted, cost,
     ))
 }
 
@@ -234,7 +230,9 @@ fn query_shinsa_report(
             target.to_path_buf(),
             "You are Kuzushi's Shinsa compliance adapter. Return only JSON with summary, findings, controls, and maturity.".to_string(),
             prompt::build_shinsa_prompt(&prompt),
-        ),
+        ).with_tool_policy(crate::runtime::AgentToolPolicy::new(
+            "compliance-assessment", std::iter::empty::<&str>(),
+        )),
         StructuredJsonContract::new(prompt.tool_name, "ShinsaReport", findings_schema()),
         require_json_object,
     )

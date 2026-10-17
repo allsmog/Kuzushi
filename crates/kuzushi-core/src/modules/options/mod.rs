@@ -2,8 +2,12 @@ use super::*;
 
 use anyhow::{Context, Result};
 pub(in crate::modules) use coerce_int_option::*;
+#[cfg(test)]
+pub(in crate::modules) use json_summary::validate_tool_input_options;
 pub use json_summary::{coerce_option_value, ensure_declared_tool_option};
-pub(in crate::modules) use json_summary::{json_summary, validate_tool_input_options};
+pub(in crate::modules) use json_summary::{
+    json_summary, validate_tool_options_with_sources, ValidatedToolOptions,
+};
 use serde_json::{Map, Value};
 mod coerce_int_option;
 mod json_summary;

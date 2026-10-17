@@ -659,6 +659,14 @@ In the shell, `ask` opens its question and allowance review after a current Map
 is accepted. `G` edits the question before freezing, approval and start remain
 separate actions, and the saved answer changes neither context nor findings.
 
+**Workflow proposals**: `planner:propose` drafts one bounded proposal from the
+operator's goal and selected phase. It is experimental and requires an approved
+fixed job and shared allowance. `campaign:context-study` with
+`generationTool=planner:propose` prepares that job without a model request. The
+shell's `plan <request>` opens the preparation form; `/plan` reopens a kept
+draft. Read the proposed actions before applying them. Generating a proposal
+executes no tools, changes no settings and approves no follow-up work.
+
 **Finding review**: `findings:groups` reads consolidated observations and their
 independent recurrence. `findings:relationships` lists duplicate, related and
 uncertain links; `findings:relationship` records a reversible decision with a
@@ -727,6 +735,17 @@ taint-iris-next family (`taint-iris-next:hunt`,
 variant analysis via `variant:hunt` + `variant:lift-pattern` with CVE
 diff mining in `ndiff:fetch-cve`, `ndiff:extract-fix-pattern`,
 `ndiff:hunt-variants`.
+
+`taint-iris-next:catalog-read` inspects draft or accepted catalog references.
+`taint-iris-next:catalog-accept` explicitly accepts a reviewed draft with source
+and active-version checks. Neither starts discovery or completes Map.
+`replay <run|latest>` reads a single saved result without transcript history;
+Tab switches to the receipt. The reader heading stays visible while scrolling;
+an overflowing document shows its row position. Narrow footers show `Tab`,
+`PgUp/Dn`, Escape and the current interrupt action. The draft shows its recorded base catalog digest,
+coverage limits and review priorities. An earlier error remains in history
+while a new confirmation owns the controls, and returns after cancellation.
+
 
 **Threat modeling & intel** — `threat-model:build`, `threat-model:read`,
 `threat-model:verify` (grounds the persisted document against the
@@ -822,11 +841,16 @@ prompt note in deep triage),
 `workspace:import-findings`, `workspace:export-findings`,
 `context:build`, `context-lite:index`, `cpg:build` (in-process cpg-rs graphs),
 `engagement:aim` (engagement scoping). `worklist:rank` is a deterministic,
-read-only Map tool that ranks files from the persisted attack surface and
-scan-coverage recommendations; `deep=true` additionally runs the Read-safe
-systems-hunt scorer. Every row retains each contributor's raw evidence, and
-the shell `worklist` command opens the same result in the visualization
-gallery.
+read-only auxiliary Map tool that ranks files from saved context and coverage
+recommendations. Explicit `deep=true` adds bounded production source prefixes:
+one inventory of at most 100,000 entries, 2,000 prefix attempts, 16 KiB per file,
+16 MiB of prefixes and a combined inventory/source ceiling of 512 MiB. No graph,
+model call or scan job is created. Rows retain raw contributor evidence;
+partial inspection stays visible. The shell `worklist` command opens the result
+in the visualization gallery. After restart it can show the last retained
+ranking, labeled as saved with current source/context equivalence unverified.
+Missing or malformed saved results offer `runs` for receipt inspection.
+
 
 **Fuzzing (agentic-fuzz-engine)** — drives an external
 agentic-fuzz-engine checkout (`afeRepo` option) against C/C++ targets;
@@ -930,3 +954,31 @@ claim.
 
 **Campaign & packs** — `campaign:plan`, `campaign:status`,
 `campaign:coverage`, `pack:lint`, `pack:suggest-shards` (§4, §7).
+
+
+`systems-hunt:deep-semantic-cwe-select` is hidden Labs planning for proposed CWE
+classes. Approve Scope allowance first. The action uses bounded repository-wide
+source prefixes and creates no findings, scan jobs or phase completion.
+`maxFiles`, `headBytes` and `maxSourceBytes` bound inspection; `maxCweClasses`
+bounds the proposal. Exact `threatModelRef` is read without changing the active
+model. Omitted reasoning keeps the selected runtime setting; `thinkingLevel`
+is an explicit override. Selected discovery scopes are unsupported. Replay
+shows the saved proposals, partial coverage and actual supplied source/context.
+A malformed reply fails without a repair query. Approve any follow-up separately.
+
+`systems-hunt:deep-semantic-hunt` is hidden Labs source-only discovery under
+Discovery allowance. Supply explicit `cwes`; it no longer selects classes or
+repairs model output implicitly. Source limits, accepted `scanScopeRef`, frozen
+`scanContextRef` and exact `threatModelRef` are consumed through shared prepared
+dispatch. Shared files remain context only. Malformed findings or citations fail
+without import, and detected source drift withholds historical candidates from
+the ledger. Artifacts use separate run paths. Findings remain unverified.
+See the [bounded deep-discovery audit](assessments/bounded-deep-discovery-2026-10-16.md).
+
+Deep discovery retains full cited source separately from what the model saw.
+`maxSnapshotBytes` defaults to 16 MiB and caps this retention at 512 MiB overall,
+with a 64 MiB per-file safety limit. The model still receives only the frozen
+prefixes shown in Replay. Stored observations bind the authenticated original
+snapshot and bytes. If capture cannot establish that binding or exceeds its
+limit, the result retains unpublished candidates and the paid call, with no
+automatic retry. See the [captured-source assessment](assessments/captured-observation-sources-2026-10-16.md).

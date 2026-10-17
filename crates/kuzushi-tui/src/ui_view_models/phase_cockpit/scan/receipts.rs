@@ -112,6 +112,23 @@ fn combined_cost(scans: &[&ScanStageData]) -> Option<ScanStageCost> {
 }
 
 fn scope_label(scope: &ScanStageScope) -> String {
+    let Some(files) = &scope.inspected_files else {
+        return legacy_scope_label(scope);
+    };
+    let noun = if files.len() == 1 { "file" } else { "files" };
+    let requested = if scope.paths.is_empty() {
+        "requested target".into()
+    } else {
+        format!("paths {}", scope.paths.join(", "))
+    };
+    format!(
+        "{requested} · {} inspected {noun} · workspace {}",
+        files.len(),
+        scope.target
+    )
+}
+
+fn legacy_scope_label(scope: &ScanStageScope) -> String {
     if scope.paths.is_empty() {
         return scope.target.clone();
     }

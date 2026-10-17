@@ -97,7 +97,7 @@ fn render_controls(frame: &mut Frame<'_>, area: Rect, progress: Option<&str>) {
     );
     frame.render_widget(
         Paragraph::new(vec![
-            Line::styled("↑↓ element · Esc context", theme::muted()),
+            Line::styled("↑↓ · f findings · Esc context", theme::muted()),
             Line::styled(action, theme::accent()),
         ]),
         controls,

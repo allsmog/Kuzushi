@@ -15,10 +15,19 @@ pub(crate) struct NoticeBannerModel {
 }
 
 pub(crate) fn notice_banner_model(app: &ShellApp) -> Option<NoticeBannerModel> {
-    app.advisory()
-        .notice
-        .as_ref()
-        .map(|notice| NoticeBannerModel::from_notice(notice, app.notice_captures_escape()))
+    let advisory = app.advisory();
+    let notice = advisory.notice.as_ref()?;
+    let behind_confirmation = advisory.pending_confirm.is_some()
+        && advisory
+            .pending_confirm_since
+            .is_some_and(|since| notice.since < since);
+    if behind_confirmation {
+        return None;
+    }
+    Some(NoticeBannerModel::from_notice(
+        notice,
+        app.notice_captures_escape(),
+    ))
 }
 
 impl NoticeBannerModel {

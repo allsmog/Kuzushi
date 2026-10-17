@@ -162,12 +162,20 @@ impl ShellApp {
     }
 
     pub(crate) fn open_report_from_current_origin(&mut self) {
+        if let Some(target) = self.target_owned() {
+            self.workbench_cache()
+                .borrow_mut()
+                .invalidate_investigation_report(&target);
+        }
+        if self.shell_view() == ShellView::Report {
+            self.set_input_mode(InputMode::Navigate);
+            self.clear_report_navigation_notice();
+            return;
+        }
         self.restore_report_choices();
-        if self.shell_view() != ShellView::Report {
-            let origin = self.current_non_nested_origin();
-            if origin.view != ShellView::Report {
-                self.router.report_mut().set_origin(origin);
-            }
+        let origin = self.current_non_nested_origin();
+        if origin.view != ShellView::Report {
+            self.router.report_mut().set_origin(origin);
         }
         self.set_shell_view(ShellView::Report);
         self.set_input_mode(InputMode::Navigate);
@@ -1067,7 +1075,12 @@ impl ShellApp {
     }
 
     pub(crate) fn set_viewport(&mut self, viewport: TerminalViewport) {
+        if self.viewport() == viewport {
+            return;
+        }
+        let reading = crate::renderer::capture_gallery_reading(self);
         self.ui.set_viewport(viewport);
+        crate::renderer::restore_gallery_reading(self, reading);
     }
 
     pub(crate) fn domain(&self) -> &DomainCache {

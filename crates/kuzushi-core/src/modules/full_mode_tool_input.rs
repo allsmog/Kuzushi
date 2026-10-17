@@ -107,11 +107,8 @@ pub(crate) fn full_mode_failed_chunk_ids(input: &Value) -> Result<Option<Vec<u32
     };
     ids.sort_unstable();
     ids.dedup();
-    if ids.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(ids))
-    }
+    anyhow::ensure!(!ids.is_empty(), "full-mode:hunt failedChunkIds is empty; select known chunks or omit the filter for a separately reviewed full plan");
+    Ok(Some(ids))
 }
 
 fn parse_failed_chunk_id(raw: &str) -> Result<u32> {

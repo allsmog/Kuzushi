@@ -2,6 +2,12 @@ use super::*;
 
 pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
     ShellCommandSpec {
+        command: "findings refresh",
+        aliases: &["findings refresh", "/findings refresh", "/f refresh"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "reload findings while keeping filters, study selection and the current view",
+    },
+    ShellCommandSpec {
         command: "findings",
         aliases: &["findings", "/f", "f", "/findings"],
         category: ShellCommandCategory::FindingsEvidence,

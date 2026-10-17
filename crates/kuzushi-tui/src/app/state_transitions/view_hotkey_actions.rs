@@ -31,6 +31,9 @@ fn is_movement_hotkey(action: ViewHotkeyAction) -> bool {
         action,
         WorkbenchCyclePane
             | WorkbenchCyclePanePrev
+            | ReplayNextPage
+            | ReplayPreviousPage
+            | ReplayRefreshContext
             | WorkbenchScrollNext
             | WorkbenchScrollPrev
             | WorkbenchScrollFirst
@@ -1356,12 +1359,6 @@ impl ShellApp {
                 self.open_logs_filter();
                 InputUpdate::handled()
             }
-            ViewHotkeyAction::RunDiffToggleSources => {
-                let current = self.router.default_scroll().offset();
-                let restored = self.router.run_diff_mut().toggle_sources(current);
-                self.router.default_scroll_mut().set(restored);
-                InputUpdate::handled()
-            }
             ViewHotkeyAction::PauseScan => self.reduce_hotkey_command(ShellCommand::Pause),
             ViewHotkeyAction::ResumeScan => self.reduce_hotkey_command(ShellCommand::Resume(None)),
             ViewHotkeyAction::OpenNextPhase => self.reduce_hotkey_command(ShellCommand::Next),
@@ -1371,6 +1368,33 @@ impl ShellApp {
             }
             _ => InputUpdate::ignored(),
         }
+    }
+
+    fn apply_run_reader_hotkey(&mut self, action: ViewHotkeyAction) -> InputUpdate {
+        if action == ViewHotkeyAction::ReplayRefreshContext {
+            self.invalidate_view_hydration();
+            self.workbench_cache()
+                .borrow_mut()
+                .invalidate_run_request_context();
+            return InputUpdate::handled();
+        }
+        let current = self.router.default_scroll().offset();
+        let restored = match action {
+            ViewHotkeyAction::RunDiffToggleSources => {
+                self.router.run_diff_mut().toggle_sources(current)
+            }
+            ViewHotkeyAction::ReplayNextPage | ViewHotkeyAction::ReplayPreviousPage => {
+                let has_inputs = crate::ui_view_models::replay_has_inputs(self);
+                self.router.replay_mut().cycle_page(
+                    current,
+                    action == ViewHotkeyAction::ReplayPreviousPage,
+                    has_inputs,
+                )
+            }
+            _ => return InputUpdate::ignored(),
+        };
+        self.router.default_scroll_mut().set(restored);
+        InputUpdate::handled()
     }
 
     fn apply_catalog_hotkey(&mut self, action: ViewHotkeyAction) -> Option<InputUpdate> {
@@ -1816,6 +1840,7 @@ mod phase_visualization_tests {
 type FocusedHotkeyHandler = fn(&mut ShellApp, ViewHotkeyAction) -> InputUpdate;
 
 const FOCUSED_HOTKEY_HANDLERS: &[FocusedHotkeyHandler] = &[
+    ShellApp::apply_run_reader_hotkey,
     ShellApp::apply_scroll_hotkey_update,
     ShellApp::apply_recommend_hotkey,
     ShellApp::apply_prompt_or_tune_hotkey,

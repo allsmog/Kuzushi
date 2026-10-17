@@ -154,6 +154,53 @@ fn cargo_audit_missing_lockfile_fails_instead_of_publishing_a_clean_scan() {
 
 #[cfg(unix)]
 #[test]
+fn direct_cargo_source_drift_keeps_positive_and_empty_runs_partial() {
+    for report in [FINDING, r#"{"vulnerabilities":{"found":false,"list":[]}}"#] {
+        let fixture = tempfile::tempdir().unwrap();
+        let source = fixture.path().join("source");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::write(source.join("Cargo.lock"), "# Owned metadata\nversion=3\n").unwrap();
+        let binary = source_editing_audit(fixture.path(), &source, report);
+        let workspace = WorkspaceTarget::new(&source).unwrap();
+        let config = V2Config::default();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let ctx = context(&workspace, &config, &store);
+        let registry = ModuleRegistry::with_v2_builtins();
+        let input = registry
+            .prepare_dispatch_input(
+                "cargo-audit:scan",
+                json!({"binary":binary,"offline":true}),
+                &ctx,
+                None,
+            )
+            .unwrap();
+        let output = registry
+            .dispatch_prepared_input_with_runtime(input, &ctx, None)
+            .unwrap();
+        assert_eq!(output["status"], "partial", "{output:#}");
+        let run = output["data"]["persisted"]["runId"].as_str().unwrap();
+        assert_eq!(store.run_status(run).unwrap().as_deref(), Some("partial"));
+        assert_eq!(
+            store.list_all_findings().unwrap().len() as u64,
+            output["data"]["count"].as_u64().unwrap()
+        );
+    }
+}
+
+#[cfg(unix)]
+fn source_editing_audit(folder: &Path, source: &Path, report: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let binary = folder.join("owned-audit-protocol.sh");
+    std::fs::write(&binary, format!(
+        "#!/bin/sh\nif [ \"$1\" = '--version' ]; then printf 'cargo-audit owned fixture\\n'; exit 0; fi\ncat >/dev/null\nprintf 'Planned inert edit\\n' > '{}'\nprintf '%s' '{}'\n",
+        source.join("planned-edit.txt").display(), report
+    )).unwrap();
+    std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+    binary
+}
+
+#[cfg(unix)]
+#[test]
 fn cargo_audit_scoped_study_keeps_separate_lockfile_identities_and_refuses_exact_membership() {
     let fixture = tempfile::tempdir().unwrap();
     let source = fixture.path().join("source");

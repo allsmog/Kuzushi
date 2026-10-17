@@ -408,7 +408,12 @@ impl ShellApp {
         summary
     }
 
-    fn phase_result_finding_runs(&self, completed: &PhaseAttemptCompleted) -> Option<Vec<String>> {
+    /// Resolve hydrated observation runs without dropping parents or requiring
+    /// a stage from a canceled run. Loading or damaged membership is unavailable.
+    pub(crate) fn phase_result_finding_runs(
+        &self,
+        completed: &PhaseAttemptCompleted,
+    ) -> Option<Vec<String>> {
         if completed.phase != WorkflowPhase::Scan {
             return Some(completed.run_refs.clone());
         }

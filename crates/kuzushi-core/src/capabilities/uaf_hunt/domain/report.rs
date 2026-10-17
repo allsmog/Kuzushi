@@ -24,6 +24,12 @@ pub struct UafHuntReport {
     pub persisted: Option<UafHuntPersistedRun>,
     #[serde(rename = "compileCommandsPath")]
     pub compile_commands_path: String,
+    #[serde(
+        rename = "compileDatabase",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub compile_database: Option<kuzushi_mcp_common::compile_database::CompileDatabaseReceipt>,
     /// Number of mcp-clang RPC calls the agent issued during the run.
     /// Helps diagnose "0 findings" — high count + 0 findings means the
     /// agent looked but didn't conclude, low count + 0 findings means
@@ -35,6 +41,18 @@ pub struct UafHuntReport {
     /// otherwise be invisible behind a "0 findings, ok: true".
     #[serde(rename = "firstClangError", skip_serializing_if = "Option::is_none")]
     pub first_clang_error: Option<String>,
+    #[serde(rename = "repoToolCalls", default)]
+    pub repo_tool_calls: u32,
+    #[serde(
+        rename = "firstRepoError",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub first_repo_error: Option<String>,
+    #[serde(rename = "maxAgentSteps", default)]
+    pub max_agent_steps: u32,
+    #[serde(rename = "clangTimeoutSecs", default)]
+    pub clang_timeout_secs: u64,
     #[serde(rename = "stepsUsed")]
     pub steps_used: u32,
     pub truncated: bool,
@@ -42,4 +60,13 @@ pub struct UafHuntReport {
     pub cost_usd: f64,
     #[serde(skip)]
     pub cost_usd_exact: bool,
+}
+
+impl UafHuntReport {
+    pub(crate) fn is_partial(&self) -> bool {
+        self.truncated
+            || self.first_clang_error.is_some()
+            || self.first_repo_error.is_some()
+            || self.clang_tool_calls == 0
+    }
 }

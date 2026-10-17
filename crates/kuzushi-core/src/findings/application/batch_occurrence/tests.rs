@@ -3,6 +3,7 @@ use crate::capabilities::campaign::ScanBatchGateBinding;
 use crate::findings::{Finding, FindingIdentityBasis, FindingStore, Severity};
 use serde_json::json;
 use std::path::Path;
+mod page_membership;
 mod retained_attempts;
 
 #[test]

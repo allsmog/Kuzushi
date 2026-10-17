@@ -10,10 +10,23 @@ pub(in crate::modules) fn json_summary(value: &Value) -> String {
     }
 }
 
+pub(in crate::modules) struct ValidatedToolOptions {
+    pub value: Value,
+    pub supplied: std::collections::BTreeSet<String>,
+}
+
+#[cfg(test)]
 pub(in crate::modules) fn validate_tool_input_options(
     tool: &ToolDescriptor,
     input: Value,
 ) -> Result<Value> {
+    Ok(validate_tool_options_with_sources(tool, input)?.value)
+}
+
+pub(in crate::modules) fn validate_tool_options_with_sources(
+    tool: &ToolDescriptor,
+    input: Value,
+) -> Result<ValidatedToolOptions> {
     let object = match input {
         Value::Null => Map::new(),
         Value::Object(object) => object,
@@ -26,35 +39,39 @@ pub(in crate::modules) fn validate_tool_input_options(
         }
     };
     let mut object = canonicalize_tool_option_keys(tool, object)?;
+    let supplied = object.keys().cloned().collect();
     let mut validated = Map::new();
 
     for spec in &tool.options {
-        match object.remove(&spec.name) {
-            Some(value) => {
-                let coerced = coerce_option_value(spec, value).map_err(|error| {
-                    anyhow::anyhow!("{} option {}: {error}", tool.name, spec.name)
-                })?;
-                validated.insert(spec.name.clone(), coerced);
-            }
-            None if spec.required => {
-                anyhow::bail!("{} requires option {}", tool.name, spec.name);
-            }
-            None => {
-                if let Some(default) = spec.default.clone() {
-                    // Defaults pass the same coercion as caller input so a
-                    // mistyped descriptor default cannot inject a value the
-                    // option type would have rejected.
-                    let coerced = coerce_option_value(spec, default).map_err(|error| {
-                        anyhow::anyhow!("{} option {} default: {error}", tool.name, spec.name)
-                    })?;
-                    validated.insert(spec.name.clone(), coerced);
-                }
-            }
+        if let Some(value) = validate_option_value(tool, spec, &mut object)? {
+            validated.insert(spec.name.clone(), value);
         }
     }
 
     reject_unknown_tool_options(tool, &object)?;
-    Ok(Value::Object(validated))
+    Ok(ValidatedToolOptions {
+        value: Value::Object(validated),
+        supplied,
+    })
+}
+
+fn validate_option_value(
+    tool: &ToolDescriptor,
+    spec: &OptionSpec,
+    object: &mut Map<String, Value>,
+) -> Result<Option<Value>> {
+    let (value, source) = match object.remove(&spec.name) {
+        Some(value) => (Some(value), ""),
+        None if spec.required => anyhow::bail!("{} requires option {}", tool.name, spec.name),
+        None => (spec.default.clone(), " default"),
+    };
+    value
+        .map(|value| {
+            coerce_option_value(spec, value).map_err(|error| {
+                anyhow::anyhow!("{} option {}{source}: {error}", tool.name, spec.name)
+            })
+        })
+        .transpose()
 }
 
 fn canonicalize_tool_option_keys(
@@ -161,6 +178,7 @@ pub fn coerce_option_value(spec: &OptionSpec, value: Value) -> Result<Value> {
         OptionType::Int => coerce_int_option(spec, value),
         OptionType::Float => coerce_float_option(value),
         OptionType::Enum => coerce_enum_option(spec, value),
+        OptionType::Json if spec.editable_json => Ok(value),
         OptionType::Json => Ok(coerce_json_option(value)),
     }
 }

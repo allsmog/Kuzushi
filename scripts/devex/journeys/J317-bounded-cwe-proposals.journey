@@ -1,0 +1,136 @@
+name: Bounded CWE proposals, exact inputs and no discovery work
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_AGENT_MCPS
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_cwe.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+paste-file: @ART/unbound-command.txt
+keys: Enter
+require-live-snap: 25 approved investigation allowance | unbound-refused
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_cwe.py @TMP_TARGET @ART unbound
+paste-file: @ART/approval-command.txt
+keys: Enter
+require-live-snap: 25 REVIEW ALLOWANCE | allowance
+expect: Total provider calls: 2
+expect: Protected review calls: 0
+resize: 40x12
+keys: End
+require-live-snap: 20 y approve | allowance-40x12
+ask: Does this allowance clearly permit two separately invoked intercepted proposal requests, with uncertain dollars and no scans or follow-up jobs?
+keys: y
+resize: 120x36
+require-live-snap: 25 Allowance approved | approved
+paste-file: @ART/invalid-command.txt
+keys: Enter
+require-live-snap: 30 CWE proposal failed | invalid-output
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_cwe.py @TMP_TARGET @ART invalid
+paste-file: @ART/generate-command.txt
+keys: Enter
+require-live-snap: 30 CWE proposals: 1 class; partial | proposal
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_cwe.py @TMP_TARGET @ART generated
+keys: Escape
+paste-file: @ART/replay-command.txt
+keys: Enter
+require-live-snap: 30 SAVED OUTPUT | proposal-result
+expect: CWE-20
+expect: No scan jobs or findings were created
+expect: Truncated source prefixes: 1
+expect: Selected discovery scopes are unsupported
+keys: Tab
+require-live-snap: 20 Full receipt | receipt
+keys: Tab
+require-live-snap: 20 SAVED OUTPUT | result-restored
+resize: 160x48
+live-snap: result-160x48
+resize: 96x89
+live-snap: result-96x89
+resize: 80x24
+live-snap: result-80x24
+resize: 60x20
+live-snap: result-60x20
+resize: 40x12
+live-snap: result-40x12
+keys: NPage
+live-snap: result-reading-01-40x12
+keys: NPage
+live-snap: result-reading-02-40x12
+keys: NPage
+live-snap: result-reading-03-40x12
+expect: REPLAY · Result
+expect: Tab receipt
+expect: rows
+keys: NPage
+live-snap: result-reading-04-40x12
+keys: NPage
+live-snap: result-reading-05-40x12
+keys: NPage
+live-snap: result-reading-06-40x12
+keys: NPage
+live-snap: result-reading-07-40x12
+keys: NPage
+live-snap: result-reading-08-40x12
+keys: NPage
+live-snap: result-reading-09-40x12
+keys: NPage
+live-snap: result-reading-10-40x12
+keys: NPage
+live-snap: result-reading-11-40x12
+keys: NPage
+live-snap: result-reading-12-40x12
+keys: NPage
+live-snap: result-reading-13-40x12
+keys: NPage
+live-snap: result-reading-14-40x12
+keys: NPage
+live-snap: result-reading-15-40x12
+keys: NPage
+live-snap: result-reading-16-40x12
+keys: NPage
+live-snap: result-reading-17-40x12
+keys: NPage
+live-snap: result-reading-18-40x12
+keys: End
+live-snap: result-tail-40x12
+expect: REPLAY · Result
+expect: Tab receipt
+ask: Are class proposals, partial coverage, unsupported discovery scopes, exact supplied input and separate approval for scans understandable at all six sizes?
+resize: 120x36
+keys: Home
+keys: NPage
+live-snap: frozen-inputs
+ask: Can the operator inspect the actual historical source/context and system instructions without another model request or a global threat-model change?
+submit: logs
+paste-file: @ART/exhausted-command.txt
+keys: Enter
+require-live-snap: 25 allowance exhausted: 2 calls committed | exhausted
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_cwe.py @TMP_TARGET @ART exhausted
+ask: Does exhaustion give a clear stop without a repair loop, fallback model, extra jobs or misleading Scan completion?
+keys: C-c
+require-exit: 15
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: logs
+paste-file: @ART/status-command.txt
+keys: Enter
+require-live-snap: 25 Calls committed: 2/2 | restarted-accounting
+require-shell: python3 -B @REPO/scripts/devex/fixtures/systems_cwe.py @TMP_TARGET @ART restarted
+paste-file: @ART/replay-command.txt
+keys: Enter
+require-live-snap: 30 SAVED OUTPUT | restarted-result
+resize: 40x12
+keys: End
+live-snap: no-color-result-tail-40x12
+expect: REPLAY · Result
+expect: Tab receipt
+keys: Home
+live-snap: no-color-result-start-40x12
+ask: Does the no-color restart retain proposal evidence, readable controls and exhausted accounting while creating no findings or further work?
+keys: C-c
+require-exit: 15

@@ -10,9 +10,12 @@ use std::sync::Arc;
 
 #[cfg(test)]
 mod completion_tests;
+mod investigation_allowance;
 mod reader;
 #[cfg(test)]
 mod reader_tests;
+#[cfg(test)]
+mod report_refresh_tests;
 mod requests;
 mod runtime;
 #[cfg(test)]
@@ -32,6 +35,12 @@ pub(crate) type StudyHistoryRead =
 pub(crate) type StudyUsageRunRead =
     Result<kuzushi_core::capabilities::campaign::ScanResourceEvidence, String>;
 pub(crate) type FindingReviewSourceRead = Result<Option<FindingReviewSource>, String>;
+pub(crate) type RunResultDocumentRead =
+    Result<Arc<kuzushi_core::run_artifacts::RunResultDocument>, String>;
+pub(crate) type RunRequestContextRead =
+    Result<Arc<kuzushi_core::run_artifacts::RunRequestContext>, String>;
+pub(crate) type InvestigationAllowanceRead =
+    Result<Option<Arc<kuzushi_core::allowance::AllowanceSnapshot>>, String>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FindingReviewSource {
@@ -203,6 +212,9 @@ pub(crate) enum ViewHydrationKey {
     StudyUsageRun {
         run_id: String,
     },
+    WorkspaceReportReview {
+        findings_watermark: Option<u64>,
+    },
     InvestigationReport {
         run_refs: Vec<String>,
         findings_watermark: Option<u64>,
@@ -218,6 +230,17 @@ pub(crate) enum ViewHydrationKey {
     },
     RunProjection {
         run_id: String,
+    },
+    RunResultDocument {
+        run_id: String,
+        producer: kuzushi_core::run_lifecycle::RunItemId,
+        digest: String,
+    },
+    RunRequestContext {
+        run_id: String,
+    },
+    InvestigationAllowance {
+        run_refs: Vec<String>,
     },
     PhaseReceiptOutcome {
         attempt_id: String,
@@ -306,11 +329,15 @@ pub(crate) enum ViewHydrationValue {
     StudyHistory(StudyHistoryRead),
     ContextMatrixReport(Result<kuzushi_core::findings::ContextMatrixOccurrenceReport, String>),
     StudyUsageRun(StudyUsageRunRead),
+    WorkspaceReportReview(Result<kuzushi_core::workspace::WorkspaceReviewSummary, String>),
     InvestigationReport(
         Result<Option<kuzushi_core::workspace::InvestigationReportDocument>, String>,
     ),
     RunArtifactText(RunArtifactTextRead),
     RunProjection(Result<kuzushi_core::run_lifecycle::RunProjectionRead, String>),
+    RunResultDocument(RunResultDocumentRead),
+    RunRequestContext(RunRequestContextRead),
+    InvestigationAllowance(InvestigationAllowanceRead),
     PhaseReceiptOutcome(
         Result<Option<kuzushi_core::workflow_attempts::PhaseAttemptOutcome>, String>,
     ),

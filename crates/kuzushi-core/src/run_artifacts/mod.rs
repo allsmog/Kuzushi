@@ -14,6 +14,10 @@ mod lifecycle_cost;
 mod llm_audit;
 mod output_declared_artifacts;
 mod persisted_terminal_outcome;
+mod prepared_model_input;
+pub(crate) use prepared_model_input::retain_prepared_model_input;
+mod inherited_allowance;
+pub(crate) use inherited_allowance::retain_inherited_allowance;
 mod process_identity;
 mod run_artifact;
 mod run_artifact_reader;
@@ -24,6 +28,11 @@ mod run_history_index;
 mod run_ledger;
 mod run_paths;
 mod run_reproducibility_metadata;
+mod run_request_context;
+pub use run_request_context::{
+    load_investigation_allowance_for_runs, load_run_request_context, RecordedAllowanceOrigin,
+    RecordedRequestScope, RunRequestContext,
+};
 mod run_result_summary;
 mod run_retention;
 mod run_summary_store;
@@ -32,10 +41,11 @@ mod scan_failure_context;
 mod scan_stage;
 mod source_revision;
 mod threat_model_context;
-pub(crate) use scan_stage::scan_paths_cover_file;
+pub(crate) use scan_stage::scan_scope_covers_file;
 pub use source_revision::RunSourceRevision;
 pub use threat_model_context::RunThreatModelContext;
 mod stage_checkpoint;
+mod stopped_run_context;
 mod terminal_intent;
 #[cfg(test)]
 mod tests;
@@ -84,7 +94,9 @@ pub use run_paths::{
 pub(crate) use run_result_summary::load_correlated_run_result_value;
 pub(crate) use run_result_summary::safe_bounded_line as bounded_run_diagnostic_line;
 pub use run_result_summary::{
-    load_correlated_run_result_summary, load_run_result_summary, RunResultSummary,
+    decode_correlated_result_document, load_correlated_result_document,
+    load_correlated_run_result_summary, load_run_result_summary, single_result_artifact,
+    RunResultDocument, RunResultSummary,
 };
 pub use run_retention::{prune_run_artifacts, RunPruneDisposition};
 pub(crate) use run_summary_store::{list_current_run_summary_prefix, CurrentRunSummaryPrefix};
@@ -101,6 +113,7 @@ pub use running::{
     RunEnvFingerprint, RunHouseRuleFingerprint, RunLlmCallAudit, RunPromptOverrideFingerprint,
     RunSummary, RunTargetGitMetadata,
 };
+pub(crate) use scan_stage::scan_severity_counts;
 pub use scan_stage::{
     load_scan_stage_data, scan_finding_run_refs, PhaseStageOutcome, PhaseStageReceipt,
     ScanArtifactDelta, ScanEngineStageOutcome, ScanFindingDelta, ScanSeverityCount, ScanStageCost,

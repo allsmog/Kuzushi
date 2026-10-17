@@ -58,7 +58,7 @@ expect: selected/Dockerfile
 submit: decision deferred Owned image policy requires owner review
 require-live-snap: 25 Owned image policy | deferred
 submit: report
-require-live-snap: 25 1 reviewed · 0 confirmed | report
+require-live-snap: 25 1 reviewed · TP: 0 | report
 keys: s j j j Enter
 require-live-snap: 25 EXPORTED | exported
 require-shell: python3 -B @REPO/scripts/devex/fixtures/iac_inspection.py @TMP_TARGET @ART exported

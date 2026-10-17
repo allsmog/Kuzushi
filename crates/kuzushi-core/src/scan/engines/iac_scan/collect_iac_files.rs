@@ -147,7 +147,15 @@ impl IacWalk<'_> {
     }
 
     fn directory_entry(&mut self, path: &Path, depth: usize, pending: &mut Vec<(PathBuf, usize)>) {
-        if should_skip_dir(&path.file_name().unwrap().to_string_lossy()) {
+        let Some(name) = path.file_name() else {
+            self.gap(
+                path,
+                CoverageGapKind::Directory,
+                "IaC directory has no final path component",
+            );
+            return;
+        };
+        if should_skip_dir(&name.to_string_lossy()) {
             self.inspection.directories_excluded += 1;
         } else {
             pending.push((path.to_path_buf(), depth + 1));
@@ -206,3 +214,6 @@ pub(crate) fn classify_iac_file(root: &Path, path: &Path) -> Option<IacScanKind>
 
     None
 }
+
+#[cfg(test)]
+mod tests;

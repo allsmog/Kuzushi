@@ -21,6 +21,9 @@ fn exact_semgrep_arguments_are_literal_files_without_a_directory_target() {
         &["--", "app/[route].py", "root file.py", "-literal.py"]
     );
     assert!(!arguments.iter().any(|value| value == "."));
+    assert!(arguments
+        .windows(2)
+        .any(|pair| pair == ["--exclude", "**/.kuzushi/**"]));
     assert_eq!(command.get_current_dir(), Some(Path::new("/repo")));
 }
 

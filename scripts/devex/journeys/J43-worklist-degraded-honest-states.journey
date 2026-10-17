@@ -9,7 +9,7 @@
 # contributors carry THREE distinct honest states.
 #
 # TUI-rendering coverage + Phase-B note: the scene deck's `⚠ degraded` banner, the
-# dim legend words (`not implemented (Phase B)`, `not tracked (Phase A)`,
+# dim legend words (`not supported`,
 # `not requested`), and the "no fabricated rows" empty state are covered by the
 # renderer unit tests (`renderer/views/scene/worklist.rs`) and the view-model tests
 # (`ui_view_models/viz_data/worklist.rs`). The `⚠ degraded — no cpg graph` banner and
@@ -39,4 +39,4 @@ expect: "live"
 expect: notRequested
 expect: callGraphFanIn
 expect: prefilterHistory
-ask: Ranks are #1..#3 contiguous (no gap forging a counted-but-missing signal); every row cites its ranker's RAW value (92/100), never a bare `0.71`; call-graph fan-in and prefilter carry distinct honest states that the TUI legend words as "not implemented (Phase B)" / "not tracked (Phase A)" (renderer unit-tested).
+ask: Ranks are #1..#3 contiguous (no gap forging a counted-but-missing signal); every row cites its ranker's RAW value (92/100), never a bare `0.71`; call-graph fan-in and prefilter say "not supported" while optional work says "not requested" (renderer unit-tested).

@@ -1,5 +1,6 @@
 mod application;
 pub(crate) use application::read_workspace_finding_export_records;
+pub(crate) use application::recorded_scan_scope_name;
 pub(crate) use application::{
     capture_cited_file_from_tree, capture_source_file_from_tree, read_captured_file,
     ReviewSourceTree,
@@ -38,9 +39,9 @@ pub use application::{
     load_finding_relationships, load_investigation_report, load_investigation_report_document,
     load_investigation_report_document_for_runs, load_investigation_report_for_runs,
     load_nested_project_scopes, load_program_scope, load_project_model_document,
-    load_scan_scope_proposal, preview_workspace_findings_export, project_model_scope_path,
-    read_captured_review_code, read_decision_reviewed_source, read_finding_review_source,
-    read_review_decision_receipt, read_review_source_capture,
+    load_scan_scope_proposal, load_workspace_review_summary, preview_workspace_findings_export,
+    project_model_scope_path, read_captured_review_code, read_decision_reviewed_source,
+    read_finding_review_source, read_review_decision_receipt, read_review_source_capture,
     record_finding_relationship_batch_review, record_finding_relationship_review,
     record_review_session_started, record_user_review_decision_for_finding,
     record_user_review_decision_for_finding_at_watermark,
@@ -50,18 +51,18 @@ pub use application::{
     workspace_finding_export_records_with_context, workspace_finding_export_records_with_reviews,
     workspace_status_for_target, write_program_scope_scaffold, ChangedScanScope,
     ContextMatrixInvestigationReceipt, FindingRelationshipBatchReviewRequest,
-    FindingRelationshipReviewRequest, InvestigationContextCase, InvestigationReportDocument,
-    InvestigationReportEvidence, InvestigationReportReceipt, InvestigationReportSummary,
-    InvestigationWorkCounts, ProjectModelDocument, ProjectModelSection, ProjectModelSectionOrigin,
-    ScopeStudyInvestigationReceipt, WorkspaceAnalysisExportSummary, WorkspaceEvidenceExportSummary,
-    WorkspaceFindingExportLocation, WorkspaceFindingExportRecord,
+    FindingRelationshipReviewRequest, InvestigationAttemptReceipt, InvestigationContextCase,
+    InvestigationReportDocument, InvestigationReportEvidence, InvestigationReportReceipt,
+    InvestigationReportSummary, InvestigationWorkCounts, ProjectModelDocument, ProjectModelSection,
+    ProjectModelSectionOrigin, ScopeStudyInvestigationReceipt, WorkspaceAnalysisExportSummary,
+    WorkspaceEvidenceExportSummary, WorkspaceFindingExportLocation, WorkspaceFindingExportRecord,
     WorkspaceFindingProvenanceSummary, WorkspaceFindingReviewContext,
     WorkspaceFindingsExportPreview, WorkspaceLessonExportRecord, WorkspaceObservedSource,
     WorkspaceRemediationExportSummary, WorkspaceReviewCompletion, WorkspaceReviewDecisionBasis,
     WorkspaceReviewDecisionReceipt, WorkspaceReviewSourceApplicability,
-    WorkspaceReviewSourceCapture, WorkspaceReviewSourceComparison, WorkspaceRunExportContext,
-    WorkspaceStatus, WorkspaceVerificationExportSummary, MAX_REVIEW_SOURCE_BYTES,
-    PROJECT_MODEL_SCHEMA_VERSION,
+    WorkspaceReviewSourceCapture, WorkspaceReviewSourceComparison, WorkspaceReviewSummary,
+    WorkspaceRunExportContext, WorkspaceStatus, WorkspaceVerificationExportSummary,
+    MAX_REVIEW_SOURCE_BYTES, PROJECT_MODEL_SCHEMA_VERSION,
 };
 pub use artifact_kb::*;
 pub use artifacts::{

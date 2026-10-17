@@ -65,9 +65,8 @@ pub(crate) fn summary_page_rows(app: &ShellApp) -> Option<usize> {
     ))
 }
 
-/// The rows PgUp/PgDn move a full-frame line page by: the step to the
-/// adjacent window of whole rows on the canvas the viewport draws, so paging
-/// neither skips nor repeats a row however the rows wrap.
+/// Display lines to the adjacent full-frame window, including wrapped-row
+/// continuations on the actual body canvas.
 pub(crate) fn scene_page_rows(app: &ShellApp, direction: PageDirection) -> Option<usize> {
     if app.shell_view() != ShellView::Scene {
         return None;
@@ -79,8 +78,7 @@ pub(crate) fn scene_page_rows(app: &ShellApp, direction: PageDirection) -> Optio
     super::gallery::scene_line_page_step(app, area, scroll, direction)
 }
 
-/// The rows PgUp/PgDn move Map's embedded line page by, measured on the same
-/// gallery body the embedded canvas draws.
+/// Display lines to the adjacent embedded window on the actual gallery body.
 pub(crate) fn map_gallery_page_rows(app: &ShellApp, direction: PageDirection) -> Option<usize> {
     if app.shell_view() != ShellView::Workbench {
         return None;

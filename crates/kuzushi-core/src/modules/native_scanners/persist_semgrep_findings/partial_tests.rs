@@ -45,6 +45,56 @@ fn standalone_semgrep_zero_findings_with_a_gap_cannot_be_completed() {
     assert_committed_delta(root.path(), "standalone-empty-partial", 0);
 }
 
+#[test]
+fn standalone_semgrep_source_drift_retains_partial_observations_after_reopen() {
+    assert_source_drift_settlement(true);
+}
+
+#[test]
+fn standalone_semgrep_empty_source_drift_cannot_commit_a_completed_run() {
+    assert_source_drift_settlement(false);
+}
+
+fn assert_source_drift_settlement(include_finding: bool) {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("app.rs"), "// Owned inert source.\n").unwrap();
+    let adapter = tempfile::tempdir().unwrap();
+    let binary = source_editing_protocol_fixture(adapter.path(), root.path(), include_finding);
+    let workspace = WorkspaceTarget::new(root.path()).unwrap();
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    let before = crate::incremental_index::current_workspace_tree_hash(workspace.root()).unwrap();
+    let output = dispatch(&workspace, &store, &binary, "source-drift");
+    assert_eq!(output["status"], "partial", "{output:#}");
+    assert_eq!(output["data"]["treeHash"], before);
+    assert_partial_run(&store, "source-drift", usize::from(include_finding));
+    assert_committed_delta(root.path(), "source-drift", u64::from(include_finding));
+    drop(store);
+    let reopened = FindingStore::open(workspace.findings_db_path()).unwrap();
+    assert_partial_run(&reopened, "source-drift", usize::from(include_finding));
+}
+
+fn source_editing_protocol_fixture(
+    adapter: &Path,
+    target: &Path,
+    include_finding: bool,
+) -> PathBuf {
+    let results = if include_finding {
+        json!([{"check_id":"labeled-source-fixture", "path":"app.rs",
+            "start":{"line":1}, "extra":{"severity":"WARNING", "message":"Labeled protocol observation"}}])
+    } else {
+        json!([])
+    };
+    let report = json!({"results":results});
+    let binary = adapter.join("owned-protocol.sh");
+    let changed = target.join("planned-edit.txt");
+    std::fs::write(&binary, format!(
+        "#!/bin/sh\nif [ \"$1\" = '--version' ]; then printf '1.0\\n'; exit 0; fi\nprintf 'Planned inert operator edit\\n' > '{}'\nprintf '%s' '{}'\n",
+        changed.display(), report
+    )).unwrap();
+    std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+    binary
+}
+
 fn assert_partial_run(store: &FindingStore, run_id: &str, expected_count: usize) {
     assert_eq!(
         store.run_status(run_id).unwrap().as_deref(),

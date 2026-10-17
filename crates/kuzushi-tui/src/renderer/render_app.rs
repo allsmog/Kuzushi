@@ -308,6 +308,7 @@ fn prompt_height(app: &ShellApp, area: Rect) -> u16 {
     guided_prompt_height(app, area)
         .or_else(|| operator_question_input_height(app, area))
         .or_else(|| answer_prompt_height(app, area))
+        .or_else(|| crate::ui_view_models::compact_replay_reading(app, area.height).then_some(0))
         .unwrap_or_else(|| u16::from(!view_supplies_own_input_surface(app)))
 }
 
@@ -355,6 +356,20 @@ mod report_input_surface_tests {
                 assert_eq!(prompt_height(&app, Rect::new(0, 0, width, height)), 0);
             }
         }
+    }
+
+    #[test]
+    fn compact_replay_frees_idle_prompt_space_but_restores_the_typing_surface() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.set_shell_view(ShellView::Replay);
+        let area = Rect::new(0, 0, 40, 12);
+        assert_eq!(prompt_height(&app, area), 0);
+        assert_eq!(primary_body_area(&app, area).height, 9);
+        app.set_input("held café\ndraft");
+        assert_eq!(prompt_height(&app, area), 1);
+        app.set_input_mode(crate::InputMode::Navigate);
+        assert_eq!(prompt_height(&app, area), 0);
+        assert_eq!(app.input(), "held café\ndraft");
     }
 }
 

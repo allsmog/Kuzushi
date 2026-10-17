@@ -1,5 +1,184 @@
 # Mode Parity Assessment
 
+Report retains a labeled previous read during refresh, requires current data
+for export, and keeps repeated metadata in `p details`. Its
+[qualification](report-reader-2026-10-17.md) has 212 focused passes,
+a workspace build, ten passing gates and J121 with 170 machine passes, zero
+failures and 108 capture pairs. Twelve final terminal-cell replays were
+inspected; eighteen human judgments remain open. All broad milestones stay
+open. Publication stays a draft on main, with no new live model request.
+
+Shell scope labels and assistant context distinguish the displayed page from
+the next phase, attach only viewed findings and run groups, and disclose
+truncated run lists. Report uses approval's OAuth display selector and keeps
+recorded identities in details. Shared execution policy and persisted formats
+are unchanged. See the [qualification](screen-context-2026-10-17.md).
+
+The interactive current-source review form keeps its captured commit/content
+identity visible while choosing a verdict, entering a reason and reviewing the
+save. This is a presentation change over the existing shared capture/decision
+contract; it starts no model or scanner work. Plain output retains the same
+source identity. See the [source identity audit](source-identity-header-2026-10-17.md).
+
+Map/Scan/Review shell chrome now reads the shared investigation allowance from
+the viewed recorded requests through an asynchronous, target-scoped projection.
+The rail and narrow footer disclose committed calls; plain output uses the same
+rows. This read starts no work and changes no approval. Report and Replay retain
+their existing accounting contracts. See the [scoped allowance audit](shared-allowance-chrome-2026-10-17.md).
+
+Interactive Scan and result summaries now share hydrated parent/engine run
+membership for canceled partial work. Plain and terminal count lines share
+semantic wrapping. Resize focus is shell presentation; ledger observations,
+decisions, accepted parent references and CLI exports are unchanged. See the
+[partial Scan audit](partial-scan-counts-2026-10-17.md).
+
+The UAF resource controls run through the shared Rust executor. Descriptor
+limits, local cancellation/deadlines and partial finding-run status apply
+wherever that action is dispatched. Controlled native shell and shared Rust
+execution are checked. Positive shell/headless compiler selection, shared
+allowance and receipt restart now pass with real read-only clangd and
+intercepted inference. Direct MCP cache invalidation is checked too. Full
+frozen-input recovery, scoped discovery and detector quality remain open. See
+the [compiler-input audit](clang-database-selection-2026-10-17.md) and
+[resource audit](uaf-resource-controls-2026-10-17.md).
+
+Investigation decision counts are shared report data, generated from the same
+ledger, effective decisions and source-applicability checks used by export.
+Shell Report projects the selected study into its header and footer; workspace
+history reads complete export membership independently of the selected Scan. Loading or failed source checks
+never substitute loaded severity totals. Original finding severity remains in
+exports. Plain presentation uses the same Report lines and decision summary.
+No scan, model request, decision or phase completion is created by reading.
+
+
+Changed-path review uses shared prepared dispatch in every mode. Its descriptor
+is auxiliary Labs Map/read work with an optional finding store and no phase
+result. It needs no model or scan prerequisite. Git comparison limits, pinned
+commit identities, nested membership and partial path disclosure are common
+execution behavior. Plain output carries the same review hints and complete
+retained path data. Shell Replay provides Result/receipt navigation; no mode
+imports path names as vulnerability findings or accepts context automatically.
+
+
+The bundled taint action shares Labs readiness and no-phase-result policy
+across exact dispatch interfaces. Shared result construction and finding
+persistence preserve failure after malformed model output, including explicitly
+retained structural candidates. Shell Replay presents the failure before the
+full diagnostics; plain output retains that same text and canonical result.
+The shell separately requests explicit cached-prerequisite reuse. DAG metadata
+alone establishes no ordering for headless callers.
+
+
+Replay's narrow Result projection places saved content before the full summary
+while retaining outcome, cost uncertainty and requested-scope accounting.
+The stored document and complete plain receipt are unchanged. Logs folds large
+submitted command echoes in interactive presentation only; its expanded reader
+provides visible `c` disclosure with separate scroll/follow state. The original
+command remains in history and session records, and filtering checks that
+complete text. Closing the reader restores the original view and draft.
+
+The standalone invariant action uses shared prepared dispatch, Context allowance,
+bounded source capture and strict output validation in shell, scan and run.
+It is an auxiliary Labs Map action without phase completion; DAG dependencies
+remain metadata, not automatic context generation. Explicit gatherer `data`
+is required as `context`. Legacy pipeline knobs fail before a provider request.
+The version 1 supplied-input document is shared result data; Replay provides
+the interactive Result/Inputs/Receipt views and plain output uses the same
+document. Neither reading nor a successful draft accepts context or starts work.
+
+Inherited accounting metadata is retained at shared runtime admission whenever
+the caller has a run artifact location. Shell, scan and run gain no separate
+approval or parsing path. The shared reader authenticates that reference and
+reads its original grant and accounting-run totals without migration or calls.
+Replay supplies the interactive summary, full receipt and refresh presentation;
+plain output uses the same context. Legacy bundles remain readable, with no
+inferred parent grant. This metadata is offered accounting, not admission proof.
+
+Shared prepared dispatch now accounts explicitly categorized repository
+execution. Internal `taint-iris-next:codeql-db` requires Context allowance and
+separate explicit execution consent across callers. It remains hidden auxiliary
+Labs Map work, operates on the whole bound target, and completes no phase.
+DAG metadata does not schedule it or add scope support. See the
+[preparation evidence](repository-preparation-allowance-2026-10-17.md).
+
+Recorded request inspection uses shared Core readers for authenticated run input,
+historical accepted scope names and allowance revisions. Replay hydrates these
+reads asynchronously, displays the original grant separately from ledger totals
+at read time, and offers an explicit read refresh. Its compact row, wide rail and
+full plain receipt share the same presentation model. Reading grants no work,
+changes no active context and reserves no calls. Missing input or accounting is
+unavailable. Requested membership does not establish scanner coverage. See the
+[recorded request assessment](recorded-run-context-2026-10-17.md).
+
+Deep discovery emits the same versioned supplied-input document through shared
+shell/run dispatch. Existing structured source/context fields remain intact.
+Interactive Replay adds Inputs with independent scroll and reverse Tab;
+plain Replay includes both complete safe-display documents. Older results
+retain their existing reader. Reading starts no work and changes no context.
+See the [supplied-input reader evidence](supplied-input-reader-2026-10-16.md).
+
+Deep discovery checks active-ledger ownership and bounded snapshot membership
+before inference through the shared executor. Shell and run share the same
+prepared source binding and outcome-specific guidance. Empty later passes
+retain earlier observations and human decisions. This adds no scan engine or
+larger-tree support. See the [source-readiness evidence](source-readiness-2026-10-16.md).
+
+Source-only deep discovery uses the same descriptor, prepared input and executor
+for exact shell/run dispatch. Selected scope/context, strict output, allowance
+and failures are shared. Its DAG dependency remains metadata and starts no class
+selection. This does not qualify it as an automatic scan-mode engine. See the
+[bounded deep-discovery audit](bounded-deep-discovery-2026-10-16.md).
+
+Systems CWE proposals use one shared prepared descriptor/executor across run
+and shell: auxiliary Labs Map, Scope allowance, optional findings store and no
+phase completion. Frozen input and coverage are ordinary result fields; Replay
+is the existing shell reader. No new scan-orchestrator ordering is implied by
+DAG metadata. See the [selector evidence](bounded-cwe-proposals-2026-10-16.md).
+
+Replay keeps its heading and row position visible during scrolling. Narrow
+footers retain Tab, paging, Escape and the current interrupt control, including
+active cancellation and notice dismissal. Exact saved diagnostic duplicates
+are folded only in the focused presentation. Plain receipt ordering, source
+artifacts and dispatch behavior remain unchanged. See the
+[reader orientation assessment](reader-orientation-2026-10-16.md).
+
+Focused saved-output reading is shell presentation over shared authenticated
+result artifacts. A healthy single result opens before receipt metadata;
+Tab keeps both reading positions. Compound work and uncertain evidence retain
+their fuller presentation. The reader starts no model or tool work. Headless
+JSON and plain output retain their contracts, with additive catalog base-digest
+data and readable result labels. New Core document decoding is pure; shell IO
+uses the existing asynchronous artifact cache. An earlier notice yields to a
+new confirmation without deletion, while a newer alert remains visible.
+See the [focused reader assessment](focused-saved-results-2026-10-16.md).
+
+Shared chunk planning now uses bounded inventory and source work, cancellation
+and streaming windows. Partial planning remains readable but cannot execute.
+Its headline and coverage receipt are shared by shell and headless output.
+Literal explicit scopes retain membership; unscoped Git work follows the shared
+tracked inventory. Optional receipt fields preserve historical JSON reading.
+See the [bounded planning evidence](bounded-chunk-inventory-2026-10-16.md).
+
+Chunked strategy ownership checks apply after shared option merging and alias
+resolution, before model work. Unsupported standard defaults and prompt files
+are omitted. Native Scan and Report readers also honor declared result ownership
+for legacy summaries, so later auxiliary planning cannot hide a blocked Scan.
+The empty-findings view uses the same rule. Explicit attempt engines and unknown
+historical scans retain their readers. See the
+[consumer audit](chunked-strategy-consumers-2026-10-16.md).
+
+Replay's failure summary and full-receipt switch are interactive presentation.
+Both retain the same typed truth; uncertain health keeps the existing reader.
+Plain output always presents the complete unscrolled receipt, independent of
+the interactive page. See the [native evidence](replay-failure-summary-2026-10-16.md).
+
+Chunked retry arrays/CSV strings, explicit cache policy and unsupported accepted
+scope/context refusal share canonical preparation. The hidden compatibility
+alias is auxiliary. Empty/unknown selections and outside source members fail;
+planning grants no scan or spending. Mode-specific source-generation or model
+fallback paths are not added. See the
+[source contract audit](chunked-source-contracts-2026-10-16.md).
+
 This document describes the current Rust execution surfaces for `kuzushi scan`,
 the interactive shell, and `kuzushi run`. Historical TypeScript runtime notes
 belong in migration ledgers, not in this current operator contract.
@@ -372,6 +551,13 @@ context reader; `threats apply` retains already-pending compatibility changes.
   add remediation metadata in every format. Reveal Destination is an explicit
   operator action and has no headless side effect.
 
+  Fresh study, context-matrix and scope-study receipts share the additive
+  `reassessmentRequiredCount` through the same export service. Shell Report
+  shows a nonzero count beside totals and explains retained historical decisions;
+  plain output uses the same lines. Ordinary unreviewed findings are separate.
+  Older receipts without the field remain unrecorded. Neither interface grants
+  source applicability or a finding verdict from this presentation.
+
 - **Deep-auditor dataflow degraded signifiers are shell-only presentation
   over a shared gate.** The `cpg_taint_paths` tool, the `taintTools` option, the
   readiness/query trace items, the `deep-audit:evidence` read API, and the
@@ -467,3 +653,31 @@ Catalog metadata import (`taint-iris-next:import-sinks`) is a shell/run auxiliar
 action. Both use prepared dispatch, required external input, bounded IO and
 completed/partial/failed result normalization. Its legacy Scan label does not
 make it a scan engine or allow it to publish a Scan phase result.
+
+### Vendor document context
+
+The four `vendor-assessment` actions share prepared dispatch in shell and run
+mode. Declared `clear`, saved-profile preservation, bounded capture and honest
+warnings are common. They are auxiliary document operations, not `sast:scan`
+engines. Assessment uses Review allowance and Labs readiness in both modes;
+none grants repository phase completion. Context packet contents are checked
+against the saved draft, and historical receipts survive clearing that draft.
+
+### Experimental metadata scoring
+
+`classifier-gate:score` shares its bounded executor, Review allowance and Labs
+readiness across shell and run. Neither mode can turn a metadata score into a
+saved finding decision, primary Review completion or dispatched follow-up.
+Missing numeric scores are partial in both modes; the shell adds summary/full
+receipt reading. Percentile histories and preserved legacy state are shared.
+The action is not an engine scheduled by `sast:scan`.
+
+### Captured observation sources
+
+Deep discovery uses the same descriptor-backed `maxSnapshotBytes`, authenticated
+source capture and findings-store insertion in shell and headless run. Stored
+observations use their original source snapshot and retained bytes; failed
+capture withholds candidates and never starts another request. Model prefixes
+and retained full files have separate limits. Shell Replay shows the same
+additive source receipt; this adds no automatic `sast:scan` engine. Other
+adapters retain their existing insertion behavior pending separate migration.

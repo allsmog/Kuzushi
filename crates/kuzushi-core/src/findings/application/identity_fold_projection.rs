@@ -4,23 +4,60 @@ use super::{finding_projection_key, IdentityFoldPolicy};
 use crate::findings::{is_attack_chain_finding, Finding, FindingEvidence, FindingSource};
 use std::collections::{BTreeMap, BTreeSet};
 
+#[cfg(test)]
+mod tests;
+
 /// Input follows authoritative observation order, oldest first. Each group
 /// presents its current observation while retaining source and evidence history.
 pub(crate) fn project_finding_generations(
     findings: Vec<Finding>,
     policy: IdentityFoldPolicy,
 ) -> Vec<Finding> {
+    project_generations_with_membership(findings, policy, &BTreeSet::new())
+        .into_iter()
+        .map(|group| group.finding)
+        .collect()
+}
+
+pub(in crate::findings) fn representative_fingerprints_for_members(
+    findings: Vec<Finding>,
+    policy: IdentityFoldPolicy,
+    member_ids: &BTreeSet<i64>,
+) -> BTreeSet<String> {
+    project_generations_with_membership(findings, policy, member_ids)
+        .into_iter()
+        .filter(|group| group.has_member)
+        .map(|group| group.finding.fingerprint)
+        .collect()
+}
+
+struct ProjectedFinding {
+    finding: Finding,
+    has_member: bool,
+}
+
+fn project_generations_with_membership(
+    findings: Vec<Finding>,
+    policy: IdentityFoldPolicy,
+    member_ids: &BTreeSet<i64>,
+) -> Vec<ProjectedFinding> {
     let safe_context = SafeProjectionContext::from_findings(&findings, policy);
-    let mut projected = Vec::<Finding>::new();
+    let mut projected = Vec::<ProjectedFinding>::new();
     let mut positions = BTreeMap::<String, usize>::new();
     for finding in findings {
         let key = safe_context.projection_key(&finding, policy);
+        let has_member = finding.id.is_some_and(|id| member_ids.contains(&id));
         if let Some(position) = positions.get(&key).copied() {
-            projected[position] = merge_findings(&projected[position], finding);
+            let group = &mut projected[position];
+            group.finding = merge_findings(&group.finding, finding);
+            group.has_member |= has_member;
             continue;
         }
         positions.insert(key, projected.len());
-        projected.push(finding);
+        projected.push(ProjectedFinding {
+            finding,
+            has_member,
+        });
     }
     projected
 }

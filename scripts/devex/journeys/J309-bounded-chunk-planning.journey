@@ -1,0 +1,72 @@
+name: Bounded chunk inventory discloses partial source work and explicit recovery
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/bounded_chunk_planning.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+submit: run full-mode:hunt {"dryRun":true,"reuseCachedChunks":false}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/bounded_chunk_planning.py @TMP_TARGET @ART partial
+paste-file: @ART/partial-replay.txt
+keys: Enter
+require-live-snap: 25 Outcome · partial | partial-plan
+expect: Planning only
+expect: partial; execution blocked
+resize: 160x48
+live-snap: partial-160x48
+resize: 96x89
+live-snap: partial-96x89
+resize: 80x24
+live-snap: partial-80x24
+resize: 60x20
+live-snap: partial-60x20
+resize: 40x12
+live-snap: partial-40x12
+expect: oversized.c
+keys: NPage
+live-snap: partial-reading-40x12
+keys: NPage
+live-snap: partial-reading-40x12-2
+keys: NPage
+live-snap: partial-reading-40x12-3
+ask: Can you identify the omitted source, fixed limits and partial planning outcome across six sizes, without confusing this with a scan or spending approval?
+resize: 120x36
+keys: Escape
+submit: logs
+submit: run full-mode:hunt {"dryRun":true,"scopeFile":"scope.txt","reuseCachedChunks":false}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/bounded_chunk_planning.py @TMP_TARGET @ART scoped
+paste-file: @ART/explicit-replay.txt
+keys: Enter
+require-live-snap: 25 selected sources planned | explicit-plan
+expect: explicit-scope
+ask: Is explicit recovery understandable as a new local plan for the selected vendor source, with no scan job or model request?
+keys: Escape
+submit: report
+require-live-snap: 25 0 findings | auxiliary-report
+expect-not: Displayed Scan: completed
+expect-not: scanned
+keys: Home
+keys: j j j
+require-live-snap: 20 format json (4/6) | export-format
+keys: Enter
+require-live-snap: 25 EXPORTED | exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/bounded_chunk_planning.py @TMP_TARGET @ART exported
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: logs
+paste-file: @ART/partial-replay.txt
+keys: Enter
+require-live-snap: 25 Outcome · partial | recovered-partial
+expect: partial; execution blocked
+require-shell: python3 -B @REPO/scripts/devex/fixtures/bounded_chunk_planning.py @TMP_TARGET @ART restarted
+ask: Does no-color restart preserve the partial receipt and separate explicit plan, without starting a scan or presenting a completed repository scan?
+keys: C-c
+require-exit: 10

@@ -3,6 +3,7 @@ use super::*;
 use crate::ui_view_models::{
     dfd_security_items_for_selection, dfd_selected_item, DfdLinkState, DfdModel, DfdSelected,
 };
+use ratatui::text::Line;
 
 pub(crate) fn diagram_body(area: Rect) -> Rect {
     Rect::new(
@@ -26,6 +27,9 @@ pub(crate) fn diagram_identity(app: &ShellApp) -> String {
 }
 
 pub(crate) fn diagram_status(app: &ShellApp) -> String {
+    if let Some(notice) = diagram_notice(app) {
+        return notice.into();
+    }
     let selected = app
         .study_context_picker()
         .and_then(|picker| picker.selected.as_ref());
@@ -35,6 +39,14 @@ pub(crate) fn diagram_status(app: &ShellApp) -> String {
         .find(|row| row.reference.as_ref() == selected)
         .and_then(|row| row.details.get(3).cloned())
         .unwrap_or_else(|| "Grounding: unavailable".into())
+}
+
+fn diagram_notice(app: &ShellApp) -> Option<&str> {
+    app.study_context_picker()?
+        .diagram
+        .as_ref()?
+        .notice
+        .as_deref()
 }
 
 pub(crate) fn diagram_detail_lines(app: &ShellApp, width: usize) -> Vec<String> {
@@ -49,11 +61,21 @@ pub(crate) fn diagram_detail_lines(app: &ShellApp, width: usize) -> Vec<String> 
         .as_ref()
         .map_or(0, |diagram| diagram.selection);
     let mut lines = selected_element_lines(&preview.dfd, selection);
+    if let Some(notice) = diagram_notice(app) {
+        lines.splice(0..0, [notice.into(), String::new()]);
+    }
     lines.extend(linked_evidence_lines(&preview.dfd, selection));
-    lines
-        .into_iter()
-        .flat_map(|line| context_wrap(&line, width.max(1)))
-        .collect()
+    wrap_diagram_lines(lines, width)
+}
+
+fn wrap_diagram_lines(lines: Vec<String>, width: usize) -> Vec<String> {
+    crate::renderer::shared::text::wrap_document_lines(
+        lines.into_iter().map(Line::raw).collect(),
+        width.clamp(1, u16::MAX as usize) as u16,
+    )
+    .into_iter()
+    .map(|line| line.to_string())
+    .collect()
 }
 
 fn selected_element_lines(model: &DfdModel, selection: usize) -> Vec<String> {
@@ -147,8 +169,5 @@ pub(crate) fn diagram_plain_lines(app: &ShellApp, width: usize) -> Vec<String> {
         lines.extend(selected_element_lines(model, selection));
         lines.extend(linked_evidence_lines(model, selection));
     }
-    lines
-        .into_iter()
-        .flat_map(|line| context_wrap(&line, width.max(1)))
-        .collect()
+    wrap_diagram_lines(lines, width)
 }

@@ -34,6 +34,7 @@ pub(super) fn controlled_output_with_limits(
     label: &str,
     stdout_limit: usize,
     stderr_limit: usize,
+    cancellation: Option<&crate::scan::ScanCancellation>,
     timeout: Duration,
 ) -> Result<Output> {
     controlled_output_with_stdout(
@@ -41,7 +42,7 @@ pub(super) fn controlled_output_with_limits(
         label,
         None,
         None,
-        None,
+        cancellation,
         timeout,
         stdout_limit,
         stderr_limit,

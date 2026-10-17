@@ -76,6 +76,7 @@ pub(in crate::modules) fn vuln_scout_module() -> BuiltinModule {
         ),
         vec![dag("vuln-scout:audit", "findings", &["context:build"])],
     )
+    .labs()
 }
 
 pub(in crate::modules) fn tob_module() -> BuiltinModule {
@@ -88,17 +89,7 @@ pub(in crate::modules) fn tob_module() -> BuiltinModule {
             tool_with_options(
                 "tob:audit",
                 "Run a Trail of Bits skills audit.",
-                vec![
-                    target_option(),
-                    plugin_root_option(),
-                    opt(
-                        "skills",
-                        OptionType::StringList,
-                        "Trail of Bits skill subset.",
-                    )
-                    .advanced(),
-                    model_option(),
-                ],
+                tob_audit_options(),
             )
             .with_policy(workspace_policy(
                 ToolPhase::Scan,
@@ -117,6 +108,7 @@ pub(in crate::modules) fn tob_module() -> BuiltinModule {
         ],
         vec![dag("tob:audit", "findings", &["context:build"])],
     )
+    .labs()
 }
 
 pub(in crate::modules) fn plugin_root_option() -> OptionSpec {
@@ -128,4 +120,18 @@ pub(in crate::modules) fn plugin_root_option() -> OptionSpec {
     .aliases(&["pluginPath", "plugin_root", "plugin_path"])
     .external_read()
     .advanced()
+}
+
+fn tob_audit_options() -> Vec<OptionSpec> {
+    vec![
+        target_option(),
+        plugin_root_option(),
+        opt(
+            "skills",
+            OptionType::StringList,
+            "Trail of Bits skill subset.",
+        )
+        .advanced(),
+        model_option(),
+    ]
 }

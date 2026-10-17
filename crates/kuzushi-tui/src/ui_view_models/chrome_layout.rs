@@ -33,6 +33,28 @@ pub(crate) fn compact_phase_reading(app: &ShellApp, height: u16) -> bool {
     compact_review_reading(app, height) || compact_map_reading(app, height)
 }
 
+pub(crate) fn compact_replay_reading(app: &ShellApp, height: u16) -> bool {
+    height <= 12 && replay_reader_is_idle(app) && !review_decision_owns_chrome(app)
+}
+
+fn replay_reader_is_idle(app: &ShellApp) -> bool {
+    app.shell_view() == ShellView::Replay
+        && super::replay_switch_owns_input(app)
+        && !app.has_running_work()
+}
+
+pub(crate) fn compact_gallery_reading(app: &ShellApp, height: u16) -> bool {
+    compact_line_gallery(app, height)
+        && workbench_reading_is_idle(app)
+        && !review_decision_owns_chrome(app)
+}
+
+fn compact_line_gallery(app: &ShellApp, height: u16) -> bool {
+    height <= 12
+        && app.shell_view() == ShellView::Scene
+        && !app.router.scene().page().is_frame_rendered()
+}
+
 fn workbench_reading_is_idle(app: &ShellApp) -> bool {
     if !app.input().is_empty() {
         return false;
@@ -133,11 +155,12 @@ pub(crate) fn keybind_footer_chrome_height(
     {
         return 0;
     }
-    reading_keybind_rows(app, terminal_height, terminal_width)
+    let rows = reading_keybind_rows(app, terminal_height, terminal_width);
+    rows - u16::from(compact_replay_reading(app, terminal_height))
 }
 
 fn reading_keybind_rows(app: &ShellApp, height: u16, width: u16) -> u16 {
-    if compact_map_reading(app, height) {
+    if compact_map_reading(app, height) || compact_gallery_reading(app, height) {
         return 1;
     }
     let wrap_width = if super::review_queue_navigation_footer(app) {
@@ -152,7 +175,11 @@ fn reading_keybind_rows(app: &ShellApp, height: u16, width: u16) -> u16 {
 }
 
 pub(crate) fn status_footer_chrome_height(app: &ShellApp, terminal_height: u16) -> u16 {
-    if compact_phase_reading(app, terminal_height) {
+    if terminal_height >= 6 && super::investigation_allowance_model(app).is_some() {
+        return 1;
+    }
+    if compact_phase_reading(app, terminal_height) || compact_gallery_reading(app, terminal_height)
+    {
         return 0;
     }
     if activity_supplies_own_chrome(app) || terminal_height < 6 {
@@ -261,6 +288,42 @@ mod tests {
         });
         assert!(!compact_review_reading(&app, 12));
         assert_eq!(status_footer_chrome_height(&app, 12), 1);
+    }
+
+    #[test]
+    fn compact_replay_retains_status_and_two_key_rows_and_restores_typed_drafts() {
+        let mut app = app_in_view(ShellView::Replay);
+        assert!(compact_replay_reading(&app, 12));
+        assert_eq!(keybind_footer_chrome_height(&app, 12, 40), 2);
+        assert_eq!(status_footer_chrome_height(&app, 12), 1);
+        assert!(!compact_replay_reading(&app, 13));
+        app.set_input("held draft");
+        assert!(!compact_replay_reading(&app, 12));
+        assert_eq!(keybind_footer_chrome_height(&app, 12, 40), 3);
+        app.set_input_mode(crate::InputMode::Navigate);
+        assert!(compact_replay_reading(&app, 12));
+        assert_eq!(app.input(), "held draft");
+    }
+
+    #[test]
+    fn compact_replay_keeps_budget_and_confirmation_surfaces() {
+        let mut app = app_in_view(ShellView::Replay);
+        app.advisory_mut().budget_halt = Some(crate::BudgetHalt {
+            spent_usd: 1.0,
+            limit_usd: 1.0,
+        });
+        assert!(!compact_replay_reading(&app, 12));
+        app.advisory_mut().budget_halt = None;
+        app.advisory_mut().pending_confirm = Some(crate::PendingConfirm {
+            kind: crate::ConfirmKind::DescriptorEffect,
+            tool: "workspace:export-findings".into(),
+            target: "owned export".into(),
+            rationale: None,
+            allowlist: None,
+            actor: None,
+            remembered: false,
+        });
+        assert!(!compact_replay_reading(&app, 12));
     }
 
     #[test]

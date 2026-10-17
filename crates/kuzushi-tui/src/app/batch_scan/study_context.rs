@@ -150,13 +150,14 @@ impl ShellApp {
     fn handle_context_modal_key(&mut self, code: KeyCode) -> Option<InputUpdate> {
         self.handle_context_comparison_key(code)
             .or_else(|| self.handle_context_actions_key(code))
+            .or_else(|| self.handle_study_diagram_key(code))
     }
 
     fn handle_context_overlay_key(&mut self, code: KeyCode) -> Option<InputUpdate> {
         if let Some(update) = self.handle_context_modal_key(code) {
             return Some(update);
         }
-        if self.handle_study_diagram_key(code) || self.scope_context_action_unavailable(code) {
+        if self.scope_context_action_unavailable(code) {
             return Some(InputUpdate::handled());
         }
         self.handle_regeneration_context_selection_key(code)

@@ -220,3 +220,36 @@ fn multiple_sessions_offer_distinct_drafts_and_keep_unselected_edits() {
         1
     );
 }
+
+#[test]
+fn outdated_recovery_selection_is_refused_without_losing_local_text() {
+    let (_root, mut app, _, _) = fixture();
+    app.open_context_editor();
+    let draft = app.context_edit_draft_mut().unwrap();
+    draft.mode = ContextEditMode::Recovery;
+    draft.recovery = crate::app::ContextDraftRecovery::Choices {
+        drafts: Vec::new(),
+        cursor: usize::MAX,
+    };
+    let entries = draft.entries.clone();
+    key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+    let draft = app.context_edit_draft().unwrap();
+    assert_eq!(draft.entries, entries);
+    assert_eq!(draft.mode, ContextEditMode::Recovery);
+    assert!(draft
+        .notice
+        .as_deref()
+        .unwrap()
+        .contains("selection is unavailable"));
+    assert!(!app.has_running_work());
+    key(&mut app, KeyCode::Down, KeyModifiers::NONE);
+    assert!(matches!(
+        app.context_edit_draft().unwrap().recovery,
+        crate::app::ContextDraftRecovery::Choices { cursor: 0, .. }
+    ));
+    key(&mut app, KeyCode::Char('n'), KeyModifiers::NONE);
+    assert_eq!(
+        app.context_edit_draft().unwrap().mode,
+        ContextEditMode::Fields
+    );
+}

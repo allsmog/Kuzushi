@@ -7,6 +7,12 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 use std::path::Path;
 
+mod document;
+pub use document::{
+    decode_correlated_result_document, load_correlated_result_document, single_result_artifact,
+    RunResultDocument,
+};
+
 const MAX_OUTPUT_LINES: usize = 12;
 const MAX_MESSAGES: usize = 8;
 const MAX_ARTIFACTS: usize = 16;
@@ -112,10 +118,7 @@ pub(crate) fn load_correlated_run_result_value(
     producing_item_id: RunItemId,
     reference: &ArtifactReference,
 ) -> Result<Value> {
-    anyhow::ensure!(
-        reference.producing_item_id == producing_item_id,
-        "result artifact producer identity does not match its call"
-    );
+    validate_reference_identity(producing_item_id, reference)?;
     let (_, bytes) = read_run_artifact_bytes(target, run_id, reference.path.as_str())
         .require("Correlated tool result")?;
     validate_reference_bytes(reference, &bytes)?;
@@ -124,6 +127,17 @@ pub(crate) fn load_correlated_run_result_value(
     let raw = serde_json::from_str::<Value>(body)
         .with_context(|| format!("Correlated tool result for run {run_id} is malformed"))?;
     Ok(raw)
+}
+
+fn validate_reference_identity(
+    producing_item_id: RunItemId,
+    reference: &ArtifactReference,
+) -> Result<()> {
+    anyhow::ensure!(
+        reference.producing_item_id == producing_item_id,
+        "result artifact producer identity does not match its call"
+    );
+    Ok(())
 }
 
 fn validate_reference_bytes(reference: &ArtifactReference, bytes: &[u8]) -> Result<()> {

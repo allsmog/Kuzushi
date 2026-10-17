@@ -24,11 +24,11 @@ pub(in crate::modules) fn execute_tool(
 ) -> Result<Value> {
     match name {
         "semgrep:scan" => run_semgrep_scan(input, ctx),
-        "codeql:scan" => run_codeql_scan(input, ctx),
+        "codeql:scan" => super::codeql_scan::run(input, ctx),
         "iac-scan:scan" => run_iac_scan(input, ctx),
         "cargo-audit:scan" => run_cargo_audit_scan(input, ctx),
-        "govulncheck:scan" => run_govulncheck_scan(input, ctx),
-        "license-scan:scan" => run_license_scan(input, ctx),
+        "govulncheck:scan" => super::govulncheck_scan::run(input, ctx),
+        "license-scan:scan" => super::license_scan::run(input, ctx),
         "sbom-scan:scan" => run_sbom_scan(input, ctx),
         "exploit-chain:scan" => run_exploit_chain_scan(input, ctx, runtime),
         "android-apk:check-env" => run_android_apk_check_env(input, ctx),
@@ -45,63 +45,11 @@ pub(in crate::modules) fn execute_tool(
     }
 }
 
-pub(in crate::modules) fn run_semgrep_scan(
-    input: Value,
+pub(super) fn emit_scan_coverage_gaps(
     ctx: &ToolExecutionContext<'_>,
-) -> Result<Value> {
-    let target = resolve_tool_target(&input, ctx)?;
-    let scanner = crate::scan::ConfiguredSemgrepScanner::from_tool_input(&input)?;
-    if let Err(error) = scanner.preflight() {
-        return Ok(failed_tool_output("semgrep:scan", &target, error));
-    }
-    let result = crate::workspace::source_snapshot::run_source_bound_tool(
-        ctx,
-        "semgrep:scan",
-        &target,
-        || run_started_semgrep_scan(&target, &scanner, &input, ctx),
-    )?;
-    Ok(with_inspection_receipts(
-        result,
-        scanner.inspection_receipts(),
-    ))
-}
-
-fn run_started_semgrep_scan(
-    target: &Path,
-    scanner: &crate::scan::ConfiguredSemgrepScanner,
-    input: &Value,
-    ctx: &ToolExecutionContext<'_>,
-) -> Result<Value> {
-    emit_scan_start(ctx, "semgrep", &target);
-    let outcome =
-        match ctx.with_cancellation(|cancel| scanner.scan_outcome_with_cancel(&target, cancel)) {
-            Ok(outcome) => outcome,
-            Err(error) => return Ok(failed_tool_output("semgrep:scan", &target, error)),
-        };
-    let mut findings = outcome.findings;
-    emit_scan_coverage_gaps(ctx, "semgrep", &outcome.scan_errors);
-    let index_static_evidence = whitebox_static_profile_requested(input)?;
-    if index_static_evidence {
-        let static_proof_state =
-            whitebox_static_proof_state_from_input(input)?.unwrap_or(StaticProofState::SignalOnly);
-        mark_whitebox_static_findings(&mut findings, static_proof_state)?;
-    }
-    let persisted = persist_semgrep_findings(
-        &target,
-        &findings,
-        ctx,
-        index_static_evidence,
-        &outcome.scan_errors,
-    )?;
-    emit_scan_done(ctx, "semgrep", findings.len());
-    Ok(
-        SemgrepScanReport::new(target.display().to_string(), findings, persisted)
-            .with_scan_errors(outcome.scan_errors)
-            .to_tool_json(),
-    )
-}
-
-fn emit_scan_coverage_gaps(ctx: &ToolExecutionContext<'_>, scanner: &str, scan_errors: &[String]) {
+    scanner: &str,
+    scan_errors: &[String],
+) {
     if scan_errors.is_empty() {
         return;
     }
@@ -118,71 +66,6 @@ fn emit_scan_coverage_gaps(ctx: &ToolExecutionContext<'_>, scanner: &str, scan_e
             )
             .emit();
     }
-}
-
-pub(in crate::modules) fn run_codeql_scan(
-    input: Value,
-    ctx: &ToolExecutionContext<'_>,
-) -> Result<Value> {
-    let target = resolve_tool_target(&input, ctx)?;
-    let scanner = CodeqlScanner::from_tool_input(&input)?;
-    if let Err(error) = scanner.preflight() {
-        return Ok(failed_tool_output("codeql:scan", &target, error));
-    }
-    crate::workspace::source_snapshot::run_source_bound_tool(ctx, "codeql:scan", &target, || {
-        run_started_codeql_scan(&target, &scanner, &input, ctx)
-    })
-}
-
-fn run_started_codeql_scan(
-    target: &Path,
-    scanner: &CodeqlScanner,
-    input: &Value,
-    ctx: &ToolExecutionContext<'_>,
-) -> Result<Value> {
-    emit_scan_start(ctx, "codeql", &target);
-    let mut output =
-        match ctx.with_cancellation(|cancel| scanner.scan_with_artifacts(&target, cancel)) {
-            Ok(output) => output,
-            Err(error) => return Ok(failed_tool_output("codeql:scan", &target, error)),
-        };
-    let index_static_evidence = whitebox_static_profile_requested(input)?;
-    if index_static_evidence {
-        let static_proof_state =
-            whitebox_static_proof_state_from_input(input)?.unwrap_or(StaticProofState::SignalOnly);
-        mark_whitebox_static_findings(&mut output.findings, static_proof_state)?;
-    }
-    persist_and_report_codeql_scan(&target, output, ctx, index_static_evidence)
-}
-
-fn persist_and_report_codeql_scan(
-    target: &Path,
-    output: ScanEngineOutput,
-    ctx: &ToolExecutionContext<'_>,
-    index_static_evidence: bool,
-) -> Result<Value> {
-    let ScanEngineOutput {
-        findings,
-        codeql_sarif_documents,
-        mut scan_errors,
-    } = output;
-    scan_errors.push("CodeQL query observations require independent review; selected queries do not establish complete repository coverage or finding validity".into());
-    emit_scan_coverage_gaps(ctx, "codeql", &scan_errors);
-    let persisted = persist_codeql_findings(
-        target,
-        &findings,
-        ctx,
-        &codeql_sarif_documents,
-        index_static_evidence,
-        &scan_errors,
-    )?;
-    emit_scan_done(ctx, "codeql", findings.len());
-    Ok(
-        CodeqlScanReport::new(target.display().to_string(), findings, persisted)
-            .with_sarif_documents(codeql_sarif_documents)
-            .with_scan_errors(scan_errors)
-            .to_tool_json(),
-    )
 }
 
 pub(super) fn emit_scan_start(ctx: &ToolExecutionContext<'_>, scanner: &str, target: &Path) {
@@ -209,181 +92,11 @@ pub(super) fn emit_scan_done(ctx: &ToolExecutionContext<'_>, scanner: &str, find
     }
 }
 
-pub(in crate::modules) fn run_iac_scan(
-    input: Value,
-    ctx: &ToolExecutionContext<'_>,
-) -> Result<Value> {
-    let target = resolve_tool_target(&input, ctx)?;
-    crate::workspace::source_snapshot::run_source_bound_tool(ctx, "iac-scan:scan", &target, || {
-        run_started_iac_scan(&target, &input, ctx)
-    })
-}
-
-fn run_started_iac_scan(
-    target: &Path,
-    input: &Value,
-    ctx: &ToolExecutionContext<'_>,
-) -> Result<Value> {
-    emit_scan_start(ctx, "iac-scan", &target);
-    let options = IacScanOptions::from_tool_input(&input)?;
-    let mut report = match ctx.with_cancellation(|cancel| scan_iac(&target, &options, cancel)) {
-        Ok(report) => report,
-        Err(error) => return Ok(failed_tool_output("iac-scan:scan", &target, error)),
-    };
-    rebase_iac_report(&mut report, target, ctx)?;
-    let findings = report
-        .findings
-        .iter()
-        .map(|finding| finding.to_core_finding())
-        .collect::<Vec<_>>();
-    let persisted = persist_iac_findings_with_coverage(
-        &findings,
-        ctx,
-        &report.coverage_gaps.scan_error_lines(),
-    )?;
-    emit_scan_done(ctx, "iac-scan", findings.len());
-    let mut output = report.to_tool_json();
-    output["data"]["coreFindings"] = json!(findings);
-    if let Some(persisted) = persisted {
-        output["data"]["persisted"] = json!(persisted);
-    }
-    Ok(output)
-}
-
-fn rebase_iac_report(
-    report: &mut crate::iac_scan::IacScanReport,
-    target: &Path,
-    ctx: &ToolExecutionContext<'_>,
-) -> Result<()> {
-    let Some(workspace) = ctx.workspace else {
-        return Ok(());
-    };
-    let prefix = target
-        .strip_prefix(workspace.root())
-        .context("IaC discovery target must stay inside its workspace")?;
-    for finding in &mut report.findings {
-        finding.rebase_path(prefix);
-    }
-    Ok(())
-}
-
-pub(in crate::modules) fn run_govulncheck_scan(
-    input: Value,
-    ctx: &ToolExecutionContext<'_>,
-) -> Result<Value> {
-    let target = resolve_tool_target(&input, ctx)?;
-    let scanner = GovulncheckScanner;
-    if let Err(error) = scanner.preflight() {
-        return Ok(failed_tool_output("govulncheck:scan", &target, error));
-    }
-    emit_scan_start(ctx, "govulncheck", &target);
-    let findings = match ctx.with_cancellation(|cancel| scanner.scan(&target, cancel)) {
-        Ok(findings) => findings,
-        Err(error) => return Ok(failed_tool_output("govulncheck:scan", &target, error)),
-    };
-    let persisted = persist_iac_findings(&target, &findings, ctx)?;
-    emit_scan_done(ctx, "govulncheck", findings.len());
-    Ok(govulncheck_output(&target, findings, persisted))
-}
-
-fn govulncheck_output(target: &Path, findings: Vec<Finding>, persisted: Option<Value>) -> Value {
-    crate::scan::completed_scan_tool_json(
-        govulncheck_summary(target, findings.len()),
-        json!({
-            "target": target.display().to_string(),
-            "count": findings.len(),
-            "coreFindings": findings,
-            "findings": findings,
-            "persisted": persisted,
-        }),
-    )
-}
-
-fn govulncheck_summary(target: &Path, count: usize) -> String {
-    format!(
-        "govulncheck: {count} advisory signal{} under {}; source loading, network and coverage remain experimental",
-        if count == 1 { "" } else { "s" },
-        target.display()
-    )
-}
-
 pub(in crate::modules) fn run_sbom_scan(
     input: Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
     super::sbom::execute(input, ctx)
-}
-
-pub(in crate::modules) fn run_license_scan(
-    input: Value,
-    ctx: &ToolExecutionContext<'_>,
-) -> Result<Value> {
-    let target = resolve_tool_target(&input, ctx)?;
-    let options = license_scan_options_from_input(&input)?;
-    crate::workspace::source_snapshot::run_source_bound_tool(
-        ctx,
-        "license-scan:scan",
-        &target,
-        || run_started_license_scan(&target, options, ctx),
-    )
-}
-
-fn run_started_license_scan(
-    target: &Path,
-    options: LicenseScanOptions,
-    ctx: &ToolExecutionContext<'_>,
-) -> Result<Value> {
-    emit_scan_start(ctx, "license-scan", target);
-    let report =
-        match ctx.with_cancellation(|cancel| scan_licenses_with_options(target, cancel, options)) {
-            Ok(report) => report,
-            Err(error) => {
-                return Ok(failed_tool_output(
-                    "license-scan:scan",
-                    target,
-                    anyhow::anyhow!("{error:#}"),
-                ))
-            }
-        };
-    let findings = report
-        .findings
-        .iter()
-        .map(|finding| finding.to_core_finding())
-        .collect::<Vec<_>>();
-    let persisted = persist_iac_findings(target, &findings, ctx)?;
-    emit_scan_done(ctx, "license-scan", findings.len());
-    let mut output = report.to_tool_json();
-    output["data"]["coreFindings"] = json!(findings);
-    if let Some(persisted) = persisted {
-        output["data"]["persisted"] = json!(persisted);
-    }
-    Ok(output)
-}
-
-fn license_scan_options_from_input(input: &Value) -> Result<LicenseScanOptions> {
-    Ok(LicenseScanOptions {
-        require_source_spdx_headers: optional_bool_input(
-            input,
-            &[
-                "requireSourceSpdxHeaders",
-                "require_source_spdx_headers",
-                "requireSpdxHeaders",
-                "require_spdx_headers",
-            ],
-        )?,
-    })
-}
-
-fn optional_bool_input(input: &Value, keys: &[&str]) -> Result<bool> {
-    for key in keys {
-        let Some(value) = input.get(*key) else {
-            continue;
-        };
-        return value
-            .as_bool()
-            .ok_or_else(|| anyhow::anyhow!("license-scan: {key} must be a boolean"));
-    }
-    Ok(false)
 }
 
 pub(in crate::modules) fn run_exploit_chain_scan(
@@ -433,41 +146,6 @@ fn persist_exploit_chain_findings(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn standalone_codeql_reported_gaps_reach_the_partial_ledger() {
-        let root = tempfile::tempdir().unwrap();
-        let workspace = crate::WorkspaceTarget::new(root.path()).unwrap();
-        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
-        let config = crate::V2Config::default();
-        let trace = crate::run_artifacts::TraceHandle::jsonl(root.path(), "codeql-gap");
-        let ctx = ToolExecutionContext {
-            config: &config,
-            workspace: Some(&workspace),
-            findings_store: Some(&store),
-            trace: Some(&trace),
-            cancellation: None,
-            authorization: Default::default(),
-        };
-        let output = ScanEngineOutput {
-            findings: vec![],
-            codeql_sarif_documents: vec![],
-            scan_errors: vec!["go: labeled missing database".into()],
-        };
-        let report = persist_and_report_codeql_scan(root.path(), output, &ctx, false).unwrap();
-        assert_eq!(
-            crate::tool_result_status(&report),
-            crate::ToolResultStatus::Partial
-        );
-        assert_eq!(
-            report["data"]["scanErrors"][0],
-            "go: labeled missing database"
-        );
-        assert_eq!(
-            store.run_status("codeql-gap").unwrap().as_deref(),
-            Some("partial")
-        );
-    }
 
     #[test]
     fn cargo_audit_output_preserves_static_proof_state_on_core_findings() {

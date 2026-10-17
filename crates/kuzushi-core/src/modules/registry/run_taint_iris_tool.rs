@@ -92,7 +92,7 @@ pub(in crate::modules) fn run_taint_iris_next_catalog_tool(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    Ok(run_taint_iris_next_catalog_report(input, ctx, runtime)?.to_tool_json())
+    run_taint_iris_next_catalog_report(input, ctx, runtime)
 }
 
 pub(in crate::modules) fn run_taint_iris_next_codeql_db_tool(

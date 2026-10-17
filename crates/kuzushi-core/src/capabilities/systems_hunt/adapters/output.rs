@@ -69,12 +69,7 @@ pub(crate) fn execute_context_gatherer(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
     let target = resolve_target(input, ctx)?;
-    let options = SystemsHuntInput::from_tool_input(input)?;
-    let output = gather_systems_context(&target, &options)?;
-    Ok(tool_json(
-        format!("systems-hunt context: {} surface(s)", output.surfaces.len()),
-        output,
-    ))
+    gather_bounded_context(&target, input, ctx)
 }
 
 pub(crate) fn execute_invariant_extract(
@@ -82,11 +77,5 @@ pub(crate) fn execute_invariant_extract(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    let output = run_systems_invariant_extract_with_cost(input, ctx, runtime)?;
-    let mut result = tool_json(
-        format!("systems-hunt invariants: {}", output.value.invariants.len()),
-        &output.value,
-    );
-    crate::module_result::apply_runtime_cost_report(&mut result, output.cost_report()?);
-    Ok(result)
+    execute_invariant_draft(input, ctx, runtime)
 }

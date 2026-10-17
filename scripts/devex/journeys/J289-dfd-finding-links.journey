@@ -1,0 +1,98 @@
+name: DFD evidence paths open saved findings and return to the diagram
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE KUZUSHI_AGENT_MCPS NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dfd_findings.py @TMP_TARGET @ART prepare
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: findings filter file:unrelated.tf
+require-live-snap: 20 1 of 1 | prior-filter
+submit: map
+require-live-snap: 20 SYSTEM SUMMARY | map-summary
+expect: Esc then z
+nav-mode:
+keys: Tab z
+require-live-snap: 20 findings at paths | topology
+expect: findings at paths
+resize: 160x48
+live-snap: topology-160x48
+expect: f findings
+resize: 96x89
+live-snap: topology-96x89
+expect: f findings
+resize: 80x24
+live-snap: topology-80x24
+expect: f findings
+resize: 60x20
+live-snap: topology-60x20
+expect: f findings
+resize: 40x12
+live-snap: topology-40x12
+expect: f findings
+resize: 120x36
+keys: j f
+require-live-snap: 20 2 of 2 | evidence-findings
+expect: Path matches span saved revisions
+resize: 160x48
+live-snap: findings-160x48
+resize: 96x89
+live-snap: findings-96x89
+resize: 80x24
+live-snap: findings-80x24
+resize: 60x20
+live-snap: findings-60x20
+resize: 40x12
+live-snap: findings-40x12
+expect: saved revisions
+expect: q diagram
+ask: Can the operator read the matched queue at all six sizes while distinguishing evidence-path matches from source-revision or verdict equivalence?
+resize: 120x36
+keys: q
+require-live-snap: 20 findings at paths | returned-topology
+keys: Enter
+resize: 40x12
+live-snap: focused-context-40x12
+expect: f findings
+expect: Enter graph
+expect: q back
+resize: 120x36
+keys: f
+require-live-snap: 20 1 of 1 | selected-context-findings
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dfd_findings.py @TMP_TARGET @ART selected-row
+submit: back
+require-live-snap: 20 Enter topology | returned-context
+keys: Enter j j f
+require-live-snap: 20 2 of 2 | flow-findings
+submit: back
+require-live-snap: 20 findings at paths | returned-flow
+keys: j j f
+require-live-snap: 20 2 of 2 | boundary-findings
+submit: back
+require-live-snap: 20 findings at paths | returned-boundary
+keys: j f
+require-live-snap: 20 repository file evidence | missing-evidence
+expect: findings at paths
+ask: Do Back and the empty-evidence state preserve the selected diagram, context focus and original workflow without starting work?
+keys: q
+submit: workbench
+require-live-snap: 20 1 of 1 | restored-prior-filter
+expect: file:unrelated.tf
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: map
+require-live-snap: 20 SYSTEM SUMMARY | restarted-map
+expect: Esc then z
+nav-mode:
+keys: Tab z
+require-live-snap: 20 findings at paths | restarted-topology
+keys: j f
+require-live-snap: 20 2 of 2 | restarted-findings
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dfd_findings.py @TMP_TARGET @ART restarted
+ask: Does no-color restart reproduce the exact file selection, exclude the similarly named file and retain all four independent observations?
+keys: C-c
+require-exit: 10

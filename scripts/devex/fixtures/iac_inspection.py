@@ -5,7 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from catalog_dependencies import SOURCE, SHA, git
+from catalog_dependencies import git
 from dependency_hygiene import native, tool_results
 from secret_settings import ledger, save
 
@@ -19,19 +19,27 @@ def sources(root):
 def seed(parent, evidence, home):
     root = parent / "repository"
     assert not root.exists() and home == (evidence / "home").resolve()
-    assert git(SOURCE, "branch", "--show-current") == "main" and git(SOURCE, "rev-parse", "HEAD") == SHA
-    subprocess.run(["git", "clone", "--local", "--no-hardlinks", "--branch", "main",
-                    str(SOURCE), str(root)], capture_output=True, check=True)
+    root.mkdir()
+    subprocess.run(["git", "init", "--quiet", "--initial-branch=main", str(root)],
+                   capture_output=True, check=True)
     selected = root / "selected"
     selected.mkdir()
     (selected / "Dockerfile").write_text("FROM owned:latest\nUSER nobody\n# Owned inert policy example\n")
     (selected / "Dockerfile.oversized").write_text("#" * 2048)
     (root / "Dockerfile").write_text("FROM excluded:latest\nUSER root\n")
     (selected / "cycle").symlink_to(selected, target_is_directory=True)
+    (root / ".gitignore").write_text("selected/cycle\n")
+    git(root, "add", "--", ".gitignore", "Dockerfile", "selected/Dockerfile", "selected/Dockerfile.oversized")
+    hooks = evidence / "empty-fixture-hooks"
+    hooks.mkdir()
+    git(root, "-c", "user.name=Owned fixture", "-c", "user.email=fixture@example.invalid",
+        "-c", "commit.gpgsign=false", "-c", "core.hooksPath=" + str(hooks),
+        "commit", "--quiet", "-m", "Owned configuration inspection fixture")
+    sha = git(root, "rev-parse", "HEAD")
     config = home / ".kuzushi/v3/config.toml"
     config.parent.mkdir(parents=True, exist_ok=True)
     config.write_text('model = "openai-codex:gpt-5.5"\n[runtime]\nthinking_level = "medium"\n')
-    save(evidence, "source-before", {"sha": SHA, "files": sources(root)})
+    save(evidence, "source-before", {"sha": sha, "files": sources(root)})
     native(root, evidence, "invalid-limit", "iac-scan:scan", {"maxFileBytes": 0}, (2, 3))
     native(root, evidence, "outside-refused", "iac-scan:scan", {"target": "../outside"}, (2, 3))
     native(root, evidence, "context", "context:build", {"enrichment": False})
@@ -46,7 +54,8 @@ def seed(parent, evidence, home):
 def verify(parent, evidence, stage):
     root = parent / "repository"
     before = json.loads((evidence / "source-before.json").read_text())
-    assert git(root, "branch", "--show-current") == "main" and git(root, "rev-parse", "HEAD") == SHA
+    sha = before["sha"]
+    assert git(root, "branch", "--show-current") == "main" and git(root, "rev-parse", "HEAD") == sha
     assert sources(root) == before["files"]
     direct = [row for row in tool_results(root) if "filesScanned" in row.get("data", {})]
     assert len(direct) == 1 and direct[0]["status"] == "partial"
@@ -78,9 +87,9 @@ def verify(parent, evidence, stage):
         assert finding["evidence"]["sourceCount"] == 1 and finding["evidence"]["state"] != "corroborated"
         assert finding["reviewDecisionAuthor"] == "human"
         assert "Owned image policy requires owner review" in json.dumps(report)
-        assert "signal_only" in json.dumps(report) and SHA in json.dumps(report)
+        assert "signal_only" in json.dumps(report) and sha in json.dumps(report)
     assert not list((root / ".kuzushi/v3/campaigns").glob("*/queue.json"))
-    save(evidence, stage + "-verified", {"sha": SHA, "sourceUnchanged": True,
+    save(evidence, stage + "-verified", {"sha": sha, "sourceUnchanged": True,
          "targetSourceExecuted": False, "providerRequests": 0, "counts": counts})
 
 

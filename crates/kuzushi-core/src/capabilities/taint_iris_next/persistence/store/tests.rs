@@ -1,5 +1,6 @@
 use super::*;
 use crate::findings::{FindingStore, TriageAuthor, TriageOutcome, TriageVerdict};
+use crate::run_lifecycle::RunItemStatus;
 use crate::{ScanCancellation, V2Config, WorkspaceTarget};
 
 fn context<'a>(
@@ -39,7 +40,13 @@ fn canceled_discovery_cannot_publish_observations_or_start_a_finding_run() {
     let cancellation = ScanCancellation::default();
     cancellation.cancel();
     let ctx = context(&workspace, &store, &config, Some(&cancellation));
-    let error = persist_taint_iris_next_findings(root.path(), &[observation()], &ctx).unwrap_err();
+    let error = persist_taint_iris_next_findings(
+        root.path(),
+        &[observation()],
+        &ctx,
+        RunItemStatus::Completed,
+    )
+    .unwrap_err();
     assert!(error.to_string().contains("canceled"));
     assert!(store.list_findings(10).unwrap().is_empty());
     assert_eq!(store.latest_run_id().unwrap(), None);
@@ -89,12 +96,53 @@ fn importing_unverified_observations_retains_history_without_carrying_a_current_
     assert_eq!(before.len(), 1);
     let config = V2Config::default();
     let ctx = context(&workspace, &store, &config, None);
-    let receipt = persist_taint_iris_next_findings(root.path(), &[finding], &ctx)
-        .unwrap()
-        .unwrap();
+    let receipt =
+        persist_taint_iris_next_findings(root.path(), &[finding], &ctx, RunItemStatus::Completed)
+            .unwrap()
+            .unwrap();
     assert!(!receipt.run_id.is_empty());
     let after = store.list_findings(10).unwrap().pop().unwrap();
     assert_eq!(store.list_all_review_decisions().unwrap(), before);
     assert_eq!(after.triage, None);
     assert_eq!(after.triaged_by, None);
+}
+
+#[test]
+fn failed_model_attempt_retains_candidates_without_a_completed_finding_run() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(root.path()).unwrap();
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    let config = V2Config::default();
+    let ctx = context(&workspace, &store, &config, None);
+    let receipt = persist_taint_iris_next_findings(
+        root.path(),
+        &[observation()],
+        &ctx,
+        RunItemStatus::Failed,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        store.run_status(&receipt.run_id).unwrap().as_deref(),
+        Some("failed")
+    );
+    assert_eq!(store.list_findings(10).unwrap().len(), 1);
+    assert!(store.list_all_review_decisions().unwrap().is_empty());
+}
+
+#[test]
+fn failed_empty_attempt_stays_failed_without_observations() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(root.path()).unwrap();
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    let config = V2Config::default();
+    let ctx = context(&workspace, &store, &config, None);
+    let receipt = persist_taint_iris_next_findings(root.path(), &[], &ctx, RunItemStatus::Failed)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        store.run_status(&receipt.run_id).unwrap().as_deref(),
+        Some("failed")
+    );
+    assert!(store.list_findings(10).unwrap().is_empty());
 }

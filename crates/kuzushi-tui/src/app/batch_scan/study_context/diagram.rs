@@ -7,6 +7,7 @@ pub(crate) struct StudyContextDiagram {
     pub(crate) selection: usize,
     pub(crate) details: bool,
     pub(crate) scroll: usize,
+    pub(crate) notice: Option<String>,
 }
 
 impl ShellApp {
@@ -31,25 +32,43 @@ impl ShellApp {
         });
     }
 
-    pub(super) fn handle_study_diagram_key(&mut self, code: KeyCode) -> bool {
+    pub(super) fn handle_study_diagram_key(&mut self, code: KeyCode) -> Option<InputUpdate> {
         if !self
             .study_context_picker()
             .is_some_and(|picker| picker.diagram_visible)
         {
-            return false;
+            return None;
+        }
+        if code == KeyCode::Char('f') {
+            return Some(self.open_context_diagram_findings());
         }
         match code {
-            KeyCode::Esc | KeyCode::Char('q') => self.edit_context_picker(|config| {
-                if let Some(picker) = config.context_picker.as_mut() {
-                    picker.diagram_visible = false;
-                }
-            }),
+            KeyCode::Esc | KeyCode::Char('q') => self.close_context_diagram(),
             KeyCode::Down | KeyCode::Char('j') => self.move_context_diagram(1),
             KeyCode::Up | KeyCode::Char('k') => self.move_context_diagram(-1),
             KeyCode::Enter => self.edit_context_diagram(|state| state.details = !state.details),
             _ => self.page_context_diagram(code),
         }
-        true
+        Some(InputUpdate::handled())
+    }
+
+    fn close_context_diagram(&mut self) {
+        self.edit_context_picker(|config| {
+            if let Some(picker) = config.context_picker.as_mut() {
+                picker.diagram_visible = false;
+            }
+        });
+    }
+
+    fn open_context_diagram_findings(&mut self) -> InputUpdate {
+        let Some((state, preview)) = self
+            .study_context_picker()
+            .and_then(|picker| picker.diagram.as_ref().zip(picker.preview.clone()))
+        else {
+            return InputUpdate::handled();
+        };
+        let selection = state.selection;
+        self.open_dfd_finding_query(&preview.dfd, selection, None)
     }
 
     fn edit_context_diagram(&mut self, edit: impl FnOnce(&mut StudyContextDiagram)) {
@@ -75,6 +94,7 @@ impl ShellApp {
             state.selection = (state.selection as i64 + direction)
                 .clamp(0, count.saturating_sub(1) as i64) as usize;
             state.scroll = 0;
+            state.notice = None;
         });
     }
 

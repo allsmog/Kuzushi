@@ -24,7 +24,8 @@ pub(super) fn register_health_tools(
                     "required": ["repoPath"],
                     "additionalProperties": false,
                     "properties": {
-                        "repoPath": {"type": "string", "minLength": 1, "maxLength": 16384}
+                        "repoPath": {"type": "string", "minLength": 1, "maxLength": 16384},
+                        "compileCommandsPath": {"type":"string","minLength":1,"maxLength":16384,"description":"Optional compiler database within granted read roots; relative paths use repoPath."}
                     }
                 }),
             },

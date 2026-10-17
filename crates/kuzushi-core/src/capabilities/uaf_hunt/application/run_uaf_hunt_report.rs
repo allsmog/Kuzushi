@@ -1,8 +1,7 @@
 use crate::capabilities::uaf_hunt::adapters::clang_subprocess::ClangMcpClient;
 use crate::capabilities::uaf_hunt::adapters::parse_uaf_hunt_input;
 use crate::capabilities::uaf_hunt::application::{
-    build_uaf_hunt_user_prompt, persist_uaf_hunt_findings, uaf_hunt_agent_tools,
-    UAF_HUNT_SYSTEM_PROMPT,
+    build_uaf_hunt_user_prompt, uaf_hunt_agent_tools, UAF_HUNT_SYSTEM_PROMPT,
 };
 use crate::capabilities::uaf_hunt::domain::{UafHuntInput, UafHuntReport};
 use crate::modules::ToolExecutionContext;
@@ -20,6 +19,7 @@ pub fn run_uaf_hunt_report(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<UafHuntReport> {
+    anyhow::ensure!(!ctx.is_cancelled(), "uaf-hunt: canceled before local work");
     let run = prepare_uaf_hunt_run(input, ctx, runtime)?;
     let loop_outcome = run_uaf_hunt_agent_loop(ctx, &run)?;
     finish_uaf_hunt_run(ctx, &run, loop_outcome)
@@ -36,6 +36,7 @@ struct UafHuntRun<'a> {
 struct UafHuntLoopOutcome {
     outcome: AgentLoopOutcome,
     stats: super::toolbox::ClangCallStats,
+    compile_database: kuzushi_mcp_common::compile_database::CompileDatabaseReceipt,
 }
 
 fn prepare_uaf_hunt_run<'a>(
@@ -87,16 +88,33 @@ fn run_uaf_hunt_agent_loop(
     let options = &run.options;
     let parent_step = run.parent_step;
     emit_uaf_hunt_progress(ctx, parent_step, "clang · spawn MCP helper");
-    let mut clang = ClangMcpClient::spawn(&target, &options.compile_commands_path)?;
+    let mut clang = ClangMcpClient::spawn(
+        target,
+        &options.compile_commands_path,
+        std::time::Duration::from_secs(options.clang_call_timeout_secs),
+        ctx.cancellation,
+    )?;
     let clang_stats = new_clang_call_stats();
-    let toolbox = build_uaf_hunt_toolbox(&target, &options, &mut clang, clang_stats.clone());
+    let compile_database = clang.compile_database_receipt().clone();
+    let toolbox = build_uaf_hunt_toolbox(
+        &target,
+        &options,
+        &mut clang,
+        clang_stats.clone(),
+        ctx.cancellation,
+    );
     let mut handler = toolbox;
     let _agent_scope = begin_uaf_hunt_agent_scope(ctx, parent_step);
     let outcome = run_tool_loop(run.runtime, &run.request, &mut handler)
         .context("uaf-hunt: agent tool-loop failed")?;
+    anyhow::ensure!(!ctx.is_cancelled(), "uaf-hunt: canceled during local work");
     drop(_agent_scope);
     let stats = snapshot_clang_call_stats(&clang_stats);
-    Ok(UafHuntLoopOutcome { outcome, stats })
+    Ok(UafHuntLoopOutcome {
+        outcome,
+        stats,
+        compile_database,
+    })
 }
 
 fn finish_uaf_hunt_run(
@@ -118,25 +136,64 @@ fn finish_uaf_hunt_run(
         parent_step,
         format!("extract · {} findings from transcript", findings.len()),
     );
-    let persisted = persist_uaf_hunt_findings(&run.target, &findings, &outcome.transcript, ctx)?;
-    emit_uaf_hunt_done(ctx, findings.len());
+    let mut report = report_for_loop(
+        run,
+        &outcome,
+        stats,
+        findings,
+        loop_outcome.compile_database,
+    );
+    let status = report_status(&report);
+    report.persisted = super::super::persistence::persist_uaf_hunt_outcome(
+        &run.target,
+        &report.findings,
+        &outcome.transcript,
+        status,
+        ctx,
+    )?;
+    emit_uaf_hunt_done(ctx, report.count);
+    Ok(report)
+}
 
-    Ok(UafHuntReport {
+fn report_status(report: &UafHuntReport) -> crate::run_lifecycle::RunItemStatus {
+    if report.is_partial() {
+        crate::run_lifecycle::RunItemStatus::Partial
+    } else {
+        crate::run_lifecycle::RunItemStatus::Completed
+    }
+}
+
+fn report_for_loop(
+    run: &UafHuntRun<'_>,
+    outcome: &AgentLoopOutcome,
+    stats: super::toolbox::ClangCallStats,
+    findings: Vec<crate::findings::Finding>,
+    compile_database: kuzushi_mcp_common::compile_database::CompileDatabaseReceipt,
+) -> UafHuntReport {
+    UafHuntReport {
         target: run.target.display().to_string(),
         count: findings.len(),
         findings,
-        persisted,
+        persisted: None,
         compile_commands_path: run.options.compile_commands_path.display().to_string(),
+        compile_database: Some(compile_database),
         clang_tool_calls: stats.calls,
         first_clang_error: stats.first_error,
+        repo_tool_calls: stats.repo_calls,
+        first_repo_error: stats.first_repo_error,
+        max_agent_steps: run.options.max_agent_steps,
+        clang_timeout_secs: run.options.clang_call_timeout_secs,
         steps_used: outcome.steps_used,
         truncated: outcome.truncated,
         cost_usd: outcome.cost_usd,
         cost_usd_exact: outcome.cost_usd_exact,
-    })
+    }
 }
 
-fn emit_uaf_hunt_start(ctx: &ToolExecutionContext<'_>, target: &Path) -> Option<crate::run_lifecycle::RunItemId> {
+fn emit_uaf_hunt_start(
+    ctx: &ToolExecutionContext<'_>,
+    target: &Path,
+) -> Option<crate::run_lifecycle::RunItemId> {
     ctx.trace.map(|trace| {
         trace
             .step(

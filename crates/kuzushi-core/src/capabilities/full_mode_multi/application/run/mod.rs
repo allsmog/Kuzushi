@@ -1,4 +1,4 @@
-use super::plan::plan;
+use super::plan::plan_with_observer;
 use crate::agent_router::RoutedRuntime;
 use crate::capabilities::full_mode_multi::domain::{
     FailedChunkError, FullModeConfig, FullModePlan, FullModeReport, PrefilteredChunk,
@@ -19,11 +19,23 @@ pub fn run(
     spend: Option<&SpendLimiter>,
     cfg: &FullModeConfig,
 ) -> Result<FullModeReport> {
-    let plan = plan(cfg).context("full_mode_multi: planning failed")?;
+    run_with_observer(runtime, spend, cfg, &mut |_| {}, &|| false)
+}
+
+pub(crate) fn run_with_observer(
+    runtime: &RoutedRuntime<'_>,
+    spend: Option<&SpendLimiter>,
+    cfg: &FullModeConfig,
+    progress: &mut dyn FnMut(usize),
+    canceled: &dyn Fn() -> bool,
+) -> Result<FullModeReport> {
+    let plan =
+        plan_with_observer(cfg, progress, canceled).context("full_mode_multi: planning failed")?;
 
     if cfg.dry_run {
         return Ok(run_setup::dry_run_report(plan));
     }
+    plan.ensure_execution_ready()?;
 
     let model = run_setup::resolve_full_mode_model(runtime)?;
     if let Some(prefilter_model) = &cfg.prefilter_model {

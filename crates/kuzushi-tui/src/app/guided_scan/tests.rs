@@ -91,6 +91,7 @@ fn numeric_option_always_offers_validated_other() {
         required: false,
         advanced: false,
         evasion: false,
+        editable_json: false,
         path_semantics: None,
         file_reference_semantics: None,
         default: Some(Value::from(200)),
@@ -118,6 +119,7 @@ fn guided_questions_hide_unstructured_workflow_inputs() {
         required: false,
         advanced: false,
         evasion: false,
+        editable_json: false,
         path_semantics: None,
         file_reference_semantics: None,
         default: None,
@@ -144,6 +146,7 @@ fn optional_option_without_a_value_offers_automatic_and_other() {
         required: false,
         advanced: false,
         evasion: false,
+        editable_json: false,
         path_semantics: None,
         file_reference_semantics: None,
         default: None,
@@ -1055,7 +1058,8 @@ fn blocked_result_copy_names_the_policy_stop_without_claiming_failure() {
     );
 
     assert!(prompt.contains("blocked before it could run"));
-    assert!(prompt.contains("autonomy posture"));
+    assert!(prompt.contains("address the stated requirement"));
+    assert!(!prompt.contains("autonomy posture"));
     assert!(!prompt.contains("failed"));
     assert!(!prompt.contains("continue to Review"));
 }

@@ -104,6 +104,7 @@ pub fn scan_iac(
         kind: options.kind,
         findings: scan.findings,
         files_scanned: scan.files_scanned,
+        inspected_files: Some(scan.inspected_files),
         files_skipped: scan.files_skipped,
         coverage_gaps: scan.coverage_gaps,
         inspection: scan.inspection,

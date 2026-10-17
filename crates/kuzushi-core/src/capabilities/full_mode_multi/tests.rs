@@ -105,7 +105,6 @@ mod tests {
                 PathBuf::from("src/conf.py"),
                 PathBuf::from("src/tmpl.j2"),
                 PathBuf::from("src/tmpl.j2"), // duplicate scope line plans once
-                PathBuf::from("src/missing.scala"),
             ]),
             ..Default::default()
         };
@@ -116,7 +115,10 @@ mod tests {
             .flat_map(|c| c.files.iter().map(|f| f.path.as_str()))
             .collect();
         paths.sort_unstable();
-        assert_eq!(paths, vec!["src/Throttle.scala", "src/conf.py", "src/tmpl.j2"]);
+        assert_eq!(
+            paths,
+            vec!["src/Throttle.scala", "src/conf.py", "src/tmpl.j2"]
+        );
     }
 
     /// The PowerShellExecutor.cpp regression: a scoped file larger than
@@ -186,7 +188,10 @@ mod tests {
         };
         let prompt = render_chunk_prompt(tmp.path(), &chunk).unwrap();
         assert!(prompt.contains("line three"));
-        assert!(!prompt.contains("line one"), "window must not leak the prefix");
+        assert!(
+            !prompt.contains("line one"),
+            "window must not leak the prefix"
+        );
         assert!(prompt.contains("first line is line 3"));
 
         let mut findings = vec![Finding::new_tool(
@@ -227,6 +232,7 @@ mod tests {
     #[test]
     fn cost_summary_scales_with_tokens() {
         let plan = FullModePlan {
+            coverage: None,
             chunks: vec![],
             total_files: 100,
             total_bytes: 1_000_000,
@@ -422,6 +428,34 @@ mod tests {
     }
 
     #[test]
+    fn disabling_cache_after_a_cached_pass_uses_fresh_discovery() {
+        let _lock = crate::test_env::semantic_cache_env_lock();
+        let tmp = make_workspace(&[("src/owned.c", "// Owned inert metadata. Never executed.\n")]);
+        let runtime_inner = ScriptedRuntimeMixed::new(vec![
+            ScriptedItem::Costed("[]".into(), 0.1),
+            ScriptedItem::Costed(r#"[{"file":"src/owned.c","line":1,"severity":"low","title":"Owned policy signal","rationale":"Scripted changed opinion; no vulnerability is claimed."}]"#.into(), 0.1),
+        ]);
+        let runtime = RoutedRuntime::new(
+            runtime_inner as Arc<dyn AgentRuntime>,
+            Arc::new(router_with_full_mode_role("openai-codex:gpt-5.5")),
+            None,
+        );
+        let mut cfg = FullModeConfig {
+            workspace_root: tmp.path().to_path_buf(),
+            ..Default::default()
+        };
+        let first = run(&runtime, None, &cfg).unwrap();
+        assert_eq!(first.chunks_from_cache, 0);
+        assert!(first.findings.is_empty());
+        cfg.reuse_cached_chunks = false;
+        let second = run(&runtime, None, &cfg).unwrap();
+        assert_eq!(second.chunks_from_cache, 0);
+        assert_eq!(second.chunks_dispatched, 1);
+        assert_eq!(second.findings.len(), 1);
+        assert_eq!(second.findings[0].file_path, "src/owned.c");
+    }
+
+    #[test]
     fn rerunning_an_unchanged_scan_replays_every_chunk_from_cache() {
         let _lock = crate::test_env::semantic_cache_env_lock();
         let body = "// padding\n".repeat(2_000);
@@ -457,7 +491,10 @@ mod tests {
         assert_eq!(second.chunks_failed, 0);
         assert_eq!(second.findings.len(), first.findings.len());
         assert_eq!(second.cost_usd, Some(0.0));
-        let summary = report_to_tool_json(&second)["summary"].as_str().unwrap().to_string();
+        let summary = report_to_tool_json(&second)["summary"]
+            .as_str()
+            .unwrap()
+            .to_string();
         assert!(summary.contains("replayed from cache"), "{summary}");
     }
 
@@ -533,7 +570,10 @@ mod tests {
         assert_eq!(report.findings.len(), 1);
         // Prefilter spend still lands in the run total.
         assert!((report.observed_cost_usd - 0.52).abs() < 1e-9);
-        let summary = report_to_tool_json(&report)["summary"].as_str().unwrap().to_string();
+        let summary = report_to_tool_json(&report)["summary"]
+            .as_str()
+            .unwrap()
+            .to_string();
         assert!(summary.contains("1 chunk prefiltered out"), "{summary}");
     }
 
@@ -566,6 +606,35 @@ mod tests {
     }
 
     // -- Test runtime helpers ------------------------------------------------
+
+    #[test]
+    fn a_partial_source_plan_is_readable_but_never_reaches_the_runtime() {
+        let root = tempfile::tempdir().unwrap();
+        let file = std::fs::File::create(root.path().join("large.c")).unwrap();
+        file.set_len(crate::workspace::MAX_REPOSITORY_INSPECTED_BYTES as u64 + 1)
+            .unwrap();
+        let runtime = RoutedRuntime::new(
+            Arc::new(PanickingRuntime),
+            Arc::new(AgentRouter::empty()),
+            None,
+        );
+        let mut cfg = FullModeConfig {
+            workspace_root: root.path().into(),
+            scope_files: Some(vec!["large.c".into()]),
+            dry_run: true,
+            ..Default::default()
+        };
+        let report = run(&runtime, None, &cfg).unwrap();
+        assert_eq!(report.chunks_dispatched, 0);
+        assert_eq!(report_to_tool_json(&report)["status"], "partial");
+        assert_eq!(
+            report_to_tool_json(&report)["summary"],
+            "Partial source plan: 1 omitted, including large.c. No scan ran."
+        );
+        cfg.dry_run = false;
+        assert!(format!("{:#}", run(&runtime, None, &cfg).unwrap_err())
+            .contains("No model request started."));
+    }
 
     struct PanickingRuntime;
     impl AgentRuntime for PanickingRuntime {
@@ -622,7 +691,10 @@ mod tests {
         }
     }
     impl AgentRuntime for ScriptedRuntimeMixed {
-        fn semantic_cache_identity(&self, _request: &AgentQueryRequest) -> Option<crate::identity::Blake3Hash> {
+        fn semantic_cache_identity(
+            &self,
+            _request: &AgentQueryRequest,
+        ) -> Option<crate::identity::Blake3Hash> {
             Some(crate::identity::hash_parts("scripted-full-mode:v1", &[]))
         }
 

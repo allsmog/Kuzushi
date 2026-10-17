@@ -65,7 +65,7 @@ pub fn descriptor_approval_confirm(
         kind: ConfirmKind::DescriptorEffect,
         tool: descriptor.name.clone(),
         target: target.to_string(),
-        rationale: Some(format!("declared {:?} effect", descriptor.effect)),
+        rationale: Some(descriptor_effect_rationale(descriptor, input)),
         allowlist: None,
         actor: opt_str(input, "actor"),
         remembered: false,
@@ -77,6 +77,18 @@ fn opt_str(input: &serde_json::Value, key: &str) -> Option<String> {
         .get(key)
         .and_then(serde_json::Value::as_str)
         .map(ToString::to_string)
+}
+
+fn descriptor_effect_rationale(
+    descriptor: &kuzushi_core::ToolDescriptor,
+    input: &serde_json::Value,
+) -> String {
+    if descriptor.name != "taint-iris-next:catalog-accept" {
+        return format!("declared {:?} effect", descriptor.effect);
+    }
+    format!("Accept reviewed draft {}. Partial context acknowledged: {}. Expected active catalog: {}. Source and catalog checks run before replacement. This starts no model request or scan.",
+        input["draftRef"].as_str().unwrap_or("unavailable"), input["acknowledgePartial"].as_bool().unwrap_or(false),
+        input["expectedActiveDigest"].as_str().unwrap_or("the draft's recorded base"))
 }
 
 /// Destructive shell/system verbs are gated unconditionally — even an explicit
@@ -249,5 +261,25 @@ mod empirical_confirmation_tests {
             &allowlist
         )
         .is_none());
+    }
+}
+
+#[cfg(test)]
+mod catalog_acceptance_tests {
+    use super::*;
+    #[test]
+    fn catalog_acceptance_confirmation_names_exact_draft_replacement_and_zero_model_work() {
+        let registry = kuzushi_core::ModuleRegistry::with_v2_builtins_without_optional_adapters();
+        let descriptor = registry
+            .resolve_tool("taint-iris-next:catalog-accept")
+            .unwrap();
+        let draft = "a".repeat(64);
+        let active = "b".repeat(64);
+        let confirm=descriptor_approval_confirm(descriptor,&serde_json::json!({"draftRef":draft,"acknowledgePartial":true,"expectedActiveDigest":active})).unwrap();
+        let text = confirm.rationale.unwrap();
+        assert!(text.contains(&draft));
+        assert!(text.contains(&active));
+        assert!(text.contains("Partial context acknowledged: true"));
+        assert!(text.contains("no model request or scan"));
     }
 }

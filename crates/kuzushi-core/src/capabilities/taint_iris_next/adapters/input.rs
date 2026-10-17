@@ -18,8 +18,11 @@ impl TaintIrisNextInput {
         let system_prompt = optional_taint_next_string(input, &["TAINT_IRIS_NEXT_PROMPT"])?
             .unwrap_or_else(taint_iris_next_system_prompt);
         Ok(Self {
-            threat_model: crate::capabilities::threat_model::ThreatModelSelection::from_input(input)?,
+            threat_model: crate::capabilities::threat_model::ThreatModelSelection::from_input(
+                input,
+            )?,
             mode,
+            catalog_digest_ref: catalog_digest_ref(input)?,
             backend,
             languages,
             caps,
@@ -36,6 +39,14 @@ impl TaintIrisNextInput {
             extra_catalog_entries,
         })
     }
+}
+
+fn catalog_digest_ref(input: &Value) -> Result<Option<String>> {
+    let reference = optional_taint_next_string(input, &["catalogDigestRef", "catalog_digest_ref"])?;
+    if let Some(value) = reference.as_deref().filter(|value| *value != "static") {
+        crate::identity::Blake3Hash::new(value.into())?;
+    }
+    Ok(reference)
 }
 
 fn taint_iris_next_target_subdir(input: &Value) -> Result<Option<String>> {
@@ -306,8 +317,13 @@ fn taint_iris_next_caps(input: &Value) -> Result<TaintIrisNextCaps> {
             kuzushi_cpg::DEFAULT_MAX_SOURCE_FILES,
             2_000_000,
         )?,
-        codeql_analyze_timeout_ms: cap(CODEQL_TIMEOUT_KEYS, "codeqlAnalyzeTimeoutMs", 180_000, 900_000)?
-            .max(30_000),
+        codeql_analyze_timeout_ms: cap(
+            CODEQL_TIMEOUT_KEYS,
+            "codeqlAnalyzeTimeoutMs",
+            180_000,
+            900_000,
+        )?
+        .max(30_000),
         min_evidence_level: taint_iris_next_min_evidence_level(input)?,
     })
 }

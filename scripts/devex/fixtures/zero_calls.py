@@ -98,6 +98,11 @@ def inspect(root, evidence, stage):
         assert accounting["limits"] == {"maxProviderCalls": 0, "protectedReviewCalls": 0}
         assert accounting["committedCalls"] == accounting["unresolvedCalls"] == 0
         assert receipt["campaignId"] == CAMPAIGN and receipt["observationCount"] == 6
+        assert receipt["findingCount"] == receipt["reviewedCount"] == 2
+        assert receipt["reviewDecisionCounts"] == {"confirmed": 0, "toFix": 0,
+            "rejectedFalsePositive": 2, "suppressed": 0, "deferred": 0, "acceptedRisk": 0}
+        assert all(f["severity"] == "high" for f in report["findings"])
+
     save(evidence, stage + "-verified", {"fixedJobs": 3, "completedJobs": 3, "observations": 6,
          "providerRequests": 0, "sourceUnchanged": True, "counts": counts})
 

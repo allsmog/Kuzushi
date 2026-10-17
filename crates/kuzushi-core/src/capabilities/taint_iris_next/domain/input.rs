@@ -46,6 +46,7 @@ pub(crate) struct TaintIrisNextCaps {
 pub(crate) struct TaintIrisNextInput {
     pub(crate) threat_model: crate::capabilities::threat_model::ThreatModelSelection,
     pub(crate) mode: TaintIrisNextMode,
+    pub(crate) catalog_digest_ref: Option<String>,
     pub(crate) backend: String,
     pub(crate) languages: Vec<String>,
     pub(crate) caps: TaintIrisNextCaps,

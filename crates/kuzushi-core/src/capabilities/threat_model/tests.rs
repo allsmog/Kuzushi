@@ -1,6 +1,12 @@
+#[path = "tests/accounting.rs"]
+mod accounting;
+#[path = "tests/randori_contracts.rs"]
+mod randori_contracts;
+
 #[cfg(test)]
 mod tests {
     use super::super::*;
+    use super::accounting::{account_runtime, AccountedRuntime};
     use std::sync::Mutex;
 
     use crate::config::V2Config;
@@ -42,7 +48,12 @@ pub fn accepts_scope(scope: &str) -> bool {
             authorization: Default::default(),
         };
         let result = registry
-            .execute_tool_with_runtime("threat-model:build", input, &ctx, Some(&runtime))
+            .execute_tool_with_runtime(
+                "threat-model:build",
+                input,
+                &ctx,
+                Some(&runtime.accounted(&ctx)),
+            )
             .unwrap();
         (result, runtime.requests())
     }
@@ -119,7 +130,7 @@ pub fn accepts_scope(scope: &str) -> bool {
                 "threat-model:build",
                 json!({"mode":"refine", "preserveUserEdits":false}),
                 &ctx,
-                Some(&runtime),
+                Some(&runtime.accounted(&ctx)),
             )
             .unwrap();
         let requests = runtime.requests();
@@ -238,13 +249,13 @@ pub fn accepts_scope(scope: &str) -> bool {
         assert_eq!(parsed["outOfScope"], json!(["admin laptops"]));
     }
 
-    struct MockThreatRuntime {
+    pub(super) struct MockThreatRuntime {
         requests: Mutex<Vec<AgentQueryRequest>>,
         responses: Mutex<Vec<AgentQueryResponse>>,
     }
 
     impl MockThreatRuntime {
-        fn new(response: Value) -> Self {
+        pub(super) fn new(response: Value) -> Self {
             Self::responses(vec![AgentQueryResponse {
                 text: String::new(),
                 structured: Some(response),
@@ -259,8 +270,18 @@ pub fn accepts_scope(scope: &str) -> bool {
             }
         }
 
-        fn requests(&self) -> Vec<AgentQueryRequest> {
+        pub(super) fn requests(&self) -> Vec<AgentQueryRequest> {
             self.requests.lock().unwrap().clone()
+        }
+
+        pub(super) fn accounted<'a>(
+            &'a self,
+            ctx: &ToolExecutionContext<'_>,
+        ) -> AccountedRuntime<'a> {
+            let calls = u32::try_from(self.responses.lock().unwrap().len())
+                .unwrap()
+                .max(1);
+            account_runtime(ctx, self, calls)
         }
     }
 
@@ -284,7 +305,7 @@ pub fn accepts_scope(scope: &str) -> bool {
         }
     }
 
-    fn sample_document() -> Value {
+    pub(super) fn sample_document() -> Value {
         json!({
             "version": "2.0",
             "dfd": {
@@ -403,7 +424,7 @@ pub fn accepts_scope(scope: &str) -> bool {
                     "preserveUserEdits": false
                 }),
                 &ctx,
-                Some(&runtime),
+                Some(&runtime.accounted(&ctx)),
             )
             .unwrap();
 
@@ -544,7 +565,7 @@ pub fn accepts_scope(scope: &str) -> bool {
                 "threat-model:build",
                 json!({"preserveUserEdits": false}),
                 &ctx,
-                Some(&runtime),
+                Some(&runtime.accounted(&ctx)),
             )
             .unwrap();
 
@@ -644,7 +665,7 @@ pub fn accepts_scope(scope: &str) -> bool {
                     "preserveUserEdits": false
                 }),
                 &ctx,
-                Some(&runtime),
+                Some(&runtime.accounted(&ctx)),
             )
             .unwrap();
 
@@ -702,7 +723,7 @@ pub fn accepts_scope(scope: &str) -> bool {
                     "contextMode": "off",
                 }),
                 &ctx,
-                Some(&runtime),
+                Some(&runtime.accounted(&ctx)),
             )
             .unwrap_err()
             .to_string();
@@ -737,7 +758,7 @@ pub fn accepts_scope(scope: &str) -> bool {
                 "threat-model:build",
                 json!({"contextMode": "off"}),
                 &ctx,
-                Some(&runtime),
+                Some(&runtime.accounted(&ctx)),
             )
             .unwrap();
 
@@ -780,7 +801,7 @@ pub fn accepts_scope(scope: &str) -> bool {
                     "seed": ["Focus on the flow described in design.md"],
                 }),
                 &ctx,
-                Some(&runtime),
+                Some(&runtime.accounted(&ctx)),
             )
             .unwrap();
 
@@ -816,7 +837,7 @@ pub fn accepts_scope(scope: &str) -> bool {
                 "threat-model:build",
                 json!({"sources": ["interview"]}),
                 &ctx,
-                Some(&runtime),
+                Some(&runtime.accounted(&ctx)),
             )
             .unwrap_err()
             .to_string();
@@ -846,7 +867,7 @@ pub fn accepts_scope(scope: &str) -> bool {
             "randori:pasta",
             json!({"outputDir": ".kuzushi/randori"}),
             &ctx,
-            Some(runtime),
+            Some(&runtime.accounted(&ctx)),
         )
     }
 
@@ -12770,7 +12791,7 @@ pub fn accepts_scope(scope: &str) -> bool {
                     "preserveUserEdits": false,
                 }),
                 &ctx,
-                Some(&runtime),
+                Some(&runtime.accounted(&ctx)),
             )
             .unwrap();
         let read = registry
@@ -12851,7 +12872,7 @@ pub fn accepts_scope(scope: &str) -> bool {
                 "threat-model:build",
                 json!({"preserveUserEdits": false, "minCoverage": 0}),
                 &ctx,
-                Some(&runtime),
+                Some(&runtime.accounted(&ctx)),
             )
             .unwrap();
 
@@ -12909,7 +12930,7 @@ pub fn accepts_scope(scope: &str) -> bool {
             "threat-model:build",
             json!({"preserveUserEdits": false, "minCoverage": 0}),
             &ctx,
-            Some(runtime),
+            Some(&account_runtime(&ctx, runtime, 2)),
         )
     }
 
@@ -13054,7 +13075,7 @@ pub fn accepts_scope(scope: &str) -> bool {
                 "threat-model:build",
                 json!({"preserveUserEdits": false}),
                 &ctx,
-                Some(&runtime),
+                Some(&runtime.accounted(&ctx)),
             )
             .unwrap_err();
 
@@ -13095,7 +13116,7 @@ pub fn accepts_scope(scope: &str) -> bool {
                 "threat-model:build",
                 json!({"preserveUserEdits": false}),
                 &ctx,
-                Some(&runtime),
+                Some(&runtime.accounted(&ctx)),
             )
             .unwrap();
 
@@ -13160,7 +13181,7 @@ pub fn accepts_scope(scope: &str) -> bool {
                 "threat-model:build",
                 json!({"seedMode": "fresh", "preserveUserEdits": false, "minCoverage": 0}),
                 &ctx,
-                Some(&runtime),
+                Some(&runtime.accounted(&ctx)),
             )
             .unwrap();
 
@@ -13218,7 +13239,7 @@ pub fn accepts_scope(scope: &str) -> bool {
                 "threat-model:build",
                 json!({"preserveUserEdits": false, "minCoverage": 0}),
                 &ctx,
-                Some(&runtime),
+                Some(&runtime.accounted(&ctx)),
             )
             .unwrap();
 
@@ -13329,7 +13350,7 @@ pub fn accepts_scope(scope: &str) -> bool {
                     "preserveUserEdits": false
                 }),
                 &ctx,
-                Some(&runtime),
+                Some(&runtime.accounted(&ctx)),
             )
             .unwrap();
 
@@ -13395,7 +13416,7 @@ pub fn accepts_scope(scope: &str) -> bool {
                 "threat-model:build",
                 json!({"pipeline": "staged", "preserveUserEdits": false}),
                 &ctx,
-                Some(&runtime),
+                Some(&runtime.accounted(&ctx)),
             )
             .unwrap();
 
@@ -13430,7 +13451,7 @@ pub fn accepts_scope(scope: &str) -> bool {
                 "threat-model:build",
                 json!({"pipeline": "staged", "preserveUserEdits": false}),
                 &ctx,
-                Some(&runtime),
+                Some(&runtime.accounted(&ctx)),
             )
             .unwrap();
 
@@ -13466,7 +13487,7 @@ pub fn accepts_scope(scope: &str) -> bool {
                     "preserveUserEdits": false
                 }),
                 &ctx,
-                Some(&runtime),
+                Some(&runtime.accounted(&ctx)),
             )
             .unwrap();
 
@@ -13528,7 +13549,7 @@ pub fn accepts_scope(scope: &str) -> bool {
                     "preserveUserEdits": false
                 }),
                 &ctx,
-                Some(&runtime),
+                Some(&runtime.accounted(&ctx)),
             )
             .unwrap();
 
@@ -13562,7 +13583,7 @@ pub fn accepts_scope(scope: &str) -> bool {
                 "threat-model:build",
                 json!({"mode": "refine"}),
                 &ctx,
-                Some(&runtime),
+                Some(&runtime.accounted(&ctx)),
             )
             .unwrap_err();
         assert!(
@@ -13587,7 +13608,7 @@ pub fn accepts_scope(scope: &str) -> bool {
                 "threat-model:build",
                 json!({"mode": "refine", "preserveUserEdits": false}),
                 &ctx,
-                Some(&runtime),
+                Some(&runtime.accounted(&ctx)),
             )
             .unwrap();
 
@@ -13627,7 +13648,7 @@ pub fn accepts_scope(scope: &str) -> bool {
                 "threat-model:build",
                 json!({"mode": "refine"}),
                 &ctx,
-                Some(&runtime),
+                Some(&runtime.accounted(&ctx)),
             )
             .unwrap();
 

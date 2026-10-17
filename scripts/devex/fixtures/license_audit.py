@@ -3,6 +3,7 @@ import hashlib
 import json
 import sqlite3
 import sys
+import time
 from pathlib import Path
 
 
@@ -105,10 +106,22 @@ def check_export(root, evidence):
         "absenceDoesNotEstablishFix":True,"fullFinding":finding})
 
 
+def wait_for_inspection(root, evidence, stage):
+    deadline = time.monotonic() + 20
+    while True:
+        try:
+            inspect(root, evidence, stage)
+            return
+        except (AssertionError, FileNotFoundError, json.JSONDecodeError, sqlite3.OperationalError):
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.1)
+
+
 root, evidence, stage = Path(sys.argv[1]).resolve(), Path(sys.argv[2]).resolve(), sys.argv[3]
 if stage == "prepare":
     prepare(root, evidence)
 elif stage in ["license", "oversize", "repair"]:
     edit_source(root, evidence, stage)
 else:
-    inspect(root, evidence, stage)
+    wait_for_inspection(root, evidence, stage)

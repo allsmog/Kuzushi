@@ -135,6 +135,8 @@ pub struct IacScanReport {
     pub kind: IacScanKind,
     pub findings: Vec<IacScanFinding>,
     pub files_scanned: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inspected_files: Option<std::collections::BTreeSet<String>>,
     pub files_skipped: usize,
     /// Paths the walk reached but could not read. A clean report over a tree
     /// with gaps has not cleared the whole tree.

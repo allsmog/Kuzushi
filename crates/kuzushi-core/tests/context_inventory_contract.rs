@@ -207,7 +207,7 @@ fn git_inventory_does_not_silently_expand_to_untracked_source() {
 
 #[cfg(unix)]
 #[test]
-fn refused_ancestor_link_keeps_prior_context_and_shard_draft() {
+fn ancestor_link_is_disclosed_as_partial_and_cannot_replace_accepted_scopes() {
     let root = fixture();
     for args in [
         vec!["init", "--quiet"],
@@ -222,23 +222,59 @@ fn refused_ancestor_link_keeps_prior_context_and_shard_draft() {
     }
     dispatch(root.path(), "context:build", json!({"enrichment":false})).unwrap();
     let context_path = kuzushi_core::context::context_snapshot_path(root.path());
-    let context_before = std::fs::read(&context_path).unwrap();
-    let result = dispatch(root.path(), "pack:suggest-shards", json!({})).unwrap();
+    let result = dispatch(
+        root.path(),
+        "pack:suggest-shards",
+        json!({"emitScopes":true}),
+    )
+    .unwrap();
     let draft_path = Path::new(result["data"]["draftPath"].as_str().unwrap());
-    let draft_before = std::fs::read(draft_path).unwrap();
+    let scopes_path = Path::new(result["data"]["scopesPath"].as_str().unwrap());
+    let accepted_scopes = std::fs::read(scopes_path).unwrap();
     let excluded = tempfile::tempdir().unwrap();
     std::fs::write(
         excluded.path().join("file.rs"),
         "// Owned excluded text; never executed.\n",
     )
     .unwrap();
+    let excluded_before = std::fs::read(excluded.path().join("file.rs")).unwrap();
     std::fs::rename(root.path().join("zeta"), root.path().join("original-zeta")).unwrap();
     std::os::unix::fs::symlink(excluded.path(), root.path().join("zeta")).unwrap();
 
-    for tool in ["context:build", "pack:suggest-shards"] {
-        let error = dispatch(root.path(), tool, json!({})).unwrap_err();
-        assert!(format!("{error:#}").contains("symlink"), "{error:#}");
-        assert_eq!(std::fs::read(&context_path).unwrap(), context_before);
-        assert_eq!(std::fs::read(draft_path).unwrap(), draft_before);
-    }
+    let context = dispatch(root.path(), "context:build", json!({"enrichment":false})).unwrap();
+    assert_eq!(context["status"], "partial");
+    assert_eq!(context["data"]["partialCoverage"], true);
+    assert_eq!(snapshot(root.path())["filesSample"], json!(["root.rs"]));
+    let inspection = &context["data"]["snapshot"]["repositoryInventory"]["inspection"];
+    assert_eq!(inspection["omitted_paths"][0]["path"], "zeta/file.rs");
+    assert!(inspection["omitted_paths"][0]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("symlink"));
+    let partial_context = std::fs::read(&context_path).unwrap();
+    let proposal = dispatch(root.path(), "pack:suggest-shards", json!({})).unwrap();
+    assert_eq!(proposal["status"], "partial");
+    assert_eq!(proposal["data"]["inventoryComplete"], false);
+    assert_eq!(proposal["data"]["inspection"]["files"], json!(["root.rs"]));
+    assert!(std::fs::read_to_string(draft_path)
+        .unwrap()
+        .contains("# PARTIAL inventory:"));
+    let partial_draft = std::fs::read(draft_path).unwrap();
+    let error = dispatch(
+        root.path(),
+        "pack:suggest-shards",
+        json!({"emitScopes":true}),
+    )
+    .unwrap_err();
+    assert!(
+        error.to_string().contains("inventory is incomplete"),
+        "{error:#}"
+    );
+    assert_eq!(std::fs::read(scopes_path).unwrap(), accepted_scopes);
+    assert_eq!(std::fs::read(&context_path).unwrap(), partial_context);
+    assert_eq!(std::fs::read(draft_path).unwrap(), partial_draft);
+    assert_eq!(
+        std::fs::read(excluded.path().join("file.rs")).unwrap(),
+        excluded_before
+    );
 }
