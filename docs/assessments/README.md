@@ -23,6 +23,9 @@ their useful decisions have moved into code, tests, or a live contract.
   owner decisions about product-surface cuts and folds.
 - [`new-modules.md`](./new-modules.md) — candidate built-ins and remaining
   module gaps.
+- [`phase-page-keys-2026-10-16.md`](./phase-page-keys-2026-10-16.md) — the
+  durable Prove and Fix readers have no route from an engagement resting at
+  Review, and the journey keys that used to reach them.
 
 ## Closure record
 

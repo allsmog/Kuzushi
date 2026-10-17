@@ -27,11 +27,11 @@ submit: demo
 wait-for: 120 PDF phase reference fixture loaded
 submit: workbench
 wait: 2
-nav-mode:
-keys: 4
+submit: prove
 wait-live-snap: 10 Viewing Prove | 1-prove
 expect: STATUS / NEXT
 expect: PROOF SUBJECT · finding
+nav-mode:
 keys: v
 wait-live-snap: 10 INVESTIGATE · Enter draft command | 2-investigation-plan
 expect: EVIDENCE GOALS

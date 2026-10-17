@@ -92,7 +92,7 @@ fn regeneration_entry_remains_readable_across_the_viewport_matrix() {
         let backend = ratatui::backend::TestBackend::new(width, height);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         terminal
-            .draw(|frame| crate::renderer::render_app(frame, &mut app))
+            .draw(|frame| crate::renderer::render_app(frame, &app))
             .unwrap();
         let text = terminal
             .backend()
