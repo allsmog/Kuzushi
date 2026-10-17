@@ -20,8 +20,8 @@ impl ScanEngine for OwnedAdapter {
         if !self.positive {
             return Ok(vec![]);
         }
-        Ok(crate::scan::engines::govulncheck::parse_govulncheck_json(target,
-            "{\"config\":{\"protocol_version\":\"v1.0.0\"}}\n{\"finding\":{\"osv\":\"GO-OWNED-1\"}}")?)
+        crate::scan::engines::govulncheck::parse_govulncheck_json(target,
+            "{\"config\":{\"protocol_version\":\"v1.0.0\"}}\n{\"finding\":{\"osv\":\"GO-OWNED-1\"}}")
     }
 }
 

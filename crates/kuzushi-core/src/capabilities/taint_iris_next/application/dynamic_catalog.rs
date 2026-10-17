@@ -11,9 +11,8 @@ pub(crate) fn taint_iris_next_target_catalog_path(repo_root: &Path) -> PathBuf {
     taint_iris_next_target_catalog_artifact_path(repo_root)
 }
 
-/// Try to load a target-specific catalog from disk. Returns `None` when
-/// no catalog has been generated yet — callers fall back to the static
-/// `TAINT_IRIS_NEXT_CATALOG`.
+/// Load a generated catalog for persisted-artifact assertions.
+#[cfg(test)]
 pub(crate) fn load_taint_iris_next_target_catalog(
     repo_root: &Path,
 ) -> Option<Vec<TaintIrisNextRankedCatalogEntry>> {

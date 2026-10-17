@@ -298,7 +298,7 @@ mod tests {
             let previous = scroll;
             scroll += rows.page_step(visible, scroll, PageDirection::Down);
             assert!(scroll > previous);
-            assert!(scroll <= previous + visible as usize - 1);
+            assert!(scroll < previous + visible as usize);
             starts.push(scroll);
         }
         assert_eq!(rows.page_step(visible, scroll, PageDirection::Down), 0);

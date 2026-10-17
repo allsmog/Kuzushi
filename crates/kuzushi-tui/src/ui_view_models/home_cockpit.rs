@@ -168,9 +168,8 @@ pub(crate) fn attack_surface_artifact_state(app: &ShellApp) -> AttackSurfaceArti
     }
 }
 
-/// The O(1) hydration version of the already-loaded `attack-surface.json`, or
-/// `None` when it has not hydrated. Read-path memo keys (the worklist fold) key
-/// on this instead of re-cloning and re-parsing the full artifact every frame.
+/// Hydration identity for assertions about the latest-run artifact fallback.
+#[cfg(test)]
 pub(crate) fn attack_surface_artifact_version(app: &ShellApp) -> Option<u64> {
     let run = HomeRunModel::from_app(app);
     let (target, run_id) = (run.target.as_deref()?, run.run_id.as_deref()?);

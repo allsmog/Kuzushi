@@ -45,7 +45,7 @@ fn compact_gallery_reserves_room_for_reading_and_visible_controls() {
         .iter()
         .position(|line| line.to_string().trim_start().starts_with("row"))
         .unwrap();
-    assert!(projected.len() - position - 1 >= 6, "{text}");
+    assert!(projected.len() - position > 6, "{text}");
 }
 
 #[test]

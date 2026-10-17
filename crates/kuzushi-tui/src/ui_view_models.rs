@@ -230,10 +230,12 @@ pub(crate) use help::{
     help_model, plain_help_model, quickstart_model, HelpCommandRow, PlainHelpCategoryModel,
     PlainHelpModel, QuickstartStep,
 };
+#[cfg(test)]
+pub(crate) use home_cockpit::attack_surface_artifact_version;
 pub(crate) use home_cockpit::{
-    attack_surface_artifact_state, attack_surface_artifact_version, attack_surface_model,
-    home_cockpit_model, AttackSurfaceArtifactState, HomeArtifactRow, HomeCockpitModel,
-    HomeFindingsCard, HomeNextCard, HomeRunArtifactChip, HomeRunCard, HomeTopRiskRow,
+    attack_surface_artifact_state, attack_surface_model, home_cockpit_model,
+    AttackSurfaceArtifactState, HomeArtifactRow, HomeCockpitModel, HomeFindingsCard, HomeNextCard,
+    HomeRunArtifactChip, HomeRunCard, HomeTopRiskRow,
 };
 pub(crate) use jobs_registry::{
     jobs_registry_model, JobHistoryState, JobRow, JobRunStatus, JobSource, JobsRegistryModel,

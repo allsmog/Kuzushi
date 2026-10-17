@@ -90,7 +90,7 @@ fn source_prefixes_and_inventory_share_the_combined_byte_ceiling() {
     inventory.inspection.as_mut().unwrap().inspected_bytes =
         crate::workspace::inventory::MAX_REPOSITORY_INSPECTED_BYTES - 4;
     let index = index_inventory(root.path(), inventory, &|| false).unwrap();
-    assert_eq!(index.files[0].text.as_bytes().len(), 4);
+    assert_eq!(index.files[0].text.len(), 4);
     assert_eq!(index.coverage["reservedSourceBytes"], 4);
     assert_eq!(index.coverage["maxSourceBytes"], 4);
     assert_eq!(index.coverage["status"], "partial");
