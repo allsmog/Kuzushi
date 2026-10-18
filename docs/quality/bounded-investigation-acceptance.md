@@ -1,5 +1,36 @@
 # Bounded investigation acceptance ledger
 
+The [lesson generation checkpoint](../assessments/lesson-generation-acceptance-2026-10-18.md)
+repairs skipped evidence during narrow-terminal paging and distinguishes historical
+source from evidence-text size and provider attempts. Twenty-four Core and
+twenty-two TUI lesson tests, the workspace build, Clippy and risk gate pass.
+Final J119 records 28 machine passes, zero failures, 30 capture pairs and six
+pending human judgments; fifteen terminal-cell replays were inspected. One
+intercepted request preserves the original finding decision, accepted lesson and
+consumed allowance after restart. No live request is added. Four delivery items
+remain locally verified and five remain open. This checkpoint on main follows
+`dd00ef73e2` and includes both lesson-copy repairs below. Older draft labels are
+historical.
+
+The [named context-copy choices checkpoint](../assessments/named-lesson-copy-choices-2026-10-18.md)
+pairs readable names with exact selected revisions and keeps copy/back/reference
+controls visible at 40 columns. Seventeen TUI and 23 Core lesson tests, the
+workspace build, TUI Clippy and risk gate pass. Final J118 records 34 machine
+passes, zero failures, 37 capture pairs and eight pending human judgments;
+fifteen terminal-cell replays were inspected. The copy, retained draft and
+retirement remain distinct. No live request is added. Four delivery items
+remain locally verified and five remain open. This draft on main follows
+`dd00ef73e2` and includes the retained-draft repair below.
+
+The [retained lesson draft repair](../assessments/lesson-draft-preservation-2026-10-18.md)
+preserves unsubmitted text when a separate accepted-lesson context copy finishes.
+The regression reproduces the original loss through shared dispatch. Core/TUI
+lesson checks, the workspace build, TUI Clippy and risk gate pass. Final J118
+records 23 machine passes, zero failures, 27 capture pairs and seven pending
+human judgments; fifteen terminal-cell replays were inspected across six sizes
+and no-color restart. No live request is added. Four delivery items remain
+locally verified and five remain open. This is a draft on main after `dd00ef73e2`.
+
 The [context matrix checkpoint](../assessments/context-matrix-acceptance-2026-10-18.md)
 removes prior-finding suppression from agentic discovery and adds Home/End field
 navigation without changing editor ownership. All 356 distinct focused Rust
@@ -543,7 +574,7 @@ original requirements remain open. No new live model request is made.
 | SHA/content-aware comparison and honest recurrence | Finding identity/source history, batch occurrence, J121 dirty-source reassessment and retained FP/deferral decisions; [attempt and recurrence evidence](../assessments/attempts-and-recurrence-2026-10-15.md) adds exact run membership and canceled/superseded-only zero recurrence; [scope source comparison](../assessments/scope-source-comparison-2026-10-15.md) adds visible revision differences and unchecked matching SHAs before new work; [current SHA workflow](../assessments/source-identity-header-2026-10-17.md) adds actual two-commit, same-SHA dirty-content and source-qualified review in J196/J199 | Scoped. A missing later observation never establishes a fix or safe cross-branch decision reuse. Current J196/J199 have 90 machine passes and five pending human judgments over deterministic policy observations; nondeterministic model quality and other scanner bindings remain open. J275 is explicitly synthetic reader evidence, not discovery quality validation. J277 has 33 machine passes and six pending human judgments; it contains no findings and establishes no fix. |
 | Severity, confidence, recurrence and scope views | Review queue, canonical filters, batch occurrence, scope-case views and [recorded scope filtering](../assessments/recorded-scope-findings-2026-10-17.md) | Scoped. `findings:list`, CLI and shell share authenticated accepted-scope membership before paging. Scope, run, study and source predicates must match the same observation run. Missing metadata is partial; global aliases and human decisions stay authoritative. Scale, cancellation and full UX qualification remain open. |
 | Goal-relevance view separate from finding verdicts | `findings:goals`, `findings:goal-assess`, Review `O`/`goals`, immutable audit history and export; [goal relevance evidence](../assessments/goal-relevance-2026-10-15.md) | Scoped. Manual assessments bind exact saved briefs and recorded observations, with reversible clears and conflict review. J274 verifies the six-size browser, compact forms and no-color restart. Large histories, rapid key sequences and human UX acceptance remain open. |
-| Accepted findings produce draft lessons; only reviewed lessons enter future accepted context | Finding lesson tools, `threat-model:reuse-lessons`, eligibility validation and retirement tests; [integrated J304](../assessments/reviewed-learning-loop-2026-10-16.md) verifies exact frozen lesson text in three actual adapter requests, six completed local jobs, retirement refusal and restart | Scoped. Transport is intercepted and the lesson is manually reviewed policy guidance. This is not live inference or generated-lesson usefulness evidence; keep legacy imported patterns explicitly unverified. Six human judgments remain pending. |
+| Accepted findings produce draft lessons; only reviewed lessons enter future accepted context | [Named J118 choices](../assessments/named-lesson-copy-choices-2026-10-18.md) add selected names, exact references and bounded compact controls. [Current J118 draft preservation](../assessments/lesson-draft-preservation-2026-10-18.md) verifies explicit acceptance, inactive copying and retirement with one retained human finding decision; finding lesson tools, `threat-model:reuse-lessons`, eligibility validation and retirement tests; [integrated J304](../assessments/reviewed-learning-loop-2026-10-16.md) verifies exact frozen lesson text in three actual adapter requests, six completed local jobs, retirement refusal and restart | Scoped. Transport is intercepted and the lesson is manually reviewed policy guidance. This is not live inference or generated-lesson usefulness evidence; keep legacy imported patterns explicitly unverified. Six human judgments remain pending. |
 | Source-only variants and next-investigation proposals have their own approved question, scope and allowance | Proposal/context study machinery and experimental source-pattern adapters | Scoped. Do not credit unaccepted drafts as executed follow-ups or useful variant coverage. |
 
 ## Spending, interfaces and operator acceptance

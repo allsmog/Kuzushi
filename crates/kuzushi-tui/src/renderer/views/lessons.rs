@@ -6,6 +6,9 @@ use crate::app::{
 use kuzushi_core::findings::FindingLesson;
 mod context;
 mod form;
+mod generation;
+mod reader;
+pub(crate) use reader::lesson_reader_scroll;
 
 pub(super) fn lesson_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     if app.router.lessons.context_selecting {
@@ -16,11 +19,15 @@ pub(super) fn lesson_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             return form::form_lines(app, draft, area);
         }
     }
+    super::shell_view_lines::default_scrolled_lines(app, area, browser_document_lines(app, area))
+}
+
+fn browser_document_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = vec![Line::styled("REUSABLE LESSONS", theme::accent())];
     lines.extend(browser_actions(area.width));
     lines.extend(browser_lines(app, area));
     lines.extend(notice_lines(app, area.width));
-    super::shell_view_lines::default_scrolled_lines(app, area, lines)
+    lines
 }
 
 fn browser_actions(width: u16) -> Vec<Line<'static>> {
@@ -98,7 +105,7 @@ fn lesson_row(
         .lessons
         .selected
         .iter()
-        .any(|reference| reference.lesson_id == record.id);
+        .any(|lesson| lesson.reference.lesson_id == record.id);
     wrapped(
         &format!(
             "{} {} {:?} · {} · v{}",
@@ -147,7 +154,7 @@ fn generation_receipt_lines(record: &FindingLesson, width: u16) -> Vec<Line<'sta
     let Some(receipt) = &record.generation else {
         return wrapped("Draft source: operator text", width, theme::muted());
     };
-    wrapped(&format!("Proposed by: {}\nSource supplied: {} · input {} B · {} synthesis request\nGeneration run: {}\nPrompt: {}",safe(&receipt.model),safe(&receipt.source_capture),receipt.input_bytes,receipt.synthesis_requests,receipt.run_id.as_deref().unwrap_or("unrecorded"),receipt.prompt_sha256),width,theme::muted())
+    generation::receipt_lines(receipt, width)
 }
 
 pub(super) fn notice_lines(app: &ShellApp, width: u16) -> Vec<Line<'static>> {

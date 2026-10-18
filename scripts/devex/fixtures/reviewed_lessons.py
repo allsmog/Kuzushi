@@ -30,6 +30,7 @@ def prepare(root, evidence):
         "limits": "Historical guidance only. Current source needs independent review.",
         "reason": "Reviewed the complete text, applicability and historical limits.",
         "retire": "Retire the labeled lesson after the context-copy experiment.",
+        "retained": "Keep this unsubmitted note after copying context.\nUnicode café stays editable.",
     }.items():
         (evidence / (name + ".txt")).write_text(text)
     (evidence / "open.txt").write_text("open generation:" + str(receipt["findingId"]))
@@ -40,7 +41,7 @@ def verify(root, evidence, stage):
     page = execute(root, Path(os.environ["HOME"]), evidence, "lessons-" + stage, "findings:lessons", {})
     rows = page["rows"]
     expected = {"empty": None, "draft-confirmation": None, "draft": "draft", "accept-confirmation": "draft",
-        "accepted": "accepted", "copy-confirmation": "accepted", "copy": "accepted", "retired": "retired", "restart": "retired"}[stage]
+        "accepted": "accepted", "copy-confirmation": "accepted", "copy": "accepted", "retained-copy": "accepted", "retired": "retired", "restart": "retired"}[stage]
     if expected is None:
         assert rows == []
     else:
@@ -60,14 +61,14 @@ def verify(root, evidence, stage):
     assert hashlib.sha256((root / "hello.txt").read_bytes()).hexdigest() == (evidence / "source-before.sha256").read_text()
     catalog = execute(root, Path(os.environ["HOME"]), evidence, "models-" + stage, "threat-model:models", {})
     models = catalog.get("manifest", catalog).get("models", [])
-    if stage in ["copy", "retired", "restart"]:
+    if stage in ["copy", "retained-copy", "retired", "restart"]:
         assert len(models) == 2, catalog
         copy = models[-1]
         revision = copy["revisions"][-1]
         reference = {"modelId": copy["modelId"], "revisionId": revision["revisionId"], "sha256": revision["sha256"]}
         data = execute(root, Path(os.environ["HOME"]), evidence, "copy-read-" + stage, "threat-model:read", {"threatModelRef": reference})
         assert len(data["document"]["reviewedLessons"]) == 1
-        assert data["lessonState"]["usable"] == (stage == "copy")
+        assert data["lessonState"]["usable"] == (stage in ["copy", "retained-copy"])
     else:
         assert len(models) == 1, catalog
     (evidence / (stage + "-check.json")).write_text(json.dumps({"stage": stage, "lessonState": expected, "lessonCount": len(rows),

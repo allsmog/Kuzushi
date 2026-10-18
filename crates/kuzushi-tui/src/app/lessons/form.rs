@@ -89,18 +89,6 @@ impl ShellApp {
         match code {
             KeyCode::Esc => self.router.lessons.form.as_mut().unwrap().confirming = false,
             KeyCode::Enter => self.submit_lesson_form(),
-            KeyCode::PageDown => {
-                let offset = self.router.default_scroll().offset();
-                self.router
-                    .default_scroll_mut()
-                    .set(offset.saturating_add(5));
-            }
-            KeyCode::PageUp => {
-                let offset = self.router.default_scroll().offset();
-                self.router
-                    .default_scroll_mut()
-                    .set(offset.saturating_sub(5));
-            }
             _ => {}
         }
     }

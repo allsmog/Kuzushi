@@ -5,6 +5,7 @@ use crate::findings::{
 use crate::runtime::{AgentQueryRequest, AgentQueryResponse};
 use crate::{ModuleRegistry, V2Config, WorkspaceTarget};
 use std::sync::{Arc, Mutex};
+mod captured_source;
 
 struct Fixture {
     root: tempfile::TempDir,

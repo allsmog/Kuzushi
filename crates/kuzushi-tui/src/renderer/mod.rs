@@ -21,6 +21,7 @@ pub(crate) use views::context_page_rows;
 pub(crate) use views::entry_point_page_scroll;
 pub(crate) use views::finding_group_page_rows;
 pub(crate) use views::keymap_reader_scroll;
+pub(crate) use views::lesson_reader_scroll;
 pub(crate) use views::logs_reader_scroll;
 pub(crate) use views::planning_option_error_scroll;
 pub(crate) use views::quit_disclosure_viewport;

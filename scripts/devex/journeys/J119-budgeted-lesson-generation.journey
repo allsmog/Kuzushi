@@ -51,14 +51,29 @@ keys: L
 require-live-snap: 25 dispatcher pid | launched
 require-shell: python3 -B @REPO/scripts/devex/fixtures/lesson_generation.py finished @TMP_TARGET @ART
 keys: r
-require-live-snap: 25 1 job(s) · 1 completed | completed
+require-live-snap: 25 Jobs: 1 · 1 completed | completed
 keys: a
 require-live-snap: 25 GENERATED LESSON DRAFT | generation-result
 expect: Inspect model-proposed lesson
 keys: Enter
 require-live-snap: 25 Labeled model lesson | saved-draft
 expect: Proposed by:
+expect: Captured historical source supplied.
 ask: Does the actual executor expose only a model draft, with model and source omissions disclosed, unchanged finding decisions and explicit later human acceptance?
+resize: 160x48
+live-snap: source-160x48
+resize: 96x89
+live-snap: source-96x89
+resize: 80x24
+live-snap: source-80x24
+resize: 60x20
+live-snap: source-60x20
+resize: 40x12
+keys: PageDown
+require-live-snap: 20 Captured historical source | source-40x12
+ask: Is historical source distinct from the evidence text size, provider retry accounting and finding verdict, including at 40 columns by paging?
+resize: 120x36
+keys: Home
 keys: a
 paste-file: @ART/reason.txt
 keys: Enter
@@ -73,7 +88,7 @@ launch: --target @TMP_TARGET
 require-live-snap: 30 KUZUSHI | restarted
 paste-file: @ART/resume-command.txt
 keys: Enter
-require-live-snap: 25 1 job(s) · 1 completed | recovered-job
+require-live-snap: 25 Jobs: 1 · 1 completed | recovered-job
 nav-mode:
 keys: a
 require-live-snap: 25 GENERATED LESSON DRAFT | recovered-result

@@ -1,5 +1,7 @@
 use super::*;
+mod draft_preservation;
 mod fixture;
+mod reader;
 
 #[test]
 fn lesson_preparation_failure_is_visible_without_losing_draft_or_focus() {
@@ -136,6 +138,8 @@ fn lesson_writer_preserves_focus_and_confirmation_is_explicit() {
         std::thread::yield_now();
     }
     assert_eq!(app.shell_view(), ShellView::Help);
+    assert!(app.router.lessons.form.is_none());
+    assert!(!app.router.lessons.form_visible);
     assert_eq!(
         store.finding_lessons(50, 0).unwrap().rows[0].state,
         LessonState::Draft

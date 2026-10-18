@@ -13,6 +13,7 @@ from rejected_context import execute
 
 def seed(root, evidence, home):
     prepare(root, evidence)
+    capture_source_receipt(root, evidence)
     repo = Path(__file__).resolve().parents[3]
     shutil.copyfile(repo / "scripts/devex/fixtures/lesson_provider.mjs", evidence / "provider.mjs")
     credentials = home / ".kuzushi/lesson-credentials.json"
@@ -26,6 +27,18 @@ def seed(root, evidence, home):
         + json.dumps(command) + '\n[runtime.anthropic_oauth]\ncredentials_path = '
         + json.dumps(str(credentials)) + '\nallow_env_token = false\n')
     (evidence / "reason.txt").write_text("Reviewed the generated text and its historical source limitations.")
+
+
+def capture_source_receipt(root, evidence):
+    with sqlite3.connect((root / ".kuzushi/v3/index.sqlite3").as_uri() + "?mode=ro", uri=True) as db:
+        path, blob, snapshot, event = db.execute("select display_path,blob_hash,snapshot_hash,created_seq from finding_observations").fetchone()
+    assert path == "hello.txt" and blob
+    source = (root / "hello.txt").read_bytes()
+    (evidence / "expected-source.txt").write_bytes(source)
+    receipt = json.loads((root / ".kuzushi/lesson-fixture.json").read_text())
+    proof = {"path":path,"blobHash":blob,"snapshotHash":snapshot,"observationSeq":event,
+        "sha256":hashlib.sha256(source).hexdigest(),"findingId":receipt["findingId"]}
+    (evidence / "source-proof.json").write_text(json.dumps(proof) + "\n")
 
 
 def verify(root, evidence, stage):
@@ -48,6 +61,8 @@ def verify(root, evidence, stage):
             break
         time.sleep(1)
     assert all(job["state"] == "completed" for job in json.loads(queue.read_text())["jobs"].values())
+    jobs = list(json.loads(queue.read_text())["jobs"].values())
+    assert len(jobs) == 1 and jobs[0]["attempts"] == 1 and jobs[0]["dispatches"] == 1
     calls = [json.loads(line) for line in calls_path.read_text().splitlines()]
     assert len(calls) == 1 and calls[0]["tools"] == 0 and calls[0]["liveProviderRequests"] == 0
     page = execute(root, Path(os.environ["HOME"]), evidence, "lessons-" + stage, "findings:lessons", {})
@@ -57,6 +72,7 @@ def verify(root, evidence, stage):
     assert record["generation"]["synthesisRequests"] == 1
     assert record["generation"]["model"] == frozen["model"]
     assert record["generation"]["model"].split(":")[-1] == "gpt-5.5"
+    assert record["generation"]["sourceCapture"] == "included"
     assert record["state"] == ("accepted" if stage in ["accepted", "restart"] else "draft")
     allowance = execute(root, Path(os.environ["HOME"]), evidence, "allowance-" + stage, "campaign:allowance", {"investigationId": plan["investigationId"]})
     assert allowance["allowance"]["committedCalls"] == 1

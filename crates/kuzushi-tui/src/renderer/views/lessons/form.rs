@@ -2,7 +2,11 @@ use super::*;
 
 pub(super) fn form_lines(app: &ShellApp, form: &LessonForm, area: Rect) -> Vec<Line<'static>> {
     if form.confirming {
-        return confirmation_lines(app, form, area);
+        return super::super::shell_view_lines::default_scrolled_lines(
+            app,
+            area,
+            confirmation_document_lines(app, form, area),
+        );
     }
     if area.height < 10 {
         return compact_form_lines(app, form, area);
@@ -87,29 +91,23 @@ fn field_summary(form: &LessonForm, width: u16) -> Vec<Line<'static>> {
     }
 }
 
-fn confirmation_lines(app: &ShellApp, form: &LessonForm, area: Rect) -> Vec<Line<'static>> {
+pub(super) fn confirmation_document_lines(
+    app: &ShellApp,
+    form: &LessonForm,
+    area: Rect,
+) -> Vec<Line<'static>> {
     let mut lines = vec![Line::styled(
         format!("CONFIRM {}", form_title(form)),
         theme::accent(),
     )];
     lines.extend(wrapped(
-        "Enter records this action · Esc edits · PgUp/PgDn inspect",
+        "Enter records this action · Esc edits · PgUp/PgDn inspect · Home/End first/last",
         area.width,
         theme::accent(),
     ));
     match &form.action {
         LessonFormAction::Draft { .. } => {
-            lines.extend(field_summary(form, area.width));
-            for (label, field) in ["Title", "Lesson", "Applies", "Limits"]
-                .iter()
-                .zip(&form.fields)
-            {
-                lines.extend(wrapped(
-                    &format!("{label}: {}", safe(field.text())),
-                    area.width,
-                    theme::primary(),
-                ));
-            }
+            lines.extend(draft_confirmation_lines(form, area.width));
         }
         LessonFormAction::Review { record, .. } => {
             lines.extend(detail_lines(record, area.width));
@@ -122,7 +120,22 @@ fn confirmation_lines(app: &ShellApp, form: &LessonForm, area: Rect) -> Vec<Line
     }
     lines.extend(wrapped("This action does not start scans or change finding verdicts. Context reuse is a separate explicit action.",area.width,theme::muted()));
     lines.extend(notice_lines(app, area.width));
-    super::super::shell_view_lines::default_scrolled_lines(app, area, lines)
+    lines
+}
+
+fn draft_confirmation_lines(form: &LessonForm, width: u16) -> Vec<Line<'static>> {
+    let mut lines = field_summary(form, width);
+    for (label, field) in ["Title", "Lesson", "Applies", "Limits"]
+        .iter()
+        .zip(&form.fields)
+    {
+        lines.extend(wrapped(
+            &format!("{label}: {}", safe(field.text())),
+            width,
+            theme::primary(),
+        ));
+    }
+    lines
 }
 
 fn form_title(form: &LessonForm) -> String {

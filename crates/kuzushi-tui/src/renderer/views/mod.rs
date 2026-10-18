@@ -51,6 +51,7 @@ mod chat;
 mod editor;
 mod help;
 mod lessons;
+pub(crate) use lessons::lesson_reader_scroll;
 mod module;
 mod onboarding;
 mod options;

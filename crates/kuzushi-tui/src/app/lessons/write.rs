@@ -72,12 +72,12 @@ impl ShellApp {
             }
         };
         self.refresh_lessons();
-        self.router.lessons.form_visible = false;
-        self.router.lessons.form = None;
         if action == "threat-model:reuse-lessons" {
             self.finish_lesson_context(&output);
             return;
         }
+        self.router.lessons.form_visible = false;
+        self.router.lessons.form = None;
         self.router.lessons.notice = Some(
             output["output"]
                 .as_str()

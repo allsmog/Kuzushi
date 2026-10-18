@@ -5,22 +5,25 @@ impl ShellApp {
         if self.runtime_state.lesson_write.is_some() {
             return;
         }
-        let Some(reference) = self.selected_accepted_lesson_reference() else {
+        let Some(selection) = self.selected_accepted_lesson() else {
             return;
         };
-        if let Err(error) = toggle_reference(&mut self.router.lessons.selected, reference) {
+        if let Err(error) = toggle_reference(&mut self.router.lessons.selected, selection) {
             self.router.lessons.notice = Some(error.into());
         }
     }
 
-    fn selected_accepted_lesson_reference(&mut self) -> Option<LessonRef> {
+    fn selected_accepted_lesson(&mut self) -> Option<SelectedLesson> {
         let record = self.selected_lesson()?;
         if record.state != LessonState::Accepted {
             self.router.lessons.notice =
                 Some("Accept this lesson before selecting it for a context copy.".into());
             return None;
         }
-        record.reference().ok()
+        Some(SelectedLesson {
+            reference: record.reference().ok()?,
+            title: record.content.title,
+        })
     }
 
     pub(super) fn begin_lesson_context(&mut self) {
@@ -53,29 +56,38 @@ impl ShellApp {
                 self.router.lessons.context_cursor = (self.router.lessons.context_cursor + 1)
                     .min(catalog.rows.len().saturating_sub(1))
             }
-            KeyCode::Enter => {
-                self.router.lessons.context_confirm = catalog
-                    .rows
-                    .get(self.router.lessons.context_cursor)
-                    .and_then(|row| row.reference.clone())
-            }
+            KeyCode::Enter => self.choose_lesson_context_base(&catalog.rows),
             _ => {}
         }
     }
 
+    fn choose_lesson_context_base(
+        &mut self,
+        rows: &[crate::ui_view_models::study_context::ContextRow],
+    ) {
+        self.router.lessons.context_confirm = rows
+            .get(self.router.lessons.context_cursor)
+            .and_then(|row| {
+                Some(LessonContextBase {
+                    reference: row.reference.clone()?,
+                    label: row.label.clone(),
+                })
+            });
+        self.router.default_scroll_mut().reset();
+    }
+
     fn handle_lesson_context_confirm(&mut self, code: KeyCode) {
         match code {
-            KeyCode::Esc => self.router.lessons.context_confirm = None,
-            KeyCode::Enter => {
-                let input = serde_json::json!({"threatModelRef":self.router.lessons.context_confirm,"lessons":self.router.lessons.selected});
-                self.spawn_lesson_action("threat-model:reuse-lessons", input);
+            KeyCode::Esc => {
+                self.router.lessons.context_confirm = None;
+                self.router.default_scroll_mut().reset();
             }
-            KeyCode::PageDown => self.router.default_scroll_mut().scroll_down(5),
-            KeyCode::PageUp => {
-                let offset = self.router.default_scroll().offset();
-                self.router
-                    .default_scroll_mut()
-                    .set(offset.saturating_sub(5));
+            KeyCode::Enter => {
+                let input = context_copy_input(
+                    self.router.lessons.context_confirm.as_ref().unwrap(),
+                    &self.router.lessons.selected,
+                );
+                self.spawn_lesson_action("threat-model:reuse-lessons", input);
             }
             _ => {}
         }
@@ -95,10 +107,10 @@ impl ShellApp {
     }
 }
 
-fn remove_selected_lesson(selection: &mut Vec<LessonRef>, reference: &LessonRef) -> bool {
+fn remove_selected_lesson(selection: &mut Vec<SelectedLesson>, reference: &LessonRef) -> bool {
     let Some(index) = selection
         .iter()
-        .position(|row| row.lesson_id == reference.lesson_id)
+        .position(|row| row.reference.lesson_id == reference.lesson_id)
     else {
         return false;
     };
@@ -107,15 +119,26 @@ fn remove_selected_lesson(selection: &mut Vec<LessonRef>, reference: &LessonRef)
 }
 
 fn toggle_reference(
-    selection: &mut Vec<LessonRef>,
-    reference: LessonRef,
+    selection: &mut Vec<SelectedLesson>,
+    lesson: SelectedLesson,
 ) -> Result<(), &'static str> {
-    if remove_selected_lesson(selection, &reference) {
+    if remove_selected_lesson(selection, &lesson.reference) {
         return Ok(());
     }
     if selection.len() == 8 {
         return Err("Select at most eight lessons. The previous selection is retained.");
     }
-    selection.push(reference);
+    selection.push(lesson);
     Ok(())
 }
+
+fn context_copy_input(base: &LessonContextBase, selected: &[SelectedLesson]) -> serde_json::Value {
+    let lessons = selected
+        .iter()
+        .map(|lesson| &lesson.reference)
+        .collect::<Vec<_>>();
+    serde_json::json!({"threatModelRef":base.reference,"lessons":lessons})
+}
+
+#[cfg(test)]
+mod tests;

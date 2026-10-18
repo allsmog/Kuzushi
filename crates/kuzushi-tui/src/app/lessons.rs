@@ -6,9 +6,12 @@ use kuzushi_core::findings::{
 };
 use std::path::PathBuf;
 mod state;
-pub(crate) use state::{LessonForm, LessonFormAction, LessonWrite, LessonsRouteState};
+pub(crate) use state::{
+    LessonContextBase, LessonForm, LessonFormAction, LessonWrite, LessonsRouteState, SelectedLesson,
+};
 mod context;
 mod form;
+mod reader;
 mod write;
 
 impl ShellApp {
@@ -60,7 +63,7 @@ impl ShellApp {
         if !self.lesson_surface_owns_key(key) {
             return None;
         }
-        if let Some(update) = self.handle_lesson_modal_key(key) {
+        if let Some(update) = self.handle_lesson_owned_input(key) {
             return Some(update);
         }
         if self.input_mode() != InputMode::Navigate {
@@ -70,6 +73,16 @@ impl ShellApp {
             .then(state_transitions::InputUpdate::handled)
     }
 
+    fn handle_lesson_owned_input(
+        &mut self,
+        key: KeyEvent,
+    ) -> Option<state_transitions::InputUpdate> {
+        if self.handle_lesson_reading_key(key) {
+            return Some(state_transitions::InputUpdate::handled());
+        }
+        self.handle_lesson_modal_key(key)
+    }
+
     fn lesson_surface_owns_key(&self, key: KeyEvent) -> bool {
         let interrupt =
             key.modifiers == KeyModifiers::CONTROL && matches!(key.code, KeyCode::Char('c' | 'd'));
@@ -77,12 +90,12 @@ impl ShellApp {
     }
 
     fn handle_lesson_modal_key(&mut self, key: KeyEvent) -> Option<state_transitions::InputUpdate> {
-        if self.router.lessons.form_visible {
-            self.handle_lesson_form_key(key);
-            return Some(state_transitions::InputUpdate::handled());
-        }
         if self.router.lessons.context_selecting {
             self.handle_lesson_context_key(key);
+            return Some(state_transitions::InputUpdate::handled());
+        }
+        if self.router.lessons.form_visible {
+            self.handle_lesson_form_key(key);
             return Some(state_transitions::InputUpdate::handled());
         }
         None

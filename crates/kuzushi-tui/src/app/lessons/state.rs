@@ -7,15 +7,27 @@ pub(crate) struct LessonsRouteState {
     pub(crate) cursor: usize,
     pub(crate) pinned_id: Option<String>,
     pub(crate) offset: usize,
-    pub(crate) selected: Vec<LessonRef>,
+    pub(crate) selected: Vec<SelectedLesson>,
     pub(crate) form: Option<LessonForm>,
     pub(crate) form_visible: bool,
     pub(crate) notice: Option<String>,
     pub(crate) context_cursor: usize,
     pub(crate) context_selecting: bool,
-    pub(crate) context_confirm: Option<kuzushi_core::ThreatModelRef>,
+    pub(crate) context_confirm: Option<LessonContextBase>,
     pub(crate) saved_context: Option<kuzushi_core::ThreatModelRef>,
     pub(crate) generation_study: Option<Box<crate::app::BatchScanConfig>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SelectedLesson {
+    pub(crate) reference: LessonRef,
+    pub(crate) title: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct LessonContextBase {
+    pub(crate) reference: kuzushi_core::ThreatModelRef,
+    pub(crate) label: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]

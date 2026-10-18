@@ -1,5 +1,36 @@
 # Bounded investigations implementation
 
+The [lesson generation checkpoint](../assessments/lesson-generation-acceptance-2026-10-18.md)
+repairs skipped evidence during narrow-terminal paging and distinguishes historical
+source from evidence-text size and provider attempts. Twenty-four Core and
+twenty-two TUI lesson tests, the workspace build, Clippy and risk gate pass.
+Final J119 records 28 machine passes, zero failures, 30 capture pairs and six
+pending human judgments; fifteen terminal-cell replays were inspected. One
+intercepted request preserves the original finding decision, accepted lesson and
+consumed allowance after restart. No live request is added. Four delivery items
+remain locally verified and five remain open. This checkpoint on main follows
+`dd00ef73e2` and includes both lesson-copy repairs below. Older draft labels are
+historical.
+
+The [named context-copy choices checkpoint](../assessments/named-lesson-copy-choices-2026-10-18.md)
+pairs readable names with exact selected revisions and keeps copy/back/reference
+controls visible at 40 columns. Seventeen TUI and 23 Core lesson tests, the
+workspace build, TUI Clippy and risk gate pass. Final J118 records 34 machine
+passes, zero failures, 37 capture pairs and eight pending human judgments;
+fifteen terminal-cell replays were inspected. The copy, retained draft and
+retirement remain distinct. No live request is added. Four delivery items
+remain locally verified and five remain open. This draft on main follows
+`dd00ef73e2` and includes the retained-draft repair below.
+
+The [retained lesson draft repair](../assessments/lesson-draft-preservation-2026-10-18.md)
+preserves unsubmitted text when a separate accepted-lesson context copy finishes.
+The regression reproduces the original loss through shared dispatch. Core/TUI
+lesson checks, the workspace build, TUI Clippy and risk gate pass. Final J118
+records 23 machine passes, zero failures, 27 capture pairs and seven pending
+human judgments; fifteen terminal-cell replays were inspected across six sizes
+and no-color restart. No live request is added. Four delivery items remain
+locally verified and five remain open. This is a draft on main after `dd00ef73e2`.
+
 The [context matrix checkpoint](../assessments/context-matrix-acceptance-2026-10-18.md)
 removes prior-finding suppression from agentic discovery and adds Home/End field
 navigation without changing editor ownership. All 356 distinct focused Rust

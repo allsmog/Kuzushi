@@ -18,6 +18,10 @@ keys: Tab
 paste-file: @ART/text.txt
 require-live-snap: 20 Unicode café | multiline-field
 ask: Does the lesson field own the multiline Unicode paste, preserve the composer, and show the four-field flow and human-review boundary?
+resize: 160x48
+live-snap: editor-160x48
+resize: 96x89
+live-snap: editor-96x89
 resize: 80x24
 live-snap: editor-80x24
 resize: 60x20
@@ -56,16 +60,56 @@ ask: Does accepting a lesson require a reason and a second explicit Enter, show 
 keys: Enter
 require-live-snap: 25 Accepted · Greeting | accepted-lesson
 require-shell: python3 -B @REPO/scripts/devex/fixtures/reviewed_lessons.py accepted @TMP_TARGET @ART
+keys: n Tab
+paste-file: @ART/retained.txt
+require-live-snap: 20 Keep this unsubmitted note | retained-before-copy
+keys: Escape
 keys: Space u
 require-live-snap: 25 LESSONS INTO CONTEXT | base-picker
-expect: 1 explicitly selected
+expect: Selected lessons: 1.
 keys: Enter
 require-live-snap: 20 Enter creates copy | copy-confirmation
+expect: Base: Owned lesson context
+expect: Greeting review lesson · revision 2
 require-shell: python3 -B @REPO/scripts/devex/fixtures/reviewed_lessons.py copy-confirmation @TMP_TARGET @ART
-ask: Does the copy confirmation identify the exact base and selected lesson count while preserving active context and requiring later explicit scan-context selection?
+ask: Does copy confirmation name the selected base and lesson revisions, retain their exact references, and explain that the active context and finding decisions remain unchanged?
+resize: 160x48
+live-snap: copy-160x48
+resize: 96x89
+live-snap: copy-96x89
+resize: 80x24
+live-snap: copy-80x24
+resize: 60x20
+live-snap: copy-60x20
+resize: 40x12
+keys: Home
+require-live-snap: 20 Base: Owned lesson | copy-base-40x12
+expect: Greeting review lesson
+expect: Enter copy
+expect: Esc base
+expect: Home/End read
+keys: PageDown
+require-live-snap: 20 active context | copy-meaning-40x12
+keys: End
+require-live-snap: 20 sha256: | copy-references-40x12
+keys: PageUp
+live-snap: copy-pageup-40x12
+keys: Home
+resize: 120x36
+keys: Escape
+require-live-snap: 20 Choose the exact base | restored-base-picker
+keys: Enter
+require-live-snap: 20 Greeting review lesson | restored-copy-confirmation
+require-shell: python3 -B @REPO/scripts/devex/fixtures/reviewed_lessons.py copy-confirmation @TMP_TARGET @ART
+ask: Can the named choices and full references be read across all six sizes, with bounded Home/End paging and an unchanged selection after returning to the base picker, without creating the copy early?
 keys: Enter
 require-live-snap: 25 Saved context: | saved-copy
 require-shell: python3 -B @REPO/scripts/devex/fixtures/reviewed_lessons.py copy @TMP_TARGET @ART
+keys: d
+require-live-snap: 20 Keep this unsubmitted note | retained-after-copy
+require-shell: python3 -B @REPO/scripts/devex/fixtures/reviewed_lessons.py retained-copy @TMP_TARGET @ART
+ask: Can the unsubmitted multiline draft be resumed after copying accepted lessons, without saving that draft or changing its text and selected field?
+keys: Escape
 keys: t
 paste-file: @ART/retire.txt
 keys: Enter
