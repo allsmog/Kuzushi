@@ -103,8 +103,8 @@ fn cost_spend_rows(
     vec![
         cost_spend_row("session", session),
         cost_spend_row("last tool", last_tool),
-        cost_spend_row("budget", budget),
-        cost_spend_row("hard ceiling", hard_ceiling),
+        cost_spend_row("observed stop", budget),
+        cost_spend_row("max stop setting", hard_ceiling),
     ]
 }
 

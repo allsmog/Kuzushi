@@ -42,7 +42,7 @@ fn paged_cost_reader_reaches_all_accounting_details_without_skipping_small_viewp
             }
         }
         assert!(
-            visited.contains("unknown(meteringincomplete)/cap$1.00·unknown"),
+            visited.contains("unknown(meteringincomplete)/stop$1.00·unknown"),
             "{width}x{height}: {visited}"
         );
         assert!(
@@ -50,6 +50,10 @@ fn paged_cost_reader_reaches_all_accounting_details_without_skipping_small_viewp
             "{visited}"
         );
         assert!(!visited.contains("100%"), "{visited}");
+        assert!(visited.contains("Arequestcanoverspendbeforeitsreceiptarrives."));
+        assert!(visited.contains("Approvedcalllimitsapplyseparately."));
+        assert!(visited.contains("observedstop$1.00"));
+        assert!(visited.contains("maxstopsettingnotconfigured"));
         assert_eq!(app.input(), "held operator draft");
         assert!(app.is_budget_halted());
         assert_eq!(app.session().session_budget_usd(), Some(1.0));

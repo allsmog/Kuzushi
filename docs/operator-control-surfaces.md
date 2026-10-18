@@ -308,6 +308,9 @@ truth.
   name an explicitly selected compatible model with its actual API-key, OAuth,
   or session credential. An unset budget is `not enforced`; a set budget must
   be positive and remain within the configured hard ceiling.
+  Cost labels this as an `observed stop` and the maximum permitted value as
+  `max stop setting`. A request can overspend before its receipt arrives;
+  approved provider-call limits remain enforced separately.
 - The Map setup row owns methodology, whole-repository versus bound leaf
   scopes, bounded all-scope expansion, design-document paths, and operator
   context. These are descriptor options, so headless and shell dispatch
@@ -412,6 +415,12 @@ truth.
   `findings.jsonl`, `findings.json`, `findings.csv`, and `VULN-FINDINGS.json`. Export success or
   failure remains on Report with format, count, completeness, absolute
   path/error, and timestamp.
+  The destination header keeps the export outcome visible while reading.
+  `e` edits the path; compact footers show `e path` beside `Enter export`.
+  Markdown bundles build their files, investigation receipt and manifest in a
+  private sibling directory before publishing the completed directory. Failed
+  builds leave the destination retryable. Existing files, symbolic links and
+  nonempty directories are preserved; choose another destination for a new bundle.
   Revealing a destination requires explicit `o` and is an argument-safe
   platform action, never an automatic side effect.
   A selected study is recovered from authenticated Scan references, including

@@ -2,10 +2,10 @@
 import hashlib
 import json
 import os
-import sqlite3
 import subprocess
 import sys
 from pathlib import Path
+from secret_settings import ledger
 
 
 def save(evidence, label, value):
@@ -24,9 +24,8 @@ def native(root, evidence, label, tool, value, succeeds=True):
     return json.loads(result.stdout)
 
 
-def counts(root):
-    path = root / ".kuzushi/v3/index.sqlite3"
-    with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as connection:
+def counts(root, evidence):
+    with ledger(root, evidence) as connection:
         tables = {row[0] for row in connection.execute("select name from sqlite_master where type='table'")}
         names = ["finding_observations", "investigation_call_reservations", "investigation_work_attempts", "review_decisions"]
         return {name: connection.execute("select count(*) from " + name).fetchone()[0] if name in tables else 0 for name in names}
@@ -92,9 +91,9 @@ def before(root, evidence):
     assert len(result["data"]["allowance"]["workPlan"]["jobs"]) == 3
     refusals(root, evidence, approval)
     allowance = snapshot(root, evidence, "headless-status")
-    assert source(root) == original and all(value == 0 for value in counts(root).values())
+    assert source(root) == original and all(value == 0 for value in counts(root, evidence).values())
     assert not list((root / ".kuzushi/v3/campaigns").glob("*/queue.json"))
-    save(evidence, "before", {"source":original,"counts":counts(root),"allowance":allowance})
+    save(evidence, "before", {"source":original,"counts":counts(root, evidence),"allowance":allowance})
     command = 'run campaign:allowance {"investigationId":"owned","run_id":"legacy-no-provider-evidence"}'
     (evidence / "read-command.txt").write_text(command)
 
@@ -102,9 +101,9 @@ def before(root, evidence):
 def after(root, evidence):
     previous = json.loads((evidence / "before.json").read_text())
     assert snapshot(root, evidence, "restarted-status") == previous["allowance"]
-    assert source(root) == previous["source"] and counts(root) == previous["counts"]
+    assert source(root) == previous["source"] and counts(root, evidence) == previous["counts"]
     assert not list((root / ".kuzushi/v3/campaigns").glob("*/queue.json"))
-    save(evidence, "after", {"source":source(root),"counts":counts(root),"providerRequests":0,"jobsStarted":0})
+    save(evidence, "after", {"source":source(root),"counts":counts(root, evidence),"providerRequests":0,"jobsStarted":0})
 
 
 root, evidence = [Path(value).resolve() for value in sys.argv[1:3]]

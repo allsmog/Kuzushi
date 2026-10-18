@@ -1,4 +1,4 @@
-use super::export_markdown_bundle::write_markdown_bundle;
+use super::export_markdown_bundle::{publish_bundle, validate_destination, write_markdown_bundle};
 use super::export_metadata::{workspace_export_metadata_value, workspace_export_omitted_fields};
 use super::export_projection::{
     workspace_finding_export_positions, workspace_finding_export_records_at_positions,
@@ -495,7 +495,7 @@ fn validate_workspace_findings_output_path(
     format: WorkspaceExportFormat,
 ) -> Result<()> {
     match format {
-        WorkspaceExportFormat::MarkdownBundle => validate_markdown_bundle_path(output_path),
+        WorkspaceExportFormat::MarkdownBundle => validate_destination(output_path),
         _ => validate_single_file_path(output_path),
     }
 }
@@ -516,27 +516,6 @@ fn validate_single_file_path(output_path: &Path) -> Result<()> {
     if output_path.exists() && output_path.is_dir() {
         anyhow::bail!(
             "workspace findings export output must be a file path, not directory: {}",
-            output_path.display()
-        );
-    }
-    Ok(())
-}
-
-fn validate_markdown_bundle_path(output_path: &Path) -> Result<()> {
-    if !output_path.exists() {
-        return Ok(());
-    }
-    if !output_path.is_dir() {
-        anyhow::bail!(
-            "markdown-bundle export needs a directory path, not a file: {}",
-            output_path.display()
-        );
-    }
-    let mut entries = fs::read_dir(output_path)
-        .with_context(|| format!("Could not read {}", output_path.display()))?;
-    if entries.next().is_some() {
-        anyhow::bail!(
-            "markdown-bundle output directory must be empty: {}",
             output_path.display()
         );
     }
@@ -570,10 +549,8 @@ struct ExportTarget<'a> {
     options: &'a WorkspaceExportOptions,
 }
 
-/// A failed write must never leave a new export beside a stale or missing
-/// receipt. Single-file exports write the receipt first; the bundle owns its
-/// directory, so its receipt follows the bundle. Each file is replaced
-/// atomically.
+/// Single-file exports write their receipt first. Directory bundles are built
+/// with their receipt and authenticated manifest before publication.
 fn write_export_with_receipt(
     workspace: &WorkspaceTarget,
     prepared: &PreparedWorkspaceFindingsExport,
@@ -583,26 +560,46 @@ fn write_export_with_receipt(
         &super::investigation_report::InvestigationReportDocument,
     )>,
 ) -> Result<()> {
-    use super::export_investigation_receipt::{attach_bundle_receipt, write_receipt};
-    let write_export = || {
-        write_workspace_findings_export(
-            workspace,
-            prepared,
-            target.format,
-            target.output_path,
-            target.options,
-        )
-    };
-    let Some((path, receipt)) = receipt else {
-        return write_export();
-    };
-    if target.format != WorkspaceExportFormat::MarkdownBundle {
-        write_receipt(path, receipt)?;
-        return write_export();
+    use super::export_investigation_receipt::write_receipt;
+    if target.format == WorkspaceExportFormat::MarkdownBundle {
+        return write_bundle_export(workspace, prepared, target, receipt.map(|(_, value)| value));
     }
-    write_export()?;
-    write_receipt(path, receipt)?;
-    attach_bundle_receipt(target.output_path, receipt)
+    if let Some((path, receipt)) = receipt {
+        write_receipt(path, receipt)?;
+    }
+    write_workspace_findings_export(
+        workspace,
+        prepared,
+        target.format,
+        target.output_path,
+        target.options,
+    )
+}
+
+fn write_bundle_export(
+    workspace: &WorkspaceTarget,
+    prepared: &PreparedWorkspaceFindingsExport,
+    target: &ExportTarget<'_>,
+    receipt: Option<&super::investigation_report::InvestigationReportDocument>,
+) -> Result<()> {
+    publish_bundle(target.output_path, |staging| {
+        write_markdown_bundle(
+            workspace,
+            &prepared.findings,
+            &prepared.records,
+            staging,
+            target.options,
+            prepared.total_count,
+        )?;
+        if let Some(receipt) = receipt {
+            super::export_investigation_receipt::write_receipt(
+                &staging.join("investigation.json"),
+                receipt,
+            )?;
+            super::export_investigation_receipt::attach_bundle_receipt(staging, receipt)?;
+        }
+        Ok(())
+    })
 }
 
 fn write_workspace_findings_export(
@@ -612,16 +609,6 @@ fn write_workspace_findings_export(
     output_path: &Path,
     options: &WorkspaceExportOptions,
 ) -> Result<()> {
-    if format == WorkspaceExportFormat::MarkdownBundle {
-        return write_markdown_bundle(
-            workspace,
-            &prepared.findings,
-            &prepared.records,
-            output_path,
-            options,
-            prepared.total_count,
-        );
-    }
     let body = render_workspace_findings_export(
         workspace,
         &prepared.records,

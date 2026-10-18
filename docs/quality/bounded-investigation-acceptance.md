@@ -1,5 +1,25 @@
 # Bounded investigation acceptance ledger
 
+The [Report bundle repair](../assessments/report-bundle-publication-2026-10-17.md)
+publishes complete directory exports and keeps outcome, path editing and export
+visible at compact sizes. All 126 distinct focused checks, the workspace build,
+Core/TUI Clippy and risk gate pass. Final J121 records 210 machine passes, zero
+failures and 127 capture pairs, with fifteen inspected terminal-cell replays.
+Twenty human judgments remain pending. Four delivery items are locally verified;
+five remain open, including broader Report and TUI acceptance. This checkpoint
+includes the spending-control work below and adds no live model requests.
+Older checkpoint counts and draft labels are historical.
+
+The [spending control acceptance](../assessments/spending-control-acceptance-2026-10-17.md)
+closes explicit allowance, durable reservations and unknown-cost states locally.
+Cost now distinguishes receipt-based dollar stops from enforced request limits.
+All 125 focused Rust checks, nine bridge checks, the build, TUI Clippy and risk
+gate pass. Sequential J227/J166 record 54 machine passes, zero failures and
+40 capture pairs; six human judgments remain pending. Twenty terminal-cell
+replays were inspected. Four delivery items are locally verified; five remain
+open. No live request is added. This increment is a draft on main after the
+published `775ed5eea5` checkpoint. Older counts and draft status are historical.
+
 The [finite study acceptance](../assessments/finite-study-acceptance-2026-10-17.md)
 closes finite plans and restart recovery locally and keeps spending terms visible
 throughout approval. All 186 focused checks, the build, TUI Clippy and risk gate
@@ -489,11 +509,11 @@ original requirements remain open. No new live model request is made.
 
 | Requirement | Current evidence | State and remaining work |
 | --- | --- | --- |
-| Explicit allowance before supported model work; all categories share durable accounting | `modules/allowance_dispatch.rs`, `spend/allowance`; model work needs explicit or inherited binding; [zero-call investigation evidence](../assessments/zero-provider-calls-2026-10-15.md) | Scoped. J279 completes three real local passes, manual triage, export and restart under an explicit zero-provider-call ceiling. All model accounting categories refuse zero. This does not qualify live-model discovery or excluded Prove/Fix actions. |
-| Atomic reservations, internal attempts/retries, workers, cancellation and restart | Allowance admission/settlement/work-plan tests and native limit/recovery journeys; J275 displays lifetime dispatch totals separately from resettable current counters and discloses unavailable legacy totals | Scoped. Unresolved reservations are retained. Reconcile every original concurrency and revised-plan acceptance case. |
-| Show exact model/workload/concurrency, protected Review capacity and uncertainty before approval | Study form/approval readers, J121/J206 | Scoped. The default selected model contract is GPT-5.5 OAuth with medium reasoning and no fallback. Separately approved low-model experiments are explicit overrides, not proof of every default-model path. |
-| Strict dollars only with a conservative enforceable upper bound; otherwise explicit finite limits and unknown dollars | Shared runtime limiter and allowance UI; J121 reports unknown cost and protects two Review calls | Scoped. Unknown is not zero. Do not claim an enforceable dollar ceiling for an adapter without charge bounds. |
-| Finish/report, revise remaining work or approve a specific new allowance; no implicit cap doubling or review downgrade | J121 retains an admitted cancellation, requires explicit attempt approval, stops at two completed passes and resumes after an explicit six-to-seven-call revision | Scoped. Approval does not approve later proposals or silently increase attempt bounds. |
+| Explicit allowance before supported model work; all categories share durable accounting | `modules/allowance_dispatch.rs`, `spend/allowance`; model work needs explicit or inherited binding; [zero-call investigation evidence](../assessments/zero-provider-calls-2026-10-15.md) | Implemented and verified locally for spending control. Prepared dispatch, native admission and zero-call checks reconcile all in-scope accounting categories. Detector usefulness and excluded operations remain outside this item. |
+| Atomic reservations, internal attempts/retries, workers, cancellation and restart | Allowance admission/settlement/work-plan tests and native limit/recovery journeys; J275 displays lifetime dispatch totals separately from resettable current counters and discloses unavailable legacy totals | Implemented and verified locally for spending control. Immediate transactions, independent connections, internal/outer retry admission, retained cancellation and explicit revisions are reconciled in the [spending acceptance](../assessments/spending-control-acceptance-2026-10-17.md). |
+| Show exact model/workload/concurrency, protected Review capacity and uncertainty before approval | Study form/approval readers, J121/J206 | Implemented and verified locally for spending control. Canonical prepared terms stay pinned across all six sizes; frozen workers and models remain distinct from mutable settings. Formal human UX and live-model quality remain open. |
+| Strict dollars only with a conservative enforceable upper bound; otherwise explicit finite limits and unknown dollars | Shared runtime limiter and allowance UI; J121 reports unknown cost and protects two Review calls | Implemented and verified locally through finite call limits and disclosed dollar uncertainty. No strict all-charge dollar guarantee is offered for the selected OAuth adapter. Cost explains delayed receipts and keeps unavailable charges unknown. |
+| Finish/report, revise remaining work or approve a specific new allowance; no implicit cap doubling or review downgrade | J121 retains an admitted cancellation, requires explicit attempt approval, stops at two completed passes and resumes after an explicit six-to-seven-call revision | Implemented and verified locally for spending control. Current J227 also exports findings while halted and refuses a second model request. Broader investigation export contents and formal operator acceptance remain open. |
 | Versioned brief, scope proposal, immutable context reference, study plan, reservation and accepted lesson artifacts | Existing campaign/workspace/CAS/findings/spend contracts; documented additive migrations | Scoped. Keep shared prepared dispatch and public module/artifact compatibility; do not add parallel orchestration. |
 | Keyboard-only journey, visible actions, palette/composer ownership, draft/selection/scroll continuity, six sizes and plain/no-color | J121/J206 and focused input, context, findings and recovery tests; [Review readers](../assessments/review-reader-controls-2026-10-15.md) adds distinct groups/goals controls, retained draft and paste reading, protected filter drafting, visible bulk return and native reversible triage | Scoped. Per-journey human judgments remain pending; machine state checks are not operator delight approval. |
 | Typing/scroll/resize under active work; background focus and cancellation | Logs and inventory probes, warmed Review tests, and [approved study progress](../assessments/approved-study-progress-2026-10-17.md) through study navigation, palette return and 40-column resize | Scoped. Native checks retain the original dispatcher/request, draft, fixed queue, completed-pass findings and accounting. Recorded queue states are not process-liveness claims. This does not qualify every active surface or physical/reference latency. |

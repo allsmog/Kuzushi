@@ -70,7 +70,7 @@ fn cost_model_does_not_invent_a_budget_when_unset() {
     assert!(model
         .spend_rows
         .iter()
-        .any(|row| { row.cells == ["budget".to_string(), "not enforced".to_string(),] }));
+        .any(|row| { row.cells == ["observed stop".to_string(), "not enforced".to_string(),] }));
     assert_eq!(model.auth_spend_cells[1], "\u{2014}");
     assert!(model.budget_status.is_none());
 }
@@ -97,11 +97,11 @@ fn cost_model_reports_last_tool_and_budget_status() {
     assert!(model
         .spend_rows
         .iter()
-        .any(|row| row.cells == ["budget".to_string(), "$5.00".to_string()]));
+        .any(|row| row.cells == ["observed stop".to_string(), "$5.00".to_string()]));
     assert!(model
         .spend_rows
         .iter()
-        .any(|row| { row.cells == ["hard ceiling".to_string(), "$25.00".to_string()] }));
+        .any(|row| { row.cells == ["max stop setting".to_string(), "$25.00".to_string()] }));
     assert_eq!(
         model.budget_status,
         Some(CostBudgetStatus {

@@ -1,5 +1,25 @@
 # Bounded investigations implementation
 
+The [Report bundle repair](../assessments/report-bundle-publication-2026-10-17.md)
+publishes complete directory exports and keeps outcome, path editing and export
+visible at compact sizes. All 126 distinct focused checks, the workspace build,
+Core/TUI Clippy and risk gate pass. Final J121 records 210 machine passes, zero
+failures and 127 capture pairs, with fifteen inspected terminal-cell replays.
+Twenty human judgments remain pending. Four delivery items are locally verified;
+five remain open, including broader Report and TUI acceptance. This checkpoint
+includes the spending-control work below and adds no live model requests.
+Older checkpoint counts and draft labels are historical.
+
+The [spending control acceptance](../assessments/spending-control-acceptance-2026-10-17.md)
+closes explicit allowance, durable reservations and unknown-cost states locally.
+Cost now distinguishes receipt-based dollar stops from enforced request limits.
+All 125 focused Rust checks, nine bridge checks, the build, TUI Clippy and risk
+gate pass. Sequential J227/J166 record 54 machine passes, zero failures and
+40 capture pairs; six human judgments remain pending. Twenty terminal-cell
+replays were inspected. Four delivery items are locally verified; five remain
+open. No live request is added. This increment is a draft on main after the
+published `775ed5eea5` checkpoint. Older counts and draft status are historical.
+
 The [finite study acceptance](../assessments/finite-study-acceptance-2026-10-17.md)
 closes finite plans and restart recovery locally and keeps spending terms visible
 throughout approval. All 186 focused checks, the build, TUI Clippy and risk gate
@@ -739,7 +759,7 @@ without qualifying the complete operator experience or closing a broad milestone
 
 - [x] Bounded iterative inventory and inventory-derived scope suggestions. See [acceptance evidence](../assessments/bounded-inventory-acceptance-2026-10-17.md).
 - [ ] Registry-derived per-tool functional matrix and curated phase readiness.
-- [ ] Explicit allowance, durable reservations, and honest unknown-cost states.
+- [x] Explicit allowance, durable reservations, and honest unknown-cost states. See [acceptance evidence](../assessments/spending-control-acceptance-2026-10-17.md).
 - [x] Accepted context references independent of the global active model. See [acceptance evidence](../assessments/immutable-context-acceptance-2026-10-17.md).
 - [x] Finite study plans with three-pass defaults and restart recovery. See [acceptance evidence](../assessments/finite-study-acceptance-2026-10-17.md).
 - [ ] Optional AI scope proposals, coverage checks, and TUI scope editing.

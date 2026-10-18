@@ -40,6 +40,9 @@ expect: unknown
 expect-not: >=$0.00
 expect: Spending stays halted
 expect-not: 100%
+expect: Dollar stops use returned receipts.
+expect: A request can overspend before its receipt arrives.
+expect: Approved call limits apply separately.
 resize: 160x48
 live-snap: cost-160x48
 resize: 96x89
@@ -68,7 +71,10 @@ keys: Escape
 ask: Do unknown spend and percentages stay qualified, with readable paging and a visible spending halt at each size?
 resize: 120x36
 submit: report
-require-live-snap: 25 REPORT | finish-and-report
+require-live-snap: 25 Workspace spend: total unavailable | finish-and-report
+expect: Spending stays halted
+keys: Enter
+require-live-snap: 25 sarif · 0 finding(s) | export-while-halted
 expect: Spending stays halted
 paste-file: @ART/cost-request.txt
 keys: Enter
@@ -76,7 +82,7 @@ require-live-snap: 25 runtime-backed launch blocked | spending-guard-retained
 require-shell: python3 -B @REPO/scripts/devex/fixtures/cost_recovery.py @TMP_TARGET @ART verify
 keys: C-c
 require-exit: 15
-ask: Can the operator inspect the completed work and exit without raising the cap, consuming a protected call or starting another request?
+ask: Can the operator inspect and export the completed work, then exit without raising the stop, consuming a protected call or starting another request?
 env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
 launch: --target @TMP_TARGET
 require-live-snap: 30 KUZUSHI | restarted

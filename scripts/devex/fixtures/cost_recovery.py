@@ -53,9 +53,19 @@ def verify(root, evidence):
         assert db.execute("select count(*) from finding_observations").fetchone()[0] == 0
         approval = json.loads(db.execute("select approval_json from investigation_allowance_revisions where investigation_id = 'owned-cost-recovery'").fetchone()[0])
         assert approval["limits"] == {"maxProviderCalls": 2, "protectedReviewCalls": 1}
+    report_hash = verify_export(root)
     (evidence / "verified.json").write_text(json.dumps({"syntheticProviderCalls": 1,
         "liveProviderCalls": 0, "sourceUnchanged": True, "sourceExecuted": False,
-        "findingObservations": 0, "providerReservations": 1}, indent=2) + "\n")
+        "findingObservations": 0, "providerReservations": 1,
+        "reportSha256": report_hash, "reportResults": 0}, indent=2) + "\n")
+
+
+def verify_export(root):
+    path = root / ".kuzushi/reports/report.sarif"
+    report = json.loads(path.read_text())
+    assert report["version"] == "2.1.0" and len(report["runs"]) == 1
+    assert report["runs"][0]["results"] == []
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def check_pages(evidence):

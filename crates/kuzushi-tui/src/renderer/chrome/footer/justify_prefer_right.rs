@@ -66,6 +66,7 @@ fn split_keybindings_for_wrap(app: &ShellApp) -> (Vec<(String, String)>, Vec<(St
     if replay_navigation::applies(app, &bindings) {
         return replay_navigation::rows(bindings);
     }
+    bindings = bindings.into_iter().map(compact_export_binding).collect();
     bindings.sort_by_key(|binding| wrapped_binding_priority((&binding.0, &binding.1)));
     distribute_wrapped_bindings(bindings)
 }
@@ -125,12 +126,21 @@ fn compact_reader_binding((key, label): (String, String)) -> (String, String) {
     (key, label)
 }
 
+fn compact_export_binding((key, label): (String, String)) -> (String, String) {
+    let label = match (key.as_str(), label.as_str()) {
+        ("Enter", "export/retry") => "export".to_string(),
+        ("e", "edit path") => "path".to_string(),
+        _ => label,
+    };
+    (key, label)
+}
+
 fn wrapped_binding_priority(binding: (&str, &str)) -> u8 {
     match binding {
         ("j/k", "select") | ("↑/↓", "action") | ("Ctrl+F", "filter") => 0,
         ("Ctrl+N" | "Ctrl+P" | "Ctrl+N/P", _) => 0,
         ("Ctrl+C" | "Ctrl+G" | "Ctrl+Y" | "Esc" | "Esc/q" | "q" | "PgUp/PgDn", _) => 0,
-        ("Enter" | "Tab" | "Shift+Tab", _) => 1,
+        ("Enter" | "Tab" | "Shift+Tab", _) | ("e", "path") => 1,
         (key, _) if looks_like_typed_command(key) => 3,
         _ => 2,
     }

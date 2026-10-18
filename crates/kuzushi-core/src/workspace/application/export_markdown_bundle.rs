@@ -9,9 +9,11 @@ use std::collections::{BTreeMap, HashMap};
 
 mod finding;
 mod formatting;
+mod publication;
 mod readme;
 mod review;
 use finding::render_bundle_finding_markdown;
+pub(super) use publication::{publish_bundle, validate_destination};
 use readme::render_bundle_readme_markdown;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

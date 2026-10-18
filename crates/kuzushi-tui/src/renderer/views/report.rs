@@ -18,15 +18,27 @@ fn report_reader_header(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
     let route = app.router.report();
     let mut lines = vec![
         report_read_selection_line(app, width),
-        Line::styled(
-            fit_path(route.path_draft(), width as usize),
-            theme::accent(),
-        ),
+        report_destination_line(route, width as usize),
     ];
     if let Some(notice) = crate::ui_view_models::report_source_notice(app) {
         lines.push(Line::styled(fit(notice, width as usize), theme::warn()));
     }
     lines
+}
+
+fn report_destination_line(route: &crate::app::ReportRouteState, width: usize) -> Line<'static> {
+    let Some(receipt) = route.receipt() else {
+        return Line::styled(fit_path(route.path_draft(), width), theme::accent());
+    };
+    let (status, style) = if receipt.error.is_some() {
+        ("EXPORT FAILED", theme::danger())
+    } else {
+        ("EXPORTED", theme::success())
+    };
+    let prefix = format!("{status} · ");
+    let remaining = width.saturating_sub(display_width(&prefix));
+    let text = format!("{prefix}{}", fit_path(route.path_draft(), remaining));
+    Line::styled(fit(&text, width), style)
 }
 
 fn report_read_selection_line(app: &ShellApp, width: u16) -> Line<'static> {
@@ -283,6 +295,8 @@ fn report_actions(receipt: Option<&crate::app::ReportReceipt>) -> [&'static str;
     ]
 }
 
+#[cfg(test)]
+mod export_status_tests;
 #[cfg(test)]
 mod source_tests;
 

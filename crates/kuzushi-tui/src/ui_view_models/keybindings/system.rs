@@ -57,13 +57,13 @@ fn report_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     vec![
         bind("Esc/q", "return"),
         bind("Enter", "export/retry"),
+        bind("e", "edit path"),
         bind("r", "refresh report"),
         bind("PgUp/PgDn", "read"),
         bind("j/k", "format"),
         bind("c", "completeness"),
         bind("s", "study/history"),
         bind("p", "details"),
-        bind("e", "edit path"),
         bind("S", "save choices"),
         bind("o", "reveal"),
     ]

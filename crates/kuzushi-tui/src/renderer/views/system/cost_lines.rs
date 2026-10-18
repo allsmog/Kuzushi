@@ -97,7 +97,10 @@ fn push_cost_budget_section(lines: &mut Vec<Line<'static>>, model: &CostModel, a
             if area.width < 100 || row.fill.is_none() {
                 lines.extend(detail_wrapped(
                     &row.cells[0],
-                    &format!("{} / cap {} · {}", row.cells[1], row.cells[2], row.cells[3]),
+                    &format!(
+                        "{} / stop {} · {}",
+                        row.cells[1], row.cells[2], row.cells[3]
+                    ),
                     area.width,
                 ));
             } else {
@@ -105,6 +108,16 @@ fn push_cost_budget_section(lines: &mut Vec<Line<'static>>, model: &CostModel, a
             }
         }
     }
+    lines.extend(
+        [
+            "Dollar stops use returned receipts.",
+            "A request can overspend before its receipt arrives.",
+            "Approved call limits apply separately.",
+        ]
+        .into_iter()
+        .flat_map(|text| wrap_text(text, area.width as usize))
+        .map(|line| muted(&line)),
+    );
     lines.push(blank());
 }
 

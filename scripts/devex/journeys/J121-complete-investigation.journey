@@ -198,7 +198,7 @@ require-live-snap: 20 R report | bounded-choices-40x12
 expect: a plan/allowance
 keys: R
 require-live-snap: 25 TP: | bounded-report-40x12
-expect: Enter export/retry
+expect: Enter export
 resize: 120x36
 require-live-snap: 25 4 committed / 6 calls | bounded-report-loaded
 expect: 2 completed / 3 planned
@@ -346,6 +346,43 @@ require-live-snap: 25 format json (4/6) · all | final-json-selection
 keys: Enter
 require-live-snap: 25 json · 2 finding(s) | final-export
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART final-report
+keys: Up Up
+require-live-snap: 25 format markdown-bundle (2/6) · all | bundle-selection
+keys: e
+require-live-snap: 20 EXPORT DESTINATION | bundle-path-editor
+keys: C-u
+type: main.rs
+keys: Enter
+require-live-snap: 20 format markdown-bundle (2/6) · all | bundle-blocked-path-saved
+expect: main.rs
+expect-not: EXPORT DESTINATION
+keys: Enter
+require-live-snap: 25 EXPORT FAILED | bundle-path-refused
+expect: needs a directory path
+expect: 5 committed / 7 calls
+require-shell: python3 -B @REPO/scripts/devex/fixtures/report_bundle.py @TMP_TARGET @ART blocked
+resize: 40x12
+keys: Home
+require-live-snap: 20 EXPORT FAILED | bundle-failure-40x12
+expect: e path
+keys: e
+require-live-snap: 20 EXPORT DESTINATION | bundle-recovery-editor-40x12
+keys: C-u
+type: .kuzushi/reports/study-bundle
+keys: Enter
+require-live-snap: 20 format markdown-bundle (2/6) · all | bundle-recovery-path-saved
+expect: study-bundle
+expect-not: EXPORT DESTINATION
+keys: Enter
+require-live-snap: 25 EXPORTED | bundle-exported-40x12
+expect: e path
+require-shell: python3 -B @REPO/scripts/devex/fixtures/report_bundle.py @TMP_TARGET @ART exported
+ask: Can the operator recover from the blocked bundle path using the visible destination editor, while the completed bundle retains exact findings, decisions, coverage and shared accounting without more model work?
+resize: 120x36
+keys: Down Down Home
+require-live-snap: 25 format json (4/6) · all | return-to-json-report
+keys: Enter
+require-live-snap: 25 json · 2 finding(s) | restored-json-export
 resize: 160x48
 keys: Home
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 5/7 report
@@ -398,6 +435,7 @@ require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @
 require-live-snap: 25 5 committed / 7 calls | recovered-report
 expect: 0 pending · TP: 0 · FP: 1 · 1 deferred
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART restart
+require-shell: python3 -B @REPO/scripts/devex/fixtures/report_bundle.py @TMP_TARGET @ART restart
 ask: Does no-color restart recover the accepted context, completed original jobs, both human decisions and shared consumption without another request or new investigation?
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART hide-context
 paste-file: @ART/context-command.txt

@@ -7,7 +7,7 @@ require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_policy.py @TMP_TAR
 require-shell: python3 -B @REPO/scripts/devex/fixtures/allowance_controls.py @TMP_TARGET @ART before
 require-wrapper-flow:
 launch: --target @TMP_TARGET
-require-live-snap: 30 Viewing Map | pending-map
+require-live-snap: 30 SETUP · READY THE MAP RUN | pending-setup
 expect-not: Map ✓
 submit: setup
 require-live-snap: 30 SETUP · READY THE MAP RUN | setup-still-needed
@@ -54,12 +54,10 @@ require-live-snap: 25 SETUP · READY THE MAP RUN | setup-after-read
 expect-not: Map ✓
 require-shell: python3 -B @REPO/scripts/devex/fixtures/allowance_controls.py @TMP_TARGET @ART after
 keys: C-c
-require-live-snap: 10 CONFIRM SESSION EXIT | explicit-quit
-keys: y
 require-exit: 10
 env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
 launch: --target @TMP_TARGET
-require-live-snap: 30 Viewing Map | restarted-pending-map
+require-live-snap: 30 SETUP · READY THE MAP RUN | restarted-pending-setup
 expect-not: Map ✓
 submit: setup
 require-live-snap: 30 SETUP · READY THE MAP RUN | restarted-setup
@@ -73,6 +71,4 @@ require-live-snap: 25 Calls available for context, scopes, scans and lessons: 2 
 require-shell: python3 -B @REPO/scripts/devex/fixtures/allowance_controls.py @TMP_TARGET @ART after
 ask: Does no-color restart retain the exact allowance and protected capacity while observations, reservations, attempts and decisions remain zero?
 keys: C-c
-require-live-snap: 10 CONFIRM SESSION EXIT | explicit-restart-quit
-keys: y
 require-exit: 10
