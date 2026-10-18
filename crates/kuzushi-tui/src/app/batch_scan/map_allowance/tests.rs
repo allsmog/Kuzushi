@@ -107,6 +107,23 @@ fn ordinary_scan_form_after_restart_retains_map_accounting_and_navigation_origin
 }
 
 #[test]
+fn diagram_accounting_uses_its_explicit_run_and_preserves_spent_calls() {
+    let root = tempfile::tempdir().unwrap();
+    accepted_map(root.path());
+    let mut config = BatchScanConfig::load(root.path(), None);
+    restore_diagram_map_allowance(&mut config, Some(&["accepted-map".into()]));
+    assert_eq!(config.study.investigation_id, "map-investigation");
+    assert_eq!(config.study.allowance.as_ref().unwrap().committed_calls, 1);
+    assert_eq!(config.study.max_provider_calls, Some(5));
+    assert_eq!(config.study.protected_review_calls, Some(2));
+    assert!(!config.study.approved());
+    let mut missing = BatchScanConfig::load(root.path(), None);
+    restore_diagram_map_allowance(&mut missing, Some(&["missing-map".into()]));
+    assert!(missing.study.ensure_accounting_ready().is_err());
+    assert!(missing.study.allowance.is_none());
+}
+
+#[test]
 fn missing_accounting_displays_an_error_and_blocks_scan_and_context_allowances() {
     let root = tempfile::tempdir().unwrap();
     let config = accepted_map(root.path());

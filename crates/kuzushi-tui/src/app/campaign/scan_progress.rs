@@ -2,6 +2,14 @@ use super::*;
 use crate::app::ViewHydrationKey;
 
 impl ShellApp {
+    pub(crate) fn study_navigation_return_active(&self) -> bool {
+        self.scan_study_navigation_active() || self.dfd_study_jobs_navigation_active()
+    }
+
+    pub(crate) fn restore_campaign_reader_origin(&mut self) -> bool {
+        self.restore_scan_study_origin() || self.restore_dfd_study_jobs_origin()
+    }
+
     pub(crate) fn scan_study_navigation_active(&self) -> bool {
         self.shell_view() == ShellView::Campaign
             && self.router.campaign().batch_scan_config.is_none()

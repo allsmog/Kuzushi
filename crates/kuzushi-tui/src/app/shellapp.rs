@@ -639,6 +639,7 @@ impl ShellApp {
             self.invalidate_view_hydration();
             let campaign = self.router.campaign_mut();
             campaign.batch_scan_config = None;
+            campaign.dfd_study_return = None;
             campaign.clear_active_batch();
         }
         self.session.set_target(target.clone());

@@ -866,6 +866,16 @@ validation requires an explicitly approved test allowance and runs sequentially.
 
 ## Current implementation evidence
 
+October 18, 2026: [DFD scan planning](../assessments/dfd-study-2026-10-18.md)
+connects selected diagram evidence and its exact displayed context to the existing
+finite study planner. Explicit approval and launch remain separate; Back retains
+the diagram, parent draft and shared accounting. Final J337 records 61 machine
+passes, zero failures and six pending human judgments over 50 capture pairs.
+Three static jobs produce six observations from two selected files, with two
+scripted deferrals and no provider request. There are 64 focused Rust passes,
+build, lint and risk checks. Four delivery items remain locally verified and five
+remain open; broad module, model-quality and UX qualification is unchanged.
+
 October 18, 2026: [Selectable scope membership](../assessments/scope-tree-2026-10-18.md)
 replaces the flat list with expandable, paged file branches and exact member
 actions. Context inheritance and local omission remain readable from authenticated

@@ -138,13 +138,13 @@ impl ShellApp {
     }
 
     fn linked_scan_study_bindings(&self, bindings: &mut Vec<ViewKeybinding>) {
-        if !self.scan_study_navigation_active() {
+        if !self.study_navigation_return_active() {
             return;
         }
         let label = if self.router.campaign().job_detail {
             "jobs"
         } else {
-            "Scan"
+            self.study_return_label()
         };
         for binding in bindings
             .iter_mut()
@@ -161,6 +161,14 @@ impl ShellApp {
                 ViewHotkeyAction::CampaignBackToList,
             ),
         );
+    }
+
+    fn study_return_label(&self) -> &'static str {
+        if self.dfd_study_jobs_navigation_active() {
+            "diagram"
+        } else {
+            "Scan"
+        }
     }
 
     /// Generic line/edge scrolling applies to scrollable views except those

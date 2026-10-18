@@ -147,7 +147,7 @@ impl ShellApp {
     }
 
     fn back_from_campaign_detail(&mut self) -> InputUpdate {
-        if self.restore_scan_study_origin() {
+        if self.restore_campaign_reader_origin() {
             return InputUpdate::handled();
         }
         let deck = self.router.campaign_mut();

@@ -397,8 +397,8 @@ pub(crate) use target_facts::target_fact_detail_lines;
 pub(crate) use terminal_title::terminal_title;
 pub(crate) use theme_picker::{theme_picker_model, ThemePickerModel};
 pub(crate) use threat_model::{
-    map_context_run_refs, threat_model_absence_hint, threat_model_doc, threat_model_relative_path,
-    threat_summary_review, ThreatSummaryReview,
+    displayed_threat_model_ref, map_context_run_refs, threat_model_absence_hint, threat_model_doc,
+    threat_model_relative_path, threat_summary_review, ThreatSummaryReview,
 };
 pub(crate) use threat_model::{
     threat_model_freshness, threat_model_picker, ThreatModelFreshnessModel, ThreatModelHeadRow,

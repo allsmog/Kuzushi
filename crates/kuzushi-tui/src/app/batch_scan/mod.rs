@@ -21,6 +21,7 @@ pub(crate) use context_edit::{
 };
 mod context_matrix;
 mod controller;
+mod dfd_study;
 mod launch;
 mod map_allowance;
 mod model_draft_exit;

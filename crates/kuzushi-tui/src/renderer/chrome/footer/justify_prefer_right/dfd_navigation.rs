@@ -7,9 +7,11 @@ pub(super) fn has_findings_link(bindings: &[(String, String)]) -> bool {
 }
 
 pub(super) fn rows(bindings: Bindings) -> (Bindings, Bindings) {
-    const PRIMARY: [&str; 3] = ["j/k/↑/↓", "f", "Enter"];
+    const PRIMARY: [&str; 3] = ["j/k/↑/↓", "f", "s"];
     let (primary, mut secondary): (Bindings, Bindings) = bindings
         .into_iter()
+        // Enter already returns to topology; reserve the other row for Back.
+        .filter(|(key, label)| !(key == "Esc" && label == "collapse"))
         .partition(|(key, _)| PRIMARY.contains(&key.as_str()));
     let primary = primary.into_iter().map(compact_binding).collect();
     secondary.sort_by_key(|(key, _)| secondary_priority(key));
@@ -20,9 +22,10 @@ pub(super) fn rows(bindings: Bindings) -> (Bindings, Bindings) {
 fn secondary_priority(key: &str) -> u8 {
     match key {
         "Ctrl+C" | "Esc/q" | "Esc" | "q" => 0,
-        "PgUp/PgDn" => 1,
-        "Tab" => 2,
-        _ => 3,
+        "Enter" => 1,
+        "PgUp/PgDn" => 2,
+        "Tab" => 3,
+        _ => 4,
     }
 }
 
@@ -62,7 +65,7 @@ mod tests {
                     .flat_map(|line| line.spans)
                     .map(|span| span.content.to_string())
                     .collect::<String>();
-                for required in ["j/k", "f findings", "Enter", "back"] {
+                for required in ["j/k", "f findings", "s plan scan", "Enter", "back"] {
                     assert!(text.contains(required), "{width} focused={focused}: {text}");
                 }
             }
@@ -88,6 +91,7 @@ mod tests {
         let mut bindings = vec![
             ("j/k/↑/↓", if focused { "context" } else { "select" }),
             ("f", "findings at paths"),
+            ("s", "plan scan"),
             ("g", "regenerate scope"),
             ("Enter", if focused { "topology" } else { "context" }),
             ("PgUp/PgDn", "detail"),

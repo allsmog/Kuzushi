@@ -97,6 +97,23 @@ pub(super) fn preview_scan_input(app: &ShellApp) -> Result<serde_json::Value> {
     }
     // This is an options preview. Admission, source hashing and prompt binding
     // run through prepared dispatch in the campaign worker before publication.
+    prepare_scan_preview(app, input)
+}
+
+pub(super) fn preview_scan_input_for_context(
+    app: &ShellApp,
+    reference: &kuzushi_core::ThreatModelRef,
+) -> Result<serde_json::Value> {
+    let input = force_shell_discovery_only_sast_input(
+        "sast:scan",
+        serde_json::json!({
+            "threatModelRef": reference,
+        }),
+    );
+    prepare_scan_preview(app, input)
+}
+
+fn prepare_scan_preview(app: &ShellApp, input: serde_json::Value) -> Result<serde_json::Value> {
     app.registry()
         .prepare_tool_input("sast:scan", input, Some(app.option_store()))
 }

@@ -72,6 +72,7 @@ impl ShellApp {
             return InputUpdate::handled();
         };
         let id = id.to_owned();
+        self.retain_dfd_study_return(config);
         self.router.campaign_mut().batch_scan_config = None;
         if config.study.matrix.receipt.is_some() || config.study.scope_receipt.is_some() {
             self.open_campaign_view(Some(id));

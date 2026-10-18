@@ -71,6 +71,7 @@ fn fixture(selected: bool) -> (tempfile::TempDir, ShellApp, ThreatModelRef) {
 fn accepted_map_and_reviewing_map_keep_exact_context_without_activation() {
     for selected in [false, true] {
         let (root, app, alpha) = fixture(selected);
+        assert_eq!(displayed_threat_model_ref(&app).unwrap(), alpha);
         assert_eq!(threat_model_doc(&app).unwrap()["title"], "Alpha");
         assert!(dfd_model(&app)
             .nodes
@@ -108,6 +109,16 @@ fn accepted_map_and_reviewing_map_keep_exact_context_without_activation() {
             "Beta"
         );
     }
+}
+
+#[test]
+fn reference_loading_or_absent_map_never_falls_back_to_another_active_revision() {
+    assert!(recorded_context_ref(ViewDataState::Loading).is_err());
+    assert!(recorded_context_ref(ViewDataState::Ready(Ok(None))).is_err());
+    assert_eq!(
+        recorded_context_ref(ViewDataState::Ready(Err("missing recorded Map".into()))).unwrap_err(),
+        "missing recorded Map"
+    );
 }
 
 #[test]

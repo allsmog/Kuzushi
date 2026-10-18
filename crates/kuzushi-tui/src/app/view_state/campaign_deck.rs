@@ -46,6 +46,7 @@ pub struct CampaignRouteState {
     pub(crate) setup_context_study: Option<crate::app::BatchScanConfig>,
     pub(crate) workflow_proposal_study: Option<crate::app::BatchScanConfig>,
     pub(crate) batch_scan_config: Option<crate::app::BatchScanConfig>,
+    pub(crate) dfd_study_return: Option<Box<crate::app::BatchScanConfig>>,
     /// The batch whose occurrence report scopes Review. The id survives deck
     /// refreshes until the operator clears it or switches targets.
     pub(crate) active_batch_id: Option<String>,
@@ -73,6 +74,7 @@ impl Default for CampaignRouteState {
             trend: None,
             trend_history: Vec::new(),
             batch_scan_config: None,
+            dfd_study_return: None,
             setup_context_study: None,
             workflow_proposal_study: None,
             active_batch_id: None,

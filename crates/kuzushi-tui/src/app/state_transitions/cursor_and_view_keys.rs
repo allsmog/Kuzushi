@@ -135,10 +135,19 @@ impl ShellApp {
         if self.is_dfd_findings_key(key) {
             return self.open_selected_dfd_findings();
         }
+        if self.dfd_study_hotkey_owns_input(key) {
+            return self.open_selected_dfd_study();
+        }
         match target {
             GalleryKeyTarget::EmbeddedMap => self.handle_embedded_map_gallery_key(key),
             GalleryKeyTarget::FullScene => self.handle_full_scene_view_key(key),
         }
+    }
+
+    fn dfd_study_hotkey_owns_input(&self, key: KeyEvent) -> bool {
+        self.input_mode() == InputMode::Navigate
+            && self.router.scene().page() == crate::scene3d::VizPage::Dfd
+            && key.code == KeyCode::Char('s')
     }
 
     fn gallery_input_target(&self, modifiers: KeyModifierState) -> Option<GalleryKeyTarget> {

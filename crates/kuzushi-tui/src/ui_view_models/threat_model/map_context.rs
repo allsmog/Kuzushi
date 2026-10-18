@@ -7,6 +7,43 @@ pub(crate) fn map_context_run_refs(app: &ShellApp) -> Option<Vec<String>> {
     map_context_attempt(app).map(|record| record.completed.run_refs.clone())
 }
 
+/// Resolve the same cached document the diagram presents, without activating it.
+pub(crate) fn displayed_threat_model_ref(app: &ShellApp) -> Result<ThreatModelRef, String> {
+    if let Some(state) = context_read(app) {
+        return recorded_context_ref(state);
+    }
+    match app
+        .workbench_cache()
+        .borrow()
+        .cached_threat_model_store(app.target())
+    {
+        ViewDataState::Ready(ThreatModelStoreState::Ready {
+            manifest,
+            active: Some(_),
+            ..
+        }) => manifest
+            .active
+            .ok_or_else(|| "Displayed context has no immutable reference.".into()),
+        ViewDataState::Ready(ThreatModelStoreState::Invalid(error)) => Err(error),
+        _ => Err("Inspect a saved context revision before planning from this diagram.".into()),
+    }
+}
+
+fn recorded_context_ref(
+    state: ViewDataState<Result<Option<MapRunContext>, String>>,
+) -> Result<ThreatModelRef, String> {
+    match state {
+        ViewDataState::Ready(Ok(context)) => context
+            .and_then(|context| context.model_ref)
+            .ok_or_else(|| {
+                "This Map has no immutable context reference. Inspect a saved revision first."
+                    .into()
+            }),
+        ViewDataState::Ready(Err(error)) => Err(error),
+        _ => Err("Recorded Map context is loading. Wait for its diagram before planning.".into()),
+    }
+}
+
 fn map_context_attempt(app: &ShellApp) -> Option<&PhaseAttemptRecord> {
     app.engagement
         .unresolved_phase_attempt(WorkflowPhase::Map)

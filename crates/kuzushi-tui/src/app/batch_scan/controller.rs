@@ -196,17 +196,21 @@ impl ShellApp {
     }
 
     pub(in crate::app::batch_scan) fn finish_closing_study(&mut self) -> InputUpdate {
-        let origin = self
-            .router
-            .campaign_mut()
-            .batch_scan_config
-            .take()
-            .and_then(|config| config.origin);
+        let config = self.router.campaign_mut().batch_scan_config.take();
+        let origin = match config {
+            Some(config) if config.dfd_origin.is_some() => {
+                return self.restore_dfd_study_origin(config)
+            }
+            config => config.and_then(|config| config.origin),
+        };
         self.restore_study_navigation(origin);
         InputUpdate::handled()
     }
 
-    fn restore_study_navigation(&mut self, origin: Option<super::config::StudyNavigationOrigin>) {
+    pub(super) fn restore_study_navigation(
+        &mut self,
+        origin: Option<super::config::StudyNavigationOrigin>,
+    ) {
         let Some(origin) = origin else {
             self.open_campaign_view(None);
             return;

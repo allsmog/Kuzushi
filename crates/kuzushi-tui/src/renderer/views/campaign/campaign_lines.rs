@@ -28,7 +28,7 @@ pub(crate) fn campaign_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         Some(campaign) => append_campaign_detail(&mut lines, deck, campaign, area),
         None => append_campaign_list(&mut lines, deck, area),
     }
-    append_deck_footer(&mut lines, deck, area, app.scan_study_navigation_active());
+    append_deck_footer(&mut lines, deck, area, app.study_navigation_return_active());
     lines
 }
 

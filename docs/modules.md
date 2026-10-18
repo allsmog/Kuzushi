@@ -946,6 +946,20 @@ and [migration notes](../RELEASING.md).
 
 ### Evidence paths and finding queries
 
+The DFD's `s plan scan` action in Navigate mode opens a new finite study from the
+selected element's exact source evidence and displayed immutable context. A
+focused context row narrows its paths. The inspected-context diagram offers the
+same action without activating that revision. The form quotes every proposed
+path, defaults to three passes and one worker, and requires normal preparation,
+allowance approval and launch. Opening it starts no work. Invalid or unverified
+evidence refuses the handoff; it cannot broaden into a repository scan.
+
+Back restores the diagram and prior study draft, including after opening approved
+jobs. Accounting stays with the same investigation and refreshes on return;
+pending parent limits remain draft choices. New nested diagram studies require
+returning first. Existing source, engine and context options still pass through
+the shared prepared dispatcher. See [qualification evidence](assessments/dfd-study-2026-10-18.md).
+
 The DFD's `f` action opens Review for the selected element's repository file
 evidence. In the context inspector it uses the selected context row. Nodes,
 flows and trust boundaries share the same path selection. Paths outside the
