@@ -6,7 +6,7 @@ pub(super) fn evaluate(
     files: &BTreeSet<&str>,
 ) -> ScanScopeCoverage {
     let mut coverage = ScanScopeCoverage {
-        enumeration_complete: inventory.truncation.is_none(),
+        enumeration_complete: enumeration_complete(inventory),
         inventory_limited: inventory_limited(inventory),
         enumerated_files: files.len(),
         discovery_members: BTreeMap::new(),
@@ -23,12 +23,22 @@ pub(super) fn evaluate(
     coverage
 }
 
+fn enumeration_complete(inventory: &RepositoryInventory) -> bool {
+    inventory
+        .inspection
+        .as_ref()
+        .and_then(|inspection| inspection.enumeration_complete)
+        .unwrap_or(false)
+}
+
 fn inventory_limited(inventory: &RepositoryInventory) -> bool {
     if inventory.truncation.is_some() {
         return true;
     }
     inventory.inspection.as_ref().is_none_or(|inspection| {
-        !inspection.omitted_paths.is_empty() || !inspection.truncated_files.is_empty()
+        inspection.enumeration_complete != Some(true)
+            || !inspection.omitted_paths.is_empty()
+            || !inspection.truncated_files.is_empty()
     })
 }
 
@@ -102,6 +112,11 @@ fn inventory_limitations(inventory: &RepositoryInventory) -> Vec<String> {
         lines.push(format!("Partial inventory: {}", truncation.reason));
     }
     if let Some(inspection) = &inventory.inspection {
+        if inspection.enumeration_complete.is_none() {
+            lines.push(
+                "File enumeration completeness was not recorded; coverage remains limited.".into(),
+            );
+        }
         lines.push(format!("Enumeration: {}; {} omitted paths; {} files inspected only in part; {} bytes inspected.",
             inspection.enumeration, inspection.omitted_paths.len(), inspection.truncated_files.len(), inspection.inspected_bytes));
         lines.extend(super::inspection_limits::details(inspection));

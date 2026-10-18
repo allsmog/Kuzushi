@@ -1,5 +1,22 @@
 # Bounded investigations implementation
 
+The [bounded inventory acceptance](../assessments/bounded-inventory-acceptance-2026-10-17.md)
+closes the bounded iterative inventory and inventory-derived candidate item
+locally. All 264 focused checks, the build, Clippy and risk gate pass. The final
+binary stops at the actual 100,000-entry limit on a 100,001-file owned fixture.
+J330 adds 24 machine passes, zero failures and 17 capture pairs across six sizes,
+refusal, acknowledgement and no-color restart. Three human judgments remain
+open. The other eight delivery items stay open. No live request is added and
+the pending 53-file publication checkpoint is unchanged.
+
+The [linked study navigation repair](../assessments/linked-study-navigation-2026-10-17.md)
+aligns the reader, prompt and compact Back hints with actual dispatch.
+All 76 focused checks, the build, Clippy and ten repository gates pass.
+Sequential J121/J304 have 247 machine passes, zero failures and 171 capture
+pairs on one frozen build. Twenty-six human judgments remain open. This is a
+separate unstaged draft; the pending 53-file publication checkpoint is unchanged.
+Transport is intercepted, with no new live request or broad milestone closure.
+
 The [approved study progress checkpoint](../assessments/approved-study-progress-2026-10-17.md)
 shows finite recorded Scan counts and opens the exact study with `c` in Navigate
 mode. Returning preserves the Scan origin and draft without starting work.
@@ -701,7 +718,7 @@ reversible history and export. Native J274 has 46 machine passes, zero failures
 and three pending human judgments. This closes that concrete implementation gap
 without qualifying the complete operator experience or closing a broad milestone.
 
-- [ ] Bounded iterative inventory and inventory-derived scope suggestions.
+- [x] Bounded iterative inventory and inventory-derived scope suggestions. See [acceptance evidence](../assessments/bounded-inventory-acceptance-2026-10-17.md).
 - [ ] Registry-derived per-tool functional matrix and curated phase readiness.
 - [ ] Explicit allowance, durable reservations, and honest unknown-cost states.
 - [ ] Accepted context references independent of the global active model.

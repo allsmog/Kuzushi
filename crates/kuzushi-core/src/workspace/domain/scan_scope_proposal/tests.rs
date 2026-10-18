@@ -1,6 +1,7 @@
 use super::*;
 mod additions;
 mod editing;
+mod enumeration;
 
 #[test]
 fn loose_root_files_and_prefix_collisions_remain_uncovered() {
@@ -133,6 +134,7 @@ fn inventory_gaps_and_legacy_unknown_membership_are_honest() {
     inventory.truncation = Some(crate::workspace::InventoryTruncation {
         reason: "entry limit".into(),
     });
+    inventory.inspection.as_mut().unwrap().enumeration_complete = Some(false);
     let coverage = draft.evaluate(&inventory).unwrap();
     assert!(!coverage.enumeration_complete);
     assert!(coverage
@@ -225,7 +227,7 @@ fn inventory(paths: &[&str]) -> RepositoryInventory {
         generated_vendor_paths: Vec::new(),
         truncation: None,
         inspection: Some(crate::workspace::InventoryInspection {
-            enumeration_complete: None,
+            enumeration_complete: Some(true),
             files: paths.iter().map(|p| (*p).into()).collect(),
             enumeration: "fixture".into(),
             entries: paths.len(),

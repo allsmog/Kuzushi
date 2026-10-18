@@ -76,6 +76,7 @@ fn selected_detail(state: &ScopeReviewState) -> Vec<String> {
             "Inventory limited: {}. Included files without content identity: {}.",
             review.coverage.inventory_limited, review.identity_omissions.total
         ));
+        lines.push(enumeration_summary(&review.coverage));
         lines.push(format!(
             "Shared dependencies: {}",
             joined_or_none(&scope.shared_dependencies)
@@ -92,6 +93,7 @@ fn selected_detail(state: &ScopeReviewState) -> Vec<String> {
 
 fn coverage_detail(review: &kuzushi_core::workspace::ScanScopeReview) -> Vec<String> {
     let mut lines = vec![
+        enumeration_summary(&review.coverage),
         format!(
             "Inventory: {} enumerated files",
             review.coverage.enumerated_files
@@ -117,6 +119,15 @@ fn coverage_detail(review: &kuzushi_core::workspace::ScanScopeReview) -> Vec<Str
     );
     lines.push("Press f to read this category's files. Exclusions and overlap need separate acknowledgement. Uncovered or unbound included files block acceptance.".into());
     lines
+}
+
+fn enumeration_summary(coverage: &kuzushi_core::workspace::ScanScopeCoverage) -> String {
+    let state = if coverage.enumeration_complete {
+        "complete under inventory policy"
+    } else {
+        "partial or unrecorded"
+    };
+    format!("File enumeration: {state}. Content inspection and exclusions are separate limits.")
 }
 
 fn joined_or_none(values: &[String]) -> String {
@@ -146,6 +157,7 @@ fn acceptance_detail(state: &ScopeReviewState) -> Vec<String> {
     let mut lines = vec!["Accept boundaries only".into(), "No scans, model requests or allowance approvals occur. Any future study must bind this exact revision and receive separate approval.".into(),
         format!("Uncovered: {}. Included files without source identity: {}.", c.uncovered_files.total, review.identity_omissions.total),
         format!("Inventory limited: {}. Overlap: {}. Excluded: {}.", c.inventory_limited, c.overlaps.total, c.excluded_files.total)];
+    lines.push(enumeration_summary(c));
     lines.extend(c.limitations.clone());
     lines.push("Check each applicable acknowledgement. Gaps in membership or source identity cannot be waived.".into());
     lines

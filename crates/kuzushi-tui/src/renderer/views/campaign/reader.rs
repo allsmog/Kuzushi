@@ -80,23 +80,28 @@ fn reader_chrome(app: &ShellApp, area: Rect) -> ReaderChrome {
 }
 
 fn compact_navigation_controls(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
-    let actions = [
-        ("composer", "prompt_mode", "Esc", "compose"),
-        ("global", "command_palette", "Ctrl+G", "commands"),
-    ];
-    let text = actions
-        .into_iter()
-        .flat_map(|(context, action, key, label)| {
-            app.ui()
-                .keymap_binding_labels(context, action, &[key])
-                .into_iter()
-                .map(move |key| format!("{key} {label}"))
-        })
-        .collect::<Vec<_>>()
-        .join(" · ");
+    let mut controls = compact_return_controls(app);
+    controls.extend(
+        app.ui()
+            .keymap_binding_labels("global", "command_palette", &["Ctrl+G"])
+            .into_iter()
+            .map(|key| format!("{key} commands")),
+    );
+    let text = controls.join(" · ");
     wrap_text(&text, usize::from(width).max(1))
         .into_iter()
         .map(|text| Line::styled(text, theme::accent()))
+        .collect()
+}
+
+fn compact_return_controls(app: &ShellApp) -> Vec<String> {
+    if let Some(binding) = crate::ui_view_models::linked_study_return_binding(app) {
+        return vec![format!("{} {}", binding.key, binding.label)];
+    }
+    app.ui()
+        .keymap_binding_labels("composer", "prompt_mode", &["Esc"])
+        .into_iter()
+        .map(|key| format!("{key} compose"))
         .collect()
 }
 
@@ -114,12 +119,20 @@ fn compact_campaign_document(app: &ShellApp, area: Rect) -> bool {
 
 fn sticky_controls(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
     let deck = app.router.campaign();
-    let text = sticky_control_text(deck);
+    let text = qualify_study_return_control(app, sticky_control_text(deck));
     text.lines()
         .flat_map(|line| wrap_text(line, usize::from(width).max(1)))
         .take(2)
         .map(|line| Line::styled(line, theme::accent()))
         .collect()
+}
+
+fn qualify_study_return_control(app: &ShellApp, text: String) -> String {
+    let Some(binding) = crate::ui_view_models::linked_study_return_binding(app) else {
+        return text;
+    };
+    let hint = format!("{} {}", binding.key, binding.label);
+    text.replace("q list", &hint).replace("q jobs", &hint)
 }
 
 fn sticky_control_text(deck: &crate::app::CampaignRouteState) -> String {

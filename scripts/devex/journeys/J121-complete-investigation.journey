@@ -122,7 +122,16 @@ expect-not: legacy inferred
 nav-mode:
 keys: c
 require-live-snap: 20 Jobs: 3 | admitted-study-link
+expect: Esc Scan
+expect-not: q list
+expect-not: Esc returns to prompt
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART study
+keys: Enter
+require-live-snap: 20 Esc jobs | admitted-study-job
+expect-not: Esc returns to prompt
+keys: Escape
+require-live-snap: 20 Jobs: 3 | admitted-study-jobs
+expect: Esc Scan
 keys: Escape
 require-live-snap: 20 APPROVED STUDY | admitted-study-return
 keys: Escape

@@ -4,6 +4,7 @@ use kuzushi_core::V2Config;
 use ratatui::{backend::TestBackend, Terminal};
 mod budget_choices;
 mod job_detail;
+mod linked_study;
 mod progress;
 
 fn reader(width: u16, height: u16) -> ShellApp {

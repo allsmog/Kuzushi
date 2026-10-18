@@ -1,5 +1,22 @@
 # Bounded investigation acceptance ledger
 
+The [bounded inventory acceptance](../assessments/bounded-inventory-acceptance-2026-10-17.md)
+closes the bounded iterative inventory and inventory-derived candidate item
+locally. All 264 focused checks, the build, Clippy and risk gate pass. The final
+binary stops at the actual 100,000-entry limit on a 100,001-file owned fixture.
+J330 adds 24 machine passes, zero failures and 17 capture pairs across six sizes,
+refusal, acknowledgement and no-color restart. Three human judgments remain
+open. The other eight delivery items stay open. No live request is added and
+the pending 53-file publication checkpoint is unchanged.
+
+The [linked study navigation repair](../assessments/linked-study-navigation-2026-10-17.md)
+aligns the reader, prompt and compact Back hints with actual dispatch.
+All 76 focused checks, the build, Clippy and ten repository gates pass.
+Sequential J121/J304 have 247 machine passes, zero failures and 171 capture
+pairs on one frozen build. Twenty-six human judgments remain open. This is a
+separate unstaged draft; the pending 53-file publication checkpoint is unchanged.
+Transport is intercepted, with no new live request or broad milestone closure.
+
 The [approved study progress checkpoint](../assessments/approved-study-progress-2026-10-17.md)
 shows finite recorded Scan counts and opens the exact study with `c` in Navigate
 mode. Returning preserves the Scan origin and draft without starting work.
@@ -425,7 +442,7 @@ original requirements remain open. No new live model request is made.
 
 | Requirement | Current evidence | State and remaining work |
 | --- | --- | --- |
-| One bounded inventory, iterative fallback, containment and symlink exclusion | `workspace/inventory/build_repository_inventory.rs`; 100,000 entries, 512 MiB overall and 256 KiB per file; deep-tree/cycle tests; native J206/J232; [real repository inventory](../assessments/real-repository-inventory-2026-10-15.md) adds J277 over a 5,771-file, 48 MB snapshot with explicit path disclosures and unchanged-tree SHA refusal | Scoped. The current source passes 175 focused checks. J277 has 25 machine passes and five pending human judgments. Larger real repositories, optimized-build performance and complete cancellation/truncation reconciliation remain open. |
+| One bounded inventory, iterative fallback, containment and symlink exclusion | [Bounded inventory acceptance](../assessments/bounded-inventory-acceptance-2026-10-17.md): 264 current focused passes, actual 100,000-entry boundary, source/membership cache integrity and J330; earlier J277 supplies a 5,771-file, 48 MB source snapshot | Implemented and verified locally for this delivery item. Limits, iteration, containment, cancellation, prefix/enum distinction and whole-repository candidates are reconciled. Three J330 human judgments and broader workflow, architectural usefulness, throughput and reference parity remain open outside this item. |
 | Whole repository remains available; loose files, exclusions and partial inspection stay visible | `capabilities/shard_suggest.rs`, `workspace/domain/scan_scope_proposal`; native J206 preserves 65/65/1 primary memberships and separate shared context | Scoped. Complete coverage cannot be inferred from enumeration or pass completion. |
 | Optional AI proposal, one request, no delegation/repair, at most eight primary scopes plus shared scope | `modules/pack_module/suggest_scopes.rs`; accepted/rejected real-model receipts in [scope proposal evidence](../assessments/live-scope-proposal-2026-10-14.md) | Scoped. Larger architectural usefulness remains open. Regeneration and further splitting still need separate approved work. |
 | Validate paths, overlap, uncovered files and shared dependencies; review and edit boundaries visually | `workspace/domain/scan_scope_proposal`; scope edit journeys including J206/J260 | Scoped. AI suggestions are not acceptance; shared context must not add discovery jobs. |

@@ -108,7 +108,7 @@ require-shell: python3 -B @REPO/scripts/devex/fixtures/learning_loop.py candidat
 keys: r
 require-live-snap: 25 3 completed | completed-experiment
 submit: report
-require-live-snap: 25 1 finding · 0 reviewed · TP: 0 | experiment-report
+require-live-snap: 25 1 finding · 1 pending · TP: 0 | experiment-report
 expect: 3 completed / 3 planned
 expect: no complete coverage claim
 expect: source review needed: 1

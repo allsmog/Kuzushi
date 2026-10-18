@@ -1,5 +1,17 @@
 # Releasing Kuzushi
 
+## Scope inventory completeness clarification
+
+`pack:scopes` derives `coverage.enumerationComplete` from the inventory's recorded
+enumeration receipt. Content prefixes can coexist with complete file enumeration;
+they still set `inventoryLimited` and require explicit inventory-limit
+acknowledgement before new acceptance. Missing legacy completeness fields mean
+unrecorded enumeration, not complete coverage. Such inventories remain readable
+and require the existing acknowledgement for new acceptance. Earlier acceptance
+records retain their recorded state; source and membership gates remain in force.
+No tool option or artifact schema changes. Clients must keep enumeration and
+content-inspection limits separate.
+
 - Findings add accepted-scope filters: `scopeId` (`scope`, `scope_id`) and
   `scopeRecord` (`scope_record`), with `scope:` and `scope-record:` expressions.
   CLI `findings` adds `--scope` and `--scope-record`. Scope-filtered JSON adds

@@ -243,6 +243,12 @@ fn navigation_prompt_line(app: &ShellApp) -> Line<'static> {
     if app.shell_view() == crate::ShellView::Report {
         return disabled_prompt_line("e edits path · Enter exports · Esc returns");
     }
+    if let Some(binding) = crate::ui_view_models::linked_study_return_binding(app) {
+        return Line::styled(
+            format!("{} {} · ↑/↓ jobs", binding.key, binding.label),
+            theme::disabled(),
+        );
+    }
     let Some(page) = crate::ui_view_models::workbench_prompt_mode(app) else {
         return disabled_prompt_line("NAVIGATION MODE — view keys active · Esc returns to prompt");
     };

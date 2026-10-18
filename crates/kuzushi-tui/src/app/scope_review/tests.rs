@@ -5,6 +5,7 @@ use kuzushi_core::{ToolExecutionContext, V2Config, WorkspaceTarget};
 use ratatui::{backend::TestBackend, Terminal};
 mod action_search;
 mod additions;
+mod enumeration;
 mod file_boundaries;
 mod findings;
 mod source;

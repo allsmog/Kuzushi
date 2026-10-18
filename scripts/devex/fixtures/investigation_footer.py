@@ -47,6 +47,8 @@ def study_deck(root, evidence):
     plan = fixture.scan_plan(root)
     screen = subprocess.check_output(["tmux", "capture-pane", "-p", "-t", owned_pane(root)], text=True)
     assert plan["campaignId"] in screen and "Jobs: 3" in screen
+    assert "Esc Scan" in screen
+    assert "q list" not in screen and "Esc returns to prompt" not in screen
     assert len(fixture.investigation.calls(evidence)) == 3
     with (evidence / "study-link-verified.jsonl").open("a") as output:
         output.write(json.dumps({"campaignId": plan["campaignId"], "samePlan": True, "calls": 3}) + "\n")

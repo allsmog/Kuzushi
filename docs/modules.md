@@ -1,5 +1,12 @@
 # Kuzushi modules
 
+Scope inventory completeness and content inspection are separate facts.
+`pack:scopes` uses the recorded enumeration receipt for
+`coverage.enumerationComplete`; a content-prefix limit still makes
+`inventoryLimited` true and requires the existing inventory-limit acknowledgement
+before acceptance. Legacy inventories without recorded enumeration completeness
+remain readable and limited. Scope acceptance never approves scans or spending.
+
 Report retains a labeled previous read during refresh, requires current data
 for export, and keeps repeated metadata in `p details`. Its
 [qualification](assessments/report-reader-2026-10-17.md) has 212 focused passes,

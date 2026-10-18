@@ -47,6 +47,8 @@ mod attack_surface;
 mod auth;
 mod boot_splash;
 mod campaign_job;
+mod campaign_navigation;
+pub(crate) use campaign_navigation::linked_study_return_binding;
 mod catalog;
 pub(crate) mod study_resource_picker;
 pub(crate) use campaign_job::{
