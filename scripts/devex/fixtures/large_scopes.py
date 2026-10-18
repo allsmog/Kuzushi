@@ -3,7 +3,6 @@ import hashlib
 import json
 import os
 import shutil
-import sqlite3
 import subprocess
 import sys
 import time
@@ -11,6 +10,7 @@ from pathlib import Path
 from investigation_journey import seed as source_seed, read_native
 from rejected_context import execute
 from finite_scopes import scope
+from secret_settings import ledger
 
 CAMPAIGN = "large-scopes"
 
@@ -24,8 +24,8 @@ def queue(root):
     return json.loads((root / ".kuzushi/v3/campaigns" / CAMPAIGN / "queue.json").read_text())["jobs"]
 
 
-def accounting(root):
-    with sqlite3.connect((root / ".kuzushi/v3/index.sqlite3").as_uri() + "?mode=ro", uri=True) as db:
+def accounting(root, evidence):
+    with ledger(root, evidence) as db:
         approvals = [json.loads(row[0]) for row in db.execute("select approval_json from investigation_allowance_revisions order by revision")]
         calls = db.execute("select count(*),sum(settled_at is null),sum(review) from investigation_call_reservations").fetchone()
         attempts = db.execute("select count(*) from investigation_work_attempts").fetchone()[0]
@@ -105,7 +105,7 @@ def verify(root, evidence, stage):
         assert expected in [6, 12, 18, 24]
         jobs = await_jobs(root, lambda jobs: sum(job["state"] == "completed" for job in jobs.values()) >= expected)
         assert len(jobs) == 27
-        state = accounting(root)
+        state = accounting(root, evidence)
         assert state["approvals"][-1]["limits"] == {"maxProviderCalls": 29, "protectedReviewCalls": 2}
         (evidence / (stage + ".json")).write_text(json.dumps({"completed": sum(job["state"] == "completed" for job in jobs.values()), "fixedJobs": 27}))
         return
@@ -117,7 +117,7 @@ def verify(root, evidence, stage):
         jobs = await_jobs(root, lambda jobs: all(job["state"] in ["completed", "parked"] for job in jobs.values()))
     assert len(jobs) == 27
     calls = [json.loads(line) for line in (evidence / "large-scope-calls.jsonl").read_text().splitlines()]
-    state = accounting(root)
+    state = accounting(root, evidence)
     stop = json.loads((evidence / "large-scope-settings.json").read_text())["mode"] == "stop"
     expected = 27 if stage == "finished" else 2
     assert len(calls) == state["committed"] == state["attempts"] == expected
@@ -129,6 +129,12 @@ def verify(root, evidence, stage):
         assert len(parked) == 27 - complete
         assert sum(job["attempts"] for job in parked) == (1 if stop else 0)
         assert all(job["dispatches"] == 0 and not job.get("runId") for job in parked if job["attempts"] == 0)
+        if stop:
+            canceled = [job for job in parked if job["attempts"] == 1]
+            assert len(canceled) == 1
+            assert len(canceled[0]["attemptRuns"]) == 1
+            attempt = canceled[0]["attemptRuns"][0]
+            assert attempt["state"] == "terminal" and attempt["outcome"] == "canceled"
     last = state["approvals"][-1]
     assert last["limits"] == {"maxProviderCalls": 29 if stage == "finished" else 4, "protectedReviewCalls": 2}
     assert len(last["workPlan"]["jobs"]) == 27

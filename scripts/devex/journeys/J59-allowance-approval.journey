@@ -15,7 +15,7 @@ expect: openai-codex:gpt-5.5
 expect: Dollar ceiling: not enforced
 ask: Can the operator review the exact allowance before approving, with no dollar-ceiling or automatic-work promise?
 resize: 40x12
-require-live-snap: 20 Read remaining terms to approve | allowance-first-page
+require-live-snap: 20 Read more to approve | allowance-first-page
 expect-not: y approve
 keys: y
 live-snap: hidden-terms-cannot-approve

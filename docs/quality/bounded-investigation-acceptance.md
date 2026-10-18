@@ -1,20 +1,39 @@
 # Bounded investigation acceptance ledger
 
+The [finite study acceptance](../assessments/finite-study-acceptance-2026-10-17.md)
+closes finite plans and restart recovery locally and keeps spending terms visible
+throughout approval. All 186 focused checks, the build, TUI Clippy and risk gate
+pass. Sequential J130/J131/J121 record 267 machine passes, zero failures and
+168 capture pairs; 28 human judgments remain pending. Twenty-two terminal-cell
+replays were inspected. Three delivery items are locally verified; six remain
+open. No live request is added. This checkpoint includes the preceding immutable
+context repair. Older checkpoint counts and draft status below are historical.
+
+The [immutable context acceptance](../assessments/immutable-context-acceptance-2026-10-17.md)
+closes the accepted-context-reference delivery item locally and repairs the
+scanner reader's first screen. All 75 focused checks, the build, TUI Clippy and
+risk gate pass. Sequential J273/J304 record 93 machine passes, zero failures,
+81 capture pairs and ten pending human judgments on one frozen build. Exact
+context survives active-context differences, missing objects, restart and source
+drift. Two delivery items are locally verified; seven remain open. No live
+request is added. The earlier publication is on main at `ac5af999a4`; this new
+increment remains a draft. Older checkpoint counts below are historical.
+
 The [bounded inventory acceptance](../assessments/bounded-inventory-acceptance-2026-10-17.md)
 closes the bounded iterative inventory and inventory-derived candidate item
 locally. All 264 focused checks, the build, Clippy and risk gate pass. The final
 binary stops at the actual 100,000-entry limit on a 100,001-file owned fixture.
 J330 adds 24 machine passes, zero failures and 17 capture pairs across six sizes,
 refusal, acknowledgement and no-color restart. Three human judgments remain
-open. The other eight delivery items stay open. No live request is added and
-the pending 53-file publication checkpoint is unchanged.
+open. Broader workflow acceptance remains open. No live request is added.
+This checkpoint was published in `ac5af999a4`.
 
 The [linked study navigation repair](../assessments/linked-study-navigation-2026-10-17.md)
 aligns the reader, prompt and compact Back hints with actual dispatch.
 All 76 focused checks, the build, Clippy and ten repository gates pass.
 Sequential J121/J304 have 247 machine passes, zero failures and 171 capture
 pairs on one frozen build. Twenty-six human judgments remain open. This is a
-separate unstaged draft; the pending 53-file publication checkpoint is unchanged.
+checkpoint subsequently published in `ac5af999a4`.
 Transport is intercepted, with no new live request or broad milestone closure.
 
 The [approved study progress checkpoint](../assessments/approved-study-progress-2026-10-17.md)
@@ -446,7 +465,7 @@ original requirements remain open. No new live model request is made.
 | Whole repository remains available; loose files, exclusions and partial inspection stay visible | `capabilities/shard_suggest.rs`, `workspace/domain/scan_scope_proposal`; native J206 preserves 65/65/1 primary memberships and separate shared context | Scoped. Complete coverage cannot be inferred from enumeration or pass completion. |
 | Optional AI proposal, one request, no delegation/repair, at most eight primary scopes plus shared scope | `modules/pack_module/suggest_scopes.rs`; accepted/rejected real-model receipts in [scope proposal evidence](../assessments/live-scope-proposal-2026-10-14.md) | Scoped. Larger architectural usefulness remains open. Regeneration and further splitting still need separate approved work. |
 | Validate paths, overlap, uncovered files and shared dependencies; review and edit boundaries visually | `workspace/domain/scan_scope_proposal`; scope edit journeys including J206/J260 | Scoped. AI suggestions are not acceptance; shared context must not add discovery jobs. |
-| Fixed jobs and one-worker/three-pass defaults; no recursive job creation | `capabilities/campaign/batch.rs`, `context_matrix`, `scope_study`; J121/J206 execute their fixed plans | Scoped. Reconcile all stale-plan, scope-adapter and cancellation branches against the original acceptance list. |
+| Fixed jobs and one-worker/three-pass defaults; no recursive job creation | [Finite study acceptance](../assessments/finite-study-acceptance-2026-10-17.md): 186 focused checks and sequential J130/J131/J121 with 267 machine passes, fixed membership, exact approval, cancellation and restart | Implemented and verified locally for this delivery item. Current source/context/model/prompt/configuration/worker guards, finite attempts and partial/completed selection are reconciled. General adapter usefulness, broader spending and the 28 formal human judgments remain open in their respective requirements. |
 | Per-tool purpose, phase, inputs, real executor, outputs, failures, resources, interfaces and value | [118-tool matrix](../assessments/bounded-investigation-tools.json) and linked per-tool assessments; [internal contract repairs](../assessments/internal-tool-limits-2026-10-16.md) add structured-input and finding-cap evidence | Open. All nine dimensions are populated for the 110 in-scope visible rows. No hidden action remains in Core awaiting curation. UAF is auxiliary Labs with bounded local resource and selected-compiler evidence from shell/headless execution. Full command/context recovery, source grounding and detector usefulness remain open; see the [compiler-input audit](../assessments/clang-database-selection-2026-10-17.md). The [source-prefix qualification](../assessments/source-prefix-fidelity-2026-10-17.md) demonstrates the systems context producer's bounded deterministic role, exact source and default handoff; semantic model quality and formal human UX remain open. Zero unknown source-only boundaries remain after two trigger-generation actions were classified as excluded and committed-path review was curated to auxiliary Labs Map. The [committed-path audit](../assessments/changed-path-review-2026-10-17.md) verifies exact Git identities, no filename-derived findings, bounded partial output and rejection of standalone stages that previously expanded into the excluded legacy pipeline. The bundled taint entry is now Labs after a false-success defect was reproduced and repaired; its failure evidence does not qualify general engine usefulness. Model-assisted database preparation is now auxiliary Labs Map under Context allowance and separate execution consent; its successful build remains unqualified. See the [preparation audit](../assessments/repository-preparation-allowance-2026-10-17.md). The [classifier audit](../assessments/classifier-review-2026-10-16.md) moves the metadata-only scorer to auxiliary Labs Review and preserves existing decisions. The [draft artifact audit](../assessments/randori-artifacts-2026-10-16.md) moves generation to auxiliary Labs Context and its reader to Compatibility. See the [vendor context contracts](../assessments/vendor-context-2026-10-16.md). The [catalog draft audit](../assessments/taint-catalog-drafts-2026-10-16.md) separates auxiliary Labs generation from two runtime-free Core helpers and removes implicit generation. The [bounded CWE proposal audit](../assessments/bounded-cwe-proposals-2026-10-16.md) moves class planning to auxiliary Labs Map with scoped source, charging, output and class-handoff evidence; downstream discovery remains unqualified. Registration does not qualify execution, and excluded operations will not be run. |
 | Curated Core/Labs/Compatibility defaults, distinct readiness and evidence-backed retirement proposals | Registry maturity/readiness policy, [retirement candidates](../assessments/module-retirement-candidates.md) | Scoped. No speculative deletion or promotion; keep exact dispatch and public compatibility. |
 | Phase consumers and scope enforcement are real execution behavior | Shared prepared dispatch; Context study producer jobs; exact native/agentic scope adapters; J121/J206; [scope membership audit](../assessments/scope-membership-2026-10-15.md) adds staging-aware inventory, legacy migration and real study consumption in J278 | Scoped. Unsupported adapters require separately reviewed whole-repository work. General DAG metadata is not credited as execution ordering. J278's three-job draft remains unapproved and unstarted; it proves no new scan completion. |
@@ -455,7 +474,7 @@ original requirements remain open. No new live model request is made.
 
 | Requirement | Current evidence | State and remaining work |
 | --- | --- | --- |
-| Exact immutable context, source, scope, model and prompt binding without changing global active context | `scan/application/threat_model_digest.rs`, `campaign/batch/equivalence.rs`; [frozen text](../assessments/frozen-scanner-context-2026-10-14.md) and [receipt matching](../assessments/context-receipt-matching-2026-10-14.md) | Scoped. Accepted bytes and source/lesson eligibility are checked separately; historical reading does not approve current execution. |
+| Exact immutable context, source, scope, model and prompt binding without changing global active context | `scan/application/threat_model_digest.rs`, `campaign/batch/equivalence.rs`; [immutable context acceptance](../assessments/immutable-context-acceptance-2026-10-17.md), [frozen text](../assessments/frozen-scanner-context-2026-10-14.md) and [receipt matching](../assessments/context-receipt-matching-2026-10-14.md) | Accepted-context references are implemented and verified locally. Current shared-dispatch and TUI checks cover saved text, explicit omission, active-context isolation, missing/corrupt objects, historical source and exact downstream requests. Source/lesson eligibility is rechecked without rewriting saved bytes. Full study/source/model/prompt equivalence remains with finite-plan qualification; context generation quality and overall UX remain open. |
 | Generate, question, edit, selectively regenerate, diff and accept context; preserve operator edits and show supplied text/omissions | `app/batch_scan/context_edit`, context generation/question readers and immutable revision tools | Scoped. The field editor uses named text fields, not mandatory JSON editing. Real-model answer/generation usefulness and every failure branch remain open. |
 | Fresh repetitions versus explicit context experiments with a finite matrix and baseline | `campaign/context_matrix`, `context_experiment`; J121 and matrix journeys | Scoped. Failed attempts and retries remain separate; a matrix does not prove statistical improvement. |
 | Raw observations, provenance, reversible duplicates/relationships and human decisions | Findings ledger/application services; relationship and Review journeys | Scoped. Keep related variants and uncertain matches distinct from duplicates. Reconcile scale and all interface paths. |

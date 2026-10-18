@@ -5,8 +5,12 @@ pub(super) fn picker_lines(picker: &crate::app::StudyContextPicker) -> Vec<Strin
         return vec!["Select an exact context revision and press Enter to inspect it. No model request is made.".into()];
     };
     let mut lines = context_lines(&preview.scanner_context);
+    if !valid_preview(&preview.scanner_context) {
+        return lines;
+    }
+    lines.insert(0, source_summary(&preview.scanner_context).into());
     let source = frozen_source_notice(&preview.scanner_context).unwrap_or(&preview.source_state);
-    lines.insert(0, source.to_string());
+    lines.push(source.to_string());
     if let Some(reference) = picker.selected.as_ref() {
         lines.extend([
             format!("Context revision: {}", reference.revision_id),
@@ -14,6 +18,17 @@ pub(super) fn picker_lines(picker: &crate::app::StudyContextPicker) -> Vec<Strin
         ]);
     }
     lines
+}
+
+fn source_summary(preview: &Value) -> &'static str {
+    if preview["origin"] != "frozen-study" {
+        return "Revision preview; not frozen for a job.";
+    }
+    match preview["sourceMatchesAtInspection"].as_bool() {
+        Some(true) => "Saved text; source matches at read.",
+        Some(false) => "Earlier source; read only. Replan.",
+        None => "Source unchecked; read only. Replan.",
+    }
 }
 
 fn frozen_source_notice(preview: &Value) -> Option<&'static str> {
@@ -33,6 +48,9 @@ pub(super) fn context_lines(preview: &Value) -> Vec<String> {
         lines.push("Scanner projection is unavailable or malformed in this receipt. Enter rereads the exact revision. No context was substituted.".into());
         return lines;
     }
+    lines.push("THREAT-MODEL TEXT INCLUDED".into());
+    append_text(&mut lines, preview["text"].as_str());
+    lines.extend([String::new(), "CONTEXT DETAILS AND LIMITS".into()]);
     if preview["origin"] == "frozen-study" {
         lines.push(
             "Saved scanner text for this study. Renderer updates do not replace these bytes."
@@ -41,11 +59,6 @@ pub(super) fn context_lines(preview: &Value) -> Vec<String> {
     }
     append_strings(&mut lines, preview.get("limitations"));
     append_strings(&mut lines, preview.get("omissions"));
-    lines.extend([
-        String::new(),
-        "THREAT-MODEL TEXT INCLUDED IN THE REQUEST".into(),
-    ]);
-    append_text(&mut lines, preview["text"].as_str());
     append_limits(&mut lines, &preview["limits"]);
     if let Some(hash) = preview["sha256"].as_str() {
         lines.push(format!("Digest text hash: {hash}"));
@@ -141,6 +154,9 @@ mod tests {
         assert!(lines.contains("Component 2 description"));
         assert!(lines.contains("Variant patterns: first 12 of 13"));
         assert!(lines.contains("other fields can appear in full"));
+        assert!(lines.find(text) < lines.find("Other engines"));
+        assert!(lines.find(text) < lines.find("1 omitted"));
+        assert!(lines.find(text) < lines.find("Projection limits:"));
     }
 
     #[test]
@@ -161,5 +177,23 @@ mod tests {
         assert!(context_lines(&preview)
             .join("\n")
             .contains("No threat-model digest text"));
+    }
+
+    #[test]
+    fn compact_source_status_never_implies_current_source_for_historical_or_unchecked_text() {
+        for (state, expected) in [
+            (json!(true), "source matches at read"),
+            (json!(false), "Earlier source; read only"),
+            (Value::Null, "Source unchecked; read only"),
+        ] {
+            let preview = json!({"origin":"frozen-study","sourceMatchesAtInspection":state});
+            let summary = source_summary(&preview);
+            assert!(summary.contains(expected), "{summary}");
+            assert!(summary.len() <= 36);
+        }
+        assert_eq!(
+            source_summary(&json!({})),
+            "Revision preview; not frozen for a job."
+        );
     }
 }

@@ -1,10 +1,12 @@
 use crate::renderer::shared::text::wrap_text;
 use crate::{ConfirmKind, PendingConfirm, ShellApp};
+mod pinned_terms;
 mod work_summary;
 
 pub(crate) struct AllowanceWorkSummary {
     pub(crate) overview: Vec<String>,
     pub(crate) details: Vec<String>,
+    pub(crate) workers: Option<usize>,
 }
 
 pub(crate) fn allowance_work_summary(
@@ -17,6 +19,7 @@ pub(crate) fn allowance_work_summary(
 /// The same wrapped document and page extent drive rendering and approval.
 pub(crate) struct AllowanceReviewModel {
     pub title: &'static str,
+    pub pinned: Vec<String>,
     pub lines: Vec<String>,
     pub offset: usize,
     pub page_rows: usize,
@@ -54,10 +57,12 @@ pub(crate) fn allowance_review_model(
         .into_iter()
         .flat_map(|line| wrap_text(&line, width))
         .collect::<Vec<_>>();
-    let page_rows = usize::from(rows.saturating_sub(6));
+    let pinned = pinned_terms::lines(app, width);
+    let page_rows = usize::from(rows.saturating_sub(6)).saturating_sub(pinned.len());
     let max_offset = lines.len().saturating_sub(page_rows);
     Some(AllowanceReviewModel {
         title,
+        pinned,
         lines,
         offset: app.advisory().confirm_scroll.min(max_offset),
         page_rows,

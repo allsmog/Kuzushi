@@ -62,13 +62,49 @@ require-shell: python3 -B @REPO/scripts/devex/fixtures/large_scopes.py @TMP_TARG
 nav-mode:
 keys: a
 require-live-snap: 25 APPROVED STUDY | recovered-allowance
-keys: Down Down Down Down Enter
+keys: Down Down Down Down Down
+require-live-snap: 20 ▸ Total calls | allowance-row-focused
+keys: Enter
+require-live-snap: 20 Total calls | edit-specific-allowance
 type: 29
 keys: Enter L End
 require-live-snap: 25 y approve | revised-approval
 expect: Total provider calls: 29
 expect: Protected review calls: 2
 expect: 27 fixed jobs
+resize: 160x48
+keys: End
+require-live-snap: 20 y approve | revised-approval-160x48
+expect: Total provider calls: 29
+expect: Protected review calls: 2
+resize: 96x89
+keys: End
+require-live-snap: 20 y approve | revised-approval-96x89
+expect: Total provider calls: 29
+expect: Protected review calls: 2
+resize: 80x24
+keys: End
+require-live-snap: 20 y approve | revised-approval-80x24
+expect: Total provider calls: 29
+expect: Protected review calls: 2
+resize: 60x20
+keys: End
+require-live-snap: 20 y approve | revised-approval-60x20
+expect: Total calls 29
+expect: Review reserve 2
+expect: Allowance: openai-oauth:gpt-5.5
+resize: 40x12
+keys: End
+require-live-snap: 20 y approve | revised-approval-40x12
+expect: Total calls 29
+expect: Review reserve 2
+expect: workers 1
+expect: 27 jobs
+expect: $ unknown
+expect: Allowance: openai-oauth:gpt-5.5
+resize: 120x36
+keys: End
+require-live-snap: 20 y approve | revised-approval-return
 ask: Is the exact revised ceiling separately approved while the original 27 jobs and two committed calls remain unchanged?
 keys: y
 require-live-snap: 25 Approval saved | approved-revision

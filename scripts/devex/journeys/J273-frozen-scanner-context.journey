@@ -26,7 +26,8 @@ keys: Enter Enter
 require-live-snap: 25 CONTEXT SUMMARY | saved-context
 keys: p
 require-live-snap: 20 Saved scanner text for this study | saved-projection
-expect: matches this source at inspection
+expect: source matches at read
+expect: Architecture components:
 ask: Is it clear that this is the exact saved text for the finite study, with independent review still required and no implication that inspection approves model spending?
 resize: 160x48
 require-live-snap: 15 SCANNER CONTEXT PREVIEW | saved-160x48
@@ -38,6 +39,14 @@ resize: 60x20
 require-live-snap: 15 SCANNER CONTEXT PREVIEW | saved-60x20
 resize: 40x12
 require-live-snap: 15 SCANNER CONTEXT PREVIEW | saved-40x12
+expect: Context: alpha
+expect: threat-model warning:
+expect-not: Omit threat-model context
+keys: PgDn
+require-live-snap: 15 Architecture components: | saved-request-40x12
+keys: PgDn
+require-live-snap: 15 CONTEXT DETAILS AND LIMITS | saved-request-tail-40x12
+expect: - alpha
 keys: End
 require-live-snap: 15 SCANNER CONTEXT PREVIEW | saved-end-40x12
 keys: Home
@@ -66,7 +75,16 @@ require-live-snap: 25 CONTEXT SUMMARY | restored-context
 keys: p
 require-live-snap: 20 Saved scanner text for this study | restored-saved-text
 require-shell: python3 -B @REPO/scripts/devex/fixtures/frozen_scanner_preview.py @TMP_TARGET @ART restarted
-ask: Does missing saved context show a concrete refusal, and does no-color restart recover the same text without another context, job, allowance or model request?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/frozen_scanner_preview.py @TMP_TARGET @ART drift
+keys: Escape
+require-live-snap: 20 PLAN A STUDY | before-source-recheck
+keys: Enter Enter
+require-live-snap: 25 CONTEXT SUMMARY | earlier-context
+keys: p
+require-live-snap: 20 Earlier source; read only | earlier-saved-text
+expect: Architecture components:
+require-shell: python3 -B @REPO/scripts/devex/fixtures/frozen_scanner_preview.py @TMP_TARGET @ART drifted
+ask: Does missing saved context show a concrete refusal, does no-color restart recover its exact bytes, and does changed source clearly make that same text historical without starting work?
 keys: Escape
 require-live-snap: 20 PLAN A STUDY | final-study
 keys: C-c

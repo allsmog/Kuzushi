@@ -1,6 +1,8 @@
 use crate::app::{state_transitions::InputUpdate, ShellApp};
 use crate::ui_view_models::study_config::study_config_area;
-use crate::ui_view_models::study_context::{context_catalog, context_detail_lines, context_layout};
+use crate::ui_view_models::study_context::{
+    context_catalog, context_detail_lines, context_reader_layout,
+};
 use anyhow::Context;
 use crossterm::event::KeyCode;
 use kuzushi_core::ThreatModelRef;
@@ -389,9 +391,13 @@ impl ShellApp {
 
     fn scroll_study_context(&mut self, code: KeyCode) {
         let viewport = self.viewport();
-        let area = context_layout(
+        let text_view = self
+            .study_context_picker()
+            .map_or(StudyContextTextView::Summary, |picker| picker.text_view);
+        let area = context_reader_layout(
             study_config_area(viewport.columns, viewport.rows),
             context_catalog(self).rows.len(),
+            text_view,
         )
         .detail;
         let max = context_detail_lines(self, area.width as usize)

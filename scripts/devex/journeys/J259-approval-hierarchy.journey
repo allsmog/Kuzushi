@@ -134,7 +134,7 @@ expect: Total provider calls: 1
 expect: Protected review calls: 1
 expect: Dollar ceiling: not enforced
 keys: y
-require-live-snap: 20 Read remaining terms to approve | early-approval-refused
+require-live-snap: 20 Read more to approve | early-approval-refused
 require-shell: python3 -B @REPO/scripts/devex/fixtures/approval_hierarchy.py @TMP_TARGET @ART unapproved
 resize: 160x48
 keys: Home

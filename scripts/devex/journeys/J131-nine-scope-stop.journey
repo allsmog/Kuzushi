@@ -8,7 +8,9 @@ launch: --target @TMP_TARGET
 require-live-snap: 30 KUZUSHI | ready
 paste-file: @ART/large-scope-command.txt
 keys: Enter
-require-live-snap: 20 27 job(s) | fixed-work
+require-live-snap: 20 27 planned | fixed-work
+expect: 0 total attempts
+expect: no deck-launched dispatcher
 nav-mode:
 keys: L
 require-shell: python3 -B @REPO/scripts/devex/fixtures/large_scopes.py @TMP_TARGET @ART waiting
@@ -27,8 +29,8 @@ keys: C-u
 nav-mode:
 keys: r
 require-live-snap: 20 26 parked | paused-jobs
-expect: work paused
-ask: Are the completed pass, attempted interrupted pass and 25 unstarted jobs distinguishable within the same immutable 27-job plan?
+expect: Stopped by operator
+ask: Are the completed pass, attempted canceled pass and 25 unstarted jobs distinguishable within the same immutable 27-job plan?
 keys: Escape
 submit: workbench
 require-live-snap: 25 RESULT partial | partial-result

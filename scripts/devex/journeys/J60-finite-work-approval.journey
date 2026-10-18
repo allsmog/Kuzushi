@@ -38,7 +38,7 @@ expect: starts no jobs
 ask: At 60x20, does the last page keep the final terms and decision controls readable?
 resize: 40x12
 keys: Home
-require-live-snap: 20 Read remaining terms to approve | work-40-first
+require-live-snap: 20 Read more to approve | work-40-first
 keys: y
 live-snap: hidden-work-cannot-approve
 expect: REVIEW PLAN & ALLOWANCE
@@ -53,7 +53,7 @@ require-live-snap: 20 denied once | approval-canceled
 ask: Does cancellation return to the prior surface without starting work?
 paste-file: @ART/approval-command.txt
 keys: Enter
-require-live-snap: 20 Read remaining terms to approve | reopened-first-page
+require-live-snap: 20 Read more to approve | reopened-first-page
 expect: offline-finite
 resize: 96x89
 require-live-snap: 20 Total provider calls: 9 | work-tall

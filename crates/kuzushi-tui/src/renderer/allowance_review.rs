@@ -19,9 +19,10 @@ pub(super) fn render_allowance_review(frame: &mut Frame<'_>, app: &ShellApp) -> 
     );
     frame.render_widget(Clear, full);
     frame.render_widget(review_block(&model), area);
+    render_pinned_terms(frame, area, &model);
     let body = Rect::new(
         area.x + 2,
-        area.y + 2,
+        area.y + 2 + model.pinned.len() as u16,
         width.saturating_sub(4),
         model.page_rows as u16,
     );
@@ -35,6 +36,21 @@ pub(super) fn render_allowance_review(frame: &mut Frame<'_>, app: &ShellApp) -> 
     frame.render_widget(Paragraph::new(lines), body);
     render_review_controls(frame, area, &model);
     true
+}
+
+fn render_pinned_terms(frame: &mut Frame<'_>, area: Rect, model: &AllowanceReviewModel) {
+    let lines = model
+        .pinned
+        .iter()
+        .map(|line| Line::styled(line.clone(), theme::accent()))
+        .collect::<Vec<_>>();
+    let summary = Rect::new(
+        area.x + 2,
+        area.y + 1,
+        area.width.saturating_sub(4),
+        model.pinned.len() as u16,
+    );
+    frame.render_widget(Paragraph::new(lines), summary);
 }
 
 fn review_line(line: &str) -> Line<'static> {
@@ -57,9 +73,9 @@ fn review_block(model: &AllowanceReviewModel) -> Block<'static> {
 
 fn render_review_controls(frame: &mut Frame<'_>, area: Rect, model: &AllowanceReviewModel) {
     let action = if model.allows_approval() {
-        "y approve · n cancel"
+        "y approve · n cancel · $ unknown"
     } else {
-        "Read remaining terms to approve"
+        "Read more to approve · $ unknown"
     };
     let lines = vec![
         Line::styled("PgUp/PgDn read · Esc cancel", theme::muted()),
@@ -80,6 +96,7 @@ pub(crate) fn allowance_review_plain_lines(app: &ShellApp, width: usize) -> Opti
     }
     let model = allowance_review_model(app, width.min(u16::MAX as usize) as u16, u16::MAX)?;
     let mut lines = vec![model.title.to_owned(), String::new()];
+    lines.extend(model.pinned);
     lines.extend(model.lines);
     lines.push("Review terms · y approve · Esc cancel".into());
     Some(lines)

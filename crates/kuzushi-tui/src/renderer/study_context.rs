@@ -1,6 +1,6 @@
 use super::*;
 use crate::ui_view_models::study_context::{
-    context_catalog, context_detail_lines, context_layout, ContextRow,
+    context_catalog, context_detail_lines, context_reader_layout, ContextRow,
 };
 use ratatui::widgets::{Block, Borders};
 
@@ -18,8 +18,8 @@ pub(super) fn render_context_picker(frame: &mut Frame<'_>, app: &ShellApp, area:
     }
     render_context_header(frame, app, area);
     let catalog = context_catalog(app);
-    let layout = context_layout(area, catalog.rows.len());
-    render_context_rows(frame, &catalog.rows, picker.selected.as_ref(), layout.list);
+    let layout = context_reader_layout(area, catalog.rows.len(), picker.text_view);
+    render_context_selection(frame, &catalog.rows, picker, area, layout.list);
     render_context_detail(
         frame,
         app,
@@ -31,6 +31,38 @@ pub(super) fn render_context_picker(frame: &mut Frame<'_>, app: &ShellApp, area:
     if let Some(selected) = picker.actions_selected {
         actions::render(frame, app, area, selected);
     }
+}
+
+fn render_context_selection(
+    frame: &mut Frame<'_>,
+    rows: &[ContextRow],
+    picker: &crate::app::StudyContextPicker,
+    area: Rect,
+    list: Rect,
+) {
+    if picker.text_view == crate::app::StudyContextTextView::Scanner {
+        render_scanner_identity(frame, rows, picker.selected.as_ref(), area);
+        return;
+    }
+    render_context_rows(frame, rows, picker.selected.as_ref(), list);
+}
+
+fn render_scanner_identity(
+    frame: &mut Frame<'_>,
+    rows: &[ContextRow],
+    reference: Option<&kuzushi_core::ThreatModelRef>,
+    area: Rect,
+) {
+    let label = rows
+        .iter()
+        .find(|row| row.reference.as_ref() == reference)
+        .map_or("Selected revision unavailable", |row| row.label.as_str());
+    let width = area.width.saturating_sub(4);
+    let text = fit(&format!("Context: {label}"), usize::from(width));
+    frame.render_widget(
+        Paragraph::new(Line::styled(text, theme::accent())),
+        Rect::new(area.x + 2, area.y + 2, width, 1),
+    );
 }
 
 fn render_context_subview(

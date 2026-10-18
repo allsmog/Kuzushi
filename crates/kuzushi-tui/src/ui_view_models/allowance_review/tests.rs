@@ -9,6 +9,8 @@ use ratatui::{backend::TestBackend, Terminal};
 
 const SIZES: &[(u16, u16)] = &[(40, 12), (60, 20), (80, 24), (96, 89), (120, 36), (160, 48)];
 
+mod pinned_terms;
+
 fn request(work: bool) -> PendingConfirm {
     let mut input = serde_json::json!({"investigationId":"operator-study","expectedRevision":2,
         "model":"openai-codex:gpt-5.5", "maxProviderCalls":12, "protectedReviewCalls":4,

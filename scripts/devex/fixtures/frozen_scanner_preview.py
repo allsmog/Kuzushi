@@ -37,20 +37,24 @@ def verify(root, evidence, stage):
                     {"threatModelRef": refs["selected"], "threatModelDigestRef": frozen})["data"]
     preview = data["scannerContextPreview"]
     assert preview["frozenReference"] == frozen
-    assert preview["origin"] == "frozen-study" and preview["sourceMatchesAtInspection"] is True
+    matches = stage != "drifted"
+    assert preview["origin"] == "frozen-study" and preview["sourceMatchesAtInspection"] is matches
     assert preview["sha256"] == "sha256:" + hashlib.sha256(preview["text"].encode()).hexdigest()
     assert "alpha" in preview["text"] and "beta" not in preview["text"]
     if stage == "prepared":
         save(evidence, "expected-projection", preview)
         (evidence / "resume-command.txt").write_text("campaign " + plan["campaignId"])
     else:
-        assert preview == json.loads((evidence / "expected-projection.json").read_text())
+        expected = json.loads((evidence / "expected-projection.json").read_text())
+        expected["sourceMatchesAtInspection"] = matches
+        assert preview == expected
     assert json.loads((root / ".kuzushi/threat-models/manifest.json").read_text())["active"] == refs["active"]
     assert not list((root / ".kuzushi/v3/campaigns").glob("*/queue.json"))
     check_empty_store(root)
     save(evidence, stage + "-check", {"providerRequests": 0, "jobsStarted": 0, "plans": 1,
         "fixedJobs": 3, "activeContextUnchanged": True, "sourceExecuted": False,
         "receiptReferenceMatchesPlan": True,
+        "sourceMatchesAtInspection": matches,
         "savedTextHash": preview["sha256"], "operatorVisualApproval": False})
 
 
@@ -58,6 +62,12 @@ def main():
     root, evidence, stage = Path(sys.argv[1]).resolve(), Path(sys.argv[2]).resolve(), sys.argv[3]
     if stage == "seed":
         seed(root, evidence)
+        return
+    if stage == "drift":
+        assert root.name == "fixture-target" and root.parent == evidence
+        path = root / "context-source-change.txt"
+        assert not path.exists()
+        path.write_text("Owned inert source change. Never executed.\n")
         return
     if stage in ["hide", "restore"]:
         reference = plans(root)[0]["baseInput"]["threatModelDigestRef"]

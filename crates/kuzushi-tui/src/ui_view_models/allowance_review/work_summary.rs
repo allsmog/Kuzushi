@@ -9,6 +9,7 @@ struct FrozenWorkSummary<'a> {
     campaign: &'a str,
     digest: &'a str,
     jobs: usize,
+    workers: usize,
     lines: Vec<String>,
     models: Vec<Option<&'a str>>,
 }
@@ -38,7 +39,11 @@ pub(super) fn summary(
     overview.extend(model_overview(&frozen.models));
     let mut details = vec![repository];
     details.extend(frozen.lines.iter().filter(|line| !line.is_empty()).cloned());
-    Some(super::AllowanceWorkSummary { overview, details })
+    Some(super::AllowanceWorkSummary {
+        overview,
+        details,
+        workers: Some(frozen.workers),
+    })
 }
 
 fn frozen_summaries(config: &BatchScanConfig) -> Vec<FrozenWorkSummary<'_>> {
@@ -65,6 +70,7 @@ fn mismatch_lines() -> super::AllowanceWorkSummary {
             "Work summary unavailable: this approval differs from the displayed plan.".into(),
         ],
         details: Vec::new(),
+        workers: None,
     }
 }
 
@@ -77,6 +83,7 @@ fn review_summary(config: &BatchScanConfig) -> Option<FrozenWorkSummary<'_>> {
             campaign: &receipt.campaign_id,
             digest: &receipt.plan_sha256,
             jobs: 1,
+            workers: 1,
             models: vec![Some(receipt.model.as_str())],
             lines: vec![
                 format!(
@@ -111,6 +118,7 @@ fn context_summary(receipt: &ContextStudyReceipt) -> FrozenWorkSummary<'_> {
         campaign: &receipt.campaign_id,
         digest: &receipt.plan_sha256,
         jobs,
+        workers: 1,
         models: vec![Some(receipt.model.as_str())],
         lines: vec![
             format!("Context: {jobs} fixed jobs · 1 worker"),
@@ -128,7 +136,7 @@ fn context_summary(receipt: &ContextStudyReceipt) -> FrozenWorkSummary<'_> {
 
 fn workflow_proposal_summary(receipt: &ContextStudyReceipt) -> FrozenWorkSummary<'_> {
     FrozenWorkSummary {
-        campaign: &receipt.campaign_id, digest: &receipt.plan_sha256, jobs: 1,
+        campaign: &receipt.campaign_id, digest: &receipt.plan_sha256, jobs: 1, workers: 1,
         models: vec![Some(receipt.model.as_str())],
         lines: vec![
             "Workflow proposal: 1 fixed job · 1 worker".into(),
@@ -173,6 +181,7 @@ fn scan_summary(config: &BatchScanConfig) -> Option<FrozenWorkSummary<'_>> {
         campaign: &receipt.campaign_id,
         digest: &receipt.plan_sha256,
         jobs: receipt.job_count,
+        workers: receipt.workers,
         models: vec![receipt.equivalence.components.model.as_deref()],
         lines: vec![
             format!(
@@ -219,6 +228,7 @@ fn case_summary<'a>(
         digest,
         jobs,
         lines,
+        workers,
         models: cases
             .iter()
             .map(|case| case.equivalence.components.model.as_deref())

@@ -1,6 +1,8 @@
 use super::*;
 use crate::app::StudyContextTextView;
 
+mod readability;
+
 #[test]
 fn late_context_reads_cannot_replace_the_current_frozen_projection() {
     let (root, mut app, first, _) = fixture();

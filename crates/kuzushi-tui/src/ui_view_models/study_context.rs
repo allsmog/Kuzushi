@@ -184,6 +184,17 @@ pub(crate) fn context_diagram_model(
     super::viz_data::dfd_model_from_doc(Some(document), target)
 }
 
+pub(crate) fn context_reader_layout(
+    area: Rect,
+    row_count: usize,
+    text_view: crate::app::StudyContextTextView,
+) -> super::study_config::StudyConfigLayout {
+    if text_view == crate::app::StudyContextTextView::Scanner {
+        return super::study_config::study_reader_layout(area, true);
+    }
+    context_layout(area, row_count)
+}
+
 pub(crate) fn context_layout(
     area: Rect,
     row_count: usize,
@@ -525,6 +536,21 @@ mod tests {
         assert_eq!(layout.list.height, 3);
         assert!(layout.detail.height >= 15);
         assert!(layout.detail.bottom() <= layout.controls.y);
+    }
+
+    #[test]
+    fn scanner_layout_gives_the_document_full_width_and_uses_the_same_controls() {
+        use crate::app::StudyContextTextView;
+        for (width, height) in [(40, 11), (60, 19), (80, 23), (96, 88), (120, 35), (160, 47)] {
+            let area = Rect::new(0, 0, width, height);
+            let scanner = context_reader_layout(area, 20, StudyContextTextView::Scanner);
+            let summary = context_reader_layout(area, 20, StudyContextTextView::Summary);
+            assert_eq!(scanner.list.height, 0);
+            assert_eq!(scanner.detail.width, width - 4);
+            assert_eq!(scanner.controls, summary.controls);
+            assert!(scanner.detail.height >= summary.detail.height);
+            assert!(scanner.detail.bottom() <= scanner.controls.y);
+        }
     }
 
     #[test]
