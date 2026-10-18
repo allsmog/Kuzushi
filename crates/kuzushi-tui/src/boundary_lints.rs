@@ -10,11 +10,13 @@
 
 use std::path::{Path, PathBuf};
 
-/// Audited 2026-08-21. Relative to `src/`.
+/// Audited 2026-08-21, plus `theme/config.rs` on 2026-10-18 — the first
+/// run after the region rule below stopped hiding it. Relative to `src/`.
 const AUDITED_ENV_READ_FILES: &[&str] = &[
     // Terminal / accessibility / presentation mode.
     "app/runtime/run_shell.rs", // KUZUSHI_PLAIN/SCREEN_READER/LOW_BANDWIDTH
     "app/runtime/render_plain_scripted_session.rs", // KUZUSHI_MOUSE_CAPTURE
+    "theme/config.rs",          // KUZUSHI_THEME/REDUCED_MOTION, NO_COLOR, COLORTERM, TERM
     "ui_view_models/prompt.rs", // KUZUSHI_CLI_NAME branding compat
     "app/onboarding/initial_view.rs", // KUZUSHI_SKIP_ONBOARDING presentation toggle
     // Credential presence and canonical OAuth-path adapter; values never surface.
@@ -64,6 +66,8 @@ const AUDITED_PANIC_SITES: &[(&str, &str)] = &[
     ),
 ];
 
+const TEST_ATTRIBUTE: &str = "#[cfg(test)]";
+
 // Split so this file never matches its own detection patterns.
 fn env_read_pattern() -> String {
     format!("env::{}", "var")
@@ -96,18 +100,49 @@ fn is_dedicated_test_file(relative: &str) -> bool {
     relative.ends_with("tests.rs") || relative.contains("/tests/")
 }
 
-/// Everything before the first top-level `#[cfg(test)]`; `None` for files
-/// whose production region contains `#[test]` (dedicated test modules).
-fn production_region(body: &str) -> Option<&str> {
-    let region = match body.find("\n#[cfg(test)]") {
-        Some(position) => &body[..position],
-        None if body.starts_with("#[cfg(test)]") => "",
-        None => body,
-    };
-    if region.contains("#[test]") {
-        return None;
+/// The file's production region: everything outside its `#[cfg(test)]`
+/// items. The attribute guards one item, not the rest of the file, so a
+/// module that declares a test submodule beside its other `mod` lines, or
+/// that keeps a `#[cfg(test)]` helper above its production body, still has
+/// that body scanned. `None` for files whose production region contains
+/// `#[test]` (dedicated test modules).
+fn production_region(body: &str) -> Option<String> {
+    let mut region = String::with_capacity(body.len());
+    let mut rest = body;
+    while let Some(position) = rest.find(TEST_ATTRIBUTE) {
+        region.push_str(&rest[..position]);
+        rest = after_test_item(&rest[position + TEST_ATTRIBUTE.len()..]);
     }
-    Some(region)
+    region.push_str(rest);
+    (!region.contains("#[test]")).then_some(region)
+}
+
+/// What follows the item one `#[cfg(test)]` guards: a declaration ends at
+/// its `;`, a braced item at its matching close brace. An item whose braces
+/// never balance consumes the remainder, which keeps the scan conservative.
+fn after_test_item(guarded: &str) -> &str {
+    match (guarded.find(';'), guarded.find('{')) {
+        (Some(semicolon), brace) if brace.is_none_or(|brace| semicolon < brace) => {
+            &guarded[semicolon + 1..]
+        }
+        (_, Some(brace)) => after_braced_item(&guarded[brace..]),
+        (_, None) => "",
+    }
+}
+
+fn after_braced_item(from_open_brace: &str) -> &str {
+    let mut depth = 0_usize;
+    for (index, character) in from_open_brace.char_indices() {
+        depth = match character {
+            '{' => depth + 1,
+            '}' => depth.saturating_sub(1),
+            _ => depth,
+        };
+        if depth == 0 {
+            return &from_open_brace[index + character.len_utf8()..];
+        }
+    }
+    ""
 }
 
 #[cfg(test)]
@@ -133,6 +168,33 @@ mod tests {
                 Some((relative, body))
             })
             .collect()
+    }
+
+    #[test]
+    fn production_region_keeps_the_body_below_a_guarded_item() {
+        assert_eq!(
+            production_region("#[cfg(test)]\nmod unit_tests;\nfn a() {}").as_deref(),
+            Some("\nfn a() {}")
+        );
+        assert_eq!(
+            production_region("#[cfg(test)]\nfn helper() -> u8 { 1 }\nfn a() {}").as_deref(),
+            Some("\nfn a() {}")
+        );
+        assert_eq!(
+            production_region("fn a() {}\n#[cfg(test)]\nmod tests { fn b() {} }").as_deref(),
+            Some("fn a() {}\n")
+        );
+        assert_eq!(production_region("#[test]\nfn t() {}"), None);
+    }
+
+    /// An item the scanner cannot delimit must swallow the remainder rather
+    /// than hand test code to the ratchet as production source.
+    #[test]
+    fn an_undelimited_guarded_item_consumes_the_remainder() {
+        assert_eq!(
+            production_region("fn a() {}\n#[cfg(test)]\nmod tests { fn b() {} ").as_deref(),
+            Some("fn a() {}\n")
+        );
     }
 
     #[test]

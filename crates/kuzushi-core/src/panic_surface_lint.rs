@@ -38,6 +38,8 @@ const AUDITED_PANIC_SITES: &[(&str, &str)] = &[
     ),
 ];
 
+const TEST_ATTRIBUTE: &str = "#[cfg(test)]";
+
 // Split so this file's own strings never match the detection patterns.
 fn panic_patterns() -> [String; 4] {
     [
@@ -62,20 +64,50 @@ fn rust_sources(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// The file's production region: everything before the first top-level
-/// `#[cfg(test)]`. Files whose production region itself contains
+/// The file's production region: everything outside its `#[cfg(test)]`
+/// items. The attribute guards one item, not the rest of the file, so a
+/// module that declares a test submodule beside its other `mod` lines, or
+/// that keeps a `#[cfg(test)]` helper above its production body, still has
+/// that body scanned. Files whose production region itself contains
 /// `#[test]` are dedicated test files pulled in via a `#[cfg(test)] mod`
 /// in their parent and are skipped entirely.
-fn production_region(body: &str) -> Option<&str> {
-    let region = match body.find("\n#[cfg(test)]") {
-        Some(position) => &body[..position],
-        None if body.starts_with("#[cfg(test)]") => "",
-        None => body,
-    };
-    if region.contains("#[test]") {
-        return None;
+fn production_region(body: &str) -> Option<String> {
+    let mut region = String::with_capacity(body.len());
+    let mut rest = body;
+    while let Some(position) = rest.find(TEST_ATTRIBUTE) {
+        region.push_str(&rest[..position]);
+        rest = after_test_item(&rest[position + TEST_ATTRIBUTE.len()..]);
     }
-    Some(region)
+    region.push_str(rest);
+    (!region.contains("#[test]")).then_some(region)
+}
+
+/// What follows the item one `#[cfg(test)]` guards: a declaration ends at
+/// its `;`, a braced item at its matching close brace. An item whose braces
+/// never balance consumes the remainder, which keeps the scan conservative.
+fn after_test_item(guarded: &str) -> &str {
+    match (guarded.find(';'), guarded.find('{')) {
+        (Some(semicolon), brace) if brace.is_none_or(|brace| semicolon < brace) => {
+            &guarded[semicolon + 1..]
+        }
+        (_, Some(brace)) => after_braced_item(&guarded[brace..]),
+        (_, None) => "",
+    }
+}
+
+fn after_braced_item(from_open_brace: &str) -> &str {
+    let mut depth = 0_usize;
+    for (index, character) in from_open_brace.char_indices() {
+        depth = match character {
+            '{' => depth + 1,
+            '}' => depth.saturating_sub(1),
+            _ => depth,
+        };
+        if depth == 0 {
+            return &from_open_brace[index + character.len_utf8()..];
+        }
+    }
+    ""
 }
 
 fn panic_lines_in_region(region: &str) -> Vec<String> {
@@ -117,7 +149,7 @@ mod tests {
                 let Some(region) = production_region(&body) else {
                     continue;
                 };
-                for line in panic_lines_in_region(region) {
+                for line in panic_lines_in_region(&region) {
                     let audited = AUDITED_PANIC_SITES
                         .iter()
                         .position(|(file, needle)| *file == relative && line.contains(needle));
@@ -149,13 +181,34 @@ mod tests {
     }
 
     #[test]
-    fn production_region_cuts_at_cfg_test_and_skips_dedicated_test_files() {
+    fn production_region_skips_cfg_test_items_and_dedicated_test_files() {
         assert_eq!(
-            production_region("fn a() {}\n#[cfg(test)]\nmod tests {}"),
-            Some("fn a() {}")
+            production_region("fn a() {}\n#[cfg(test)]\nmod tests {}").as_deref(),
+            Some("fn a() {}\n")
         );
-        assert_eq!(production_region("#[cfg(test)]\nmod t {}"), Some(""));
+        assert_eq!(
+            production_region("#[cfg(test)]\nmod t {}").as_deref(),
+            Some("")
+        );
         assert_eq!(production_region("#[test]\nfn t() {}"), None);
-        assert_eq!(production_region("fn a() {}"), Some("fn a() {}"));
+        assert_eq!(production_region("fn a() {}").as_deref(), Some("fn a() {}"));
+    }
+
+    /// The bug this rule replaces: a guarded declaration or helper above the
+    /// production body hid everything below it from the ratchet.
+    #[test]
+    fn a_guarded_item_above_the_body_no_longer_hides_the_rest_of_the_file() {
+        assert_eq!(
+            production_region("#[cfg(test)]\nmod unit_tests;\nfn a() {}").as_deref(),
+            Some("\nfn a() {}")
+        );
+        assert_eq!(
+            production_region("#[cfg(test)]\nfn helper() -> u8 { 1 }\nfn a() {}").as_deref(),
+            Some("\nfn a() {}")
+        );
+        assert_eq!(
+            production_region("#[cfg(test)]\nmod tests { fn unbalanced() {} ").as_deref(),
+            Some("")
+        );
     }
 }
