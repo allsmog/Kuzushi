@@ -19,6 +19,7 @@ pub struct ReportRouteState {
     choices_target: Option<PathBuf>,
     choices_error: Option<String>,
     choices_saved: bool,
+    selection_epoch: u64,
 }
 
 impl Default for ReportRouteState {
@@ -39,6 +40,7 @@ impl Default for ReportRouteState {
             choices_target: None,
             choices_error: None,
             choices_saved: false,
+            selection_epoch: 0,
         }
     }
 }
@@ -49,6 +51,7 @@ impl ReportRouteState {
     }
 
     pub(crate) fn prepare_choices_target(&mut self, target: PathBuf) {
+        self.invalidate_export_selection();
         let fresh = Self::default();
         self.format_index = fresh.format_index;
         self.completeness = fresh.completeness;
@@ -86,6 +89,7 @@ impl ReportRouteState {
         choices
             .validate(&choices.target)
             .map_err(|error| error.to_string())?;
+        self.invalidate_export_selection();
         let index = Self::FORMATS
             .iter()
             .position(|format| *format == choices.format)
@@ -125,8 +129,7 @@ impl ReportRouteState {
     pub(crate) fn set_study(&mut self, study: Option<ReportStudyRef>) {
         self.study = study;
         self.workspace_history = false;
-        self.receipt = None;
-        self.reveal_error = None;
+        self.invalidate_export_selection();
     }
     pub(crate) fn provenance_details(&self) -> bool {
         self.provenance_details
@@ -143,8 +146,7 @@ impl ReportRouteState {
 
     pub(crate) fn toggle_scope(&mut self) {
         self.workspace_history = !self.workspace_history;
-        self.receipt = None;
-        self.reveal_error = None;
+        self.invalidate_export_selection();
     }
 
     pub(crate) const FORMATS: [kuzushi_core::WorkspaceExportFormat; 6] = [
@@ -269,6 +271,20 @@ impl ReportRouteState {
     pub(crate) fn set_receipt(&mut self, receipt: ReportReceipt) {
         self.receipt = Some(receipt);
         self.reveal_error = None;
+    }
+
+    pub(crate) fn clear_export_receipt(&mut self) {
+        self.receipt = None;
+        self.reveal_error = None;
+    }
+
+    pub(crate) fn selection_epoch(&self) -> u64 {
+        self.selection_epoch
+    }
+
+    fn invalidate_export_selection(&mut self) {
+        self.selection_epoch = self.selection_epoch.wrapping_add(1);
+        self.clear_export_receipt();
     }
 
     pub(crate) fn reveal_error(&self) -> Option<&str> {

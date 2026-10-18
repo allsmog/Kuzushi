@@ -23,10 +23,22 @@ fn idle_map_navigation(app: &ShellApp) -> bool {
 }
 
 fn compact_idle_workbench(app: &ShellApp, height: u16) -> bool {
-    height <= 12
-        && app.shell_view() == ShellView::Workbench
-        && workbench_reading_is_idle(app)
-        && !review_decision_owns_chrome(app)
+    compact_workbench_area(app, height) && workbench_reading_is_idle(app)
+}
+
+fn compact_workbench_area(app: &ShellApp, height: u16) -> bool {
+    height <= 12 && app.shell_view() == ShellView::Workbench && !review_decision_owns_chrome(app)
+}
+
+/// Keep the finding visible while the small Review composer owns a draft.
+pub(crate) fn compact_phase_guidance(app: &ShellApp, height: u16) -> bool {
+    compact_review_guidance(app, height) || compact_map_reading(app, height)
+}
+
+fn compact_review_guidance(app: &ShellApp, height: u16) -> bool {
+    compact_workbench_area(app, height)
+        && super::active_workbench_page(app) == crate::WorkbenchPage::Review
+        && workbench_work_is_idle(app)
 }
 
 pub(crate) fn compact_phase_reading(app: &ShellApp, height: u16) -> bool {
@@ -59,6 +71,10 @@ fn workbench_reading_is_idle(app: &ShellApp) -> bool {
     if !app.input().is_empty() {
         return false;
     }
+    workbench_work_is_idle(app)
+}
+
+fn workbench_work_is_idle(app: &ShellApp) -> bool {
     !app.has_running_work() && !app.review_decision_write_pending()
 }
 

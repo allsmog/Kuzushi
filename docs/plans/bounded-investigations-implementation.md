@@ -1,5 +1,15 @@
 # Bounded investigations implementation
 
+The [responsive export checkpoint](../assessments/report-export-responsiveness-2026-10-18.md)
+moves Report writing off the terminal loop, preserves submitted-selection receipts
+through cache refreshes and rejects mixed-revision export preparation. Compact
+Review keeps the finding and draft visible beside completion. All 220 distinct
+focused checks, the workspace build, Core/TUI Clippy and risk gate pass.
+Sequential J121/J331 record 264 machine passes, zero failures and 163 capture
+pairs. Twenty-one terminal-cell replays were inspected; twenty-two human
+judgments remain pending. Four delivery items are locally verified and five
+remain open. This is a draft on main after `f4f85db71a`, with no new live request.
+
 The [Report bundle repair](../assessments/report-bundle-publication-2026-10-17.md)
 publishes complete directory exports and keeps outcome, path editing and export
 visible at compact sizes. All 126 distinct focused checks, the workspace build,

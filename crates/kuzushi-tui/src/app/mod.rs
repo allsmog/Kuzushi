@@ -141,6 +141,7 @@ pub(crate) use relationships::{
     RelationshipBulkReview, RelationshipBulkStage, RelationshipNote, RelationshipWrite,
     RelationshipsRouteState,
 };
+mod report_export;
 mod report_preferences;
 mod sast_scan_policy;
 mod sast_tasks;

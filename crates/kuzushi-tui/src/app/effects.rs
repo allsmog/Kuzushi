@@ -252,6 +252,7 @@ pub(crate) struct WorkspaceExportFindings {
     pub(crate) target: Option<PathBuf>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ReportExport {
     pub(crate) campaign_id: Option<String>,
     pub(crate) format: kuzushi_core::WorkspaceExportFormat,
@@ -671,46 +672,6 @@ impl ShellApp {
                 );
             }
         }
-    }
-
-    pub(super) fn export_report_effect(&mut self, export: ReportExport) {
-        if export.target.as_deref() == self.target() {
-            self.persist_report_export_choices();
-        }
-        let timestamp = effect_timestamp();
-        let result = export_findings_for_target(
-            export.target.as_ref(),
-            &export.output,
-            Some(export.format.as_str()),
-            Some(export.completeness.as_str()),
-            true,
-            self.review_yield_export_provenance(),
-            self.identity_fold_policy(),
-            export.campaign_id.as_deref(),
-        );
-        let receipt = match result {
-            Ok(report) => ReportReceipt {
-                format: report.format,
-                completeness: export.completeness,
-                count: Some(report.count),
-                absolute_path: Some(report.output_path),
-                investigation_receipt_path: report.investigation_receipt_path,
-                error: None,
-                timestamp,
-            },
-            Err(error) => ReportReceipt {
-                format: export.format,
-                completeness: export.completeness,
-                count: None,
-                absolute_path: report_absolute_path(export.target.as_ref(), &export.output),
-                investigation_receipt_path: None,
-                error: Some(error.to_string()),
-                timestamp,
-            },
-        };
-        self.router.report_mut().set_receipt(receipt);
-        self.set_shell_view(ShellView::Report);
-        self.scroll_to_top();
     }
 
     pub(super) fn reveal_report_destination_effect(&mut self) {
@@ -1345,7 +1306,7 @@ fn begin_patch_application(
     })
 }
 
-fn effect_timestamp() -> String {
+pub(super) fn effect_timestamp() -> String {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -1353,7 +1314,7 @@ fn effect_timestamp() -> String {
         .to_string()
 }
 
-fn report_absolute_path(target: Option<&PathBuf>, output: &Path) -> Option<PathBuf> {
+pub(super) fn report_absolute_path(target: Option<&PathBuf>, output: &Path) -> Option<PathBuf> {
     let workspace = workspace_for_target(target).ok()?;
     Some(if output.is_absolute() {
         output.to_path_buf()

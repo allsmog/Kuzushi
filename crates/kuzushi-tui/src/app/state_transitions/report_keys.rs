@@ -61,6 +61,9 @@ impl ShellApp {
     }
 
     fn export_report_key(&mut self) -> InputUpdate {
+        if self.refuse_pending_report_export() {
+            return InputUpdate::handled();
+        }
         let campaign_id = match crate::ui_view_models::report_export_campaign(self) {
             Ok(campaign) => campaign,
             Err(error) => {

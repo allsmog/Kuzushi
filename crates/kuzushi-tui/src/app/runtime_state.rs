@@ -11,6 +11,7 @@ mod dispatcher;
 
 #[derive(Debug, Default)]
 pub(crate) struct RuntimeState {
+    pub(crate) report_export: super::report_export::ReportExportState,
     pub(crate) goal_review: super::goal_review::GoalReviewState,
     pub(crate) goal_review_states:
         std::collections::BTreeMap<(PathBuf, String), super::goal_review::GoalReviewState>,
@@ -89,6 +90,13 @@ impl RuntimeState {
 
     pub(crate) fn has_terminal_loop(&self) -> bool {
         self.loop_wake.is_some()
+    }
+
+    pub(crate) fn start_report_export(
+        &mut self,
+        request: super::report_export::ExportRequest,
+    ) -> anyhow::Result<()> {
+        self.report_export.start(request, self.loop_wake.clone())
     }
 
     pub(crate) fn start_review_decision_write(

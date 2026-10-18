@@ -182,10 +182,10 @@ pub(crate) use catalog::{
     CatalogModuleGroup,
 };
 pub(crate) use chrome_layout::{
-    compact_document_notice, compact_gallery_reading, compact_map_reading, compact_phase_reading,
-    compact_replay_reading, compact_review_reading, keybind_footer_chrome_height, rail_width,
-    status_footer_chrome_height, transcript_chrome_height, RAIL_AUTO_MIN_WIDTH,
-    RAIL_FORCE_MIN_WIDTH, RAIL_WIDTH,
+    compact_document_notice, compact_gallery_reading, compact_map_reading, compact_phase_guidance,
+    compact_phase_reading, compact_replay_reading, compact_review_reading,
+    keybind_footer_chrome_height, rail_width, status_footer_chrome_height,
+    transcript_chrome_height, RAIL_AUTO_MIN_WIDTH, RAIL_FORCE_MIN_WIDTH, RAIL_WIDTH,
 };
 pub(crate) use command_palette::{command_palette_model, CommandPaletteModel, PaletteRow};
 pub(crate) use config::{

@@ -436,6 +436,14 @@ truth.
   widths. Study exports write the same local investigation receipt through the
   shared exporter as `workspace:export-findings campaignId=<id>` and
   `kuzushi export --campaign-id <id>`. Export starts no model or follow-up work.
+  Interactive exports run one at a time. Read Report or return to the workflow
+  composer while writing continues. The submitted selection shows `EXPORTING`; another export request
+  is refused without queuing. Completion preserves page, draft, cursor and scroll.
+  Cache updates retain the submitted selection's receipt; changed targets, scope,
+  format or destination do not inherit it. Exit waits for the export result.
+  The shared exporter reads a consistent findings snapshot and checks for ledger
+  commits during preparation. Changed records require an explicit refresh and
+  retry before publication. CLI and scripted exports return synchronously.
 - Root-shell agent runs may display a reliable operator-question card in Run
   Focus. Questions are capped, cancellable, backgroundable, redacted in run
   artifacts, and never exposed to modules, subagents, bridge-owned loops, or

@@ -15,10 +15,9 @@ pub(crate) fn report_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 }
 
 fn report_reader_header(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
-    let route = app.router.report();
     let mut lines = vec![
         report_read_selection_line(app, width),
-        report_destination_line(route, width as usize),
+        report_export_destination_line(app, width as usize),
     ];
     if let Some(notice) = crate::ui_view_models::report_source_notice(app) {
         lines.push(Line::styled(fit(notice, width as usize), theme::warn()));
@@ -35,9 +34,20 @@ fn report_destination_line(route: &crate::app::ReportRouteState, width: usize) -
     } else {
         ("EXPORTED", theme::success())
     };
+    report_status_path_line(status, route.path_draft(), width, style)
+}
+
+fn report_export_destination_line(app: &ShellApp, width: usize) -> Line<'static> {
+    if let Some(path) = app.report_export_destination() {
+        return report_status_path_line("EXPORTING", &path.to_string_lossy(), width, theme::warn());
+    }
+    report_destination_line(app.router.report(), width)
+}
+
+fn report_status_path_line(status: &str, path: &str, width: usize, style: Style) -> Line<'static> {
     let prefix = format!("{status} · ");
     let remaining = width.saturating_sub(display_width(&prefix));
-    let text = format!("{prefix}{}", fit_path(route.path_draft(), remaining));
+    let text = format!("{prefix}{}", fit_path(path, remaining));
     Line::styled(fit(&text, width), style)
 }
 
@@ -74,6 +84,9 @@ fn report_document_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let route = app.router.report();
     let mut lines = report_header_lines(app, area);
     append_report_errors(&mut lines, app, area.width);
+    if let Some(progress) = app.report_export_description() {
+        append_wrapped(&mut lines, &progress, area.width);
+    }
     for line in crate::ui_view_models::report_investigation_lines(app) {
         append_wrapped(&mut lines, &line, area.width);
     }

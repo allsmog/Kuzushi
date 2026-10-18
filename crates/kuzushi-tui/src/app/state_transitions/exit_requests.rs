@@ -10,6 +10,13 @@ impl ShellApp {
     }
 
     pub(crate) fn finish_shell_quit_effect(&mut self) {
+        if self.report_export_pending() {
+            self.set_warn_notice(
+                "export",
+                "A report is exporting. Wait for its result before exiting.",
+            );
+            return;
+        }
         if self.review_decision_write_pending() {
             self.set_warn_notice(
                 "review",

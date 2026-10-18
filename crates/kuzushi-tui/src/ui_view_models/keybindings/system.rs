@@ -56,7 +56,14 @@ fn report_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     }
     vec![
         bind("Esc/q", "return"),
-        bind("Enter", "export/retry"),
+        bind(
+            "Enter",
+            if app.report_export_pending() {
+                "export running"
+            } else {
+                "export/retry"
+            },
+        ),
         bind("e", "edit path"),
         bind("r", "refresh report"),
         bind("PgUp/PgDn", "read"),

@@ -13,6 +13,9 @@ use super::*;
 use crate::run_artifacts::load_run_summary;
 use std::collections::{BTreeSet, HashMap};
 
+mod revision;
+use revision::with_export_revision;
+
 /// Refresh suppression state against the current clock before exporting, so a
 /// finding whose rule lapsed since the last scan exports as NOT suppressed
 /// (and no lapsed suppression is exported as SARIF-accepted). Idempotent; a
@@ -337,27 +340,37 @@ fn prepare_workspace_findings_export(
     workspace: &WorkspaceTarget,
     options: &WorkspaceExportOptions,
 ) -> Result<PreparedWorkspaceFindingsExport> {
+    with_export_revision(workspace, |store| {
+        prepare_workspace_export_at_revision(workspace, options, store)
+    })
+}
+
+fn prepare_workspace_export_at_revision(
+    workspace: &WorkspaceTarget,
+    options: &WorkspaceExportOptions,
+    store: &FindingStore,
+) -> Result<PreparedWorkspaceFindingsExport> {
     if let Some(campaign) = options.campaign_id.as_deref() {
         let investigation =
             super::investigation_report::load_investigation_report_document(workspace, campaign)?;
-        let mut prepared = prepare_scan_findings_export(
+        let mut prepared = prepare_scan_export_at_revision(
             workspace,
             investigation.summary().observation_run_refs,
             options,
+            store,
         )?;
         prepared.investigation = Some(investigation);
         return Ok(prepared);
     }
-    let store = FindingStore::open(workspace.findings_db_path())?;
     let all_findings =
         store.list_all_findings_with_identity_policy(export_identity_fold(options))?;
-    let all_reviews = effective_review_contexts(&store, &all_findings)?;
+    let all_reviews = effective_review_contexts(store, &all_findings)?;
     let total_count = all_findings.len();
     let positions = workspace_finding_export_positions(&all_findings);
     let filtered =
         filter_export_findings(all_findings, all_reviews, positions, options.completeness);
     let run_contexts = workspace_run_export_contexts(workspace, &filtered.findings);
-    let records = enriched_export_records(workspace, &store, &filtered, &run_contexts)?;
+    let records = enriched_export_records(workspace, store, &filtered, &run_contexts)?;
     Ok(PreparedWorkspaceFindingsExport {
         findings: filtered.findings,
         records,
@@ -371,18 +384,28 @@ fn prepare_scan_findings_export(
     run_ids: &[String],
     options: &WorkspaceExportOptions,
 ) -> Result<PreparedWorkspaceFindingsExport> {
-    let store = FindingStore::open(workspace.findings_db_path())?;
+    with_export_revision(workspace, |store| {
+        prepare_scan_export_at_revision(workspace, run_ids, options, store)
+    })
+}
+
+fn prepare_scan_export_at_revision(
+    workspace: &WorkspaceTarget,
+    run_ids: &[String],
+    options: &WorkspaceExportOptions,
+    store: &FindingStore,
+) -> Result<PreparedWorkspaceFindingsExport> {
     let all_findings = store.list_distinct_findings_for_scan_ids_with_identity_policy(
         run_ids,
         export_identity_fold(options),
     )?;
-    let all_reviews = effective_review_contexts(&store, &all_findings)?;
+    let all_reviews = effective_review_contexts(store, &all_findings)?;
     let total_count = all_findings.len();
     let positions = workspace_finding_export_positions(&all_findings);
     let filtered =
         filter_export_findings(all_findings, all_reviews, positions, options.completeness);
     let run_contexts = scan_run_export_contexts(workspace, &filtered.findings, run_ids);
-    let records = enriched_export_records(workspace, &store, &filtered, &run_contexts)?;
+    let records = enriched_export_records(workspace, store, &filtered, &run_contexts)?;
     Ok(PreparedWorkspaceFindingsExport {
         findings: filtered.findings,
         records,

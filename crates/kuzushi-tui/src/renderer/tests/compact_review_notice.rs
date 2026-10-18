@@ -31,9 +31,31 @@ fn review_reader(mode: crate::InputMode) -> (tempfile::TempDir, ShellApp) {
 }
 
 fn render(app: &ShellApp) -> String {
-    let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+    render_at(app, 40, 12)
+}
+
+fn render_at(app: &ShellApp, width: u16, height: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     terminal.draw(|frame| render_app(frame, app)).unwrap();
     rendered_buffer_rows(terminal.backend().buffer()).join("\n")
+}
+
+#[test]
+fn a_completed_export_keeps_the_finding_and_draft_visible_at_all_six_sizes() {
+    let (_root, mut app) = review_reader(crate::InputMode::Prompt);
+    app.router
+        .workbench_mut()
+        .set_focus(PhaseSurfaceId::ReviewQueue);
+    app.set_input("held draft λ");
+    app.set_success_notice("export", "Exported sarif to /owned/report.sarif");
+    for (width, height) in [(40, 11), (60, 19), (80, 23), (96, 88), (120, 35), (160, 47)] {
+        app.set_viewport(crate::TerminalViewport::new(width, height));
+        let text = render_at(&app, width, height);
+        assert!(text.contains("F-0001"), "{width}x{height}: {text}");
+        assert!(text.contains("held draft λ"), "{text}");
+        assert!(text.contains("DONE"), "{text}");
+        assert_eq!(app.input_mode(), crate::InputMode::Prompt);
+    }
 }
 
 #[test]

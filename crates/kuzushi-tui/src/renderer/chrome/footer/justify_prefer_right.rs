@@ -120,6 +120,7 @@ fn is_linked_reader_return(label: &str) -> bool {
 
 fn compact_reader_binding((key, label): (String, String)) -> (String, String) {
     let label = match (key.as_str(), label.as_str()) {
+        ("Enter", "export running") => "wait".to_string(),
         ("Enter", "open detail") => "detail".to_string(),
         _ => label,
     };

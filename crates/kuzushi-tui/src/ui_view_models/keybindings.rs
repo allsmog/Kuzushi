@@ -18,6 +18,9 @@ pub(crate) struct FooterKeybinding {
 }
 
 pub(super) fn interrupt_binding(app: &ShellApp) -> FooterKeybinding {
+    if app.report_export_pending() && !app.has_running_work() {
+        return bind("Ctrl+C", "wait export");
+    }
     active::active_keybindings(app)
         .and_then(|bindings| bindings.into_iter().find(|binding| binding.key == "Ctrl+C"))
         .unwrap_or_else(|| bind("Ctrl+C", "exit"))

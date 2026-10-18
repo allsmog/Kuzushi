@@ -2,14 +2,19 @@
 use super::*;
 
 impl FindingStore {
+    /// Connection-local change marker for commits made by other connections.
+    /// Unlike the projection sequence, this also observes accounting writes.
+    pub(crate) fn read_change_version(&self) -> Result<i64> {
+        self.conn
+            .pragma_query_value(None, "data_version", |row| row.get(0))
+            .context("Could not read ledger change version")
+    }
+
     /// Read related projection queries in one SQLite transaction. Nested
     /// readers join the caller's transaction without closing it. The snapshot
     /// starts at the first query and does not freeze filesystem artifacts.
     /// Callers must only perform reads here; this is not a write-policy gate.
-    pub fn with_projection_snapshot<T>(
-        &self,
-        read: impl FnOnce(&Self) -> Result<T>,
-    ) -> Result<T> {
+    pub fn with_projection_snapshot<T>(&self, read: impl FnOnce(&Self) -> Result<T>) -> Result<T> {
         if !self.conn.is_autocommit() {
             return read(self);
         }
