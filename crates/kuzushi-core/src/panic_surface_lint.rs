@@ -38,8 +38,6 @@ const AUDITED_PANIC_SITES: &[(&str, &str)] = &[
     ),
 ];
 
-const TEST_ATTRIBUTE: &str = "#[cfg(test)]";
-
 // Split so this file's own strings never match the detection patterns.
 fn panic_patterns() -> [String; 4] {
     [
@@ -64,50 +62,65 @@ fn rust_sources(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// The file's production region: everything outside its `#[cfg(test)]`
-/// items. The attribute guards one item, not the rest of the file, so a
-/// module that declares a test submodule beside its other `mod` lines, or
-/// that keeps a `#[cfg(test)]` helper above its production body, still has
-/// that body scanned. Files whose production region itself contains
+/// The file's production region: everything outside its top-level
+/// `#[cfg(test)]` items. The attribute guards one item, not the rest of the
+/// file, so a module that declares a test submodule beside its other `mod`
+/// lines, or that keeps a `#[cfg(test)]` helper above its production body,
+/// still has that body scanned. Files whose production region itself contains
 /// `#[test]` are dedicated test files pulled in via a `#[cfg(test)] mod`
 /// in their parent and are skipped entirely.
 fn production_region(body: &str) -> Option<String> {
-    let mut region = String::with_capacity(body.len());
-    let mut rest = body;
-    while let Some(position) = rest.find(TEST_ATTRIBUTE) {
-        region.push_str(&rest[..position]);
-        rest = after_test_item(&rest[position + TEST_ATTRIBUTE.len()..]);
+    if body.starts_with("#[cfg(test)]") {
+        return Some(String::new());
     }
-    region.push_str(rest);
+    let region = scanned_region(body);
     (!region.contains("#[test]")).then_some(region)
 }
 
-/// What follows the item one `#[cfg(test)]` guards: a declaration ends at
-/// its `;`, a braced item at its matching close brace. An item whose braces
-/// never balance consumes the remainder, which keeps the scan conservative.
-fn after_test_item(guarded: &str) -> &str {
-    match (guarded.find(';'), guarded.find('{')) {
-        (Some(semicolon), brace) if brace.is_none_or(|brace| semicolon < brace) => {
-            &guarded[semicolon + 1..]
-        }
-        (_, Some(brace)) => after_braced_item(&guarded[brace..]),
-        (_, None) => "",
+/// A column-0 `#[cfg(test)]` on its own line — the only form that guards a
+/// whole top-level item.
+const TEST_ATTRIBUTE_LINE: &str = "\n#[cfg(test)]\n";
+
+fn scanned_region(body: &str) -> String {
+    let mut region = String::with_capacity(body.len());
+    let mut cursor = 0;
+    while let Some(offset) = body[cursor..].find(TEST_ATTRIBUTE_LINE) {
+        // Keep the newline the needle anchored on: dropping it would join the
+        // line above the attribute to the line below the item, and a comment
+        // line joined to a code line hides that code from the line scan.
+        let attribute = cursor + offset;
+        region.push_str(&body[cursor..=attribute]);
+        let Some(end) = end_of_test_item(body, attribute + TEST_ATTRIBUTE_LINE.len()) else {
+            return region;
+        };
+        cursor = end;
     }
+    region.push_str(&body[cursor..]);
+    region
 }
 
-fn after_braced_item(from_open_brace: &str) -> &str {
-    let mut depth = 0_usize;
-    for (index, character) in from_open_brace.char_indices() {
-        depth = match character {
-            '{' => depth + 1,
-            '}' => depth.saturating_sub(1),
-            _ => depth,
-        };
-        if depth == 0 {
-            return &from_open_brace[index + character.len_utf8()..];
-        }
+/// Where one guarded top-level item ends: a declaration at the end of its own
+/// line, a braced item after the column-0 `}` that closes it. Deliberately not
+/// brace counting, because a `{` inside a string, a char literal or a comment
+/// would unbalance the count and swallow the production body below the item.
+/// Any other shape returns `None`, and the region ends there as it did before
+/// this rule could skip an item at all.
+fn end_of_test_item(body: &str, item: usize) -> Option<usize> {
+    let line = body[item..].lines().next()?.trim_end();
+    if line.ends_with(';') && !line.contains('{') {
+        return Some(end_of_line(body, item));
     }
-    ""
+    if !line.ends_with('{') {
+        return None;
+    }
+    let closing_brace = item + body[item..].find("\n}")? + 1;
+    Some(end_of_line(body, closing_brace))
+}
+
+fn end_of_line(body: &str, from: usize) -> usize {
+    body[from..]
+        .find('\n')
+        .map_or(body.len(), |newline| from + newline + 1)
 }
 
 fn panic_lines_in_region(region: &str) -> Vec<String> {
@@ -199,16 +212,41 @@ mod tests {
     #[test]
     fn a_guarded_item_above_the_body_no_longer_hides_the_rest_of_the_file() {
         assert_eq!(
-            production_region("#[cfg(test)]\nmod unit_tests;\nfn a() {}").as_deref(),
-            Some("\nfn a() {}")
+            production_region("use x;\n#[cfg(test)]\nmod unit_tests;\nfn a() {}").as_deref(),
+            Some("use x;\nfn a() {}")
         );
         assert_eq!(
-            production_region("#[cfg(test)]\nfn helper() -> u8 { 1 }\nfn a() {}").as_deref(),
-            Some("\nfn a() {}")
+            production_region("use x;\n#[cfg(test)]\nfn helper() -> u8 {\n    1\n}\nfn a() {}")
+                .as_deref(),
+            Some("use x;\nfn a() {}")
         );
+    }
+
+    /// Counting braces here let a `{` inside a string end the scan early and
+    /// hide every production line below the guarded helper.
+    #[test]
+    fn a_brace_inside_a_literal_cannot_swallow_the_production_body() {
+        let body = concat!(
+            "use x;\n",
+            "#[cfg(test)]\n",
+            "fn helper() {\n",
+            "    let _ = \"{\";\n",
+            "}\n",
+            "fn a() {\n",
+            "    Path::new(\"x\").to_str().unwrap();\n",
+            "}"
+        );
+        let region = production_region(body).expect("production region");
+        assert_eq!(panic_lines_in_region(&region).len(), 1, "{region}");
+    }
+
+    /// A shape this cannot delimit ends the region, which is exactly where the
+    /// scan stopped before it could skip a guarded item at all.
+    #[test]
+    fn an_undelimited_guarded_item_ends_the_region() {
         assert_eq!(
-            production_region("#[cfg(test)]\nmod tests { fn unbalanced() {} ").as_deref(),
-            Some("")
+            production_region("use x;\n#[cfg(test)]\nuse a::{b};\nfn a() {}").as_deref(),
+            Some("use x;\n")
         );
     }
 }
