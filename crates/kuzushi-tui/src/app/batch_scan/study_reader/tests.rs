@@ -29,6 +29,52 @@ fn key(app: &mut ShellApp, code: KeyCode) {
 }
 
 #[test]
+fn form_home_and_end_select_fields_without_editing_or_launching_work() {
+    let (_target, mut app) = study();
+    let before = study_projection(&app).unwrap().study;
+    let view = app.shell_view();
+    key(&mut app, KeyCode::End);
+    assert_eq!(
+        study_projection(&app).unwrap().selected_row(),
+        BatchScanConfigRow::Launch
+    );
+    key(&mut app, KeyCode::Home);
+    let config = study_projection(&app).unwrap();
+    assert_eq!(config.selected_row(), BatchScanConfigRow::Trials);
+    assert_eq!(config.study, before);
+    assert_eq!((app.input(), app.cursor()), ("preserved\ninput", 3));
+    assert_eq!(app.shell_view(), view);
+    assert!(app.activity().is_none());
+}
+
+#[test]
+fn numeric_editor_owns_home_and_end_without_changing_the_selected_field() {
+    let (_target, mut app) = study();
+    let config = app
+        .router
+        .campaign_mut()
+        .batch_scan_config
+        .as_mut()
+        .unwrap();
+    config.cursor = 5;
+    config.begin_number_edit(BatchScanConfigRow::ProviderCalls);
+    for code in [
+        KeyCode::Char('1'),
+        KeyCode::Char('2'),
+        KeyCode::Home,
+        KeyCode::Char('9'),
+        KeyCode::End,
+        KeyCode::Char('3'),
+    ] {
+        key(&mut app, code);
+    }
+    let config = study_projection(&app).unwrap();
+    assert_eq!(config.selected_row(), BatchScanConfigRow::ProviderCalls);
+    assert_eq!(config.number_edit.as_ref().unwrap().field.text(), "9123");
+    assert_eq!((app.input(), app.cursor()), ("preserved\ninput", 3));
+}
+
+#[test]
 fn reader_increases_space_at_all_viewports_and_keeps_controls_in_bounds() {
     for (width, height) in [(40, 12), (60, 20), (80, 24), (120, 36), (160, 48), (96, 89)] {
         let area = study_config_area(width, height);
@@ -79,6 +125,7 @@ fn arrows_scroll_document_and_resize_preserves_the_selected_setting() {
     );
     app.reduce_resize(40, 12);
     key(&mut app, KeyCode::End);
+    assert_eq!(study_projection(&app).unwrap().cursor, 3);
     assert!(
         study_projection(&app)
             .unwrap()

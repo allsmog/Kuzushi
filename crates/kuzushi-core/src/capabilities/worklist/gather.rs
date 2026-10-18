@@ -6,7 +6,7 @@
 use super::domain::{Contributor, ContributorState, Worklist};
 use super::fold::{rank, RecommendationsStatus, WorklistInputs};
 use crate::capabilities::scan_recommender::{
-    recommend_scans_for_target, scope_paths, ScanRecommendation,
+    recommend_scans_from_history, scope_paths, ScanRecommendation,
 };
 use crate::capabilities::systems_hunt::{rank_systems_surfaces_lite, RankedSystemsSurface};
 use crate::findings::FindingStore;
@@ -36,7 +36,7 @@ pub fn rank_worklist_for_target(
     options: &WorklistOptions,
     findings_store: Option<&FindingStore>,
 ) -> Result<Worklist> {
-    rank_worklist_observed(target, options, findings_store, &mut |_| {}, &|| false)
+    rank_worklist_observed(target, options, findings_store, &mut |_| {}, None)
         .map(|report| report.worklist)
 }
 
@@ -50,9 +50,9 @@ pub(crate) fn rank_worklist_observed(
     options: &WorklistOptions,
     findings_store: Option<&FindingStore>,
     progress: &mut dyn FnMut(usize),
-    canceled: &dyn Fn() -> bool,
+    cancellation: Option<&crate::ScanCancellation>,
 ) -> Result<InspectedWorklist> {
-    anyhow::ensure!(!canceled(), "worklist ranking canceled");
+    crate::sqlite_read_control::check(cancellation)?;
     anyhow::ensure!(
         !options.include_fan_in,
         "call-graph fan-in is not implemented"
@@ -62,8 +62,11 @@ pub(crate) fn rank_worklist_observed(
         "worklist limit must be between 1 and 500"
     );
     let (surfaces, surface_reason) = load_surfaces(target);
-    let coverage = gather_coverage(target, findings_store);
-    let systems = gather_systems(target, options, progress, canceled)?;
+    let coverage = gather_coverage(target, findings_store, cancellation);
+    crate::sqlite_read_control::check(cancellation)?;
+    let systems = gather_systems(target, options, progress, &|| {
+        cancellation.is_some_and(crate::ScanCancellation::is_cancelled)
+    })?;
     let (surfaces_systems, systems_inspection) = systems.unzip();
     let mut worklist = rank(&WorklistInputs {
         surfaces: &surfaces,
@@ -105,7 +108,11 @@ fn apply_surface_degradation(worklist: &mut Worklist, reason: Option<String>) {
 /// scope-load failure degrades the `ScanCoverage` contributor to a stated
 /// reason and returns the surface-based worklist, mirroring the `Ok(None)`
 /// honesty of the surface loader — it never `?`-propagates the error.
-fn gather_coverage(target: &Path, findings_store: Option<&FindingStore>) -> CoverageInput {
+fn gather_coverage(
+    target: &Path,
+    findings_store: Option<&FindingStore>,
+    cancellation: Option<&crate::ScanCancellation>,
+) -> CoverageInput {
     let scope_paths = match scope_paths(target) {
         Ok(scope_paths) => scope_paths,
         Err(error) => {
@@ -116,7 +123,7 @@ fn gather_coverage(target: &Path, findings_store: Option<&FindingStore>) -> Cove
             };
         }
     };
-    match recommend_scans_for_target(target, findings_store) {
+    match recommend_scans_from_history(target, findings_store, None, cancellation) {
         Ok(recommendations) => CoverageInput {
             recommendations,
             scope_paths,

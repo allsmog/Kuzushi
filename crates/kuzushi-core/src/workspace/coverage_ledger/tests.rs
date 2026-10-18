@@ -7,6 +7,7 @@ use std::process::Command;
 
 mod cancellation;
 mod read_only;
+mod source_limits;
 mod source_validity;
 
 fn revision(sha: &str, dirty: bool) -> RunTargetGitMetadata {

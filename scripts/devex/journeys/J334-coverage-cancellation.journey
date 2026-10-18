@@ -9,6 +9,8 @@ require-live-snap: 30 KUZUSHI | ready
 submit: setg ui.auto_open_activity false
 submit: logs
 require-live-snap: 15 LOGS | settled-logs
+submit: run coverage:recommend {}
+require-live-snap: 20 saved evidence only; current source not checked | saved-advice
 require-shell: python3 -B @REPO/scripts/devex/fixtures/coverage_cancellation.py @TMP_TARGET @ART @TMP_HOME arm
 submit: run coverage:sweep {"writeSkips":true}
 require-live-snap: 15 Ctrl+C request abort | active-inspection
@@ -21,11 +23,16 @@ submit: logs
 keys: End
 require-live-snap: 15 cancelled || canceled || Cancelled || Canceled | canceled-inspection
 ask: Does cancellation stop the owned Git adapter, preserve baseline history and leave the shell available for an explicit retry?
+submit: run coverage:sweep {"writeSkips":true,"maxSourceComparisons":1}
+require-live-snap: 20 reached maxSourceComparisons=1 | bounded-stop
+require-shell: python3 -B @REPO/scripts/devex/fixtures/coverage_cancellation.py @TMP_TARGET @ART @TMP_HOME limited
+ask: Is the comparison limit stop clear, with unchanged history and no automatic retry or allowance increase?
 submit: run coverage:sweep {"writeSkips":true}
 wait: 0.5
 submit: logs
 keys: End
-require-live-snap: 25 1 skip row(s) written | explicit-retry
+require-live-snap: 25 1 skip row(s) | explicit-retry
+require-live-snap: 15 Sweep coverage baselines · run receipt · completed | compact-receipt
 require-shell: python3 -B @REPO/scripts/devex/fixtures/coverage_cancellation.py @TMP_TARGET @ART @TMP_HOME completed
 nav-mode:
 keys: z

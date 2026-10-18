@@ -614,9 +614,10 @@ fn next_scan_lines(next_scans: &NextScansState, width: usize) -> Vec<Line<'stati
         NextScansState::Ready(rows) => rows,
     };
     let mut lines = vec![Line::styled("NEXT SCANS", theme::heading())];
+    lines.extend(saved_recommendation_hint(width));
     if rows.is_empty() {
         lines.push(Line::styled(
-            fit("coverage current — nothing recommended", width),
+            fit("Nothing recommended from saved history.", width),
             theme::muted(),
         ));
         return lines;
@@ -632,6 +633,17 @@ fn next_scan_lines(next_scans: &NextScansState, width: usize) -> Vec<Line<'stati
         ])
     }));
     lines
+}
+
+fn saved_recommendation_hint(width: usize) -> Vec<Line<'static>> {
+    [
+        "Saved history. Current source not checked.",
+        "Compare explicitly: run coverage:recommend {\"compareSource\":true}",
+    ]
+    .into_iter()
+    .flat_map(|text| wrap_text(text, width.max(1)))
+    .map(|line| Line::styled(line, theme::muted()))
+    .collect()
 }
 
 fn hot_module_lines(modules: &[ModuleRisk], width: usize) -> Vec<Line<'static>> {
@@ -919,13 +931,31 @@ mod next_scan_tests {
         assert!(rendered.contains("14 files changed"));
 
         let empty = text(&next_scan_lines(&NextScansState::Ready(Vec::new()), 80));
-        assert!(empty.contains("coverage current"));
+        assert!(empty.contains("Nothing recommended from saved history"));
+        assert!(empty.contains("Current source not checked"));
+        assert!(empty.contains("compareSource"));
+        assert!(!empty.contains("coverage current"));
 
         let failed = text(&next_scan_lines(
             &NextScansState::Unavailable("ledger locked".to_string()),
             80,
         ));
         assert!(failed.contains("unavailable: ledger locked"));
+    }
+
+    #[test]
+    fn saved_advice_discloses_unchecked_source_in_every_viewport_width() {
+        for width in [40, 60, 80, 96, 120, 160] {
+            let lines = next_scan_lines(&NextScansState::Ready(Vec::new()), width);
+            assert!(lines.iter().all(|line| line.width() <= width));
+            let joined = text(&lines)
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            assert!(joined.contains("Current source not checked"), "{joined}");
+            assert!(joined.contains("compareSource"), "{joined}");
+            assert!(!joined.contains("coverage current"));
+        }
     }
 
     #[test]

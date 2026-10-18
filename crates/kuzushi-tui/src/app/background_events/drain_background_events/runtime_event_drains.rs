@@ -9,6 +9,7 @@ mod phase_result_destination;
 #[cfg(test)]
 mod planner_result_tests;
 mod receipt_notice;
+use receipt_notice::run_receipt_notice;
 #[cfg(test)]
 mod setup_map_result_tests;
 #[cfg(test)]
@@ -918,25 +919,6 @@ fn operator_question_completion_detail(outcome: OperatorQuestionOutcome) -> &'st
         }
         OperatorQuestionOutcome::RoutedToSetup => "credential question routed to Setup/Auth",
         OperatorQuestionOutcome::Failed => "operator question failed",
-    }
-}
-
-fn run_receipt_notice(receipt: &RunFocusReceipt, answer_acknowledgement: Option<&str>) -> String {
-    let summary = run_result_notice(receipt);
-    answer_acknowledgement.map_or(summary.clone(), |acknowledgement| {
-        format!("{summary} · {acknowledgement}")
-    })
-}
-
-fn run_result_notice(receipt: &RunFocusReceipt) -> String {
-    let summary = format!("run receipt · {}", receipt.summary());
-    match receipt.result_summaries.as_slice() {
-        [result] if result.status == receipt.outcome => format!(
-            "{}: {} · {summary}",
-            kuzushi_core::modules::tool_display_name(&result.tool),
-            result.summary,
-        ),
-        _ => summary,
     }
 }
 

@@ -70,12 +70,30 @@ impl ShellApp {
         if matches!(code, KeyCode::Esc | KeyCode::Char('q')) {
             return self.return_from_study_reading();
         }
-        if self.scroll_study_detail(code) {
+        self.apply_study_form_navigation(code)
+    }
+
+    fn apply_study_form_navigation(&mut self, code: KeyCode) -> InputUpdate {
+        if self.scroll_study_detail(code) || self.move_study_form_to_edge(code) {
             return InputUpdate::handled();
         }
         study_action(code).map_or_else(InputUpdate::handled, |action| {
             self.apply_batch_scan_hotkey(action)
         })
+    }
+
+    fn move_study_form_to_edge(&mut self, code: KeyCode) -> bool {
+        let count = super::BatchScanConfigRow::ALL.len() as i64;
+        let delta = match code {
+            KeyCode::Home => -count,
+            KeyCode::End => count,
+            _ => return false,
+        };
+        let Some(config) = self.router.campaign_mut().batch_scan_config.as_mut() else {
+            return false;
+        };
+        config.move_cursor(delta);
+        true
     }
 
     fn return_from_study_reading(&mut self) -> InputUpdate {

@@ -1,3 +1,4 @@
+use super::super::sweep::sweep_target_with_cancellation;
 use super::*;
 use crate::ScanCancellation;
 use std::cell::Cell;

@@ -1,4 +1,6 @@
 use super::*;
+mod summary;
+pub(super) use summary::run_receipt_notice;
 
 impl ShellApp {
     pub(super) fn publish_run_focus_receipt(

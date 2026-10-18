@@ -1,8 +1,10 @@
 use super::*;
+mod source_options;
 use crate::workspace::coverage_ledger::{
-    sweep_target_with_cancellation, write_sweep_skips_with_cancellation, CoverageLedger,
-    SweepReport, SweepVerdict,
+    sweep_target_with_budget, write_sweep_skips_with_budget, CoverageLedger, SweepReport,
+    SweepVerdict,
 };
+use source_options::*;
 
 pub(crate) fn coverage_module() -> BuiltinModule {
     builtin_module(
@@ -39,14 +41,14 @@ fn coverage_sweep_tool() -> ToolDescriptor {
     tool_with_options(
         "coverage:sweep",
         "Inspect historical Git baselines. Dirty sources and unavailable scopes remain unverified. Unchanged tracked source does not establish complete scan coverage or a fixed finding. Diffs are whole-repository.",
-        vec![opt(
+        source_options(vec![opt(
             "writeSkips",
             OptionType::Bool,
             "Advance unchanged baselines to HEAD by recording sweep-skip rows. \
              Refused on a dirty tree.",
         )
         .aliases(&["write_skips", "write-skips"])
-        .default(json!(false))],
+        .default(json!(false))]),
     )
 }
 
@@ -61,15 +63,18 @@ fn coverage_recommend_tool() -> ToolDescriptor {
     tool_with_options(
         "coverage:recommend",
         "Rank scope-level scan recommendations from deterministic signals: coverage gaps, \
-         staleness since baselines, and surface-dense files with zero findings. \
-         No model calls; every row carries its mechanical evidence.",
-        vec![opt(
+         saved baseline gaps and surface-dense files with zero findings. Source comparison is \
+         explicit and bounded. No model calls; every row carries its mechanical evidence.",
+        source_options(vec![opt(
             "limit",
             OptionType::Int,
             "Maximum recommendations to return.",
         )
         .default(json!(20))
-        .integer_range(1, 500)],
+        .integer_range(1, 500),
+        opt("compareSource", OptionType::Bool,
+            "Compare current tracked source with historical baselines within the stated limits. Defaults to saved evidence only.")
+            .default(json!(false))]),
     )
 }
 
@@ -80,12 +85,14 @@ pub(in crate::modules) fn run_coverage_sweep(
     let workspace = ctx
         .workspace
         .context("coverage:sweep requires an active workspace target")?;
-    let report = sweep_target_with_cancellation(workspace.root(), ctx.cancellation)?;
+    let mut budget = source_budget(input)?;
+    let report = sweep_target_with_budget(workspace.root(), ctx.cancellation, &mut budget)?;
     let skips_written = if write_skips_requested(input) {
-        Some(write_sweep_skips_with_cancellation(
+        Some(write_sweep_skips_with_budget(
             workspace.root(),
             &report,
             ctx.cancellation,
+            &mut budget,
         )?)
     } else {
         None
@@ -94,7 +101,7 @@ pub(in crate::modules) fn run_coverage_sweep(
     Ok(crate::module_result::completed_output_result(
         output.clone(),
         output,
-        json!({ "report": report, "skipsWritten": skips_written,
+        json!({ "report": report, "skipsWritten": skips_written, "sourceComparison":budget,
             "sourceMeaning":"historical-git-baseline-check", "scopeCoverageVerified":false, "findingFixVerified":false }),
     ))
 }
@@ -125,18 +132,27 @@ pub(in crate::modules) fn run_coverage_recommend(
         .workspace
         .context("coverage:recommend requires an active workspace target")?;
     let limit = recommend_limit(input);
-    let recommendations = crate::capabilities::scan_recommender::recommend_scans_for_target(
+    let mut budget = source_budget(input)?;
+    let sweep = requested_source_comparison(input, workspace.root(), ctx, &mut budget)?;
+    let recommendations = crate::capabilities::scan_recommender::recommend_scans_from_history(
         workspace.root(),
         ctx.findings_store,
+        sweep.as_ref(),
+        ctx.cancellation,
     )?;
     let shown: Vec<_> = recommendations.iter().take(limit).collect();
-    let output = recommend_output_line(&recommendations, shown.len());
+    let output = format!(
+        "{} · {}",
+        recommend_output_line(&recommendations, shown.len()),
+        source_comparison_label(sweep.is_some())
+    );
     Ok(crate::module_result::completed_output_result(
         output.clone(),
         output,
         json!({ "recommendations": shown, "recommendationTotal": recommendations.len(),
             "target": workspace.root(), "sourceFreshnessVerified":false,
-            "sourceMeaning":"advisory-persisted-context-and-historical-baselines" }),
+            "sourceMeaning":"advisory-persisted-context-and-historical-baselines",
+            "sourceComparisonPerformed":sweep.is_some(), "sourceComparison":budget }),
     ))
 }
 

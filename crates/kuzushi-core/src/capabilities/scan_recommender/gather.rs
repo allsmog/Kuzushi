@@ -1,7 +1,8 @@
 use super::domain::ScanRecommendation;
 use super::fold::{recommend, RecommenderInputs};
 use crate::findings::FindingStore;
-use crate::workspace::coverage_ledger::{sweep_target, CoverageLedger, SweepReport};
+use crate::sqlite_read_control::check;
+use crate::workspace::coverage_ledger::{CoverageLedger, SweepReport};
 use crate::workspace::{load_nested_project_scopes, ROOT_SCOPE_ID};
 use anyhow::Result;
 use std::collections::{BTreeMap, BTreeSet};
@@ -16,20 +17,33 @@ pub fn recommend_scans_for_target(
     target: &Path,
     findings_store: Option<&FindingStore>,
 ) -> Result<Vec<ScanRecommendation>> {
+    recommend_scans_from_history(target, findings_store, None, None)
+}
+
+/// Saved evidence only unless the caller explicitly supplies a completed source
+/// comparison. This function never starts Git, walks source or creates jobs.
+pub fn recommend_scans_from_history(
+    target: &Path,
+    findings_store: Option<&FindingStore>,
+    sweep: Option<&SweepReport>,
+    cancellation: Option<&crate::ScanCancellation>,
+) -> Result<Vec<ScanRecommendation>> {
+    check(cancellation)?;
     let scope_paths = scope_paths(target)?;
     let ledger = CoverageLedger::open_if_exists(target)?;
     let latest = match &ledger {
-        Some(ledger) => ledger.latest_baselines()?,
+        Some(ledger) => ledger.latest_baselines_with_cancellation(cancellation)?,
         None => Vec::new(),
     };
-    let sweep = sweep_if_covered(target, &ledger);
+    check(cancellation)?;
     let surface_files = surface_files(target);
-    let finding_files = finding_files(target, findings_store)?;
+    let finding_files = finding_files(target, findings_store, cancellation)?;
+    check(cancellation)?;
     Ok(recommend(&RecommenderInputs {
         scope_paths: &scope_paths,
         latest_baselines: &latest,
         all_baselines: &[],
-        sweep: sweep.as_ref(),
+        sweep,
         surface_files: &surface_files,
         finding_files: &finding_files,
     }))
@@ -43,13 +57,6 @@ pub(crate) fn scope_paths(target: &Path) -> Result<BTreeMap<String, String>> {
         }
     }
     Ok(paths)
-}
-
-fn sweep_if_covered(target: &Path, ledger: &Option<CoverageLedger>) -> Option<SweepReport> {
-    if ledger.is_none() {
-        return None;
-    }
-    sweep_target(target).ok()
 }
 
 /// Surface density is advisory and comes from the persisted context
@@ -68,11 +75,16 @@ fn snapshot_surface_files(target: &Path) -> Option<BTreeMap<String, usize>> {
         .map(|map| map.summary.by_file)
 }
 
-fn finding_files(target: &Path, findings_store: Option<&FindingStore>) -> Result<BTreeSet<String>> {
+fn finding_files(
+    target: &Path,
+    findings_store: Option<&FindingStore>,
+    cancellation: Option<&crate::ScanCancellation>,
+) -> Result<BTreeSet<String>> {
     let Some(store) = findings_store else {
         return Ok(BTreeSet::new());
     };
-    let paths = store.recommendation_finding_paths(FINDING_READ_LIMIT)?;
+    let paths =
+        store.recommendation_finding_paths_with_cancellation(FINDING_READ_LIMIT, cancellation)?;
     Ok(paths
         .iter()
         .map(|path| target_relative(path, target))

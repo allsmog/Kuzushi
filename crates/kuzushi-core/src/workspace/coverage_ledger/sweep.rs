@@ -1,3 +1,4 @@
+use super::source_budget::{SourceComparisonBudget, SourceComparisonLimits};
 use super::store::{BaselineRow, CoverageLedger};
 use super::SWEEP_SKIP_MODE;
 use crate::modules::WorkflowPhase;
@@ -68,6 +69,15 @@ pub(crate) fn sweep_target_with_cancellation(
     target: &Path,
     cancellation: Option<&crate::ScanCancellation>,
 ) -> Result<SweepReport> {
+    let mut budget = SourceComparisonBudget::new(SourceComparisonLimits::default())?;
+    sweep_target_with_budget(target, cancellation, &mut budget)
+}
+
+pub(crate) fn sweep_target_with_budget(
+    target: &Path,
+    cancellation: Option<&crate::ScanCancellation>,
+    budget: &mut SourceComparisonBudget,
+) -> Result<SweepReport> {
     check_cancelled(cancellation)?;
     let head = git::metadata(target, cancellation)?;
     let baselines = match CoverageLedger::open_if_exists(target)? {
@@ -75,7 +85,7 @@ pub(crate) fn sweep_target_with_cancellation(
         None => Vec::new(),
     };
     let scope_paths = scope_path_index(target)?;
-    let mut diffs = DiffCache::new(target, &head.sha, cancellation);
+    let mut diffs = DiffCache::new(target, &head.sha, cancellation, budget);
     let entries = baselines
         .iter()
         .map(|row| {
@@ -98,13 +108,15 @@ pub(crate) fn sweep_target_with_cancellation(
 /// HEAD. Refuses on a dirty tree: a baseline must never claim a revision the
 /// working tree does not match. Returns the number of rows written.
 pub fn write_sweep_skips(target: &Path, report: &SweepReport) -> Result<usize> {
-    write_sweep_skips_with_cancellation(target, report, None)
+    let mut budget = SourceComparisonBudget::new(SourceComparisonLimits::default())?;
+    write_sweep_skips_with_budget(target, report, None, &mut budget)
 }
 
-pub(crate) fn write_sweep_skips_with_cancellation(
+pub(crate) fn write_sweep_skips_with_budget(
     target: &Path,
     report: &SweepReport,
     cancellation: Option<&crate::ScanCancellation>,
+    budget: &mut SourceComparisonBudget,
 ) -> Result<usize> {
     check_cancelled(cancellation)?;
     anyhow::ensure!(
@@ -112,7 +124,7 @@ pub(crate) fn write_sweep_skips_with_cancellation(
         "refusing --write-skips on a dirty tree; commit or stash first"
     );
     anyhow::ensure!(
-        sweep_target_with_cancellation(target, cancellation)? == *report,
+        sweep_target_with_budget(target, cancellation, budget)? == *report,
         "source or baseline state changed; run coverage:sweep again before writing skips"
     );
     write_skips(
@@ -229,14 +241,12 @@ fn scope_prefix<'index>(
     scope_paths.get(&row.scope_id).map(String::as_str)
 }
 
-fn scoped_change_count(changed_files: &[String], prefix: Option<&str>) -> usize {
-    match prefix {
-        None | Some(".") => changed_files.len(),
-        Some(prefix) => changed_files
-            .iter()
-            .filter(|file| file_under_prefix(file, prefix))
-            .count(),
-    }
+fn scoped_change_count(changed_files: &str, prefix: Option<&str>) -> usize {
+    let paths = changed_files.split('\0').filter(|file| !file.is_empty());
+    let Some(prefix) = prefix.filter(|prefix| *prefix != ".") else {
+        return paths.count();
+    };
+    paths.filter(|file| file_under_prefix(file, prefix)).count()
 }
 
 fn file_under_prefix(file: &str, prefix: &str) -> bool {
@@ -277,8 +287,9 @@ fn unbaselined_scopes(
 struct DiffCache<'target> {
     target: &'target Path,
     head_sha: String,
-    by_sha: BTreeMap<String, Option<Vec<String>>>,
+    by_sha: BTreeMap<String, Option<String>>,
     cancellation: Option<&'target crate::ScanCancellation>,
+    budget: &'target mut SourceComparisonBudget,
 }
 
 impl<'target> DiffCache<'target> {
@@ -286,19 +297,26 @@ impl<'target> DiffCache<'target> {
         target: &'target Path,
         head_sha: &str,
         cancellation: Option<&'target crate::ScanCancellation>,
+        budget: &'target mut SourceComparisonBudget,
     ) -> Self {
         Self {
             target,
             head_sha: head_sha.to_string(),
             by_sha: BTreeMap::new(),
             cancellation,
+            budget,
         }
     }
 
-    fn changed_files(&mut self, baseline_sha: &str) -> Result<Option<&[String]>> {
+    fn changed_files(&mut self, baseline_sha: &str) -> Result<Option<&str>> {
         if !self.by_sha.contains_key(baseline_sha) {
-            let diff =
-                whole_repo_diff(self.target, baseline_sha, &self.head_sha, self.cancellation)?;
+            let diff = whole_repo_diff(
+                self.target,
+                baseline_sha,
+                &self.head_sha,
+                self.cancellation,
+                self.budget,
+            )?;
             self.by_sha.insert(baseline_sha.to_string(), diff);
         }
         let diff = self

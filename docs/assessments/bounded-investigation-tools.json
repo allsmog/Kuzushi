@@ -20,7 +20,7 @@
       "module": "agentic-sast",
       "declaredMaturity": "core",
       "declaredPhase": "scan",
-      "purpose": "Run agentic SAST detectors for the current target.",
+      "purpose": "Discover source-grounded observations independently for the current target. Prior findings do not suppress rediscoveries; consolidation happens in the findings ledger.",
       "scope": "Standard accepted exact-file discovery with constrained file tools and mcps=false; whole-repository work remains available. Other strategies and MCP scopes are unsupported.",
       "runtimeRequirement": "always",
       "headlessDeclared": true,
@@ -781,7 +781,7 @@
       "module": "coverage",
       "declaredMaturity": "core",
       "declaredPhase": "operate",
-      "purpose": "Rank scope-level scan recommendations from deterministic signals: coverage gaps, staleness since baselines, and surface-dense files with zero findings. No model calls; every row carries its mechanical evidence.",
+      "purpose": "Rank scope-level scan recommendations from deterministic signals: coverage gaps, saved baseline gaps and surface-dense files with zero findings. Source comparison is explicit and bounded. No model calls; every row carries its mechanical evidence.",
       "scope": "Default Read-only advisory metadata path; no model, scan scheduling or graph construction. Deep opt-in ranking remains outside this qualification.",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -789,17 +789,20 @@
       "findingStoreRequirement": "optional",
       "requiredOptions": [],
       "declaredOptions": [
-        "limit"
+        "limit",
+        "compareSource",
+        "maxSourceComparisons",
+        "maxDiffBytes"
       ],
-      "executionEvidence": "161 distinct focused passing tests (60 Core, 101 TUI), workspace build, risk proxy and J160 with 34 machine passes, 36 native captures and six separate assistant judgments. See docs/assessments/worklist-coverage-module-audit-2026-10-10.md.",
-      "readinessVerdict": "scoped default advisory reading and recovery evidence; query-wide resource bounds, deep execution, calibrated usefulness and complete investigation acceptance remain open",
+      "executionEvidence": "161 distinct focused passing tests (60 Core, 101 TUI), workspace build, risk proxy and J160 with 34 machine passes, 36 native captures and six separate assistant judgments. See docs/assessments/worklist-coverage-module-audit-2026-10-10.md. October 18 saved-scan-recommendations-2026-10-18.md qualifies saved-only recommendation inputs and shared cancellation. Explicit source comparisons and revalidation share finite diff-count and output-byte limits. Scoped functional and native evidence does not establish full product acceptance.",
+      "readinessVerdict": "Saved-only advice and explicit bounded source comparison qualified; full history/lock costs and formal operator acceptance remain open",
       "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
       "auditDimensions": {
         "purposeAndValue": "Deterministic advisory inspection priority with raw mechanical evidence. No calibrated risk, confidence, scan coverage or vulnerability verdict claim.",
         "requiredInputs": "Active workspace and saved context/history when available. No model or credentials required. Missing history does not establish finding absence.",
         "sharedDispatchExecution": "Seven real prepared-registry contracts plus native J160 shell and child CLI context/worklist execution. Descriptor validation remains shared; no mode-specific parser.",
-        "failureAndRecovery": "Invalid limits, unsupported fan-in, missing/legacy/malformed/future schema, outside symlink and 10001-row history covered. Read-only access preserves database bytes. Explicit synthetic fixture repair precedes fresh rerun; native no-color restart restores rows.",
-        "approvedResources": "No provider requests or graph builds in audited defaults. Baseline and finding-path reads refuse above 10000 materialized rows. SQLite sorting/identity folding, bytes, aggregate latency and cancellation within database work remain unqualified.",
+        "failureAndRecovery": "Invalid limits, unsupported fan-in, missing/legacy/malformed/future schema, outside symlink and 10001-row history covered. Read-only access preserves database bytes. Explicit synthetic fixture repair precedes fresh rerun; native no-color restart restores rows. Explicit comparison propagates inspection failure; reaching a comparison limit leaves baseline rows unchanged. Present damaged findings are not silently treated as absent. Shared SQL callback cleanup, controlled child cancellation, explicit retry and restart are verified in the saved recommendation checkpoint.",
+        "approvedResources": "No provider request in the audited path. Default recommendation/worklist reads run no Git diffs. Explicit coverage comparison declares maxSourceComparisons (default 32) and maxDiffBytes (default 8388608), shared through skip revalidation. SQL reads are cancellable and retain 10000-row materialization limits; total SQL history, lock waits, RAM and wall-clock ceilings remain unqualified.",
         "interfaceParity": "Prepared dispatch and native shell evidence; child headless CLI ranking/context verified. These are advisory tools, not SAST engines. Six viewports and no-color restart observed; notice prioritization remains a UX gap.",
         "phaseAgreement": "Operate with phase_result false. Historical recommendations cannot complete Map or establish coverage or a fix.",
         "artifactConsumption": "Completed canonical result retains recommendations and adds recommendationTotal, target and advisory/freshness meaning. Worklist joins the same recommender inputs; native logs retain mechanical evidence and actual shown/total counts.",
@@ -826,10 +829,12 @@
       "findingStoreRequirement": "optional",
       "requiredOptions": [],
       "declaredOptions": [
-        "writeSkips"
+        "writeSkips",
+        "maxSourceComparisons",
+        "maxDiffBytes"
       ],
-      "executionEvidence": "Real Rust CLI/TUI prepared dispatch in J148, two actual owned Git commits, same-SHA edit and synthetic historical metadata. See docs/assessments/source-baseline-integrity-2026-10-09.md. October 18 coverage-cancellation-2026-10-18.md: 38 focused checks, locked workspace build and Core/TUI Clippy pass; native cancellation and source-history evidence preserve historical rows, current-SHA meaning and explicit retry. No model request or maturity change.",
-      "readinessVerdict": "Scoped historical-source inspection, shared cancellation and atomic skip-write recovery verified; aggregate history/memory limits and full operator acceptance remain open",
+      "executionEvidence": "Real Rust CLI/TUI prepared dispatch in J148, two actual owned Git commits, same-SHA edit and synthetic historical metadata. See docs/assessments/source-baseline-integrity-2026-10-09.md. October 18 coverage-cancellation-2026-10-18.md: 38 focused checks, locked workspace build and Core/TUI Clippy pass; native cancellation and source-history evidence preserve historical rows, current-SHA meaning and explicit retry. No model request or maturity change. October 18 saved-scan-recommendations-2026-10-18.md qualifies saved-only recommendation inputs and shared cancellation. Explicit source comparisons and revalidation share finite diff-count and output-byte limits. Scoped functional and native evidence does not establish full product acceptance.",
+      "readinessVerdict": "Scoped source inspection, shared finite diff allowance, cancellation and atomic skip recovery verified; total history/lock costs and full operator acceptance remain open",
       "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
       "auditDimensions": {
         "purposeAndValue": "Expose full historical revision and distinguish changed, unchanged and unverified source without promoting a finding verdict.",
@@ -837,8 +842,8 @@
         "requiredInputs": "Explicit active workspace; sweep requires readable Git history. Missing or uninspectable source errors honestly.",
         "sharedDispatchExecution": "Four focused prepared-dispatch tests and actual native CLI/TUI execution; writeSkips aliases and unknown-input rejection exercised.",
         "artifactConsumption": "Readable receipt and structured output preserve full SHAs, run provenance and false complete-coverage/finding-fix flags; synthetic ledger rows survive restart unchanged.",
-        "failureAndRecovery": "Prepared dispatch retains its pre-cancel guard. Coverage SQL uses a removable progress callback, the exact Git child receives the request token, and canceled skip inserts roll back. A controlled native stop test, explicit retry and no-color restart are recorded in coverage-cancellation-2026-10-18.md. Callback removal is tested after interruption and read failure.",
-        "approvedResources": "Runtime Never, no provider requests or scan jobs. Latest-baseline materialization is capped at 10000 rows; Git capture retains its 2 MiB stdout and 10-second per-command limits. Cancellation reaches SQL, child processes and the write transaction. Aggregate diff retention, total-history work and lock latency remain unqualified.",
+        "failureAndRecovery": "Prepared dispatch retains its pre-cancel guard. Coverage SQL uses a removable progress callback, the exact Git child receives the request token, and canceled skip inserts roll back. A controlled native stop test, explicit retry and no-color restart are recorded in coverage-cancellation-2026-10-18.md. Callback removal is tested after interruption and read failure. Explicit comparison propagates inspection failure; reaching a comparison limit leaves baseline rows unchanged. Present damaged findings are not silently treated as absent. Shared SQL callback cleanup, controlled child cancellation, explicit retry and restart are verified in the saved recommendation checkpoint.",
+        "approvedResources": "No provider request in the audited path. Default recommendation/worklist reads run no Git diffs. Explicit coverage comparison declares maxSourceComparisons (default 32) and maxDiffBytes (default 8388608), shared through skip revalidation. SQL reads are cancellable and retain 10000-row materialization limits; total SQL history, lock waits, RAM and wall-clock ceilings remain unqualified.",
         "scopeEnforcement": "Missing scope remains unverified; root is disclosed when unbaselined. Legacy metadata does not certify accepted context or complete selected discovery scope.",
         "interfaceParity": "Headless run, shell and six-size transcript reader consume the same executor output. Operational tools are not discovery scan tasks; full public option parity remains pending."
       },
@@ -4738,15 +4743,15 @@
         "target",
         "allowanceRef"
       ],
-      "executionEvidence": "Prepared registry and native shell/child CLI evidence in docs/assessments/worklist-coverage-module-audit-2026-10-10.md, bounded-deep-worklist-2026-10-15.md and compact-gallery-reading-2026-10-15.md. The later frozen J294/J160/J158/J121 runs have 302 machine passes, zero failures and 31 pending human judgments. J294 has 50 machine passes and 30 authenticated capture pairs; J160 has 58 and 37. The former continuation and mis-scoped capture failures remain historical evidence, superseded for these named reading cases by indexed wrapped-line paging, resize anchors and gallery-scoped capture checks. No live provider request or phase acceptance occurs.",
+      "executionEvidence": "Prepared registry and native shell/child CLI evidence in docs/assessments/worklist-coverage-module-audit-2026-10-10.md, bounded-deep-worklist-2026-10-15.md and compact-gallery-reading-2026-10-15.md. The later frozen J294/J160/J158/J121 runs have 302 machine passes, zero failures and 31 pending human judgments. J294 has 50 machine passes and 30 authenticated capture pairs; J160 has 58 and 37. The former continuation and mis-scoped capture failures remain historical evidence, superseded for these named reading cases by indexed wrapped-line paging, resize anchors and gallery-scoped capture checks. No live provider request or phase acceptance occurs. October 18 saved-scan-recommendations-2026-10-18.md qualifies saved-only recommendation inputs and shared cancellation. Explicit source comparisons and revalidation share finite diff-count and output-byte limits. Scoped functional and native evidence does not establish full product acceptance.",
       "readinessVerdict": "Scoped bounded deep inspection, saved reading and compact continuation evidence. Named continuation defects are repaired; human usefulness, aggregate SQL workload and full investigation qualification remain open.",
       "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
       "auditDimensions": {
         "purposeAndValue": "Deterministic advisory inspection priority with raw mechanical evidence. No calibrated risk, confidence, scan coverage or vulnerability verdict claim.",
         "requiredInputs": "Active workspace and saved context/history when available. No model or credentials required. Missing history does not establish finding absence.",
         "sharedDispatchExecution": "Seven real prepared-registry contracts plus native J160 shell and child CLI context/worklist execution. Descriptor validation remains shared; no mode-specific parser.",
-        "failureAndRecovery": "Invalid limits, unsupported fan-in, missing/legacy/malformed/future schema, outside symlink and 10001-row history covered. Read-only access preserves database bytes. Explicit synthetic fixture repair precedes fresh rerun; native no-color restart restores rows.",
-        "approvedResources": "No provider requests or graph builds in audited defaults. Baseline and finding-path reads refuse above 10000 materialized rows. SQLite sorting/identity folding, bytes, aggregate latency and cancellation within database work remain unqualified.",
+        "failureAndRecovery": "Invalid limits, unsupported fan-in, missing/legacy/malformed/future schema, outside symlink and 10001-row history covered. Read-only access preserves database bytes. Explicit synthetic fixture repair precedes fresh rerun; native no-color restart restores rows. Explicit comparison propagates inspection failure; reaching a comparison limit leaves baseline rows unchanged. Present damaged findings are not silently treated as absent. Shared SQL callback cleanup, controlled child cancellation, explicit retry and restart are verified in the saved recommendation checkpoint.",
+        "approvedResources": "No provider request in the audited path. Default recommendation/worklist reads run no Git diffs. Explicit coverage comparison declares maxSourceComparisons (default 32) and maxDiffBytes (default 8388608), shared through skip revalidation. SQL reads are cancellable and retain 10000-row materialization limits; total SQL history, lock waits, RAM and wall-clock ceilings remain unqualified.",
         "interfaceParity": "Prepared dispatch, native shell and child headless CLI context/ranking have scoped evidence. Six viewports, compact reading controls and no-color restart were verified in final J294/J160; human judgments and aggregate performance remain open. Advisory tools do not complete Scan.",
         "phaseAgreement": "Auxiliary Map with phase_result false. Ranking cannot complete Map; shared descriptor test and native Map 1/3 after context preparation remain consistent.",
         "artifactConsumption": "Gallery consumes completed target-matching rows/citations and shown/total counts. Saved context content identity supports restart and invalidates changed context; unchanged hydration preserves the captured cap. Full paths and degradation are paged.",
@@ -6257,12 +6262,12 @@
   },
   "internalToolAuditRef": "internal-investigation-tools.json",
   "currentRegistryCensus": {
-    "capturedAt": "2026-10-18T08:50:22.569388+00:00",
-    "publishedCommit": "2f267dfbf613b8c8cc29e518d892588e38127c5b",
-    "sourceState": "Uncommitted main includes scope workload previews and cancellation of historical coverage inspection. Broader qualification remains open.",
-    "binarySha256": "41b38ebadf3400895005269d1727bae012e03471fea27fec42bed09dfa70c098",
+    "capturedAt": "2026-10-18T10:33:09.976178+00:00",
+    "publishedCommit": "41998697dbc114bab95763ebdfb2edaead0026ee",
+    "sourceState": "Prepared main checkpoint adds saved scan advice, bounded source comparisons, compact completion receipts and history-free agentic discovery. Broader qualification remains open.",
+    "binarySha256": "5ef378825a34d277450a98feaa4158500e45f801a7187ee30120f951bfe22f6c",
     "catalogCommand": "kuzushi tools --all --json",
-    "catalogSha256": "e21637b5277d8386bc885ecaa0c4241c214e7540115131d973bd5e654e5ca634",
+    "catalogSha256": "6973268f257cb330f14a4103984ff21813653359903b88682f71c1bded28d930",
     "operatorVisibleTools": 118,
     "defaultCatalogTools": 81,
     "effectiveMaturityCounts": {
@@ -6311,181 +6316,7 @@
     ],
     "descriptorDifferences": [
       {
-        "tool": "campaign:context-study",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "campaign:coverage",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "campaign:plan",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "cargo-audit:scan",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "coverage:recommend",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "engagement:aim",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "findings:chains",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "findings:ground",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "findings:list",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "findings:relationship-batch",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "iac-scan:scan",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "license-scan:scan",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "ndiff:extract-fix-pattern",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "ndiff:hunt-variants",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "recon:import",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "sbom-scan:scan",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "secret-scan:scan",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "taint-iris-next:dataflow-plan",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "taint-iris-next:source-sink-trace",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "threat-intel:apply",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "threat-intel:discover",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "threat-intel:harvest",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "threat-intel:list",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "threat-intel:research",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "threat-model:revise",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "findings:review-source",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "threat-model:ask",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "planner:propose",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "taint-iris-next:catalog-read",
-        "fields": [
-          "purpose"
-        ]
-      },
-      {
-        "tool": "taint-iris-next:catalog-accept",
+        "tool": "agentic-sast:scan",
         "fields": [
           "purpose"
         ]
@@ -6503,14 +6334,14 @@
     "count": 113
   },
   "currentOperatorToolCount": 118,
-  "catalogSource": "/private/tmp/kuzushi-coverage-cancellation-20261018/catalog.json",
+  "catalogSource": "/tmp/kuzushi-context-matrix-acceptance-20261018/catalog.json",
   "currentPolicyInventory": {
     "registeredToolCount": 189,
     "fingerprint": "175b006df1cedbbd4ef1ac43d803f12cc32c36ab45f98e3e681243648c4bba3d",
     "source": "modules::registry::tests::builtin_dispatch_policy_inventory_is_reviewed_as_one_contract",
     "meaning": "The reviewed dispatch-policy fingerprint remains unchanged. UAF gains auxiliary Labs metadata, honest partial outcomes and descriptor-backed limits without changing runtime, approval, workspace, finding-store or phase assignment."
   },
-  "catalogFactsRefreshed": "2026-10-18: 118 visible tools, 81 Core defaults, 110 in-scope visible tools and unchanged 189 registered policy tuples. Visible descriptor facts are refreshed; existing per-tool audit claims remain scoped.",
+  "catalogFactsRefreshed": "2026-10-18: 118 visible tools, 81 Core defaults, 110 in-scope visible tools and unchanged 189 registered policy tuples. Agentic discovery description now permits rediscoveries; prior coverage option changes retain their named evidence. No maturity change.",
   "functionalAuditCheckpoint": {
     "scope": "Deterministic source context and Map consumers; no exploit development, reproducer work, patching, model calls or source execution.",
     "testFile": "crates/kuzushi-core/tests/map_context_contract.rs",
@@ -10869,5 +10700,42 @@
       }
     ],
     "broaderQualificationComplete": false
+  },
+  "savedScanAdviceCheckpoint": {
+    "assessment": "docs/assessments/saved-scan-recommendations-2026-10-18.md",
+    "focusedRustPasses": 179,
+    "nativeMachinePasses": 12,
+    "nativeMachineFailures": 0,
+    "nativeCapturePairs": 17,
+    "humanJudgmentsPending": 4,
+    "inspectedReplays": 13,
+    "newLiveRequests": 0,
+    "cumulativeLiveRequests": 14,
+    "broaderPlanComplete": false,
+    "descriptorChanges": [
+      {
+        "tool": "coverage:recommend",
+        "fields": [
+          "purpose",
+          "declaredOptions"
+        ]
+      },
+      {
+        "tool": "coverage:sweep",
+        "fields": [
+          "declaredOptions"
+        ]
+      }
+    ]
+  },
+  "freshDiscoveryCheckpoint": {
+    "assessment": "docs/assessments/context-matrix-acceptance-2026-10-18.md",
+    "evidenceRoot": "/tmp/kuzushi-context-matrix-acceptance-20261018",
+    "nativeSha256": "5ef378825a34d277450a98feaa4158500e45f801a7187ee30120f951bfe22f6c",
+    "functionalEvidence": "Agentic discovery removes findings MCP attachments and prior-run suppression guidance while retaining selected source/context tools. Existing-ledger regression passes. Strict intercepted J109 records nine fresh requests, equal prompt hashes within each context, six observations under one finding, unchanged active context, finite approved jobs and accounting recovery. No live request or broad module qualification.",
+    "machinePass": 48,
+    "machineFail": 0,
+    "pendingHumanJudgments": 8,
+    "remainingLimits": "No hard isolation claim for every filesystem/custom runtime; no model precision or complete source coverage claim. Other engines still need separate evidence."
   }
 }

@@ -47,16 +47,10 @@ os.execv("/usr/bin/git", ["/usr/bin/git",*sys.argv[1:]])
 
 def arm(evidence):
     seen = evidence / "git-seen.jsonl"
-    deadline = time.monotonic() + 8
-    while time.monotonic() < deadline:
-        if seen.exists():
-            rows = [json.loads(line) for line in seen.read_text().splitlines()]
-            if rows and all(not active(row["pid"]) for row in rows):
-                save(evidence, "warmup-git", rows)
-                (evidence / "hold-diff").touch()
-                return
-        time.sleep(0.02)
-    raise AssertionError("Initial historical recommendation read did not settle before arming")
+    rows = [json.loads(line) for line in seen.read_text().splitlines()] if seen.exists() else []
+    assert not rows, "Saved recommendation hydration or reading unexpectedly compared Git history"
+    save(evidence, "warmup-git", rows)
+    (evidence / "hold-diff").touch()
 
 
 def active(pid):
@@ -105,6 +99,15 @@ def completed(root, evidence):
         "sourceExecuted":False, "sourceUnchanged":True})
 
 
+def limited(root, evidence):
+    assert records(root) == unchanged(root, evidence)["rows"]
+    rows = [json.loads(line) for line in (evidence / "git-seen.jsonl").read_text().splitlines()]
+    assert len(rows) == 2, "Expected one canceled comparison and one bounded attempt, without revalidation"
+    assert all(not active(row["pid"]) for row in rows)
+    save(evidence, "limit-proof", {"comparisonAttemptsAfterCancellation":1,
+        "revalidationDidNotResetAllowance":True, "historicalRowsUnchanged":True})
+
+
 if __name__ == "__main__":
     root, evidence, home = [Path(value).resolve() for value in sys.argv[1:4]]
     stage = sys.argv[4]
@@ -113,6 +116,7 @@ if __name__ == "__main__":
     elif stage == "blocked": blocked(evidence)
     elif stage == "request": save(evidence, "cancel-request", {"requestedNs":time.time_ns()})
     elif stage == "canceled": canceled(root, evidence)
+    elif stage == "limited": limited(root, evidence)
     else:
         assert stage == "completed"
         completed(root, evidence)

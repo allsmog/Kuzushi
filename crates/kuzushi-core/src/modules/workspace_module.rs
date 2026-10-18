@@ -668,7 +668,7 @@ pub(crate) fn agentic_sast_module() -> BuiltinModule {
 fn agentic_sast_scan_tool() -> ToolDescriptor {
     tool_with_options(
         "agentic-sast:scan",
-        "Run agentic SAST detectors for the current target.",
+        "Discover source-grounded observations independently for the current target. Prior findings do not suppress rediscoveries; consolidation happens in the findings ledger.",
         agentic_sast_scan_options(),
     )
     .with_continuation(ContinuationSupport::Staged)

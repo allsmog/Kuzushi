@@ -3701,6 +3701,16 @@ canonical data stays visible. Existing `recommendations.json` snapshots remain
 readable. Navigate-mode `r` starts explicit deterministic refresh without model
 ranking or discovery. Narrow terminals use wrapped cards and normal paging.
 
+## Fresh source discovery
+
+Agentic discovery retains supported rediscoveries as new observations. The
+`agentic-sast:scan` policy omits the prior-findings MCP attachment and its prompt
+does not ask the model to filter out findings from other runs. Consolidation
+belongs to the findings ledger; recurrence does not set confidence or a verdict.
+Reviewed lesson context must be selected explicitly. Bounded review of the same
+run's supplied findings remains available. Other engines and arbitrary runtime
+customizations need their own evidence for this behavior.
+
 ## Historical Git baseline inspection
 
 `coverage:baselines` lists recorded scope, phase, full commit SHA, dirty state and
@@ -3729,13 +3739,24 @@ source/history, writes within a ledger transaction and rechecks source before
 commit. A rejected write rolls back its skip rows. Git and SQLite are separate
 systems, so this does not establish an atomic source snapshot across concurrent
 external edits. Each Git subprocess has a ten-second timeout, a two-MiB stdout
-limit and a 64-KiB stderr limit. These limits do not bound the entire ledger or
-sweep duration. Diff/status use NUL separators and fail on invalid UTF-8 rather
+limit and a 64-KiB stderr limit. One tool operation also defaults to 32 diff
+requests and 8 MiB aggregate diff stdout, including skip revalidation. Declared
+`maxSourceComparisons` (1 through 512) and `maxDiffBytes` (1 through 67108864)
+can explicitly revise those limits. Exhaustion fails before new baseline writes;
+it never silently renews the allowance. Cached diff paths retain compact NUL
+text instead of a separately allocated string per path. These limits do not
+establish a total RAM or wall-clock ceiling. Diff/status use NUL separators and fail on invalid UTF-8 rather
 than silently misclassifying a path. External diff, text conversion and fsmonitor
 are disabled for these inspections.
 
-`coverage:recommend` retains deterministic heuristic ranking from saved context,
-finding paths and historical baselines. `limit` now accepts 1 through 500 and
+`coverage:recommend` ranks saved context, finding paths and historical baselines
+without inspecting current source by default. Automatic Map/Scan advice and
+`worklist:rank` use this saved-only path too. `compareSource=true` explicitly
+requests a bounded comparison; inspection failures propagate instead of becoming
+empty staleness evidence. `sourceComparisonPerformed` distinguishes that action,
+and `sourceComparison` records the limits, attempts and diff stdout bytes.
+Complete source freshness remains unverified by this legacy metadata alone.
+`limit` accepts 1 through 500 and
 returns both the shown recommendations and `recommendationTotal`. Results name
 the canonical `target` and set `sourceFreshnessVerified: false`. Missing baseline
 records do not establish that source was never scanned. Ranking is advisory and

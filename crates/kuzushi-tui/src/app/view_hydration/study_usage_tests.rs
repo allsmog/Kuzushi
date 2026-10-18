@@ -1,6 +1,7 @@
 use super::*;
 use crate::app::BatchScanConfig;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 

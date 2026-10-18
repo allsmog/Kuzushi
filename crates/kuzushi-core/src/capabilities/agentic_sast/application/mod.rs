@@ -2,6 +2,7 @@ use super::*;
 
 mod build_prompt;
 mod collect_repo_inventory;
+mod discovery_policy;
 mod normalize_findings;
 mod query_findings;
 mod run_agentic_sast_report;

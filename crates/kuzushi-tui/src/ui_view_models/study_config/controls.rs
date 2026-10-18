@@ -11,14 +11,14 @@ pub(crate) fn study_read_hint(
         let controls = if config.detail_reader_scroll.is_some() {
             "z form · ↑↓/PgUp/Dn"
         } else {
-            "z read · PgUp/Dn"
+            "Home/End · z read"
         };
         return format!("Tab {next} · {controls}");
     }
     let reading = if config.detail_reader_scroll.is_some() {
         "z form · ↑↓ scroll"
     } else {
-        "↑↓ choose · z read"
+        "↑↓/Home/End · z read"
     };
     format!("{reading} · PgUp/Dn {}/{}", offset + 1, maximum + 1)
 }
@@ -59,7 +59,8 @@ mod tests {
                 config.detail_reader_scroll = expanded.then_some(0);
                 let hint = study_read_hint(&config, false, 0, 200);
                 assert!(hint.chars().count() <= 36, "{hint}");
-                assert!(hint.contains("Tab") && hint.contains("PgUp/Dn"));
+                assert!(hint.contains("Tab"));
+                assert!(hint.contains(if expanded { "PgUp/Dn" } else { "Home/End" }));
                 assert!(hint.contains(if expanded { "z form" } else { "z read" }));
             }
             config.source_view.selected = config.source_view.selected.next(false);

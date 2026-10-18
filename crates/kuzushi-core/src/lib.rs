@@ -39,6 +39,7 @@ mod panic_surface_lint;
 pub(crate) mod process_lookup;
 mod runtime_diagnostics;
 pub(crate) mod sqlite_connection;
+pub(crate) mod sqlite_read_control;
 pub(crate) mod structured_output;
 #[cfg(test)]
 mod terminal_output_lint;

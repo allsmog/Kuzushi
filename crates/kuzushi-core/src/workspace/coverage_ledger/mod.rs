@@ -6,6 +6,7 @@
 mod cancellation;
 mod guards;
 mod schema;
+mod source_budget;
 mod store;
 mod summary_intake;
 mod sweep;
@@ -13,13 +14,14 @@ mod sweep;
 mod tests;
 
 pub use guards::{guard_conflict, GuardRow};
+pub(crate) use source_budget::{SourceComparisonBudget, SourceComparisonLimits};
 pub use store::{BaselineRow, CoverageLedger};
 pub use summary_intake::record_baseline_from_summary;
 pub use sweep::{
     sweep_target, write_sweep_skips, ScopeSweepEntry, SourceCheckIssue, SweepReport, SweepVerdict,
     SWEEP_RUN_ID,
 };
-pub(crate) use sweep::{sweep_target_with_cancellation, write_sweep_skips_with_cancellation};
+pub(crate) use sweep::{sweep_target_with_budget, write_sweep_skips_with_budget};
 
 use std::path::{Path, PathBuf};
 

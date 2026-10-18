@@ -5,6 +5,7 @@ use crate::{ToolExecutionContext, V2Config, WorkspaceTarget};
 use serde_json::{json, Value};
 use std::path::Path;
 use std::process::Command;
+mod source_comparison;
 
 fn context<'a>(config: &'a V2Config, workspace: &'a WorkspaceTarget) -> ToolExecutionContext<'a> {
     ToolExecutionContext {

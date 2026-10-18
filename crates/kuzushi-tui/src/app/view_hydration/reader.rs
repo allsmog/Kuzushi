@@ -4,6 +4,8 @@ use kuzushi_core::{LatestRunPointerIssue, LatestRunPointerState};
 
 mod completion_io;
 mod groups;
+#[cfg(test)]
+mod recommendation_tests;
 mod review_source;
 mod study_usage;
 mod workspace_io;
@@ -40,6 +42,11 @@ fn read_regular_cancellable(
     key: &ViewHydrationKey,
     cancellation: &ViewHydrationCancellation,
 ) -> Option<ViewHydrationValue> {
+    if key == &ViewHydrationKey::ScanRecommendations {
+        let value = saved_scan_recommendations(target, Some(&cancellation.scan));
+        return (!cancellation.is_canceled())
+            .then_some(ViewHydrationValue::ScanRecommendations(value));
+    }
     if key == &ViewHydrationKey::TargetProfile {
         return TargetProfile::detect_cancellable(target, || cancellation.is_canceled())
             .map(ViewHydrationValue::TargetProfile);
@@ -463,17 +470,18 @@ fn map_evidence_is_adequate(target: &Path) -> bool {
     kuzushi_core::workflow_attempts::assess_map_evidence(&facts).is_adequate()
 }
 
-/// Runs the coverage sweep (git diffs + repo walk) off-frame; the findings
-/// store is advisory, so a target without one still yields recommendations.
+/// Load saved advice off-frame. Current source comparison is a separate action.
 fn scan_recommendations(target: &Path) -> ScanRecommendationsState {
-    let db_path = kuzushi_core::workspace::workspace_findings_db_path(target);
-    let store = db_path
-        .exists()
-        .then(|| kuzushi_core::FindingStore::open_read_only(&db_path).ok())
-        .flatten();
-    match kuzushi_core::capabilities::scan_recommender::recommend_scans_for_target(
+    saved_scan_recommendations(target, None)
+}
+
+fn saved_scan_recommendations(
+    target: &Path,
+    cancellation: Option<&kuzushi_core::ScanCancellation>,
+) -> ScanRecommendationsState {
+    match kuzushi_core::capabilities::scan_recommender::load_saved_scan_recommendations(
         target,
-        store.as_ref(),
+        cancellation,
     ) {
         Ok(rows) => ScanRecommendationsState::Ready(rows),
         Err(error) => ScanRecommendationsState::Failed(error.to_string()),

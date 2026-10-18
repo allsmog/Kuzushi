@@ -73,13 +73,17 @@ pub(in crate::modules) fn run_worklist_rank(
                 emit_worklist_progress(ctx, entries);
             }
         },
-        &|| ctx.is_cancelled(),
+        ctx.cancellation,
     )?;
     let worklist = report.worklist;
-    let output = worklist_output_line(&worklist);
+    let output = format!(
+        "{} · saved evidence only; current source not checked",
+        worklist_output_line(&worklist)
+    );
     let mut data = serde_json::to_value(&worklist)?;
     data["target"] = json!(target.root());
     data["sourceFreshnessVerified"] = json!(false);
+    data["sourceComparisonPerformed"] = json!(false);
     data["systemsInspection"] = json!(report.systems_inspection);
     Ok(worklist_result(output, data, &worklist.degraded))
 }

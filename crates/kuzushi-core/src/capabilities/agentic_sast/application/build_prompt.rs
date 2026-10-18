@@ -37,6 +37,7 @@ fn prompt_header(target: &Path, options: &AgenticSastInput) -> Vec<String> {
         ),
         String::new(),
         "Evidence requirements: name the attacker-controlled source, sink, missing guard, and exact file:line. Omit uncertain or hypothetical findings.".to_string(),
+        "Independent discovery: do not consult other runs' findings or scan outputs. Report observations supported by this pass even when they may match earlier observations. The findings ledger consolidates rediscoveries. Explicitly supplied reviewed lessons and this run's own review context remain available.".to_string(),
     ]
 }
 
@@ -143,11 +144,6 @@ fn mcp_guidance_line(attached: &[String]) -> Option<String> {
             " Query threat_model:threats / threat_model:elements for full threat detail beyond the digest.",
         );
     }
-    if attached.iter().any(|name| name == "findings") {
-        line.push_str(
-            " Query findings:query for prior findings on a file BEFORE reporting there; report new evidence, not duplicates of known findings.",
-        );
-    }
     Some(line)
 }
 
@@ -201,7 +197,8 @@ mod enrichment_tests {
         assert!(prompt.contains("spec reaches execve"));
         assert!(prompt.contains("Attached MCP toolsets: treesitter, threat-model, findings."));
         assert!(prompt.contains("threat_model:threats"));
-        assert!(prompt.contains("findings:query"));
+        assert!(!prompt.contains("findings:query"));
+        assert!(prompt.contains("Report observations supported by this pass"));
     }
 
     #[test]

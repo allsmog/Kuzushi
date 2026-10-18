@@ -37,7 +37,15 @@ require-shell: python3 -B @REPO/scripts/devex/fixtures/context_matrix.py @TMP_TA
 ask: Does preparation freeze nine jobs and three exact contexts without model requests, global-context replacement or automatic approval?
 keys: Escape
 require-live-snap: 20 PLAN A STUDY | allowance-origin
-keys: Down Enter
+resize: 40x12
+keys: Home
+require-live-snap: 20 Discovery passes | first-input-40x12
+keys: End
+require-live-snap: 20 Next action | last-input-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_matrix.py @TMP_TARGET @ART draft
+keys: Home
+resize: 120x36
+keys: Down Down Down Down Down Enter
 live-snap: total-call-editor
 keys: 1 1 Enter
 keys: Down Enter
@@ -61,7 +69,7 @@ keys: r
 require-live-snap: 25 9 completed | completed
 keys: a
 require-live-snap: 25 APPROVED STUDY | recovered-plan
-keys: Down Down Down Down Down Down Down Down Down Enter
+keys: Home Down Down Down Down Down Down Down Down Down Down Enter
 require-live-snap: 20 CONTEXT CASES | saved-cases
 keys: v
 require-live-snap: 25 observed 3 / 3 | alpha-results
@@ -124,7 +132,7 @@ require-shell: python3 -B @REPO/scripts/devex/fixtures/context_matrix.py @TMP_TA
 keys: r
 require-live-snap: 25 Matrix allowance refreshed | accounting-recovered
 expect: 9 committed / 11 total
-keys: Down Down Down Down Down Down Down Down Down Enter v
+keys: Home Down Down Down Down Down Down Down Down Down Down Enter v
 require-live-snap: 25 observed 3 / 3 | recovered-alpha-results
 keys: Down
 require-live-snap: 25 observed 2 / 3 | recovered-case-results

@@ -10,7 +10,7 @@ fn options(deep: bool) -> WorklistOptions {
     }
 }
 fn observed(root: &Path) -> super::gather::InspectedWorklist {
-    rank_worklist_observed(root, &options(true), None, &mut |_| {}, &|| false).unwrap()
+    rank_worklist_observed(root, &options(true), None, &mut |_| {}, None).unwrap()
 }
 
 #[test]
@@ -46,7 +46,7 @@ fn default_ranking_does_not_walk_or_supply_systems_evidence() {
     )
     .unwrap();
     let report =
-        rank_worklist_observed(root.path(), &options(false), None, &mut |_| {}, &|| false).unwrap();
+        rank_worklist_observed(root.path(), &options(false), None, &mut |_| {}, None).unwrap();
     assert!(report.systems_inspection.is_none());
     assert_eq!(
         report.worklist.contributors[&Contributor::SystemsHunt],
@@ -104,16 +104,16 @@ fn deep_ranking_excludes_tests_symlink_cycles_and_outside_source() {
 fn deep_cancellation_during_inventory_stops_before_ranking() {
     let root = tempfile::tempdir().unwrap();
     std::fs::write(root.path().join("owned.c"), "// Owned parser\n").unwrap();
-    let canceled = std::cell::Cell::new(false);
+    let canceled = crate::ScanCancellation::default();
     let result = rank_worklist_observed(
         root.path(),
         &options(true),
         None,
-        &mut |_| canceled.set(true),
-        &|| canceled.get(),
+        &mut |_| canceled.cancel(),
+        Some(&canceled),
     );
     assert!(result.is_err());
-    assert!(canceled.get());
+    assert!(canceled.is_cancelled());
 }
 
 #[test]

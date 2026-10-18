@@ -1,5 +1,43 @@
 # Releasing Kuzushi
 
+## Discovery retains rediscovered observations
+
+`agentic-sast:scan` no longer attaches the prior-findings MCP server or tells
+discovery to suppress known findings. A pass can emit a supported rediscovery;
+the existing ledger retains the raw observation and consolidates its identity.
+Human decisions remain separate. Explicitly supplied reviewed lessons and the
+same run's bounded review context remain available.
+
+The tool description changes with this behavior, so a recorded descriptor-set
+condition may differ from an older study. Prepare and explicitly approve a new
+fixed plan when the existing plan reports that mismatch. Historical plans,
+spending and observations are retained. Tool names, options and artifact
+formats are unchanged. Other modules can still use findings tools for their
+declared review or history work. This does not change the selected runtime,
+provider or model.
+
+## Explicit historical source comparison
+
+Automatic scan recommendations, `worklist:rank` and the Rust library helper
+`recommend_scans_for_target` now use saved evidence without running Git diffs.
+They do not establish current source freshness. Call `coverage:recommend` with
+`compareSource=true` for an explicit comparison. Unlike earlier advisory reads,
+an explicitly requested comparison propagates inspection failure.
+
+`coverage:sweep` and explicit recommendation comparisons default to at most 32
+Git diff requests and 8 MiB aggregate diff stdout. Declared `maxSourceComparisons`
+and `maxDiffBytes` options permit reviewed changes within their validated ranges.
+Initial sweep and skip revalidation share one allowance in tool execution.
+Exhaustion stops before new baseline writes; there is no automatic retry or cap
+increase. Git metadata checks keep their existing per-command limits. The byte
+allowance is not a total RAM, elapsed-time or dollar ceiling.
+
+Existing public sweep entry points retain their signatures with finite default
+limits. Recommendation rows and historical artifact formats are unchanged.
+Tool results add `sourceComparisonPerformed` where appropriate and a
+`sourceComparison` receipt with limits, comparison attempts and diff bytes.
+Reprepare cached dispatch input to see the new options.
+
 ## Scope inventory completeness clarification
 
 `pack:scopes` derives `coverage.enumerationComplete` from the inventory's recorded

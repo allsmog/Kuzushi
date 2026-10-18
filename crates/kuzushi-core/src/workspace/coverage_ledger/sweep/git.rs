@@ -1,4 +1,5 @@
 //! Bounded, source-only Git inspection. Failures cannot become a clean-source claim.
+use super::SourceComparisonBudget;
 use crate::run_artifacts::RunTargetGitMetadata;
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -55,11 +56,13 @@ pub(super) fn whole_repo_diff(
     from: &str,
     to: &str,
     cancellation: Option<&crate::ScanCancellation>,
-) -> Result<Option<Vec<String>>> {
+    budget: &mut SourceComparisonBudget,
+) -> Result<Option<String>> {
     if !valid_revision(from) {
         return Ok(None);
     }
-    let output = output(
+    let output_limit = budget.reserve_diff()?.min(MAX_GIT_OUTPUT_BYTES);
+    let output = limited_output(
         target,
         &[
             "diff",
@@ -71,11 +74,15 @@ pub(super) fn whole_repo_diff(
             "--",
         ],
         cancellation,
+        output_limit,
     )?;
+    budget.record_bytes(output.stdout.len())?;
     if !output.status.success() {
         return Ok(None);
     }
-    Ok(Some(paths(&output.stdout)?))
+    Ok(Some(String::from_utf8(output.stdout).context(
+        "Git paths are not valid UTF-8; source comparison is unavailable",
+    )?))
 }
 
 fn valid_revision(value: &str) -> bool {
@@ -87,6 +94,15 @@ fn output(
     args: &[&str],
     cancellation: Option<&crate::ScanCancellation>,
 ) -> Result<Output> {
+    limited_output(target, args, cancellation, MAX_GIT_OUTPUT_BYTES)
+}
+
+fn limited_output(
+    target: &Path,
+    args: &[&str],
+    cancellation: Option<&crate::ScanCancellation>,
+    max_stdout_bytes: usize,
+) -> Result<Output> {
     let mut command = Command::new("git");
     command
         .env("GIT_OPTIONAL_LOCKS", "0")
@@ -97,7 +113,7 @@ fn output(
     crate::bounded_subprocess::output_with_limits_and_cancellation(
         &mut command,
         "coverage Git inspection",
-        MAX_GIT_OUTPUT_BYTES,
+        max_stdout_bytes,
         64 * 1024,
         cancellation,
         GIT_TIMEOUT,

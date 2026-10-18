@@ -1,5 +1,6 @@
 // Labeled transport fixture. Every fetch is intercepted; no network fallback.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,6 +18,20 @@ globalThis.fetch = async (url, init) => {
   assert.deepEqual(body.reasoning, { effort: "medium" });
   assert.equal(body.previous_response_id, undefined, "Each pass starts a fresh session");
   const prompt = JSON.stringify(body.input);
+  assert.ok(
+    !prompt.includes("Query findings:query for prior findings"),
+    "Independent discovery must not be instructed to suppress known findings",
+  );
+  assert.ok(prompt.includes("Independent discovery:"));
+  const toolNames = (body.tools ?? []).map((tool) => tool.name ?? tool.function?.name ?? "");
+  assert.ok(
+    toolNames.every((name) => !/^findings(?:[:_-]|$)/i.test(name)),
+    "Discovery must not expose the prior-findings toolset",
+  );
+  assert.ok(
+    !prompt.includes("Labeled synthetic matrix observation"),
+    "Fresh discovery must not be seeded with an earlier pass's observation",
+  );
   const context = count < 3 ? "Alpha" : count < 6 ? "Beta" : "Gamma";
   assert.ok(prompt.includes(context), `The ${context} context must be supplied to the scanner`);
   if (count < 6) assert.ok(!prompt.includes("Gamma"), "Never substitute globally active context");
@@ -28,6 +43,10 @@ globalThis.fetch = async (url, init) => {
       model: body.model,
       reasoning: body.reasoning,
       freshSession: true,
+      priorObservationTitleAbsent: true,
+      priorHistoryGuidanceAbsent: true,
+      toolNames,
+      promptSha256: createHash("sha256").update(prompt).digest("hex"),
       liveProviderRequests: 0,
     })}\n`,
   );

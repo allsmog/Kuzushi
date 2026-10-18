@@ -42,6 +42,80 @@ fn a_single_auxiliary_receipt_leads_with_the_actual_tool_result() {
 }
 
 #[test]
+fn long_output_is_recorded_once_and_the_receipt_keeps_its_reader_route() {
+    let mut app = app_with_terminal_run("completed");
+    app.set_input("retained operator draft");
+    assert!(app.finalize_run_focus_if_idle());
+    let mut receipt = app.activity().unwrap().run_focus_receipt.clone().unwrap();
+    let output = "Owned source evidence and a full captured revision. ".repeat(12);
+    let result = result_summary("coverage:sweep", "completed", &output);
+    receipt.result_summaries.push(result.clone());
+    app.log("result", &output);
+    let view = app.shell_view();
+    app.publish_run_focus_receipt(Some(receipt), None);
+    let notice = app.advisory().notice.as_ref().unwrap();
+    assert!(notice.message.contains("Sweep coverage baselines"));
+    assert!(notice.message.contains("run receipt · completed"));
+    assert!(notice.message.contains("full result: logs"));
+    assert!(!notice.message.contains("Owned source evidence"));
+    assert_eq!(
+        app.log_lines()
+            .iter()
+            .filter(|line| line.body.contains(&output))
+            .count(),
+        1
+    );
+    assert_eq!(
+        app.activity()
+            .unwrap()
+            .run_focus_receipt
+            .as_ref()
+            .unwrap()
+            .result_summaries,
+        vec![result]
+    );
+    assert_eq!(app.input(), "retained operator draft");
+    assert_eq!(app.shell_view(), view);
+}
+
+#[test]
+fn multiline_results_keep_their_qualifications_in_the_full_reader() {
+    let mut app = app_with_terminal_run("partial");
+    assert!(app.finalize_run_focus_if_idle());
+    let mut receipt = app.activity().unwrap().run_focus_receipt.clone().unwrap();
+    let mut result = result_summary(
+        "coverage:sweep",
+        "partial",
+        "Tracked source unchanged. Missing scopes remain unverified.",
+    );
+    result.output_line_count = 2;
+    receipt.result_summaries.push(result);
+    let notice = run_receipt_notice(&receipt, None);
+    assert!(notice.contains("run receipt · partial"));
+    assert!(notice.contains("full result: logs"));
+    assert!(!notice.contains("Tracked source unchanged"));
+}
+
+#[test]
+fn concise_unicode_results_survive_and_long_or_empty_summaries_use_the_reader() {
+    let mut app = app_with_terminal_run("completed");
+    assert!(app.finalize_run_focus_if_idle());
+    let mut receipt = app.activity().unwrap().run_focus_receipt.clone().unwrap();
+    for (summary, compact) in [
+        ("日本語の結果", true),
+        ("", false),
+        ("first\nqualified", false),
+    ] {
+        receipt.result_summaries = vec![result_summary("coverage:sweep", "completed", summary)];
+        let notice = run_receipt_notice(&receipt, None);
+        assert_eq!(notice.contains("full result: logs"), !compact);
+        if compact {
+            assert!(notice.contains(summary));
+        }
+    }
+}
+
+#[test]
 fn compound_or_mismatched_results_keep_the_overall_outcome_primary() {
     let mut app = app_with_terminal_run("failed");
     assert!(app.finalize_run_focus_if_idle());

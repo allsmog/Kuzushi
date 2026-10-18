@@ -357,6 +357,13 @@ truth.
   historical source inspection. A stopped sweep interrupts Git/SQL work and
   rolls back uncommitted skip rows. An explicit retry is separate work. Even a
   completed skip does not establish complete coverage or a fixed finding.
+- Automatic scan advice, `worklist:rank` and `coverage:recommend` read saved
+  evidence without comparing Git history. Current source is not checked.
+  `coverage:recommend` accepts explicit `compareSource=true`. Comparisons and
+  `coverage:sweep` default to `maxSourceComparisons=32` and `maxDiffBytes=8388608`,
+  including skip revalidation in the same operation. A limit stops before new
+  baseline writes and requires an explicit new action to change the allowance.
+  These limits count diff requests and stdout bytes, not dollars or total RAM.
 - In the study form, Enter on Source and context opens the immutable revision
   browser. Arrows choose a revision; Enter reads its exact document; Tab switches
   between summary and complete document; Page Up/Down scroll the detail. `a`

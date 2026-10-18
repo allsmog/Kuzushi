@@ -5,7 +5,6 @@ use kuzushi_core::{
 };
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 #[cfg(test)]
@@ -177,16 +176,16 @@ impl FileCompletionIndex {
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ViewHydrationCancellation {
-    canceled: Arc<AtomicBool>,
+    scan: kuzushi_core::ScanCancellation,
 }
 
 impl ViewHydrationCancellation {
     pub(crate) fn cancel(&self) {
-        self.canceled.store(true, Ordering::Release);
+        self.scan.cancel();
     }
 
     pub(crate) fn is_canceled(&self) -> bool {
-        self.canceled.load(Ordering::Acquire)
+        self.scan.is_cancelled()
     }
 }
 

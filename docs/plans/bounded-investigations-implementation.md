@@ -1,5 +1,36 @@
 # Bounded investigations implementation
 
+The [context matrix checkpoint](../assessments/context-matrix-acceptance-2026-10-18.md)
+removes prior-finding suppression from agentic discovery and adds Home/End field
+navigation without changing editor ownership. All 356 distinct focused Rust
+checks, the workspace build, Core/TUI Clippy and risk gate pass. The registry
+policy contract also passes. Final J109 records 48 machine passes, zero failures,
+49 capture pairs and eight pending human judgments; sixteen terminal-cell
+replays were inspected. Nine intercepted requests preserve six observations,
+one finding and the same allowance after restart. No live request is added.
+Four delivery items remain locally verified and five remain open. This
+checkpoint is prepared on main from `41998697db`; older draft labels below
+are historical.
+
+The [compact completion receipt checkpoint](../assessments/compact-run-receipts-2026-10-18.md)
+keeps complete tool output once in the transcript and uses a short final receipt
+for long reports. All 136 focused checks, the workspace build, TUI Clippy and
+risk gate pass. Final J334 records thirteen machine passes, zero failures,
+eighteen capture pairs and four pending human judgments; fourteen terminal-cell
+replays were inspected. Full result and source identity survive, with no new
+model request. Four delivery items remain locally verified and five remain open.
+This is a draft on main after `41998697db`.
+
+The [saved scan advice checkpoint](../assessments/saved-scan-recommendations-2026-10-18.md)
+removes automatic historical Git comparisons and gives explicit comparisons
+shared attempt/output limits through skip revalidation. All 179 focused checks,
+the build, Clippy and risk gate pass. Frozen J334 records twelve machine passes,
+zero failures, seventeen capture pairs and four pending human judgments.
+Thirteen terminal-cell replays were inspected. Source freshness and finding
+fixes remain unverified by metadata alone. No live request is added; four
+delivery items are locally verified and five remain open. This is a draft on
+main after `41998697db`.
+
 The [responsive export checkpoint](../assessments/report-export-responsiveness-2026-10-18.md)
 moves Report writing off the terminal loop, preserves submitted-selection receipts
 through cache refreshes and rejects mixed-revision export preparation. Compact

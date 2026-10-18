@@ -6,10 +6,12 @@
 mod domain;
 mod fold;
 mod gather;
+mod saved;
 #[cfg(test)]
 mod tests;
 
 pub use domain::{ReasonTag, ScanRecommendation};
 pub use fold::{recommend, RecommenderInputs};
-pub use gather::recommend_scans_for_target;
 pub(crate) use gather::scope_paths;
+pub use gather::{recommend_scans_for_target, recommend_scans_from_history};
+pub use saved::load_saved_scan_recommendations;

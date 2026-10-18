@@ -1,3 +1,4 @@
+use super::discovery_policy::fresh_discovery_policy;
 use super::*;
 
 const AGENTIC_SAST_HEADER: &str =
@@ -408,10 +409,10 @@ impl AgenticSastRun {
         let whitebox_static = whitebox_static_profile_requested(input)?;
         let system_prompt = agentic_sast_prompt_from_input(input, whitebox_static, &target)?;
         let scope = selected_agentic_scope(input, ctx, &target)?;
-        let tool_policy = match &scope {
+        let tool_policy = fresh_discovery_policy(match &scope {
             Some(scope) => scoped_agent_policy(&target, scope)?,
             None => agent_tool_policy_for_input_and_target(input, &target)?,
-        };
+        });
         let prepared = prepare_agentic_inventory(&target, scope.as_ref(), &options, ctx)?;
         ctx.ensure_active()?;
         let enrichment = PromptEnrichment::for_run(&target, &tool_policy, input)?;
