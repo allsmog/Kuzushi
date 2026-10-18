@@ -64,6 +64,13 @@ const AUDITED_PANIC_SITES: &[(&str, &str)] = &[
         "ui_view_models/run_timeline.rs",
         "run metadata artifact must be in shared canonical spec",
     ),
+    // Serializing a `&str` emits a JSON string. The writer reports an error
+    // only for a non-string map key, a non-finite float, or a `Serialize`
+    // that fails, and a path supplies none of them.
+    (
+        "ui_view_models/scope_review/paths.rs",
+        "a path string is serializable",
+    ),
 ];
 
 const TEST_ATTRIBUTE: &str = "#[cfg(test)]";
