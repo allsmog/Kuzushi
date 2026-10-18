@@ -11,6 +11,7 @@ mod findings;
 mod literal_paths;
 mod source;
 mod suggestion;
+mod tree;
 mod workload;
 
 #[test]

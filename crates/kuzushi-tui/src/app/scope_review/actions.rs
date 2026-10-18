@@ -96,7 +96,10 @@ impl ShellApp {
         let Some(review) = self.scope_review().and_then(|state| state.review.clone()) else {
             return;
         };
-        let Some(exclusion) = review.record.draft.exclusions.first() else {
+        let selected = self
+            .scope_review()
+            .and_then(ScopeReviewState::selected_file);
+        let Some(exclusion) = recorded_exclusion(&review, selected.as_deref()) else {
             self.scope_notice("No recorded exclusions to include. Scope membership is unchanged.");
             return;
         };
@@ -126,14 +129,21 @@ impl ShellApp {
     }
 
     fn open_scope_form(&mut self, kind: ScopeEditKind) {
-        let scope = self.scope_review().and_then(selected_scope).cloned();
+        let scope = scope_form_template(self.scope_review(), kind);
         let Some(scope) = scope else {
             self.scope_notice("Select a scope first.");
             return;
         };
         let state = self.router.scope_review_mut().as_mut().unwrap();
+        let selected_path = state.selected_file();
         state.menu = None;
-        state.form = Some(ScopeEditForm::for_scope(kind, &scope));
+        let mut form = ScopeEditForm::for_scope(kind, &scope);
+        if kind == ScopeEditKind::ExcludePath {
+            if let Some(path) = selected_path {
+                form.fields[0].1 = crate::app::FieldEditor::new(&path);
+            }
+        }
+        state.form = Some(form);
         state.scroll = 0;
         state.notice = match kind {
             ScopeEditKind::Split | ScopeEditKind::ExcludePath => {
@@ -245,7 +255,7 @@ pub(crate) fn selected_scope(
         .scopes
         .iter()
         .chain(review.record.draft.shared_scope.iter())
-        .nth(state.cursor)
+        .find(|scope| Some(scope.id.as_str()) == state.selected_id())
 }
 
 pub(crate) fn merge_destinations(
@@ -273,19 +283,32 @@ pub(crate) fn merge_destinations(
 }
 
 pub(crate) fn selected_filter(state: &ScopeReviewState) -> Option<ScopeFileFilter> {
-    if let Some(id) = state.selected_id() {
-        return Some(ScopeFileFilter::Scope {
-            scope_id: id.into(),
-        });
+    Some(state.selected_row()?.branch().filter())
+}
+
+fn scope_form_template(
+    state: Option<&ScopeReviewState>,
+    kind: ScopeEditKind,
+) -> Option<kuzushi_core::workspace::ProposedScanScope> {
+    let state = state?;
+    if kind == ScopeEditKind::ExcludePath && state.selected_file().is_some() {
+        return state.review.as_ref()?.record.draft.scopes.first().cloned();
     }
-    let draft = &state.review.as_ref()?.record.draft;
-    match state
-        .cursor
-        .checked_sub(draft.scopes.len() + usize::from(draft.shared_scope.is_some()))?
-    {
-        0 => Some(ScopeFileFilter::Uncovered),
-        1 => Some(ScopeFileFilter::Excluded),
-        2 => Some(ScopeFileFilter::Overlap),
-        _ => None,
-    }
+    selected_scope(state).cloned()
+}
+
+fn recorded_exclusion<'a>(
+    review: &'a ScanScopeReview,
+    path: Option<&str>,
+) -> Option<&'a kuzushi_core::workspace::ScanScopeExclusion> {
+    let exclusions = &review.record.draft.exclusions;
+    let Some(path) = path else {
+        return exclusions.first();
+    };
+    exclusions.iter().find(|rule| {
+        path == rule.path
+            || path
+                .strip_prefix(&rule.path)
+                .is_some_and(|rest| rest.starts_with('/'))
+    })
 }

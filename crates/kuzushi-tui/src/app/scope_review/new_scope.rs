@@ -11,7 +11,10 @@ impl ShellApp {
             return;
         };
         let form = state.new_scope_draft.take().unwrap_or_else(|| {
-            let paths = uncovered_paths(review);
+            let paths = state
+                .selected_file()
+                .map(|file| vec![file])
+                .unwrap_or_else(|| uncovered_paths(review));
             let scope = ProposedScanScope {
                 id: kuzushi_core::new_run_id("scope"),
                 name: "New discovery scope".into(),

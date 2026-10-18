@@ -9,6 +9,9 @@ mod new_scope;
 mod state;
 mod study;
 mod suggestion;
+mod tree;
+mod tree_keys;
+pub(crate) use tree::{ScopeBranch, ScopeTreeRow, ScopeTreeState, SCOPE_TREE_PAGE_SIZE};
 #[cfg(test)]
 mod tests;
 use crate::app::{state_transitions::InputUpdate, ShellApp};
@@ -69,6 +72,7 @@ impl ShellApp {
             reference: serde_json::from_value(input["proposalRef"].clone()).ok(),
             filter: serde_json::from_value(input["fileFilter"].clone()).ok(),
             offset: input["offset"].as_u64().unwrap_or(0) as usize,
+            tree_branch: None,
         });
         state.notice = Some(
             "Reading source and scope evidence. No model calls. Ctrl+C cancels active work.".into(),
@@ -148,6 +152,10 @@ fn install_file_page(state: &mut ScopeReviewState, request: &ScopeRequest, data:
     };
     match serde_json::from_value::<ScopeFilePage>(data.clone()) {
         Ok(page) if page.offset == request.offset => {
+            if let Some(branch) = &request.tree_branch {
+                install_tree_page(state, branch.clone(), page);
+                return;
+            }
             state.files = Some(ScopeFiles {
                 filter: filter.clone(),
                 page,
@@ -162,6 +170,18 @@ fn install_file_page(state: &mut ScopeReviewState, request: &ScopeRequest, data:
             state.notice = Some(format!("Scope file page unavailable: {error}"));
         }
     }
+}
+
+fn install_tree_page(state: &mut ScopeReviewState, branch: ScopeBranch, page: ScopeFilePage) {
+    let selected = page.files.first().map(|path| ScopeTreeRow::File {
+        branch: branch.clone(),
+        path: path.clone(),
+    });
+    state.tree.pages.insert(branch, page);
+    state.restore_tree_selection(selected);
+    state.pending = None;
+    state.scroll = 0;
+    state.notice = None;
 }
 
 fn install_latest_review(state: &mut ScopeReviewState, data: &Value) {

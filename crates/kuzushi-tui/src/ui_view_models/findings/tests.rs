@@ -1463,6 +1463,28 @@ fn store_live_source(app: &ShellApp, finding: &Finding, state: Result<&str, &str
 }
 
 #[test]
+fn literal_finding_source_uses_the_hydrated_exact_path_without_false_drift() {
+    let (_root, app) = scanned_fold_app();
+    for path in [" app /lib.py", "app/lib.py ", " "] {
+        let mut finding = scanned_fold_finding();
+        finding.file_path = path.into();
+        store_live_source(&app, &finding, Ok("owned inert source\n"));
+        store_scanned_window(
+            &app,
+            &finding,
+            crate::ScannedSnippetState::Ready(crate::ScannedSnippetWindow {
+                start_line: 1,
+                focus_line: 1,
+                lines: vec!["owned inert source".into()],
+            }),
+        );
+        let snippet = source_snippet_model(&app, &finding).unwrap();
+        assert!(snippet.note.is_none(), "{path:?}: {:?}", snippet.note);
+        assert_eq!(snippet.lines, ["owned inert source"]);
+    }
+}
+
+#[test]
 fn snippet_falls_back_to_the_scanned_copy_when_the_live_line_drifts() {
     let (temp, app) = scanned_fold_app();
     std::fs::create_dir_all(temp.path().join("src")).unwrap();

@@ -11,6 +11,7 @@ pub(crate) struct ScopeReviewState {
     pub findings_origin: Option<crate::app::state_transitions::LinkedFindingsOrigin>,
     pub review: Option<Arc<ScanScopeReview>>,
     pub cursor: usize,
+    pub tree: super::ScopeTreeState,
     pub study_scope_ids: std::collections::BTreeSet<String>,
     pub scroll: usize,
     pub menu: Option<usize>,
@@ -34,6 +35,7 @@ impl ScopeReviewState {
             findings_origin: None,
             review: None,
             cursor: 0,
+            tree: Default::default(),
             study_scope_ids: Default::default(),
             scroll: 0,
             menu: None,
@@ -58,11 +60,13 @@ impl ScopeReviewState {
                 .get(id)
                 .is_some_and(|members| members.total > 0)
         });
-        let selected = self.selection_for_saved_review();
-        self.cursor = selected
-            .and_then(|id| scope_ids(&review).position(|next| next == id))
-            .unwrap_or(0);
+        let selected = self
+            .selection_for_saved_review()
+            .map(|id| super::ScopeTreeRow::Branch(super::ScopeBranch::Scope(id)))
+            .or_else(|| self.selected_row());
+        self.reconcile_tree(&review);
         self.review = Some(Arc::new(review));
+        self.restore_tree_selection(selected);
         self.files = None;
         self.pending = None;
         self.form = None;
@@ -75,17 +79,39 @@ impl ScopeReviewState {
     }
 
     pub fn selected_id(&self) -> Option<&str> {
-        scope_ids(self.review.as_deref()?).nth(self.cursor)
+        let super::ScopeTreeRow::Branch(super::ScopeBranch::Scope(id)) = self.selected_row()?
+        else {
+            return None;
+        };
+        scope_ids(self.review.as_deref()?).find(|next| *next == id)
     }
 
     pub fn row_count(&self) -> usize {
-        self.review.as_ref().map_or(0, |r| {
-            r.record.draft.scopes.len() + usize::from(r.record.draft.shared_scope.is_some()) + 3
-        })
+        self.tree_rows().len()
+    }
+
+    fn reconcile_tree(&mut self, review: &ScanScopeReview) {
+        let same_proposal = self
+            .review
+            .as_ref()
+            .is_some_and(|old| old.reference.proposal_id == review.reference.proposal_id);
+        if !same_proposal {
+            self.tree = Default::default();
+            return;
+        }
+        if self.review.as_ref().is_some_and(|old| {
+            old.coverage != review.coverage || old.record.source != review.record.source
+        }) {
+            self.tree.pages.clear();
+        }
+        self.tree.expanded.retain(|branch| match branch {
+            super::ScopeBranch::Scope(id) => scope_ids(review).any(|next| next == id),
+            _ => true,
+        });
     }
 }
 
-fn scope_ids(review: &ScanScopeReview) -> impl Iterator<Item = &str> {
+pub(super) fn scope_ids(review: &ScanScopeReview) -> impl Iterator<Item = &str> {
     review
         .record
         .draft
@@ -101,6 +127,7 @@ pub(crate) struct ScopeRequest {
     pub reference: Option<ScanScopeProposalRef>,
     pub filter: Option<ScopeFileFilter>,
     pub offset: usize,
+    pub tree_branch: Option<super::ScopeBranch>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

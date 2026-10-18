@@ -3015,9 +3015,17 @@ the last 1 MiB of history. Earlier history remains on disk; it does not enter
 this window. Campaign spend totals continue to come from campaign receipts.
 
 `scopes` opens the current repository's saved scope draft, or offers an explicit
-inventory action when none exists. Arrow keys choose a boundary or coverage row;
-Enter opens its action menu, `f` reads a bounded file page, and PgUp/PgDn read
-long detail. The menu exposes rename, split, merge, scope/path exclusions,
+inventory action when none exists. Up/Down chooses a boundary, coverage branch,
+file or page action. Right expands a branch; Left collapses it or returns from
+a member to its parent. Each expanded branch holds at most 32 file rows plus
+explicit previous/next page actions. Those actions read recorded membership
+through shared dispatch, including members beyond the 128-file coverage preview.
+Enter opens a boundary or file action menu; file exclusion pre-fills the exact
+selected path, and restoration reviews its covering exclusion rule. A directory
+rule can restore several files and still requires new boundary acceptance.
+Space marks discovery boundary rows only. Selecting a file never marks its
+parent. `f` retains the separate paged file reader, and PgUp/PgDn reads long
+detail. The menu exposes rename, split, merge, scope/path exclusions,
 explicit inclusion, boundary questions, shared discovery, whole repository and
 exact acceptance. Choosing whole repository preserves recorded exclusions and
 their reasons. **Include an excluded file or directory** removes one exact
@@ -3025,6 +3033,13 @@ exclusion rule, recomputes coverage and creates an unaccepted revision. Other
 rules remain in force, including any parent directory exclusion. Unknown paths
 refuse without changing membership. Existing accepted plans retain their
 original scope revision.
+Boundary details show common inheritance, local overrides or explicit omissions
+from a matching study draft. Historical context comes from the selected current
+authenticated report, including its frozen common context and operator choice;
+target and exact proposal references must match. A previous refreshing report
+cannot supply current associations. No global context is activated. Scope-study
+exports retain `scopeProposalRef`, `inheritedThreatModelRef` and
+`contextSelections` as additive provenance.
 Forms preserve the shell composer and use Tab/Shift+Tab between fields, newline
 path lists and F2 to save. Failed edits retain the form. Acceptance has separate
 inventory, overlap and exclusion acknowledgements and starts no scans.

@@ -670,7 +670,7 @@ fn append_snippet_note(mut snippet: SourceSnippetModel, suffix: &str) -> SourceS
 }
 
 fn finding_source_path(app: &ShellApp, finding: &Finding) -> Option<std::path::PathBuf> {
-    let raw = finding.file_path.trim();
+    let raw = finding.file_path.as_str();
     if raw.is_empty() {
         return None;
     }

@@ -3,6 +3,15 @@ use anyhow::{Context, Result};
 use kuzushi_core::workspace::ScanScopeRef;
 
 impl ShellApp {
+    pub(crate) fn scope_context_report_key(&self) -> Option<crate::app::ViewHydrationKey> {
+        if !self.scope_review_is_visible() || self.router.report().workspace_history() {
+            return None;
+        }
+        let selected =
+            self.router.report().study().is_some() || self.report_scan_attempt().is_some();
+        selected.then(|| self.report_hydration_key())
+    }
+
     pub(super) fn plan_selected_scope(&mut self) -> InputUpdate {
         if self
             .scope_review()

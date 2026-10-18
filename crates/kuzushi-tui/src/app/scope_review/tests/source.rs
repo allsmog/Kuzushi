@@ -173,7 +173,7 @@ fn legacy_scope_binding_is_visible_without_changing_its_recorded_approval() {
     assert!(scope_title(&state, &source).contains("MEMBERSHIP UNBOUND"));
     assert_eq!(source.label(), "Membership unbound; rebuild required");
     assert!(state.review.as_ref().unwrap().record.acceptance.is_some());
-    let text =
-        crate::ui_view_models::scope_review::scope_detail_lines(&state, &source, 120).join("\n");
+    let text = crate::ui_view_models::scope_review::scope_detail_lines(&app, &state, &source, 120)
+        .join("\n");
     assert!(text.contains("Included files without content identity: 0"));
 }

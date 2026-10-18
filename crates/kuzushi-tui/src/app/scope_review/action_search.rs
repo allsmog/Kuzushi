@@ -6,15 +6,27 @@ impl ScopeReviewState {
     pub(crate) fn matching_actions(&self) -> Vec<usize> {
         let query = self.menu_search.as_ref().map_or("", |field| field.text());
         let query = query.to_lowercase();
+        let file_actions = self.file_actions();
         SCOPE_ACTIONS
             .iter()
             .enumerate()
+            .filter(|(index, _)| file_actions.is_none_or(|actions| actions.contains(index)))
             .filter(|(_, label)| {
                 let label = label.to_lowercase();
                 query.split_whitespace().all(|word| label.contains(word))
             })
             .map(|(index, _)| index)
             .collect()
+    }
+
+    fn file_actions(&self) -> Option<&'static [usize]> {
+        let Some(ScopeTreeRow::File { branch, .. }) = self.selected_row() else {
+            return None;
+        };
+        if branch == ScopeBranch::Excluded {
+            return Some(&[11, 17]);
+        }
+        Some(&[4, 15, 17])
     }
 
     fn reconcile_action_selection(&mut self) {
@@ -77,7 +89,7 @@ impl ShellApp {
 
     fn reduce_action_search(&mut self, key: KeyEvent) -> InputUpdate {
         if key.code == KeyCode::Enter && key.modifiers.is_empty() {
-            return self.choose_searched_action();
+            return self.choose_available_scope_action();
         }
         let state = self.router.scope_review_mut().as_mut().unwrap();
         if let Some(backwards) = navigation_direction(key) {
@@ -88,7 +100,7 @@ impl ShellApp {
         InputUpdate::handled()
     }
 
-    fn choose_searched_action(&mut self) -> InputUpdate {
+    pub(super) fn choose_available_scope_action(&mut self) -> InputUpdate {
         let state = self.scope_review().unwrap();
         let Some(index) = state
             .menu
@@ -134,7 +146,6 @@ pub(super) fn cancel_search(state: &mut ScopeReviewState) -> bool {
     if state.menu_search.take().is_none() {
         return false;
     }
-    state.scroll = 0;
-    state.notice = None;
+    state.reconcile_action_selection();
     true
 }

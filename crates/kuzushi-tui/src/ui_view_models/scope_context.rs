@@ -56,11 +56,19 @@ fn selection_detail(config: &BatchScanConfig) -> Vec<String> {
     };
     let mut lines = vec![
         format!("Boundary: {} · {} passes", case_label(config, &case.scope_id), case.passes),
-        format!("Context association: {}", binding_label(case)),
         "Enter inspects or chooses an exact revision for this boundary. i inherits common; o explicitly omits context.".into(),
         "Selection does not activate a global context or change sibling overrides. Changes require a new plan approval; spending remains.".into(),
     ];
     lines.push(format!("Boundary id: {}", case.scope_id));
+    lines.extend(association_detail(config, case));
+    lines
+}
+
+pub(crate) fn association_detail(
+    config: &BatchScanConfig,
+    case: &ScopeStudyCaseInput,
+) -> Vec<String> {
+    let mut lines = vec![format!("Context association: {}", binding_label(case))];
     append_reference(
         &mut lines,
         "Draft effective context",
@@ -164,7 +172,7 @@ pub(crate) fn reading_controls(width: u16, offset: usize, max: usize) -> String 
     format!("{label} {}/{}", offset + 1, max + 1)
 }
 
-fn append_reference(lines: &mut Vec<String>, label: &str, reference: Option<&Value>) {
+pub(crate) fn append_reference(lines: &mut Vec<String>, label: &str, reference: Option<&Value>) {
     match reference {
         None => lines.push(format!("{label}: unset; preparation must resolve it")),
         Some(Value::Null) => lines.push(format!("{label}: explicitly omitted")),

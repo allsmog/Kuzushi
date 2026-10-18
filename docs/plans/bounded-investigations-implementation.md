@@ -866,6 +866,17 @@ validation requires an explicitly approved test allowance and runs sequentially.
 
 ## Current implementation evidence
 
+October 18, 2026: [Selectable scope membership](../assessments/scope-tree-2026-10-18.md)
+replaces the flat list with expandable, paged file branches and exact member
+actions. Context inheritance and local omission remain readable from authenticated
+saved studies after restart; the Review spaced-path source badge is repaired.
+Native J336 has 90 machine passes, zero failures and eight pending human judgments
+over 79 capture pairs. Its 131-file source retains six fixed jobs, nine observations
+and three scripted deferrals without provider calls. There are 163 distinct
+focused Rust passes, a workspace build, lint and risk checks. The concrete tree
+gap is closed; broad scope/model quality and complete UX acceptance remain open.
+Delivery remains four locally verified items and five open items.
+
 October 18, 2026: [Literal scope membership](../assessments/literal-scope-membership-2026-10-18.md)
 repairs path trimming in scope forms, typed option lists and shared scanner
 resolution. Final J335 completes six approved static jobs over distinct spaced

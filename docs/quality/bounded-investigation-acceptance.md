@@ -1,5 +1,15 @@
 # Bounded investigation acceptance ledger
 
+The [scope-tree increment](../assessments/scope-tree-2026-10-18.md) implements the
+previously missing selectable membership tree, bounded paging, exact member
+actions and visible common/local context associations. The literal-path Review
+source badge is also repaired. Final J336 records 90 machine passes, zero
+failures and eight pending human judgments over 79 capture pairs. It preserves
+six fixed jobs and nine observations on an unchanged 131-file source. The 163
+focused Rust checks, build, lint and risk gate pass. No model request is added.
+Scope proposal quality, complete viewport qualification and the broader original
+requirements remain open; no broad delivery checkbox changes.
+
 The [literal membership checkpoint](../assessments/literal-scope-membership-2026-10-18.md)
 records 219 distinct focused Rust passes and final J335 with 70 machine passes,
 zero failures and six pending human judgments. Six fixed static jobs retain
