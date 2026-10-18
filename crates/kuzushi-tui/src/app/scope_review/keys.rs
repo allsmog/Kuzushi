@@ -46,6 +46,7 @@ impl ShellApp {
         }
         self.scope_choice_key(key.code)
             .or_else(|| self.scope_file_boundary_key(key.code))
+            .or_else(|| self.scope_tree_key(key.code))
             .unwrap_or_else(|| self.scope_list_key(key.code))
     }
 
@@ -74,10 +75,14 @@ impl ShellApp {
             scope_rows(state).0.len(),
         )
         .detail;
-        let maximum =
-            scope_detail_lines(state, &scope_source_view(self, state), area.width as usize)
-                .len()
-                .saturating_sub(area.height as usize);
+        let maximum = scope_detail_lines(
+            self,
+            state,
+            &scope_source_view(self, state),
+            area.width as usize,
+        )
+        .len()
+        .saturating_sub(area.height as usize);
         let current = state.scroll.min(maximum);
         let page = area.height.max(1) as usize;
         let offset = if code == KeyCode::PageUp {
@@ -169,10 +174,13 @@ impl ShellApp {
 
     fn scope_menu_key(&mut self, code: KeyCode, index: usize) -> InputUpdate {
         if code == KeyCode::Enter {
-            return self.apply_scope_menu(index);
+            return self.choose_available_scope_action();
         }
         let state = self.router.scope_review_mut().as_mut().unwrap();
-        move_index(state.menu.as_mut().unwrap(), code, SCOPE_ACTIONS.len());
+        let actions = state.matching_actions();
+        let mut position = actions.iter().position(|next| *next == index).unwrap_or(0);
+        move_index(&mut position, code, actions.len());
+        state.menu = actions.get(position).copied();
         InputUpdate::handled()
     }
 

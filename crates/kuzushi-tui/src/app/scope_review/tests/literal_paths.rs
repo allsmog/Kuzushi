@@ -1,6 +1,6 @@
 use super::*;
 
-fn literal_fixture() -> (tempfile::TempDir, ShellApp) {
+pub(super) fn literal_fixture() -> (tempfile::TempDir, ShellApp) {
     let (root, mut app) = fixture();
     std::fs::create_dir(root.path().join(" auth ")).unwrap();
     std::fs::write(

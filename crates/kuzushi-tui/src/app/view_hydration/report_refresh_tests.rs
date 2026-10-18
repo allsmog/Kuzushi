@@ -5,6 +5,27 @@ use crate::ui_view_models::{
 use kuzushi_core::workspace::InvestigationReportDocument;
 use kuzushi_core::{V2Config, WorkspaceTarget};
 
+#[test]
+fn scope_overlay_keeps_selected_study_hydration_after_tool_completion_changes_the_view() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = workspace_app(root.path());
+    app.router.report_mut().toggle_scope();
+    app.router
+        .report_mut()
+        .set_study(Some(crate::app::ReportStudyRef {
+            campaign_id: "owned-study".into(),
+            plan_sha256: "owned-digest".into(),
+        }));
+    app.set_shell_view(ShellView::Module);
+    *app.router.scope_review_mut() = Some(crate::app::ScopeReviewState::new(
+        app.target_owned().unwrap(),
+    ));
+    let expected = app.report_hydration_key();
+    assert!(requests::active_view_hydration_keys(&app).contains(&expected));
+    app.router.scope_review_mut().as_mut().unwrap().open = false;
+    assert!(!requests::active_view_hydration_keys(&app).contains(&expected));
+}
+
 fn workspace_app(root: &std::path::Path) -> ShellApp {
     let workspace = WorkspaceTarget::new(root).unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));

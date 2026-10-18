@@ -19,10 +19,18 @@ fn current_detail(state: &ScopeReviewState) -> Vec<String> {
     if state.menu.is_some() {
         return menu_detail(state);
     }
-    if let Some(files) = &state.files {
-        return file_detail(files);
+    if let Some(detail) = reading_detail(state) {
+        return detail;
     }
     selected_detail(state)
+}
+
+fn reading_detail(state: &ScopeReviewState) -> Option<Vec<String>> {
+    state
+        .files
+        .as_ref()
+        .map(file_detail)
+        .or_else(|| super::tree::selected_file_detail(state))
 }
 
 fn editor_detail(state: &ScopeReviewState) -> Option<Vec<String>> {
@@ -227,7 +235,12 @@ fn menu_detail(state: &ScopeReviewState) -> Vec<String> {
         17 => "Reload saved boundaries and current repository facts. Keep the selected boundary and earlier immutable revisions. This does not build a new inventory, start scans or make model requests.",
         _ => "Create a separate inventory draft for the current source. Earlier immutable revisions remain available. No model requests are made.",
     };
-    let mut lines = vec![description.into()];
+    let mut lines = state
+        .selected_file()
+        .map(|path| format!("Selected file: {}", super::paths::display_path(&path)))
+        .into_iter()
+        .collect::<Vec<_>>();
+    lines.push(description.into());
     if state.menu == Some(16) {
         lines.insert(
             0,
@@ -237,10 +250,18 @@ fn menu_detail(state: &ScopeReviewState) -> Vec<String> {
             ),
         );
     }
-    if selected_scope(state).is_none() && state.menu.unwrap_or(0) < 6 {
+    if boundary_action_unavailable(state) {
         lines.push("Select a scope before using this action.".into());
     }
     lines
+}
+
+fn boundary_action_unavailable(state: &ScopeReviewState) -> bool {
+    match state.menu {
+        Some(4) => selected_scope(state).is_none() && state.selected_file().is_none(),
+        Some(0..=5) => selected_scope(state).is_none(),
+        _ => false,
+    }
 }
 
 fn source_detail(review: &kuzushi_core::workspace::ScanScopeReview) -> Vec<String> {

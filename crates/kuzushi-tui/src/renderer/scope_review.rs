@@ -121,6 +121,7 @@ fn render_scope_panels(
         .collect::<Vec<_>>();
     frame.render_widget(Paragraph::new(lines), layout.list);
     let detail = scope_detail_lines(
+        app,
         state,
         &scope_source_view(app, state),
         layout.detail.width as usize,
@@ -190,6 +191,7 @@ pub(super) fn scope_review_plain_lines(app: &ShellApp, width: usize) -> Option<V
     text.extend(scope_search_label(state));
     text.extend(scope_rows(state).0);
     text.extend(scope_detail_lines(
+        app,
         state,
         &scope_source_view(app, state),
         width,

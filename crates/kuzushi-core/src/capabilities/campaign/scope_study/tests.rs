@@ -129,6 +129,19 @@ fn accepted_scopes_compile_six_frozen_jobs_and_reject_tampering() {
             .unwrap();
     assert_eq!(report.work_counts().planned, 6);
     assert_eq!(report.summary().finding_count, 0);
+    let serialized = serde_json::to_value(&report).unwrap();
+    assert_eq!(
+        serialized["scopeProposalRef"],
+        json!(receipt.scope_study.proposal_ref)
+    );
+    assert_eq!(
+        serialized["inheritedThreatModelRef"],
+        receipt.scope_study.inherited_threat_model_ref
+    );
+    assert_eq!(
+        serialized["contextSelections"],
+        json!(receipt.scope_study.selections)
+    );
     std::fs::write(
         root.path().join("app/owned.rs"),
         "// Changed owned source\n",

@@ -3,7 +3,10 @@ mod action_search;
 mod detail;
 mod paths;
 pub(crate) use action_search::scope_search_label;
+mod context;
+mod recorded_context;
 mod source;
+mod tree;
 mod workload;
 use crate::app::{merge_destinations, ScopeReviewState, SCOPE_ACTIONS};
 use crate::renderer::shared::text::wrap_text;
@@ -15,12 +18,20 @@ pub(crate) fn scope_title(state: &ScopeReviewState, source: &ScopeSourceView) ->
         return title.into();
     }
     if state.menu.is_some() {
-        return "SCOPE ACTIONS".into();
+        return scope_action_title(state).into();
     }
     state.review.as_ref().map_or_else(
         || "SCAN SCOPES".into(),
         |review| saved_scope_title(review, source),
     )
+}
+
+fn scope_action_title(state: &ScopeReviewState) -> &'static str {
+    if state.selected_file().is_some() {
+        "FILE ACTIONS"
+    } else {
+        "SCOPE ACTIONS"
+    }
 }
 
 fn saved_scope_title(
@@ -78,33 +89,11 @@ fn scope_boundary_rows(state: &ScopeReviewState) -> (Vec<String>, usize) {
     let Some(review) = &state.review else {
         return (vec!["Build inventory [c]".into()], 0);
     };
-    let draft = &review.record.draft;
-    let mut rows = draft
-        .scopes
+    let rows = state
+        .tree_rows()
         .iter()
-        .map(|scope| marked_boundary_row(state, review, scope))
-        .collect::<Vec<_>>();
-    if let Some(shared) = &draft.shared_scope {
-        rows.push(format!(
-            "[{}] Shared: {} · {}",
-            if state.study_scope_ids.contains(&shared.id) {
-                "x"
-            } else {
-                " "
-            },
-            shared.name,
-            if draft.shared_discovery {
-                "discovery"
-            } else {
-                "context"
-            }
-        ));
-    }
-    rows.extend([
-        format!("Uncovered · {}", review.coverage.uncovered_files.total),
-        format!("Excluded · {}", review.coverage.excluded_files.total),
-        format!("Overlap · {}", review.coverage.overlaps.total),
-    ]);
+        .map(|row| tree::row_label(state, review, row))
+        .collect();
     (rows, state.cursor)
 }
 
@@ -199,12 +188,13 @@ fn scope_navigation_controls(state: &ScopeReviewState) -> [&'static str; 2] {
         ];
     }
     [
-        "↑↓ Space mark · p plan · Enter menu",
-        "v findings f files PgUp/Dn Esc back",
+        "↑↓ →/← tree · Space mark · p plan",
+        "Enter menu · f files · Esc back",
     ]
 }
 
 pub(crate) fn scope_detail_lines(
+    app: &crate::app::ShellApp,
     state: &ScopeReviewState,
     source: &ScopeSourceView,
     width: usize,
@@ -213,7 +203,13 @@ pub(crate) fn scope_detail_lines(
     if let Some(notice) = &state.notice {
         text.extend([notice.clone(), String::new()]);
     }
-    text.extend(action_search::search_detail(state).unwrap_or_else(|| scope_detail(state)));
+    let mut detail = action_search::search_detail(state).unwrap_or_else(|| scope_detail(state));
+    let position = detail.len().min(2);
+    detail.splice(
+        position..position,
+        context::scope_context_detail(app, state),
+    );
+    text.extend(detail);
     if let Some(review) = &state.review {
         text.push(format!(
             "Recorded boundary approval: {}.",

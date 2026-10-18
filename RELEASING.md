@@ -1,5 +1,15 @@
 # Releasing Kuzushi
 
+## Scope context provenance in reports
+
+Scope-study investigation receipts add `scopeProposalRef`,
+`inheritedThreatModelRef` and `contextSelections`. These fields retain the exact
+accepted scope revision and the operator's common, local and omitted context
+choices from the existing frozen study. Existing fields and saved study formats
+remain unchanged. Re-export older reports to include the added provenance.
+Rust callers constructing `ScopeStudyInvestigationReceipt` must initialize the
+three new fields from the authenticated scope-study receipt.
+
 ## Literal scope paths
 
 Explicit `StringList` JSON arrays and quoted operator entries now preserve
