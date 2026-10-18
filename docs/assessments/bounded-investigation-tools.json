@@ -319,7 +319,7 @@
       "module": "campaign",
       "declaredMaturity": "core",
       "declaredPhase": "map",
-      "purpose": "Draft one bounded Map model action for approval: source-grounded context or a scan scope proposal. Keeps current context and scope acceptance unchanged. Makes no model requests.",
+      "purpose": "Draft one bounded model action for approval: context, scan scopes or a lesson. Keeps context, scope and lesson acceptance unchanged. Makes no model requests.",
       "scope": "one repository-wide source-only context generation job, optionally preceded by up to two frozen deterministic preparation jobs",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -369,7 +369,7 @@
       "module": "campaign",
       "declaredMaturity": "compatibility",
       "declaredPhase": "operate",
-      "purpose": "Coverage matrix: shards \u00d7 threat sources with per-cell campaign progress and per-shard finding counts. Read-only; no model calls.",
+      "purpose": "Compatibility shard-progress matrix. Accepted scope studies use their investigation report. Counts historical job progress, not repository coverage. Read-only; no model calls.",
       "scope": "audit-pending",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -400,7 +400,7 @@
       "module": "campaign",
       "declaredMaturity": "compatibility",
       "declaredPhase": "map",
-      "purpose": "Deterministically cross the threat model (or a modelsDir of subsystem models) with the shard manifest and optional model list into a ranked job matrix at .kuzushi/v3/campaigns/<id>/plan.json, with one seasoned prompt file per threat-scoped job. No model calls.",
+      "purpose": "Compatibility shard planner. Prefer campaign:study for accepted scope and finite investigation approval. Deterministically cross the threat model (or a modelsDir of subsystem models) with the shard manifest and optional model list into a ranked job matrix at .kuzushi/v3/campaigns/<id>/plan.json, with one seasoned prompt file per threat-scoped job. No model calls.",
       "scope": "audit-pending",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -536,7 +536,7 @@
       "module": "cargo-audit",
       "declaredMaturity": "core",
       "declaredPhase": "scan",
-      "purpose": "Inspect one selected-directory Cargo.lock against dependency advisories; persist package/version signals for owner review.",
+      "purpose": "Inspect the selected directory Cargo.lock for dependency advisories. Nested lockfiles and source reachability are not inspected.",
       "scope": "Directory-root lockfile only. Explicit directory scopes retain distinct structural identities; accepted exact-file membership is refused. Nested lockfiles and source reachability are not inspected.",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -756,8 +756,8 @@
       "findingStoreRequirement": "optional",
       "requiredOptions": [],
       "declaredOptions": [],
-      "executionEvidence": "Real Rust CLI/TUI prepared dispatch in J148, two actual owned Git commits, same-SHA edit and synthetic historical metadata. See docs/assessments/source-baseline-integrity-2026-10-09.md.",
-      "readinessVerdict": "scoped historical source-integrity inspection verified; full IO/cancellation/scope and TUI acceptance pending",
+      "executionEvidence": "Real Rust CLI/TUI prepared dispatch in J148, two actual owned Git commits, same-SHA edit and synthetic historical metadata. See docs/assessments/source-baseline-integrity-2026-10-09.md. October 18 coverage-cancellation-2026-10-18.md: 38 focused checks, locked workspace build and Core/TUI Clippy pass; native cancellation and source-history evidence preserve historical rows, current-SHA meaning and explicit retry. No model request or maturity change.",
+      "readinessVerdict": "Scoped historical-source inspection, shared cancellation and atomic skip-write recovery verified; aggregate history/memory limits and full operator acceptance remain open",
       "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
       "auditDimensions": {
         "purposeAndValue": "Expose full historical revision and distinguish changed, unchanged and unverified source without promoting a finding verdict.",
@@ -765,8 +765,8 @@
         "requiredInputs": "Explicit active workspace; sweep requires readable Git history. Missing or uninspectable source errors honestly.",
         "sharedDispatchExecution": "Four focused prepared-dispatch tests and actual native CLI/TUI execution; writeSkips aliases and unknown-input rejection exercised.",
         "artifactConsumption": "Readable receipt and structured output preserve full SHAs, run provenance and false complete-coverage/finding-fix flags; synthetic ledger rows survive restart unchanged.",
-        "failureAndRecovery": "Dirty skip refusal, stale reports, malformed path bytes, Unicode/newline paths and no-color recovery have evidence. Total-work/cancellation races and nested Git roots remain pending.",
-        "approvedResources": "Runtime Never, zero provider/scanner requests in owned fixture. Git subprocess timeout/output limits are shared adapter bounds; the entire ledger/sweep remains unbounded.",
+        "failureAndRecovery": "Prepared dispatch retains its pre-cancel guard. Coverage SQL uses a removable progress callback, the exact Git child receives the request token, and canceled skip inserts roll back. A controlled native stop test, explicit retry and no-color restart are recorded in coverage-cancellation-2026-10-18.md. Callback removal is tested after interruption and read failure.",
+        "approvedResources": "Runtime Never, no provider requests or scan jobs. Latest-baseline materialization is capped at 10000 rows; Git capture retains its 2 MiB stdout and 10-second per-command limits. Cancellation reaches SQL, child processes and the write transaction. Aggregate diff retention, total-history work and lock latency remain unqualified.",
         "scopeEnforcement": "Missing scope remains unverified; root is disclosed when unbaselined. Legacy metadata does not certify accepted context or complete selected discovery scope.",
         "interfaceParity": "Headless run, shell and six-size transcript reader consume the same executor output. Operational tools are not discovery scan tasks; full public option parity remains pending."
       },
@@ -781,7 +781,7 @@
       "module": "coverage",
       "declaredMaturity": "core",
       "declaredPhase": "operate",
-      "purpose": "Rank scope-level scan recommendations from deterministic signals: coverage gaps, staleness since baselines, surface-dense files with zero findings. No model calls; every row carries its mechanical evidence.",
+      "purpose": "Rank scope-level scan recommendations from deterministic signals: coverage gaps, staleness since baselines, and surface-dense files with zero findings. No model calls; every row carries its mechanical evidence.",
       "scope": "Default Read-only advisory metadata path; no model, scan scheduling or graph construction. Deep opt-in ranking remains outside this qualification.",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -828,8 +828,8 @@
       "declaredOptions": [
         "writeSkips"
       ],
-      "executionEvidence": "Real Rust CLI/TUI prepared dispatch in J148, two actual owned Git commits, same-SHA edit and synthetic historical metadata. See docs/assessments/source-baseline-integrity-2026-10-09.md.",
-      "readinessVerdict": "scoped historical source-integrity inspection verified; full IO/cancellation/scope and TUI acceptance pending",
+      "executionEvidence": "Real Rust CLI/TUI prepared dispatch in J148, two actual owned Git commits, same-SHA edit and synthetic historical metadata. See docs/assessments/source-baseline-integrity-2026-10-09.md. October 18 coverage-cancellation-2026-10-18.md: 38 focused checks, locked workspace build and Core/TUI Clippy pass; native cancellation and source-history evidence preserve historical rows, current-SHA meaning and explicit retry. No model request or maturity change.",
+      "readinessVerdict": "Scoped historical-source inspection, shared cancellation and atomic skip-write recovery verified; aggregate history/memory limits and full operator acceptance remain open",
       "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
       "auditDimensions": {
         "purposeAndValue": "Expose full historical revision and distinguish changed, unchanged and unverified source without promoting a finding verdict.",
@@ -837,8 +837,8 @@
         "requiredInputs": "Explicit active workspace; sweep requires readable Git history. Missing or uninspectable source errors honestly.",
         "sharedDispatchExecution": "Four focused prepared-dispatch tests and actual native CLI/TUI execution; writeSkips aliases and unknown-input rejection exercised.",
         "artifactConsumption": "Readable receipt and structured output preserve full SHAs, run provenance and false complete-coverage/finding-fix flags; synthetic ledger rows survive restart unchanged.",
-        "failureAndRecovery": "Dirty skip refusal, stale reports, malformed path bytes, Unicode/newline paths and no-color recovery have evidence. Total-work/cancellation races and nested Git roots remain pending.",
-        "approvedResources": "Runtime Never, zero provider/scanner requests in owned fixture. Git subprocess timeout/output limits are shared adapter bounds; the entire ledger/sweep remains unbounded.",
+        "failureAndRecovery": "Prepared dispatch retains its pre-cancel guard. Coverage SQL uses a removable progress callback, the exact Git child receives the request token, and canceled skip inserts roll back. A controlled native stop test, explicit retry and no-color restart are recorded in coverage-cancellation-2026-10-18.md. Callback removal is tested after interruption and read failure.",
+        "approvedResources": "Runtime Never, no provider requests or scan jobs. Latest-baseline materialization is capped at 10000 rows; Git capture retains its 2 MiB stdout and 10-second per-command limits. Cancellation reaches SQL, child processes and the write transaction. Aggregate diff retention, total-history work and lock latency remain unqualified.",
         "scopeEnforcement": "Missing scope remains unverified; root is disclosed when unbaselined. Legacy metadata does not certify accepted context or complete selected discovery scope.",
         "interfaceParity": "Headless run, shell and six-size transcript reader consume the same executor output. Operational tools are not discovery scan tasks; full public option parity remains pending."
       },
@@ -938,7 +938,7 @@
       "module": "engagement",
       "declaredMaturity": "compatibility",
       "declaredPhase": "operate",
-      "purpose": "Seed engagement/harness.toml with focus, engine, and budget metadata.",
+      "purpose": "Write legacy engagement/harness.toml metadata. Recorded budget is not enforced and approves no scan work. Use campaign:study for finite work and allowance approval.",
       "scope": "Retain legacy harness metadata through exact dispatch; recorded budget has no enforcement or work-approval authority.",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -1018,7 +1018,7 @@
       "module": "findings",
       "declaredMaturity": "labs",
       "declaredPhase": "review",
-      "purpose": "Advisory relationships among recorded confirmed findings. Metadata only; no source analysis or model calls.",
+      "purpose": "Experimental advisory relationships over recorded confirmed findings. Output limits do not bound pair enumeration; large histories and in-progress cancellation remain unqualified. No model calls. Does not complete Review.",
       "scope": "Small ledger-only advisory reads and artifact consumers; resource bounds and source feasibility remain unqualified.",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -1096,7 +1096,7 @@
       "module": "findings",
       "declaredMaturity": "core",
       "declaredPhase": "review",
-      "purpose": "Re-check every open finding's citation against the target tree at the current revision. Reports grounded / line-drift / file-missing counts and audits newly stale anchors. Descriptive only \u2014 never retires a finding.",
+      "purpose": "Re-check every open finding's citation against the target tree at the current revision. Reports grounded / line-drift / file-missing counts and audits newly stale anchors. Citation inspection only; never retires a finding or changes its verdict.",
       "scope": "Owned citation and history management, auxiliary Review. No repository scan or finding-validity claim.",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -1363,7 +1363,7 @@
       "module": "findings",
       "declaredMaturity": "core",
       "declaredPhase": "review",
-      "purpose": "List persisted findings with recorded source, study and accepted-scope filters.",
+      "purpose": "List persisted findings.",
       "scope": "One explicitly selected owned workspace ledger. Imported observations and suppression rules are management inputs; no scanner or source execution.",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -1462,7 +1462,7 @@
       "module": "findings",
       "declaredMaturity": "core",
       "declaredPhase": "review",
-      "purpose": "Explicit atomic operator review of a finite captured relationship selection, preserving every finding identity and verdict.",
+      "purpose": "Review a bounded selection atomically. Finding identities and verdicts stay separate.",
       "scope": "One target ledger, 1 to 50 exact captured records. Acceptance requires current observation endpoints; rejection and unlink retain recorded historical endpoints.",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -2152,7 +2152,7 @@
       "module": "iac-scan",
       "declaredMaturity": "core",
       "declaredPhase": "scan",
-      "purpose": "Read Dockerfiles, GitHub Actions workflows and Terraform for configuration policy signals requiring owner review.",
+      "purpose": "Read Dockerfiles, GitHub Actions and Terraform for configuration policy signals.",
       "scope": "Contained directory discovery with bounded iterative traversal and reads. Selected child paths are workspace-relative; accepted exact-file scopes are refused before discovery.",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -2190,7 +2190,7 @@
       "module": "license-scan",
       "declaredMaturity": "core",
       "declaredPhase": "scan",
-      "purpose": "Read local license declarations and source-header policy signals for owner review; real findings remain signal_only.",
+      "purpose": "Scan package manifests for license-risk findings.",
       "scope": "Directory-root inventory with contained reads; directory-scoped SAST is supported and exact-file widening is rejected. Recognition and mixed-license boundaries remain heuristic.",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -2225,7 +2225,7 @@
       "module": "ndiff",
       "declaredMaturity": "labs",
       "declaredPhase": "map",
-      "purpose": "Experimental unaccepted advisory-pattern draft from supplied existing diff context. No source tools, accepted lesson, context activation, patch generation or automatic discovery.",
+      "purpose": "Experimental advisory-pattern draft from a supplied existing diff. Output remains unaccepted and does not change context, start discovery or generate a patch. Learning allowance and explicit external-action authorization are required. Live retrieval and useful pattern quality remain unqualified.",
       "scope": "Bounded supplied text or regular file within the selected target; optional reference retrieval remains unqualified. Claims no repository discovery coverage.",
       "runtimeRequirement": "always",
       "headlessDeclared": true,
@@ -2323,7 +2323,7 @@
       "module": "ndiff",
       "declaredMaturity": "labs",
       "declaredPhase": "scan",
-      "purpose": "Experimental source observations guided by an explicitly supplied advisory pattern. Independent review required; does not establish complete coverage, enforced scope or applicability.",
+      "purpose": "Experimental source observations guided by an explicitly supplied advisory pattern. Results require independent review and do not establish complete coverage, enforced discovery scope or advisory applicability. Approve this separate search and its allowance.",
       "scope": "Source-only prompt guidance from explicit pattern; includeVendored does not enforce membership and scanContextRef is unsupported.",
       "runtimeRequirement": "always",
       "headlessDeclared": true,
@@ -2733,7 +2733,7 @@
       "module": "recon",
       "declaredMaturity": "core",
       "declaredPhase": "scan",
-      "purpose": "Import recorded recon and HTTP evidence for inspection; does not establish local scan coverage.",
+      "purpose": "Import recorded recon and HTTP evidence for inspection (amass, httpx, nuclei, nmap-xml, Burp XML, HAR). Does not establish local scan coverage.",
       "scope": "Passive saved exports only; scoped evidence for JSONL parsing and HAR/Burp capture intake.",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -3089,7 +3089,7 @@
       "module": "sbom-scan",
       "declaredMaturity": "core",
       "declaredPhase": "map",
-      "purpose": "Identify declared dependencies, observed lockfile versions and dependency edges for repository understanding; emits CycloneDX/SPDX and no vulnerability verdicts.",
+      "purpose": "Inventory declared and resolved dependencies. This produces no vulnerability findings or phase completion.",
       "scope": "Selected target-root filesystem inventory; exact-file discovery scopes are unsupported. Ignored and unsupported material is outside this inventory.",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -3125,7 +3125,7 @@
       "module": "secret-scan",
       "declaredMaturity": "core",
       "declaredPhase": "scan",
-      "purpose": "Locate secret-like source literals with redacted evidence. Matches remain signal-only; credential validity is not checked.",
+      "purpose": "Inspect source files for secret-like strings. Results require review.",
       "scope": "Contained standalone directory inspection; SAST supports selected roots and accepted exact-file membership with separate explicit plan limits.",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -3339,7 +3339,7 @@
       "module": "taint-iris-next",
       "declaredMaturity": "labs",
       "declaredPhase": "scan",
-      "purpose": "Supporting deterministic analysis planning.",
+      "purpose": "Experimental deterministic dataflow planning. Produces supporting candidates without agent review or Scan completion. Scoped evidence, coverage disclosure and in-progress cancellation remain unqualified.",
       "scope": "Owned inventory and missing-prerequisite execution only. No useful engine, source feasibility, accepted context or scoped discovery qualification.",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -3493,7 +3493,7 @@
       "module": "taint-iris-next",
       "declaredMaturity": "compatibility",
       "declaredPhase": "scan",
-      "purpose": "Compatibility alias of dataflow-plan with the same planner, options and output.",
+      "purpose": "Compatibility alias for taint-iris-next:dataflow-plan. Uses the same planner, options and output. Produces no Scan completion.",
       "scope": "Owned inventory and missing-prerequisite execution only. No useful engine, source feasibility, accepted context or scoped discovery qualification.",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -3545,7 +3545,7 @@
       "module": "threat-intel",
       "declaredMaturity": "labs",
       "declaredPhase": "map",
-      "purpose": "Preview catalog routes and unsupported entries. Default dry planning needs no model or child dispatch; live dispatch remains a legacy opt-in.",
+      "purpose": "Experimental catalog preview. The default dry run reads metadata without a model or starting hunts. Live dispatch is a legacy opt-in path outside accepted scope studies. Does not complete Map.",
       "scope": "Runtime-free metadata preview and receipt honesty. No actual hunt, accepted scope study, source analysis or model qualification.",
       "runtimeRequirement": "input-aware",
       "headlessDeclared": true,
@@ -3580,7 +3580,7 @@
       "module": "threat-intel",
       "declaredMaturity": "labs",
       "declaredPhase": "map",
-      "purpose": "Offline dependency candidates with explicit incomplete coverage; use sbom-scan:scan for repository dependency inventory.",
+      "purpose": "Experimental offline dependency candidates with incomplete manifest coverage. Use sbom-scan:scan for dependency inventory. Produces no vulnerability findings or Map completion.",
       "scope": "Legacy limited manifest selection, conditional child Go lookup and potential enclosing Bazel reads; exact discovery membership unsupported.",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -3614,7 +3614,7 @@
       "module": "threat-intel",
       "declaredMaturity": "labs",
       "declaredPhase": "map",
-      "purpose": "Experimental finite unaccepted advisory catalog drafting with approved Learning allowance. Creates no findings, accepted lessons, Map checkpoint or hunts.",
+      "purpose": "Experimental unaccepted catalog draft from a finite explicit advisory list. Learning allowance and external-action authorization are required. Source claims, live retrieval and useful detectors remain unqualified; this action does not complete Map or start hunts.",
       "scope": "Partial dependency/advisory context or explicit bounded ID list. Source claims and useful detector outcomes unqualified; exact discovery scope unsupported.",
       "runtimeRequirement": "always",
       "headlessDeclared": true,
@@ -3668,7 +3668,7 @@
       "module": "threat-intel",
       "declaredMaturity": "core",
       "declaredPhase": "map",
-      "purpose": "Read stored catalog entry metadata without invoking entries or creating finding verdicts.",
+      "purpose": "Read entries declared in a threat-intel catalog TOML. Reading a catalog produces no findings or Map completion.",
       "scope": "Workspace-contained catalog path; default chooses first sorted TOML file in .kuzushi/catalogs.",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -3702,7 +3702,7 @@
       "module": "threat-intel",
       "declaredMaturity": "labs",
       "declaredPhase": "map",
-      "purpose": "Experimental finite unaccepted advisory catalog drafting with approved Learning allowance. Creates no findings, accepted lessons, Map checkpoint or hunts.",
+      "purpose": "Experimental bounded advisory lookup and unaccepted catalog drafting. The approved action may query OSV and extract at most maxCves patterns, each with a possible repair. Learning allowance and external authorization are required. Inventory, live retrieval and useful detectors remain unqualified; no Map completion or hunts.",
       "scope": "Partial dependency/advisory context or explicit bounded ID list. Source claims and useful detector outcomes unqualified; exact discovery scope unsupported.",
       "runtimeRequirement": "always",
       "headlessDeclared": true,
@@ -4271,7 +4271,7 @@
       "module": "threat-model",
       "declaredMaturity": "core",
       "declaredPhase": "map",
-      "purpose": "Review manual text changes to an exact context and save an inactive immutable copy.",
+      "purpose": "Save reviewed text edits as an inactive immutable context copy. No model requests.",
       "scope": "Selected workspace; original source and scope binding retained.",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -4997,7 +4997,7 @@
       "module": "findings",
       "declaredMaturity": "core",
       "declaredPhase": "review",
-      "purpose": "Associate an explicit human decision with captured current source while preserving observations and earlier decisions.",
+      "purpose": "Capture, inspect and explicitly decide against the current source. No scan or model calls.",
       "scope": "One recorded finding generation and selected target. Immutable metadata capture with bounded source identity; no scan, code execution or provider work.",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -5043,7 +5043,7 @@
       "module": "threat-model",
       "declaredMaturity": "core",
       "declaredPhase": "map",
-      "purpose": "Answer an operator question over accepted context without changing context or findings.",
+      "purpose": "Answer one question about an exact accepted context. No tools, discovery, context edits or finding verdicts.",
       "scope": "Exact immutable context revision and source identity, plus bounded captured operator notes; no source collection, tools or discovery.",
       "runtimeRequirement": "always",
       "headlessDeclared": true,
@@ -5096,7 +5096,7 @@
       "discoveryMaturityOverride": null,
       "declaredPhase": "map",
       "phaseResult": false,
-      "purpose": "Prepare a finite workflow proposal over declared Core investigation tools. The operator reviews actions separately.",
+      "purpose": "Experimental, single-request workflow proposal under an approved investigation allowance. No tools, delegation, output repair or action execution. New work requires separate approval.",
       "scope": "Explicit target and source identity, bounded operator goal, optional Map/Scan/Review boundary and current Core capability metadata. Source contents are not supplied to this proposal model.",
       "runtimeRequirement": "always",
       "headlessDeclared": true,
@@ -5233,7 +5233,7 @@
     {
       "tool": "taint-iris-next:catalog-read",
       "module": "taint-iris-next",
-      "purpose": "Inspect immutable drafts, frozen model inputs, active profiles and retained accepted versions.",
+      "purpose": "Inspect an exact immutable taint catalog draft and its frozen inputs. Historical reading does not verify current source freshness.",
       "scope": "Runtime-free auxiliary Map helper. No findings, discovery, model request or phase completion.",
       "executionEvidence": "Prepared shared-dispatch Core tests and frozen native J315. docs/assessments/taint-catalog-drafts-2026-10-16.md",
       "readinessVerdict": "scoped local lifecycle and interface evidence; broad UX qualification pending",
@@ -5270,7 +5270,7 @@
     {
       "tool": "taint-iris-next:catalog-accept",
       "module": "taint-iris-next",
-      "purpose": "Explicitly activate one reviewed draft with source and active-version checks, preserving previous bytes.",
+      "purpose": "Accept one reviewed draft after source and active-catalog checks. Requires explicit approval, starts no scan and cannot complete Map.",
       "scope": "Runtime-free auxiliary Map helper. No findings, discovery, model request or phase completion.",
       "executionEvidence": "Prepared shared-dispatch Core tests and frozen native J315. docs/assessments/taint-catalog-drafts-2026-10-16.md",
       "readinessVerdict": "scoped local lifecycle and interface evidence; broad UX qualification pending",
@@ -6257,22 +6257,22 @@
   },
   "internalToolAuditRef": "internal-investigation-tools.json",
   "currentRegistryCensus": {
-    "capturedAt": "2026-10-17T14:15:03.247693+00:00",
-    "publishedCommit": "28aef9d96039e0b8366badf6d2c9267e6d926ce2",
-    "sourceState": "Uncommitted main. UAF is auxiliary Labs with bounded local I/O, explicit operator limits and partial failure history. Compiler-database selection, source grounding, real engine value and human UX remain open.",
-    "binarySha256": "248626d567a2d1de2992e7d3c846c203ec79690affb416ad0fc17c1ad403a794",
+    "capturedAt": "2026-10-18T08:50:22.569388+00:00",
+    "publishedCommit": "2f267dfbf613b8c8cc29e518d892588e38127c5b",
+    "sourceState": "Uncommitted main includes scope workload previews and cancellation of historical coverage inspection. Broader qualification remains open.",
+    "binarySha256": "41b38ebadf3400895005269d1727bae012e03471fea27fec42bed09dfa70c098",
     "catalogCommand": "kuzushi tools --all --json",
-    "catalogSha256": "1fd41470fb4d940cdc6927839bb5c915bb55a3dcddee29dd4b7ac963b0455b92",
+    "catalogSha256": "e21637b5277d8386bc885ecaa0c4241c214e7540115131d973bd5e654e5ca634",
     "operatorVisibleTools": 118,
     "defaultCatalogTools": 81,
     "effectiveMaturityCounts": {
-      "labs": 32,
       "core": 81,
+      "labs": 32,
       "compatibility": 5
     },
     "inScopeMaturityCounts": {
-      "labs": 27,
       "core": 78,
+      "labs": 27,
       "compatibility": 5
     },
     "excludedVisibleTools": [
@@ -6287,33 +6287,212 @@
     ],
     "registeredPolicyTools": 189,
     "registeredPolicyFingerprint": "175b006df1cedbbd4ef1ac43d803f12cc32c36ab45f98e3e681243648c4bba3d",
-    "policyTest": "The focused policy inventory passes with the unchanged 189 dispatch tuples. UAF maturity, phase-result metadata and option definitions change; visible catalog remains identical.",
+    "policyTest": "The 189-tuple policy fingerprint remains unchanged and its focused registry test passes. No action is promoted, retired or added.",
     "outsideOperatorCatalog": 71,
     "checkedDescriptorFields": [
-      "allowanceCategory",
+      "allowance_category",
       "approval",
-      "dagNode",
+      "continuation",
+      "costDataProjection",
+      "description",
+      "discoveryMaturity",
       "effect",
-      "effectiveMaturity",
-      "findingStore",
-      "module",
-      "moduleHidden",
-      "moduleMaturity",
+      "finding_store_requirement",
+      "headless",
+      "maturity",
+      "moduleId",
       "name",
-      "optionDefinitions",
-      "optionNames",
+      "options",
       "phase",
-      "phaseResult",
-      "purpose",
-      "runtime",
-      "toolHidden",
-      "workspace"
+      "phase_result",
+      "prompts",
+      "runtime_requirement",
+      "workspace_requirement"
     ],
     "descriptorDifferences": [
-      "uaf-hunt:hunt: Labs override, auxiliary phase result, purpose and canonical limit definitions"
+      {
+        "tool": "campaign:context-study",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "campaign:coverage",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "campaign:plan",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "cargo-audit:scan",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "coverage:recommend",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "engagement:aim",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "findings:chains",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "findings:ground",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "findings:list",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "findings:relationship-batch",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "iac-scan:scan",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "license-scan:scan",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "ndiff:extract-fix-pattern",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "ndiff:hunt-variants",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "recon:import",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "sbom-scan:scan",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "secret-scan:scan",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "taint-iris-next:dataflow-plan",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "taint-iris-next:source-sink-trace",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "threat-intel:apply",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "threat-intel:discover",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "threat-intel:harvest",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "threat-intel:list",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "threat-intel:research",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "threat-model:revise",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "findings:review-source",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "threat-model:ask",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "planner:propose",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "taint-iris-next:catalog-read",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "taint-iris-next:catalog-accept",
+        "fields": [
+          "purpose"
+        ]
+      }
     ],
     "coreInScopeGenericOutcomePlaceholders": 0,
-    "meaning": "Current production registry and controlled UAF resource/failure evidence. Labs curation does not establish functional engine qualification or reference parity.",
+    "meaning": "Visible metadata is refreshed from the frozen native catalog, decoding omitted Never runtime and true phase-result defaults according to ToolDescriptor serde. Internal classifications retain their named evidence. Metadata does not establish model accuracy or full module qualification.",
     "inScopeOperatorTools": 110
   },
   "catalogSnapshot": {
@@ -6324,14 +6503,14 @@
     "count": 113
   },
   "currentOperatorToolCount": 118,
-  "catalogSource": "/tmp/kuzushi-tui-integration-20261012/scanner-omissions-catalog.json",
+  "catalogSource": "/private/tmp/kuzushi-coverage-cancellation-20261018/catalog.json",
   "currentPolicyInventory": {
     "registeredToolCount": 189,
     "fingerprint": "175b006df1cedbbd4ef1ac43d803f12cc32c36ab45f98e3e681243648c4bba3d",
     "source": "modules::registry::tests::builtin_dispatch_policy_inventory_is_reviewed_as_one_contract",
     "meaning": "The reviewed dispatch-policy fingerprint remains unchanged. UAF gains auxiliary Labs metadata, honest partial outcomes and descriptor-backed limits without changing runtime, approval, workspace, finding-store or phase assignment."
   },
-  "catalogFactsRefreshed": "Current draft: 118 visible tools and 189 registered actions. Full descriptor and visible catalog bytes are unchanged. See reportDecisionSummaryCheckpoint and currentRegistryCensus.",
+  "catalogFactsRefreshed": "2026-10-18: 118 visible tools, 81 Core defaults, 110 in-scope visible tools and unchanged 189 registered policy tuples. Visible descriptor facts are refreshed; existing per-tool audit claims remain scoped.",
   "functionalAuditCheckpoint": {
     "scope": "Deterministic source context and Map consumers; no exploit development, reproducer work, patching, model calls or source execution.",
     "testFile": "crates/kuzushi-core/tests/map_context_contract.rs",
@@ -10496,5 +10675,199 @@
     "newLiveProviderRequests": 0,
     "broadMilestonesOpen": 9,
     "status": "scoped Core count and resize repair verified; full investigation acceptance remains open"
+  },
+  "coverageCancellationCheckpoint": {
+    "assessment": "docs/assessments/coverage-cancellation-2026-10-18.md",
+    "tools": [
+      "coverage:sweep",
+      "coverage:baselines"
+    ],
+    "focusedRustPasses": 38,
+    "providerRequests": 0,
+    "maturityChanged": false,
+    "metadataRowsRefreshed": 118,
+    "metadataDifferences": [
+      {
+        "tool": "campaign:context-study",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "campaign:coverage",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "campaign:plan",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "cargo-audit:scan",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "coverage:recommend",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "engagement:aim",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "findings:chains",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "findings:ground",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "findings:list",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "findings:relationship-batch",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "iac-scan:scan",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "license-scan:scan",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "ndiff:extract-fix-pattern",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "ndiff:hunt-variants",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "recon:import",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "sbom-scan:scan",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "secret-scan:scan",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "taint-iris-next:dataflow-plan",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "taint-iris-next:source-sink-trace",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "threat-intel:apply",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "threat-intel:discover",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "threat-intel:harvest",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "threat-intel:list",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "threat-intel:research",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "threat-model:revise",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "findings:review-source",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "threat-model:ask",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "planner:propose",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "taint-iris-next:catalog-read",
+        "fields": [
+          "purpose"
+        ]
+      },
+      {
+        "tool": "taint-iris-next:catalog-accept",
+        "fields": [
+          "purpose"
+        ]
+      }
+    ],
+    "broaderQualificationComplete": false
   }
 }

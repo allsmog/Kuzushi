@@ -66,12 +66,7 @@ fn selected_detail(state: &ScopeReviewState) -> Vec<String> {
         return Vec::new();
     };
     if let Some(scope) = selected_scope(state) {
-        let mut lines = vec![
-            scope.name.clone(),
-            format!("Boundary: {}", scope.paths.join(", ")),
-            format!("Why: {}", scope.rationale),
-            format!("Scope id: {}", scope.id),
-        ];
+        let mut lines = selected_heading(state, scope);
         lines.push(format!(
             "Inventory limited: {}. Included files without content identity: {}.",
             review.coverage.inventory_limited, review.identity_omissions.total
@@ -85,10 +80,26 @@ fn selected_detail(state: &ScopeReviewState) -> Vec<String> {
             "Open questions: {}",
             joined_or_none(&scope.open_questions)
         ));
-        lines.extend(resource_detail(state));
+        lines.extend(resource_detail());
         return lines;
     }
     coverage_detail(review)
+}
+
+fn selected_heading(
+    state: &ScopeReviewState,
+    scope: &kuzushi_core::workspace::ProposedScanScope,
+) -> Vec<String> {
+    let mut lines = vec![
+        scope.name.clone(),
+        format!("Boundary: {}", scope.paths.join(", ")),
+    ];
+    lines.extend(super::workload::summary(state));
+    lines.extend([
+        format!("Why: {}", scope.rationale),
+        format!("Scope id: {}", scope.id),
+    ]);
+    lines
 }
 
 fn coverage_detail(review: &kuzushi_core::workspace::ScanScopeReview) -> Vec<String> {
@@ -138,15 +149,10 @@ fn joined_or_none(values: &[String]) -> String {
     }
 }
 
-fn resource_detail(state: &ScopeReviewState) -> Vec<String> {
-    let Some(review) = state.review.as_ref() else {
-        return Vec::new();
-    };
-    let draft = &review.record.draft;
-    vec![format!("Boundaries: {} primary scopes. Shared discovery: {}.", draft.scopes.len(), draft.shared_discovery),
-        "Study context, local overrides, passes and model are reviewed in each study.".into(),
-        "Scope acceptance does not approve jobs or spending. Space marks discovery boundaries; p reviews one finite study for the marked set, or the focused boundary when none are marked. Other boundaries stay unplanned.".into(),
-        "Shared context adds no discovery unless explicitly selected.".into()]
+fn resource_detail() -> Vec<String> {
+    let mut lines = super::workload::guidance();
+    lines.push("Space marks discovery boundaries; p reviews the marked set, or the focused boundary when none are marked. Other boundaries stay unplanned. Scope acceptance does not approve jobs or spending.".into());
+    lines
 }
 
 fn acceptance_detail(state: &ScopeReviewState) -> Vec<String> {
@@ -158,6 +164,7 @@ fn acceptance_detail(state: &ScopeReviewState) -> Vec<String> {
         format!("Uncovered: {}. Included files without source identity: {}.", c.uncovered_files.total, review.identity_omissions.total),
         format!("Inventory limited: {}. Overlap: {}. Excluded: {}.", c.inventory_limited, c.overlaps.total, c.excluded_files.total)];
     lines.push(enumeration_summary(c));
+    lines.extend(super::workload::detail(state));
     lines.extend(c.limitations.clone());
     lines.push("Check each applicable acknowledgement. Gaps in membership or source identity cannot be waived.".into());
     lines

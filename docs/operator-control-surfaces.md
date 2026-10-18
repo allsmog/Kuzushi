@@ -348,6 +348,15 @@ truth.
   dollar pricing. All jobs and requests still require finite approval and
   durable reservations. Unknown prices do not appear as zero charges or as a
   false halted state. Dollar-capped campaigns retain their evidence requirement.
+- `scopes` pins the default job count for all included discovery boundaries.
+  Selected-boundary details compare that total with the focused or marked set
+  for the next study. Splits, exclusions and shared-discovery edits recompute
+  the preview. These counts do not approve work or estimate provider requests
+  or dollar cost; the study reviews engines, exact context and allowance.
+- `coverage:sweep` and `coverage:baselines` use normal tool cancellation for
+  historical source inspection. A stopped sweep interrupts Git/SQL work and
+  rolls back uncommitted skip rows. An explicit retry is separate work. Even a
+  completed skip does not establish complete coverage or a fixed finding.
 - In the study form, Enter on Source and context opens the immutable revision
   browser. Arrows choose a revision; Enter reads its exact document; Tab switches
   between summary and complete document; Page Up/Down scroll the detail. `a`

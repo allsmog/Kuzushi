@@ -3,6 +3,7 @@
 //! complete scan scope. A sweep compares tracked source and may add explicit
 //! sweep-skip records; neither operation establishes coverage or a finding fix.
 
+mod cancellation;
 mod guards;
 mod schema;
 mod store;
@@ -18,6 +19,7 @@ pub use sweep::{
     sweep_target, write_sweep_skips, ScopeSweepEntry, SourceCheckIssue, SweepReport, SweepVerdict,
     SWEEP_RUN_ID,
 };
+pub(crate) use sweep::{sweep_target_with_cancellation, write_sweep_skips_with_cancellation};
 
 use std::path::{Path, PathBuf};
 

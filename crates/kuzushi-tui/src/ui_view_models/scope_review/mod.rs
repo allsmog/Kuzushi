@@ -3,6 +3,7 @@ mod action_search;
 mod detail;
 pub(crate) use action_search::scope_search_label;
 mod source;
+mod workload;
 use crate::app::{merge_destinations, ScopeReviewState, SCOPE_ACTIONS};
 use crate::renderer::shared::text::wrap_text;
 pub(crate) use detail::scope_detail;
@@ -35,7 +36,10 @@ fn saved_scope_title(
         (false, false, true) => "ACCEPTED SCOPES",
         _ => "DRAFT SCOPES",
     };
-    format!("{label} · r{}", review.reference.revision)
+    let total = workload::all_jobs(review)
+        .map(|jobs| format!("all: {jobs} jobs"))
+        .unwrap_or_else(|_| "workload unavailable".into());
+    format!("{label} · r{} · {total}", review.reference.revision)
 }
 
 fn form_title(form: &crate::app::ScopeEditForm) -> Option<&'static str> {

@@ -5,9 +5,10 @@ use crate::run_artifacts::RunTargetGitMetadata;
 use crate::workspace::{load_nested_project_scopes, ROOT_SCOPE_ID};
 use anyhow::{Context, Result};
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 mod git;
+use super::cancellation::check as check_cancelled;
 
 /// Run identity recorded on `sweep-skip` baseline rows. There is no run
 /// receipt behind such a row; its evidence is the deterministic whole-repo
@@ -60,23 +61,34 @@ pub struct SweepReport {
 /// whole-repo and filtered per scope afterwards — a pathspec-limited diff
 /// can silently advance baselines past unscanned changes.
 pub fn sweep_target(target: &Path) -> Result<SweepReport> {
-    let head = git::metadata(target)?;
+    sweep_target_with_cancellation(target, None)
+}
+
+pub(crate) fn sweep_target_with_cancellation(
+    target: &Path,
+    cancellation: Option<&crate::ScanCancellation>,
+) -> Result<SweepReport> {
+    check_cancelled(cancellation)?;
+    let head = git::metadata(target, cancellation)?;
     let baselines = match CoverageLedger::open_if_exists(target)? {
-        Some(ledger) => ledger.latest_baselines()?,
+        Some(ledger) => ledger.latest_baselines_with_cancellation(cancellation)?,
         None => Vec::new(),
     };
     let scope_paths = scope_path_index(target)?;
-    let mut diffs = DiffCache::new(target, &head.sha);
+    let mut diffs = DiffCache::new(target, &head.sha, cancellation);
     let entries = baselines
         .iter()
-        .map(|row| sweep_entry(row, &head, &scope_paths, &mut diffs))
+        .map(|row| {
+            check_cancelled(cancellation)?;
+            sweep_entry(row, &head, &scope_paths, &mut diffs)
+        })
         .collect::<Result<Vec<_>>>()?;
     anyhow::ensure!(
-        git::metadata(target)? == head,
+        git::metadata(target, cancellation)? == head,
         "source changed during baseline inspection; run coverage:sweep again"
     );
     Ok(SweepReport {
-        unbaselined_scopes: unbaselined_scopes(&scope_paths, &baselines),
+        unbaselined_scopes: unbaselined_scopes(&scope_paths, &baselines, cancellation)?,
         head,
         entries,
     })
@@ -86,25 +98,51 @@ pub fn sweep_target(target: &Path) -> Result<SweepReport> {
 /// HEAD. Refuses on a dirty tree: a baseline must never claim a revision the
 /// working tree does not match. Returns the number of rows written.
 pub fn write_sweep_skips(target: &Path, report: &SweepReport) -> Result<usize> {
+    write_sweep_skips_with_cancellation(target, report, None)
+}
+
+pub(crate) fn write_sweep_skips_with_cancellation(
+    target: &Path,
+    report: &SweepReport,
+    cancellation: Option<&crate::ScanCancellation>,
+) -> Result<usize> {
+    check_cancelled(cancellation)?;
     anyhow::ensure!(
         !report.head.dirty,
         "refusing --write-skips on a dirty tree; commit or stash first"
     );
     anyhow::ensure!(
-        sweep_target(target)? == *report,
+        sweep_target_with_cancellation(target, cancellation)? == *report,
         "source or baseline state changed; run coverage:sweep again before writing skips"
     );
+    write_skips(
+        target,
+        report,
+        current_entries_behind_head(report),
+        cancellation,
+    )
+}
+
+pub(super) fn write_skips<'a>(
+    target: &Path,
+    report: &SweepReport,
+    entries: impl Iterator<Item = &'a ScopeSweepEntry>,
+    cancellation: Option<&crate::ScanCancellation>,
+) -> Result<usize> {
+    check_cancelled(cancellation)?;
     let ledger = CoverageLedger::open(target)?;
     let transaction = ledger.connection().unchecked_transaction()?;
     let mut written = 0;
-    for entry in current_entries_behind_head(report) {
+    for entry in entries {
+        check_cancelled(cancellation)?;
         ledger.record_baseline(&sweep_skip_row(entry, &report.head)?)?;
         written += 1;
     }
     anyhow::ensure!(
-        git::metadata(target)? == report.head,
+        git::metadata(target, cancellation)? == report.head,
         "source changed while writing sweep skips; no skip rows were committed"
     );
+    check_cancelled(cancellation)?;
     transaction.commit()?;
     Ok(written)
 }
@@ -221,12 +259,17 @@ fn scope_path_index(target: &Path) -> Result<BTreeMap<String, String>> {
 fn unbaselined_scopes(
     scope_paths: &BTreeMap<String, String>,
     baselines: &[BaselineRow],
-) -> Vec<String> {
-    scope_paths
-        .keys()
-        .filter(|scope_id| !baselines.iter().any(|row| row.scope_id == **scope_id))
-        .cloned()
-        .collect()
+    cancellation: Option<&crate::ScanCancellation>,
+) -> Result<Vec<String>> {
+    let known: BTreeSet<_> = baselines.iter().map(|row| row.scope_id.as_str()).collect();
+    let mut missing = Vec::new();
+    for scope in scope_paths.keys() {
+        check_cancelled(cancellation)?;
+        if !known.contains(scope.as_str()) {
+            missing.push(scope.clone());
+        }
+    }
+    Ok(missing)
 }
 
 /// One whole-repo `git diff --name-only <sha>..HEAD` per distinct baseline
@@ -235,27 +278,34 @@ struct DiffCache<'target> {
     target: &'target Path,
     head_sha: String,
     by_sha: BTreeMap<String, Option<Vec<String>>>,
+    cancellation: Option<&'target crate::ScanCancellation>,
 }
 
 impl<'target> DiffCache<'target> {
-    fn new(target: &'target Path, head_sha: &str) -> Self {
+    fn new(
+        target: &'target Path,
+        head_sha: &str,
+        cancellation: Option<&'target crate::ScanCancellation>,
+    ) -> Self {
         Self {
             target,
             head_sha: head_sha.to_string(),
             by_sha: BTreeMap::new(),
+            cancellation,
         }
     }
 
     fn changed_files(&mut self, baseline_sha: &str) -> Result<Option<&[String]>> {
         if !self.by_sha.contains_key(baseline_sha) {
-            let diff = whole_repo_diff(self.target, baseline_sha, &self.head_sha)?;
+            let diff =
+                whole_repo_diff(self.target, baseline_sha, &self.head_sha, self.cancellation)?;
             self.by_sha.insert(baseline_sha.to_string(), diff);
         }
-        Ok(self
+        let diff = self
             .by_sha
             .get(baseline_sha)
-            .expect("just inserted")
-            .as_deref())
+            .context("Baseline diff disappeared after inspection")?;
+        Ok(diff.as_deref())
     }
 }
 

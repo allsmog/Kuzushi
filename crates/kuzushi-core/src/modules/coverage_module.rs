@@ -1,6 +1,7 @@
 use super::*;
 use crate::workspace::coverage_ledger::{
-    sweep_target, write_sweep_skips, CoverageLedger, SweepReport, SweepVerdict,
+    sweep_target_with_cancellation, write_sweep_skips_with_cancellation, CoverageLedger,
+    SweepReport, SweepVerdict,
 };
 
 pub(crate) fn coverage_module() -> BuiltinModule {
@@ -79,9 +80,13 @@ pub(in crate::modules) fn run_coverage_sweep(
     let workspace = ctx
         .workspace
         .context("coverage:sweep requires an active workspace target")?;
-    let report = sweep_target(workspace.root())?;
+    let report = sweep_target_with_cancellation(workspace.root(), ctx.cancellation)?;
     let skips_written = if write_skips_requested(input) {
-        Some(write_sweep_skips(workspace.root(), &report)?)
+        Some(write_sweep_skips_with_cancellation(
+            workspace.root(),
+            &report,
+            ctx.cancellation,
+        )?)
     } else {
         None
     };
@@ -95,11 +100,12 @@ pub(in crate::modules) fn run_coverage_sweep(
 }
 
 pub(in crate::modules) fn run_coverage_baselines(ctx: &ToolExecutionContext<'_>) -> Result<Value> {
+    ctx.ensure_active()?;
     let workspace = ctx
         .workspace
         .context("coverage:baselines requires an active workspace target")?;
     let baselines = match CoverageLedger::open_if_exists(workspace.root())? {
-        Some(ledger) => ledger.latest_baselines()?,
+        Some(ledger) => ledger.latest_baselines_with_cancellation(ctx.cancellation)?,
         None => Vec::new(),
     };
     let output = baseline_output(&baselines);

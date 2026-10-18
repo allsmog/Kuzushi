@@ -33,7 +33,9 @@ def commit(root, message):
 def native(root, evidence, label, tool, inputs=None, succeeds=True):
     arguments = [os.environ["KUZUSHI_NATIVE_BIN"], "--target", str(root), "run", tool,
         "--input", json.dumps(inputs or {})]
-    result = subprocess.run(arguments, capture_output=True, text=True, timeout=40)
+    environment = os.environ.copy()
+    environment["HOME"] = (evidence / "runtime-home.txt").read_text()
+    result = subprocess.run(arguments, capture_output=True, text=True, timeout=40, env=environment)
     (evidence / (label + ".stdout.json")).write_text(result.stdout)
     (evidence / (label + ".stderr.txt")).write_text(result.stderr)
     if not succeeds:
@@ -46,7 +48,7 @@ def native(root, evidence, label, tool, inputs=None, succeeds=True):
 
 def records(root):
     database = root / ".kuzushi/v3/coverage.sqlite3"
-    with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as db:
+    with sqlite3.connect(database) as db:
         return db.execute("select scope_id,phase,mode,run_id,revision_sha,branch,dirty,ts "
             "from scan_baselines order by scope_id,phase,ts").fetchall()
 
@@ -65,6 +67,7 @@ def sweep(root, evidence, stage):
 
 
 def prepare(root, evidence, home):
+    (evidence / "runtime-home.txt").write_text(str(home))
     for name in ["app.py", "config.env"]:
         (root / name).unlink(missing_ok=True)
     (root / ".gitignore").write_text("# Workspace maintains local state ignore rules.\n")
@@ -78,6 +81,12 @@ def prepare(root, evidence, home):
     empty = sweep(root, evidence, "unbaselined")
     assert empty["data"]["report"]["unbaselinedScopes"] == ["root"]
     with sqlite3.connect(root / ".kuzushi/v3/coverage.sqlite3") as db:
+        db.execute("CREATE TABLE scan_baselines (scope_id TEXT NOT NULL, phase TEXT NOT NULL, "
+            "mode TEXT NOT NULL, run_id TEXT NOT NULL, revision_sha TEXT NOT NULL, branch TEXT, "
+            "dirty INTEGER NOT NULL CHECK(dirty IN (0,1)), ts INTEGER NOT NULL CHECK(ts>=0), "
+            "PRIMARY KEY(scope_id,phase,mode,ts))")
+        db.execute("CREATE INDEX scan_baselines_latest ON scan_baselines(scope_id,phase,ts DESC)")
+        db.execute("PRAGMA user_version=1")
         rows = [("root", "scan", "synthetic-history", "synthetic-not-a-scan", sha, "main", 0, 100),
             ("root", "map", "synthetic-history", "synthetic-dirty-history", sha, "main", 1, 101),
             ("missing", "scan", "synthetic-history", "synthetic-unavailable-scope", sha, "main", 0, 102)]
@@ -126,7 +135,7 @@ def committed(root, evidence):
 def no_work(root):
     database = root / ".kuzushi/v3/index.sqlite3"
     if database.is_file():
-        with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as db:
+        with sqlite3.connect(database) as db:
             tables = {row[0] for row in db.execute("select name from sqlite_master where type='table'")}
             for table in ["finding_observations", "review_decisions", "investigation_call_reservations",
                     "investigation_work_attempts"]:
@@ -153,13 +162,14 @@ def verify(root, evidence, stage):
         "findingObservations": 0, "reviewDecisions": 0, "providerReservations": 0, "workAttempts": 0})
 
 
-root, evidence = Path(sys.argv[1]).resolve(), Path(sys.argv[2]).resolve()
-action = sys.argv[3]
-if action == "prepare":
-    prepare(root, evidence, Path(sys.argv[4]).resolve())
-elif action == "dirty":
-    dirty(root, evidence)
-elif action == "committed":
-    committed(root, evidence)
-else:
-    verify(root, evidence, action)
+if __name__ == "__main__":
+    root, evidence = Path(sys.argv[1]).resolve(), Path(sys.argv[2]).resolve()
+    action = sys.argv[3]
+    if action == "prepare":
+        prepare(root, evidence, Path(sys.argv[4]).resolve())
+    elif action == "dirty":
+        dirty(root, evidence)
+    elif action == "committed":
+        committed(root, evidence)
+    else:
+        verify(root, evidence, action)

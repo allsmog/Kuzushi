@@ -1,5 +1,11 @@
 # Module maturity tiers
 
+Historical coverage tools retain Core status after a supported-path cancellation
+repair. Git inspection and SQL reads now receive the active stop handle, and
+canceled skip writes roll back. This qualifies no general coverage or finding
+fix claim. The [cancellation evidence](assessments/coverage-cancellation-2026-10-18.md)
+also refreshes visible metadata without promoting or retiring tools.
+
 `uaf-hunt:hunt` has a Labs discovery override and no phase result. Its hidden
 module identity remains compatible. Bounded local resource and failure checks
 support explicit experimental use. Selected compiler input now has bounded

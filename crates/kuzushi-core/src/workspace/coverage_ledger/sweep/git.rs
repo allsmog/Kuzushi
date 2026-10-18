@@ -8,12 +8,20 @@ use std::time::Duration;
 const MAX_GIT_OUTPUT_BYTES: usize = 2 * 1024 * 1024;
 const GIT_TIMEOUT: Duration = Duration::from_secs(10);
 
-pub(super) fn metadata(target: &Path) -> Result<RunTargetGitMetadata> {
-    let sha = text_output(target, &["rev-parse", "--verify", "HEAD^{commit}"])?;
-    let branch = text_output(target, &["branch", "--show-current"])?;
+pub(super) fn metadata(
+    target: &Path,
+    cancellation: Option<&crate::ScanCancellation>,
+) -> Result<RunTargetGitMetadata> {
+    let sha = text_output(
+        target,
+        &["rev-parse", "--verify", "HEAD^{commit}"],
+        cancellation,
+    )?;
+    let branch = text_output(target, &["branch", "--show-current"], cancellation)?;
     let status = output(
         target,
         &["status", "--porcelain=v1", "-z", "--untracked-files=normal"],
+        cancellation,
     )?;
     anyhow::ensure!(
         status.status.success(),
@@ -26,8 +34,12 @@ pub(super) fn metadata(target: &Path) -> Result<RunTargetGitMetadata> {
     })
 }
 
-fn text_output(target: &Path, args: &[&str]) -> Result<String> {
-    let result = output(target, args)?;
+fn text_output(
+    target: &Path,
+    args: &[&str],
+    cancellation: Option<&crate::ScanCancellation>,
+) -> Result<String> {
+    let result = output(target, args, cancellation)?;
     anyhow::ensure!(
         result.status.success(),
         "sweep requires readable Git metadata"
@@ -38,7 +50,12 @@ fn text_output(target: &Path, args: &[&str]) -> Result<String> {
         .to_string())
 }
 
-pub(super) fn whole_repo_diff(target: &Path, from: &str, to: &str) -> Result<Option<Vec<String>>> {
+pub(super) fn whole_repo_diff(
+    target: &Path,
+    from: &str,
+    to: &str,
+    cancellation: Option<&crate::ScanCancellation>,
+) -> Result<Option<Vec<String>>> {
     if !valid_revision(from) {
         return Ok(None);
     }
@@ -53,6 +70,7 @@ pub(super) fn whole_repo_diff(target: &Path, from: &str, to: &str) -> Result<Opt
             &format!("{from}..{to}"),
             "--",
         ],
+        cancellation,
     )?;
     if !output.status.success() {
         return Ok(None);
@@ -64,7 +82,11 @@ fn valid_revision(value: &str) -> bool {
     !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-fn output(target: &Path, args: &[&str]) -> Result<Output> {
+fn output(
+    target: &Path,
+    args: &[&str],
+    cancellation: Option<&crate::ScanCancellation>,
+) -> Result<Output> {
     let mut command = Command::new("git");
     command
         .env("GIT_OPTIONAL_LOCKS", "0")
@@ -72,11 +94,12 @@ fn output(target: &Path, args: &[&str]) -> Result<Output> {
         .arg(target)
         .args(["-c", "core.fsmonitor=false"])
         .args(args);
-    crate::bounded_subprocess::output_with_limits_and_control(
+    crate::bounded_subprocess::output_with_limits_and_cancellation(
         &mut command,
         "coverage Git inspection",
         MAX_GIT_OUTPUT_BYTES,
         64 * 1024,
+        cancellation,
         GIT_TIMEOUT,
     )
 }

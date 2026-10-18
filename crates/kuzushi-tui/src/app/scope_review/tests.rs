@@ -10,6 +10,7 @@ mod file_boundaries;
 mod findings;
 mod source;
 mod suggestion;
+mod workload;
 
 #[test]
 fn explicit_shared_context_copy_and_removal_use_prepared_dispatch_without_work() {

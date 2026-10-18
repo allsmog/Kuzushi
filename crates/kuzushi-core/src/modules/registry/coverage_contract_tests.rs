@@ -95,6 +95,46 @@ fn seed(workspace: &WorkspaceTarget) -> String {
 }
 
 #[test]
+fn cancelled_sweep_cannot_advance_historical_baselines() {
+    let root = owned_repository();
+    let workspace = WorkspaceTarget::new(root.path()).unwrap();
+    seed(&workspace);
+    git(
+        root.path(),
+        &[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "Owned metadata revision",
+        ],
+    );
+    let config = V2Config::default();
+    let cancellation = crate::ScanCancellation::default();
+    let mut ctx = context(&config, &workspace);
+    ctx.cancellation = Some(&cancellation);
+    let registry = ModuleRegistry::with_v2_builtins();
+    let prepared = registry
+        .prepare_dispatch_input("coverage:sweep", json!({"writeSkips":true}), &ctx, None)
+        .unwrap()
+        .authorize_explicit_headless();
+    cancellation.cancel();
+    let result = registry.dispatch_prepared_input_with_runtime(prepared, &ctx, None);
+    let rows = CoverageLedger::open_if_exists(root.path())
+        .unwrap()
+        .unwrap()
+        .all_baselines()
+        .unwrap();
+    assert_eq!(rows.len(), 1, "Cancellation must preserve historical rows");
+    assert!(format!("{:#}", result.unwrap_err()).contains("cancel"));
+}
+
+#[test]
 fn coverage_descriptors_are_operational_and_cannot_complete_map() {
     let registry = ModuleRegistry::with_v2_builtins();
     for name in ["coverage:baselines", "coverage:sweep", "coverage:recommend"] {

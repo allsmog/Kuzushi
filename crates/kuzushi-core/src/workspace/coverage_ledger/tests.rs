@@ -5,6 +5,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+mod cancellation;
 mod read_only;
 mod source_validity;
 

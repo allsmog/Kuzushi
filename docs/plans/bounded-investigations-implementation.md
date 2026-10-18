@@ -768,11 +768,11 @@ and three pending human judgments. This closes that concrete implementation gap
 without qualifying the complete operator experience or closing a broad milestone.
 
 - [x] Bounded iterative inventory and inventory-derived scope suggestions. See [acceptance evidence](../assessments/bounded-inventory-acceptance-2026-10-17.md).
-- [ ] Registry-derived per-tool functional matrix and curated phase readiness.
+- [ ] Registry-derived per-tool functional matrix and curated phase readiness. [Coverage cancellation and current catalog evidence](../assessments/coverage-cancellation-2026-10-18.md) repair a supported path and refresh 118 visible descriptor rows; broader qualification remains open.
 - [x] Explicit allowance, durable reservations, and honest unknown-cost states. See [acceptance evidence](../assessments/spending-control-acceptance-2026-10-17.md).
 - [x] Accepted context references independent of the global active model. See [acceptance evidence](../assessments/immutable-context-acceptance-2026-10-17.md).
 - [x] Finite study plans with three-pass defaults and restart recovery. See [acceptance evidence](../assessments/finite-study-acceptance-2026-10-17.md).
-- [ ] Optional AI scope proposals, coverage checks, and TUI scope editing.
+- [ ] Optional AI scope proposals, coverage checks, and TUI scope editing. [Workload previews](../assessments/scope-workload-preview-2026-10-18.md) now expose all-boundary and selected-study job counts before approval; broader qualification remains open.
 - [ ] Comparable context experiments and complete observation provenance.
 - [ ] Reversible review relationships and accepted reusable lessons.
 - [ ] Complete TUI journey, report, layout and recovery verification.

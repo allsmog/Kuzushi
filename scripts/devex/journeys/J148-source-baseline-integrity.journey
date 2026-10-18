@@ -65,8 +65,6 @@ expect-not: Map ✓
 require-shell: python3 -B @REPO/scripts/devex/fixtures/source_baselines.py @TMP_TARGET @ART after
 ask: Does a same-SHA edit remain unverified, refuse skip writes and then disclose the changed source after an owned commit, without creating investigation work?
 keys: C-c
-require-live-snap: 10 CONFIRM SESSION EXIT | explicit-quit
-keys: y
 require-exit: 10
 env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
 launch: --target @TMP_TARGET
@@ -82,6 +80,4 @@ expect-not: Map ✓
 require-shell: python3 -B @REPO/scripts/devex/fixtures/source_baselines.py @TMP_TARGET @ART restarted
 ask: Does no-color restart preserve historical records and require genuine Map work, with zero provider requests, scans, findings and decisions?
 keys: C-c
-require-live-snap: 10 CONFIRM SESSION EXIT | explicit-restart-quit
-keys: y
 require-exit: 10

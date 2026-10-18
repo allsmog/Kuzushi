@@ -72,10 +72,18 @@ impl CoverageLedger {
     /// Latest baseline per (scope, phase), across modes: a `sweep-skip` row
     /// advances the same coverage fact a real scan would.
     pub fn latest_baselines(&self) -> Result<Vec<BaselineRow>> {
+        self.latest_baselines_with_cancellation(None)
+    }
+
+    pub(crate) fn latest_baselines_with_cancellation(
+        &self,
+        cancellation: Option<&crate::ScanCancellation>,
+    ) -> Result<Vec<BaselineRow>> {
         self.query_baselines(
             "SELECT scope_id, phase, mode, run_id, revision_sha, branch, dirty, MAX(ts)
              FROM scan_baselines GROUP BY scope_id, phase
              ORDER BY scope_id, phase",
+            cancellation,
         )
     }
 
@@ -83,10 +91,19 @@ impl CoverageLedger {
         self.query_baselines(
             "SELECT scope_id, phase, mode, run_id, revision_sha, branch, dirty, ts
              FROM scan_baselines ORDER BY scope_id, phase, ts",
+            None,
         )
     }
 
-    fn query_baselines(&self, sql: &str) -> Result<Vec<BaselineRow>> {
+    fn query_baselines(
+        &self,
+        sql: &str,
+        cancellation: Option<&crate::ScanCancellation>,
+    ) -> Result<Vec<BaselineRow>> {
+        super::cancellation::read(&self.conn, cancellation, || self.read_baselines(sql))
+    }
+
+    fn read_baselines(&self, sql: &str) -> Result<Vec<BaselineRow>> {
         let mut statement = self.conn.prepare(sql)?;
         let raw_rows = statement
             .query_map([], RawBaseline::from_row)?
