@@ -125,6 +125,7 @@ impl ShellApp {
 
     fn campaign_view_keybindings(&self) -> Vec<ViewKeybinding> {
         let mut bindings = campaign_keybindings();
+        self.linked_scan_study_bindings(&mut bindings);
         if self.selected_fixed_study_has_ended() {
             if let Some(binding) = bindings
                 .iter_mut()
@@ -134,6 +135,32 @@ impl ShellApp {
             }
         }
         bindings
+    }
+
+    fn linked_scan_study_bindings(&self, bindings: &mut Vec<ViewKeybinding>) {
+        if !self.scan_study_navigation_active() {
+            return;
+        }
+        let label = if self.router.campaign().job_detail {
+            "jobs"
+        } else {
+            "Scan"
+        };
+        for binding in bindings
+            .iter_mut()
+            .filter(|binding| binding.action == ViewHotkeyAction::CampaignBackToList)
+        {
+            binding.label = label.into();
+        }
+        bindings.insert(
+            0,
+            super::view_keybinding_helpers::bind(
+                HotkeyTrigger::Esc,
+                "Esc",
+                label,
+                ViewHotkeyAction::CampaignBackToList,
+            ),
+        );
     }
 
     /// Generic line/edge scrolling applies to scrollable views except those

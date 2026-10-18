@@ -10,6 +10,13 @@ pub(crate) struct DispatcherExit {
 }
 
 impl RuntimeState {
+    pub(crate) fn owned_dispatcher_origin(&self) -> Option<(&std::path::Path, &str)> {
+        self.dispatcher_child.as_ref()?;
+        self.dispatcher_origin
+            .as_ref()
+            .map(|(target, id)| (target.as_path(), id.as_str()))
+    }
+
     pub(crate) fn hold_dispatcher(&mut self, child: Child, target: PathBuf, campaign: String) {
         self.dispatcher_child = Some(child);
         self.dispatcher_origin = Some((target, campaign));

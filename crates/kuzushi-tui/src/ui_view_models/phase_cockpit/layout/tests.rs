@@ -137,6 +137,7 @@ fn phase_presentation_plan_guided_mode_has_one_attention_surface() {
 fn guided_scan_coverage_can_use_the_available_rows_without_acceptance() {
     use crate::ui_view_models::{ScanEngineOutcomeModel, ScanPhaseModel};
     let body = PhaseCockpitBody::Scan(ScanPhaseModel {
+        study: None,
         scope: "service".into(),
         plan: "manual".into(),
         attempt: None,

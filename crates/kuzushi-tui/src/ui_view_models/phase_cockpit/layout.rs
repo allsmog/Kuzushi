@@ -210,7 +210,10 @@ fn compact_reading_focus(
     let focus = stored_focus.filter(|id| {
         matches!(
             id,
-            PhaseSurfaceId::ReviewDetail | PhaseSurfaceId::ScanReceipt | PhaseSurfaceId::ScanDelta
+            PhaseSurfaceId::ReviewDetail
+                | PhaseSurfaceId::ScanReceipt
+                | PhaseSurfaceId::ScanDelta
+                | PhaseSurfaceId::ScanEngines
         )
     })?;
     let (_, visible) = automatic_specs(specs, area);
@@ -371,6 +374,14 @@ fn scan_composition(body: &PhaseCockpitBody) -> Option<Composition> {
     let PhaseCockpitBody::Scan(model) = body else {
         return None;
     };
+    if model.study.is_some() {
+        return Some(Composition::OperationalColumns {
+            left: PhaseSurfaceId::ScanEngines,
+            center: PhaseSurfaceId::ScanDelta,
+            right: PhaseSurfaceId::ScanReceipt,
+            log_strip: None,
+        });
+    }
     model
         .live
         .is_some()

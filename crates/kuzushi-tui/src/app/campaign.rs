@@ -13,6 +13,7 @@ use kuzushi_core::capabilities::campaign::snapshot::{
 use std::path::Path;
 mod dispatcher_results;
 mod observations;
+mod scan_progress;
 
 impl ShellApp {
     pub(crate) fn open_campaign_view(&mut self, requested: Option<String>) {
@@ -146,6 +147,9 @@ impl ShellApp {
     }
 
     fn back_from_campaign_detail(&mut self) -> InputUpdate {
+        if self.restore_scan_study_origin() {
+            return InputUpdate::handled();
+        }
         let deck = self.router.campaign_mut();
         if deck.job_detail {
             deck.job_detail = false;

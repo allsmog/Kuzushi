@@ -23,6 +23,9 @@ pub(super) fn render_scope(
 }
 
 pub(super) fn scope_lines(model: &ScanPhaseModel, width: usize) -> Vec<Line<'static>> {
+    if model.study.is_some() {
+        return super::study::scope_lines(model, width);
+    }
     let mut lines = vec![
         Line::styled(fit(&model.scope, width), theme::primary()),
         Line::styled(fit(&model.plan, width), theme::muted()),
@@ -43,7 +46,11 @@ pub(super) fn render_engines(
     render_lines_pane(
         frame,
         area,
-        "RECORDED ENGINE OUTCOMES",
+        if model.study.is_some() {
+            "STUDY JOBS"
+        } else {
+            "RECORDED ENGINE OUTCOMES"
+        },
         engine_lines(model, area.width.saturating_sub(2) as usize),
         PhaseSurfaceId::ScanEngines,
         state,
@@ -51,6 +58,9 @@ pub(super) fn render_engines(
 }
 
 pub(super) fn engine_lines(model: &ScanPhaseModel, width: usize) -> Vec<Line<'static>> {
+    if model.study.is_some() {
+        return super::study::job_lines(model, width);
+    }
     let mut live = live_scan_lines(model, width);
     if model.engine_outcomes.is_empty() {
         live.push(Line::styled(
@@ -60,15 +70,17 @@ pub(super) fn engine_lines(model: &ScanPhaseModel, width: usize) -> Vec<Line<'st
         return live;
     }
     if !live.is_empty() {
-        live.extend(engine_outcome_lines(model, width));
+        live.extend(engine_outcome_lines(&model.engine_outcomes, width));
         return live;
     }
-    engine_outcome_lines(model, width)
+    engine_outcome_lines(&model.engine_outcomes, width)
 }
 
-fn engine_outcome_lines(model: &ScanPhaseModel, width: usize) -> Vec<Line<'static>> {
-    model
-        .engine_outcomes
+pub(super) fn engine_outcome_lines(
+    outcomes: &[ScanEngineOutcomeModel],
+    width: usize,
+) -> Vec<Line<'static>> {
+    outcomes
         .iter()
         .flat_map(|outcome| {
             let mut lines = vec![engine_line(outcome, width)];
@@ -149,7 +161,11 @@ pub(super) fn render_findings(
     render_lines_pane(
         frame,
         area,
-        "FINDING / ARTIFACT DELTA",
+        if model.study.is_some() {
+            "APPROVED STUDY"
+        } else {
+            "FINDING / ARTIFACT DELTA"
+        },
         finding_delta_lines(model, area.width.saturating_sub(2) as usize),
         PhaseSurfaceId::ScanDelta,
         state,
@@ -157,6 +173,9 @@ pub(super) fn render_findings(
 }
 
 pub(super) fn finding_delta_lines(model: &ScanPhaseModel, width: usize) -> Vec<Line<'static>> {
+    if model.study.is_some() {
+        return super::study::summary_lines(model, width);
+    }
     let Some(attempt) = model.attempt.as_ref() else {
         return vec![Line::styled(
             "delta unavailable before a Scan run",
@@ -229,6 +248,7 @@ mod tests {
     #[test]
     fn partial_engine_detail_remains_readable_at_narrow_widths() {
         let model = ScanPhaseModel {
+            study: None,
             scope: "service".into(),
             plan: "manual".into(),
             attempt: None,
@@ -260,6 +280,7 @@ mod tests {
     #[test]
     fn live_scan_line_names_the_run_and_defers_output_to_run_focus() {
         let model = ScanPhaseModel {
+            study: None,
             scope: "target".to_string(),
             plan: "manual".to_string(),
             attempt: None,
@@ -286,6 +307,7 @@ mod tests {
     #[test]
     fn delta_pane_renders_severity_chips_between_delta_and_artifacts() {
         let model = ScanPhaseModel {
+            study: None,
             scope: "target".to_string(),
             plan: "manual".to_string(),
             attempt: Some(crate::ui_view_models::ScanAttemptModel {
@@ -320,6 +342,7 @@ mod tests {
 
         assert!(text.contains("1 critical · 2 medium"), "{text}");
         let empty_model = ScanPhaseModel {
+            study: None,
             attempt: model.attempt.clone().map(|mut attempt| {
                 attempt.severity_counts.clear();
                 attempt
@@ -382,6 +405,7 @@ mod tests {
 
     fn folded_scan_model() -> ScanPhaseModel {
         ScanPhaseModel {
+            study: None,
             scope: "target".to_string(),
             plan: "manual".to_string(),
             attempt: Some(crate::ui_view_models::ScanAttemptModel {
@@ -439,7 +463,11 @@ pub(super) fn render_receipt(
     render_lines_pane(
         frame,
         area,
-        "SCAN RECEIPT",
+        if model.study.is_some() {
+            "RECORDED RESULT"
+        } else {
+            "SCAN RECEIPT"
+        },
         receipt_lines(model, area.width.saturating_sub(2) as usize),
         PhaseSurfaceId::ScanReceipt,
         state,
@@ -448,6 +476,9 @@ pub(super) fn render_receipt(
 
 pub(super) fn receipt_lines(model: &ScanPhaseModel, width: usize) -> Vec<Line<'static>> {
     let Some(attempt) = model.attempt.as_ref() else {
+        if model.study.is_some() {
+            return super::study::receipt_lines(model, width);
+        }
         return empty_state_panel(
             "no Scan receipt",
             &["live progress belongs in Run Focus"],
@@ -464,7 +495,11 @@ pub(super) fn receipt_lines(model: &ScanPhaseModel, width: usize) -> Vec<Line<'s
 }
 
 pub(super) fn compact_summary_lines(model: &ScanPhaseModel, width: usize) -> Vec<Line<'static>> {
-    let mut lines = formatted_compact_summary_lines(model, width);
+    if model.study.is_some() {
+        return super::study::summary_lines(model, width);
+    }
+    let mut lines = super::study::summary_lines(model, width);
+    lines.extend(formatted_compact_summary_lines(model, width));
     if model
         .engine_outcomes
         .iter()

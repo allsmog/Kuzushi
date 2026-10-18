@@ -43,6 +43,7 @@ fn multi_run_attempt_names_its_additional_runs() {
 
 fn scan(outcome: Option<&str>) -> ScanPhaseModel {
     ScanPhaseModel {
+        study: None,
         scope: "a, b, c".into(),
         plan: "fixed three-scope plan".into(),
         attempt: outcome.map(attempt),

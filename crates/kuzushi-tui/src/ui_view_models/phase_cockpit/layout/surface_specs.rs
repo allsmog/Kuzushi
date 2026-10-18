@@ -57,6 +57,14 @@ fn map_readiness_state(model: &MapPhaseModel) -> SurfaceState {
 }
 
 fn scan_specs(model: &ScanPhaseModel) -> Vec<PhaseSurfaceSpec> {
+    if model.study.is_some() {
+        return vec![
+            scrollable(PhaseSurfaceId::ScanDelta),
+            scrollable(PhaseSurfaceId::ScanEngines),
+            scrollable(PhaseSurfaceId::ScanReceipt),
+            static_surface(PhaseSurfaceId::ScanScope),
+        ];
+    }
     let mut specs = vec![scan_primary_spec(model)];
     push_if(
         &mut specs,

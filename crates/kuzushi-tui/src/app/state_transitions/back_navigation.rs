@@ -30,8 +30,13 @@ impl ShellApp {
 
     fn restore_navigation_origin(&mut self) -> bool {
         self.close_model_picker_if_open()
+            || self.restore_linked_reader_origin()
+            || self.restore_contextual_surface_origin()
+    }
+
+    fn restore_linked_reader_origin(&mut self) -> bool {
+        self.restore_scan_study_origin()
             || self.restore_scope_findings_origin()
             || self.restore_dfd_review_origin()
-            || self.restore_contextual_surface_origin()
     }
 }

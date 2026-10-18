@@ -1,11 +1,27 @@
 # Bounded investigation acceptance ledger
 
+The [approved study progress checkpoint](../assessments/approved-study-progress-2026-10-17.md)
+shows finite recorded Scan counts and opens the exact study with `c` in Navigate
+mode. Returning preserves the Scan origin and draft without starting work.
+All 334 distinct focused checks, the workspace build, Core/TUI Clippy and ten
+repository gates pass. J121 has 185 machine passes, zero failures and 115 capture
+pairs. Nineteen human judgments and all nine broad milestones remain open.
+Transport is intercepted; no live request is added.
+
+The [unpublished Scan receipt repair](../assessments/unpublished-scan-receipts-2026-10-17.md)
+keeps completed-pass findings readable while a sibling's result is unpublished.
+Finished or damaged evidence still fails authentication; no work is restarted.
+All 90 focused checks and the workspace build pass. J121 has 179 machine
+passes, zero failures and 19 pending human judgments, with held-request draft,
+counter, membership and phase checks. No live request is added. All nine broad
+milestones remain open.
+
 The [investigation status checkpoint](../assessments/investigation-status-2026-10-17.md)
 simplifies phase footers and binds Report's counter to its authenticated viewed
 investigation. There are 99 distinct focused passes and J121 has 176 machine
 passes, zero failures and 19 pending human judgments. Visual inspection found
-an active Scan receipt error that remains unfixed and is recorded in the
-assessment. No new live request is added; all nine broad milestones stay open.
+an active Scan receipt error subsequently addressed by the repair above.
+No new live request is added; all nine broad milestones stay open.
 
 The [recorded scope findings qualification](../assessments/recorded-scope-findings-2026-10-17.md)
 adds authenticated accepted-scope filters across shared dispatch, CLI and TUI.
@@ -444,8 +460,8 @@ original requirements remain open. No new live model request is made.
 | Finish/report, revise remaining work or approve a specific new allowance; no implicit cap doubling or review downgrade | J121 retains an admitted cancellation, requires explicit attempt approval, stops at two completed passes and resumes after an explicit six-to-seven-call revision | Scoped. Approval does not approve later proposals or silently increase attempt bounds. |
 | Versioned brief, scope proposal, immutable context reference, study plan, reservation and accepted lesson artifacts | Existing campaign/workspace/CAS/findings/spend contracts; documented additive migrations | Scoped. Keep shared prepared dispatch and public module/artifact compatibility; do not add parallel orchestration. |
 | Keyboard-only journey, visible actions, palette/composer ownership, draft/selection/scroll continuity, six sizes and plain/no-color | J121/J206 and focused input, context, findings and recovery tests; [Review readers](../assessments/review-reader-controls-2026-10-15.md) adds distinct groups/goals controls, retained draft and paste reading, protected filter drafting, visible bulk return and native reversible triage | Scoped. Per-journey human judgments remain pending; machine state checks are not operator delight approval. |
-| Typing/scroll/resize under active work; background focus and cancellation | Logs and inventory probes; current Review probe; warmed Review renderer tests | Scoped. [Current responsiveness evidence](../assessments/active-review-input-2026-10-14.md) covers one native workload and warmed local rendering, not every active surface or physical/reference latency. |
-| One complete journey including cancellation, partial work, exhausted allowance and restart | [Current J121 evidence](../assessments/shared-allowance-chrome-2026-10-17.md): 154 machine passes, zero failures, 108 capture pairs, one retained cancellation and no live requests | Scoped. This named case covers cancellation, partial Report, explicit retry and call approvals, final acceptance and restart. Eighteen current human judgments, historical attribution and other failure combinations remain open. J275 separately qualifies cumulative attempt presentation on retained reader history. |
+| Typing/scroll/resize under active work; background focus and cancellation | Logs and inventory probes, warmed Review tests, and [approved study progress](../assessments/approved-study-progress-2026-10-17.md) through study navigation, palette return and 40-column resize | Scoped. Native checks retain the original dispatcher/request, draft, fixed queue, completed-pass findings and accounting. Recorded queue states are not process-liveness claims. This does not qualify every active surface or physical/reference latency. |
+| One complete journey including cancellation, partial work, exhausted allowance and restart | [Current J121 evidence](../assessments/approved-study-progress-2026-10-17.md): 185 machine passes, zero failures, 115 capture pairs, one retained cancellation and no live requests | Scoped. The held request preserves completed-pass membership, finite counts, study navigation, draft and call accounting without a refresh error or premature completion. Partial Report, explicit attempt/call approvals, final acceptance and restart remain covered. Nineteen human judgments, historical attribution and other failure combinations remain open. J275 separately qualifies cumulative attempt presentation on retained reader history. |
 | DFD links to context/evidence/findings/scoped actions and understandable next proposals | Map/DFD view models, linked readers and scope/proposal actions | Scoped. Reconcile all concrete element/action links and human diagram usefulness. |
 | Sequential real-model validation under approved allowance | [Owned application Scan](../assessments/live-application-scan-2026-10-15.md), [standard Review](../assessments/live-application-review-2026-10-15.md), [source-input Review](../assessments/live-source-review-2026-10-15.md) and [supporting-code Review](../assessments/live-supporting-review-2026-10-15.md): three Scan calls and three separately approved Review calls, with durable observations, opinions, export and restart | Scoped. Fourteen cumulative experiment requests used, reaching the approved maximum. All six current-investigation calls are settled, including three protected Review calls. No capacity or follow-up approval remains. One supporting-code opinion establishes the source path while disclosing unproven deployed exposure; general model usefulness and full investigation qualification remain open. |
 | Focused checks, shared dispatch, workspace build, risk proxy and exact summary verification | Named assessment receipts and signed clean-commit verification | Scoped. Local quick checks do not prove the full Rust suite, CI/platform matrix, release qualification or the complete product outcome. |

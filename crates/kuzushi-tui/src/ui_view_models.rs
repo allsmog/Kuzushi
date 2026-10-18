@@ -280,8 +280,6 @@ pub(crate) use permission_policy::{
     permission_policy_model, PermissionPolicyModel, PermissionPolicyRow,
 };
 pub(crate) use phase_cockpit::investigation_verify_command;
-#[cfg(test)]
-pub(crate) use phase_cockpit::phase_cockpit_model;
 pub(crate) use phase_cockpit::{
     map_context_fit, map_gallery_is_canvas, phase_cockpit_model_for_phase, phase_presentation_plan,
     phase_surface_specs, ready_map_gallery_is_primary, AttentionMode, ChainArtifactsModel,
@@ -291,9 +289,11 @@ pub(crate) use phase_cockpit::{
     PhasePresentationPlan, PhaseResultCardModel, PhaseSurfaceId, PlannedPhaseSurface,
     ProofReplayModel, ProvePhaseModel, RemediationLifecycleModel, RemediationLifecycleStage,
     RemediationLoadState, ReviewPhaseModel, ScanAttemptModel, ScanEngineOutcomeModel,
-    ScanPhaseModel, SelectionDisclosureModel, SurfaceInteraction, SurfaceRole, SurfaceState,
-    TraceEvidenceModel, TraceHopModel,
+    ScanPhaseModel, ScanStudyQueue, SelectionDisclosureModel, SurfaceInteraction, SurfaceRole,
+    SurfaceState, TraceEvidenceModel, TraceHopModel,
 };
+#[cfg(test)]
+pub(crate) use phase_cockpit::{phase_cockpit_model, ScanStudyModel};
 pub(crate) use plan_card::{plan_card_model, PlanCardModel, PlanChangeRow};
 pub(crate) use planning_overview::{
     enter_plan, format_relative_age, latest_cached_modified, row_outcome, workspace_history,

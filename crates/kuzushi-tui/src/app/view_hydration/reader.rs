@@ -106,7 +106,21 @@ fn read_lesson_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydrat
 }
 
 fn read_result_document_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydrationValue> {
+    read_investigation_value(target, key).or_else(|| read_recorded_document_value(target, key))
+}
+
+fn read_investigation_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydrationValue> {
     match key {
+        ViewHydrationKey::ScanStudyProgress { campaign_id } => {
+            Some(ViewHydrationValue::ScanStudyProgress(
+                kuzushi_core::capabilities::campaign::snapshot::load_approved_scan_snapshot(
+                    target,
+                    campaign_id,
+                )
+                .map(Arc::new)
+                .map_err(|error| format!("{error:#}")),
+            ))
+        }
         ViewHydrationKey::InvestigationAllowance { run_refs } => {
             Some(ViewHydrationValue::InvestigationAllowance(
                 kuzushi_core::run_artifacts::load_investigation_allowance_for_runs(
@@ -116,6 +130,15 @@ fn read_result_document_value(target: &Path, key: &ViewHydrationKey) -> Option<V
                 .map_err(|error| format!("{error:#}")),
             ))
         }
+        _ => None,
+    }
+}
+
+fn read_recorded_document_value(
+    target: &Path,
+    key: &ViewHydrationKey,
+) -> Option<ViewHydrationValue> {
+    match key {
         ViewHydrationKey::RunRequestContext { run_id } => {
             Some(ViewHydrationValue::RunRequestContext(
                 kuzushi_core::run_artifacts::load_run_request_context(target, run_id)

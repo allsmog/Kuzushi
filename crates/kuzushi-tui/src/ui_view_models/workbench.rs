@@ -311,12 +311,26 @@ fn command_bar_hints(
     let mut hints = page_command_bar_hints(app, page);
     customize_phase_hints(&mut hints, app, page, selection);
     qualify_map_zoom_hint(&mut hints, app, page);
+    qualify_scan_study_hint(&mut hints, app, page);
     if page == WorkbenchPage::Prove && !selection.has_detail {
         hints[0] = review_page_hint("choose a finding in Review");
     }
     append_report_hint(&mut hints, report_cta);
     append_phase_planner_hint(&mut hints, app, page);
     hints
+}
+
+fn qualify_scan_study_hint(hints: &mut [WorkbenchHint], app: &ShellApp, page: WorkbenchPage) {
+    if page != WorkbenchPage::Scan || app.scan_study_progress_key().is_none() {
+        return;
+    }
+    let Some(first) = hints.first_mut() else {
+        return;
+    };
+    *first = WorkbenchHint {
+        verb: Cow::Owned(workbench_navigate_control_hint(app, "c")),
+        label: Cow::Borrowed("study jobs"),
+    };
 }
 
 fn qualify_map_zoom_hint(hints: &mut [WorkbenchHint], app: &ShellApp, page: WorkbenchPage) {

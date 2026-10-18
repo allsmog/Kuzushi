@@ -1424,7 +1424,15 @@ impl ShellApp {
 
     fn dismiss_notice_or_leave_contextual_surface(&mut self, key: KeyEvent) -> bool {
         self.handle_notice_dismiss_key(key)
+            || self.handle_scan_study_back_key(key)
             || self.collapse_dfd_focus_or_restore_contextual_origin()
+    }
+
+    fn handle_scan_study_back_key(&mut self, key: KeyEvent) -> bool {
+        if !self.scan_study_navigation_active() {
+            return false;
+        }
+        self.handle_view_hotkey(key).handled
     }
 
     fn contextual_navigation_owns_keys(&self) -> bool {

@@ -14,8 +14,12 @@ pub fn campaign_plan_digest(root: &Path, id: &str) -> Result<String> {
 /// against today's source, option store or globally active context.
 pub fn validate_campaign_report_approval(root: &Path, plan: &ApprovedWorkPlanV1) -> Result<()> {
     let document = read_bounded_plan(root, &plan.campaign_id)?;
+    validate_report_plan(&document, plan)
+}
+
+pub(super) fn validate_report_plan(document: &Value, plan: &ApprovedWorkPlanV1) -> Result<()> {
     anyhow::ensure!(
-        digest_serializable(&document)? == plan.plan_sha256,
+        digest_serializable(document)? == plan.plan_sha256,
         "study plan changed after approval"
     );
     let jobs = document["jobs"]

@@ -30,6 +30,7 @@ fn is_movement_hotkey(action: ViewHotkeyAction) -> bool {
     matches!(
         action,
         WorkbenchCyclePane
+            | WorkbenchStudyJobs
             | WorkbenchCyclePanePrev
             | ReplayNextPage
             | ReplayPreviousPage
@@ -144,6 +145,9 @@ impl ShellApp {
         if let Some(update) = self.apply_workbench_draft_hotkey(action) {
             return Some(update);
         }
+        if let Some(update) = self.apply_workbench_workflow_hotkey(action) {
+            return Some(update);
+        }
         match action {
             ViewHotkeyAction::WorkbenchCyclePane => self.cycle_workbench_pane(false),
             ViewHotkeyAction::WorkbenchCyclePanePrev => self.cycle_workbench_pane(true),
@@ -157,8 +161,6 @@ impl ShellApp {
             ViewHotkeyAction::WorkbenchTogglePaneZoom => self.toggle_workbench_pane_zoom(),
             ViewHotkeyAction::WorkbenchPageNext => self.cycle_investigation_surface(false),
             ViewHotkeyAction::WorkbenchPagePrev => self.cycle_investigation_surface(true),
-            ViewHotkeyAction::WorkbenchReport => self.open_report_from_current_origin(),
-            ViewHotkeyAction::WorkbenchPlanStudy => self.open_batch_scan_config(None),
             ViewHotkeyAction::WorkbenchPage(page) => self.set_workbench_page(page),
             ViewHotkeyAction::WorkbenchCluster => self.open_workbench_coverage_clusters(),
             ViewHotkeyAction::WorkbenchBacklogToggle => self.toggle_review_backlog_preset(),
@@ -175,6 +177,16 @@ impl ShellApp {
             ViewHotkeyAction::WorkbenchBacklogSeverityCycle => self.cycle_backlog_severity_filter(),
             ViewHotkeyAction::WorkbenchBacklogToolCycle => self.cycle_backlog_tool_filter(),
             ViewHotkeyAction::Back if self.focus_workbench_findings_before_back() => {}
+            _ => return None,
+        }
+        Some(InputUpdate::handled())
+    }
+
+    fn apply_workbench_workflow_hotkey(&mut self, action: ViewHotkeyAction) -> Option<InputUpdate> {
+        match action {
+            ViewHotkeyAction::WorkbenchPlanStudy => self.open_batch_scan_config(None),
+            ViewHotkeyAction::WorkbenchStudyJobs => self.open_current_scan_study(),
+            ViewHotkeyAction::WorkbenchReport => self.open_report_from_current_origin(),
             _ => return None,
         }
         Some(InputUpdate::handled())

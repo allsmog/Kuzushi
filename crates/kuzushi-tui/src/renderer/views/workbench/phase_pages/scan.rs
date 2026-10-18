@@ -4,6 +4,7 @@ use ratatui::layout::{Constraint, Direction, Layout};
 
 mod content;
 mod format;
+mod study;
 
 use content::{
     compact_summary_lines, engine_lines, finding_delta_lines, receipt_lines, render_engines,
@@ -36,6 +37,9 @@ pub(super) fn render(
 }
 
 pub(super) fn plain_lines(model: &ScanPhaseModel, width: usize) -> Vec<Line<'static>> {
+    if model.study.is_some() {
+        return study::plain_lines(model, width);
+    }
     let mut lines = divider_lines("SCOPE / PLAN", scope_lines(model, width), width);
     lines.extend(divider_lines(
         "ENGINE OUTCOMES",

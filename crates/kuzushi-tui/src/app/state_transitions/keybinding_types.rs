@@ -91,6 +91,7 @@ pub(crate) enum ViewHotkeyAction {
     WorkbenchOpen,
     WorkbenchPageNext,
     WorkbenchPlanStudy,
+    WorkbenchStudyJobs,
     WorkbenchReport,
     WorkbenchPagePrev,
     WorkbenchPage(WorkbenchPage),

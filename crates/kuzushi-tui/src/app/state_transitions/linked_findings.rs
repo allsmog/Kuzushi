@@ -20,6 +20,12 @@ pub(crate) struct LinkedFindingsOrigin {
     pub(super) batch_config: Option<Box<crate::app::BatchScanConfig>>,
 }
 
+impl LinkedFindingsOrigin {
+    pub(crate) fn belongs_to_target(&self, target: Option<&std::path::Path>) -> bool {
+        target == Some(self.target.as_path())
+    }
+}
+
 impl ShellApp {
     pub(crate) fn capture_linked_findings_origin(
         &mut self,

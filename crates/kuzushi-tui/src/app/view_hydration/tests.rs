@@ -102,6 +102,9 @@ impl ViewArtifactReader for CountingReader {
 
 pub(super) fn missing_value(key: &ViewHydrationKey) -> ViewHydrationValue {
     match key {
+        ViewHydrationKey::ScanStudyProgress { .. } => {
+            ViewHydrationValue::ScanStudyProgress(Err("missing fixture study".into()))
+        }
         ViewHydrationKey::InvestigationAllowance { .. } => {
             ViewHydrationValue::InvestigationAllowance(Ok(None))
         }

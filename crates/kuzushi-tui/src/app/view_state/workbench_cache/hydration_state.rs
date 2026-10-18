@@ -7,6 +7,7 @@ impl WorkbenchCache {
             HydrationGroup::Completion => self.completion_hydration_needed(target, key),
             HydrationGroup::Run => self.run_hydration_needed(target, key),
             HydrationGroup::Allowance => self.investigation_allowance_needs_refresh(target, key),
+            HydrationGroup::ScanStudy => self.scan_study_needs_refresh(target, key),
             HydrationGroup::StudyUsage => self.study_usage_hydration_needed(target, key),
             HydrationGroup::Project => self.project_hydration_needed(target, key),
             HydrationGroup::Workspace => self.workspace_hydration_needed(target, key),
@@ -30,6 +31,7 @@ impl WorkbenchCache {
             self.record_failed_study_usage(failure);
             self.record_failed_review_source(failure);
             self.record_failed_allowance_read(failure);
+            self.record_failed_scan_study(failure);
             self.record_failed_report_read(failure);
             if let ViewHydrationKey::RunRequestContext { run_id } = &failure.key {
                 self.store_run_request_context(
@@ -57,6 +59,7 @@ impl WorkbenchCache {
             HydrationGroup::Completion => self.apply_completion_hydration(target, key, value),
             HydrationGroup::Run => self.apply_run_hydration(target, key, value),
             HydrationGroup::Allowance => self.apply_allowance_hydration(target, key, value),
+            HydrationGroup::ScanStudy => self.apply_scan_study_hydration(target, key, value),
             HydrationGroup::StudyUsage => self.apply_study_usage_hydration(target, key, value),
             HydrationGroup::Project => self.apply_project_hydration(target, key, value),
             HydrationGroup::Workspace => self.apply_workspace_hydration(target, key, value),
@@ -759,6 +762,7 @@ impl WorkbenchCache {
 enum HydrationGroup {
     Transient,
     Allowance,
+    ScanStudy,
     Completion,
     Run,
     StudyUsage,
@@ -772,6 +776,7 @@ fn hydration_group(key: &ViewHydrationKey) -> HydrationGroup {
     match key {
         Key::FindingsProjection(_) => HydrationGroup::Transient,
         Key::InvestigationAllowance { .. } => HydrationGroup::Allowance,
+        Key::ScanStudyProgress { .. } => HydrationGroup::ScanStudy,
         Key::StudyHistory
         | Key::StudyUsageCatalogue
         | Key::StudyUsageRun { .. }

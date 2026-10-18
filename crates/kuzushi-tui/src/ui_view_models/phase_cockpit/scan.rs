@@ -9,6 +9,7 @@ use kuzushi_core::{RunSummaryEntry, WorkflowPhase};
 
 mod attempt;
 mod receipts;
+pub(crate) mod study;
 mod summaries;
 
 use attempt::{
@@ -23,11 +24,13 @@ pub(super) fn scan_phase_model(app: &ShellApp) -> ScanPhaseModel {
         .unwrap_or_else(|| "no target selected".to_string());
     let summary_index = scan_summary_entries(app);
     let entries = &summary_index.entries;
+    let study = study::scan_study_model(app);
     let projection = durable_attempt(app)
         .map(|(record, disposition)| durable_projection(app, record, disposition, entries))
-        .or_else(|| legacy_projection(app, entries));
+        .or_else(|| legacy_projection(app, entries, study.is_none()));
     let has_projection = projection.is_some();
     ScanPhaseModel {
+        study,
         scope: projection
             .as_ref()
             .map(|projection| projection.scope.clone())
@@ -130,7 +133,14 @@ fn durable_projection(
     }
 }
 
-fn legacy_projection(app: &ShellApp, entries: &[RunSummaryEntry]) -> Option<ScanProjection> {
+fn legacy_projection(
+    app: &ShellApp,
+    entries: &[RunSummaryEntry],
+    enabled: bool,
+) -> Option<ScanProjection> {
+    if !enabled {
+        return None;
+    }
     let summary = entries.iter().find_map(terminal_scan_summary)?;
     Some(ScanProjection {
         scope: "not recorded".into(),

@@ -10,6 +10,8 @@ use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use std::path::Path;
 mod labels;
+mod progress;
+pub use progress::load_approved_scan_snapshot;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CampaignSnapshot {
@@ -103,21 +105,30 @@ pub fn load_campaign_snapshot(root: &Path, campaign_id: &str) -> Result<Campaign
     let plan = read_json_file(&campaign_plan_path(root, campaign_id))
         .with_context(|| format!("campaign {campaign_id:?} has no readable plan"))?;
     let queue_doc = load_queue_doc(root, campaign_id)?;
+    snapshot_from_documents(root, campaign_id, &plan, &queue_doc)
+}
+
+fn snapshot_from_documents(
+    root: &Path,
+    campaign_id: &str,
+    plan: &Value,
+    queue_doc: &Value,
+) -> Result<CampaignSnapshot> {
     let queue = queue_doc
         .get("jobs")
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
-    let jobs = plan_job_rows(&plan)
-        .map(|row| job_snapshot(root, &plan, row, &queue))
+    let jobs = plan_job_rows(plan)
+        .map(|row| job_snapshot(root, plan, row, &queue))
         .collect::<Vec<_>>();
     let total_cost_usd = jobs.iter().filter_map(|job| job.cost_usd).sum::<f64>() + 0.0;
     let provider_spend_unresolved = jobs.iter().any(|job| job.provider_spend_unresolved);
     Ok(CampaignSnapshot {
         campaign_id: campaign_id.to_string(),
         kind: plan.get("kind").and_then(Value::as_str).map(str::to_string),
-        requested_workers: usize_field(&plan, "requestedWorkers"),
-        effective_workers: usize_field(&plan, "effectiveWorkers"),
+        requested_workers: usize_field(plan, "requestedWorkers"),
+        effective_workers: usize_field(plan, "effectiveWorkers"),
         parallel_safety_reason: plan
             .get("parallelSafety")
             .and_then(|value| string_field(value, "clampReason")),

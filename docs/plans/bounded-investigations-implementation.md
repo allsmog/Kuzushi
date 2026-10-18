@@ -1,11 +1,27 @@
 # Bounded investigations implementation
 
+The [approved study progress checkpoint](../assessments/approved-study-progress-2026-10-17.md)
+shows finite recorded Scan counts and opens the exact study with `c` in Navigate
+mode. Returning preserves the Scan origin and draft without starting work.
+All 334 distinct focused checks, the workspace build, Core/TUI Clippy and ten
+repository gates pass. J121 has 185 machine passes, zero failures and 115 capture
+pairs. Nineteen human judgments and all nine broad milestones remain open.
+Transport is intercepted; no live request is added.
+
+The [unpublished Scan receipt repair](../assessments/unpublished-scan-receipts-2026-10-17.md)
+keeps completed-pass findings readable while a sibling's result is unpublished.
+Finished or damaged evidence still fails authentication; no work is restarted.
+All 90 focused checks and the workspace build pass. J121 has 179 machine
+passes, zero failures and 19 pending human judgments, with held-request draft,
+counter, membership and phase checks. No live request is added. All nine broad
+milestones remain open.
+
 The [investigation status checkpoint](../assessments/investigation-status-2026-10-17.md)
 simplifies phase footers and binds Report's counter to its authenticated viewed
 investigation. There are 99 distinct focused passes and J121 has 176 machine
 passes, zero failures and 19 pending human judgments. Visual inspection found
-an active Scan receipt error that remains unfixed and is recorded in the
-assessment. No new live request is added; all nine broad milestones stay open.
+an active Scan receipt error subsequently addressed by the repair above.
+No new live request is added; all nine broad milestones stay open.
 
 The [recorded scope findings qualification](../assessments/recorded-scope-findings-2026-10-17.md)
 adds authenticated accepted-scope filters across shared dispatch, CLI and TUI.

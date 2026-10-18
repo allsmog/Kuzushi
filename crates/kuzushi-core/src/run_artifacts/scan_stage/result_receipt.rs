@@ -1,6 +1,8 @@
 //! Read the host Scan payload from its correlated result, before legacy files.
 use super::*;
-use crate::run_lifecycle::{CallKind, ProjectionHealth};
+use crate::run_lifecycle::{
+    ArtifactReference, CallKind, CallProjection, ProjectionHealth, RunProjection,
+};
 
 pub(super) enum ScanReceiptSource {
     Legacy,
@@ -11,25 +13,67 @@ pub(super) fn load(target: &Path, run_id: &str) -> Result<ScanReceiptSource> {
     if !typed_history_exists(target, run_id)? {
         return Ok(ScanReceiptSource::Legacy);
     }
+    // Read the summary first: publication after this snapshot must not make an
+    // earlier unfinished projection look like contradictory completed evidence.
+    let summary = load_run_summary_without_repair(target, run_id);
     let projection = crate::run_lifecycle::load_run_projection_unhydrated(target, run_id)?;
     anyhow::ensure!(
         matches!(projection.health, ProjectionHealth::Healthy),
         "Scan run history is damaged"
     );
+    let Some(call) = parent_scan_call(&projection)? else {
+        return Ok(source_without_scan_call(&projection));
+    };
+    let Some(reference) = call.result_artifact.as_ref() else {
+        return unpublished_receipt(&projection, call, summary);
+    };
+    correlated_receipt(target, run_id, call, reference)
+}
+
+fn parent_scan_call(projection: &RunProjection) -> Result<Option<&CallProjection>> {
     let calls = projection
         .calls
         .values()
         .filter(|call| call.kind == CallKind::Tool && owns_scan_coverage(call.label.as_str()))
         .collect::<Vec<_>>();
-    let call = match calls.as_slice() {
-        [] => return Ok(source_without_scan_call(&projection)),
-        [call] => *call,
+    match calls.as_slice() {
+        [] => Ok(None),
+        [call] => Ok(Some(*call)),
         _ => anyhow::bail!("Scan run has ambiguous parent tool results"),
-    };
-    let reference = call
-        .result_artifact
-        .as_ref()
-        .context("Scan result has no authenticated artifact")?;
+    }
+}
+
+fn unpublished_receipt(
+    projection: &RunProjection,
+    call: &CallProjection,
+    summary: Result<RunSummary>,
+) -> Result<ScanReceiptSource> {
+    anyhow::ensure!(
+        !call.status.is_terminal() && projection.terminal.is_none(),
+        "Scan result has no authenticated artifact"
+    );
+    let summary = summary.context("Unpublished Scan result has no readable run summary")?;
+    anyhow::ensure!(
+        unfinished_summary(&summary),
+        "Scan result has no authenticated artifact for its recorded run status"
+    );
+    // This establishes no coverage and makes no claim about process liveness.
+    // Typed history still owns this run, so legacy sidecars remain ineligible.
+    Ok(ScanReceiptSource::Typed(None))
+}
+
+fn unfinished_summary(summary: &RunSummary) -> bool {
+    matches!(summary.status.as_str(), "pending" | "running")
+        && summary.completed_at_unix.is_none()
+        && summary.terminal_result_sha256.is_none()
+}
+
+fn correlated_receipt(
+    target: &Path,
+    run_id: &str,
+    call: &CallProjection,
+    reference: &ArtifactReference,
+) -> Result<ScanReceiptSource> {
     let result = crate::run_artifacts::load_correlated_run_result_value(
         target,
         run_id,

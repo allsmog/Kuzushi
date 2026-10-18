@@ -28,7 +28,7 @@ pub(crate) fn campaign_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         Some(campaign) => append_campaign_detail(&mut lines, deck, campaign, area),
         None => append_campaign_list(&mut lines, deck, area),
     }
-    append_deck_footer(&mut lines, deck, area);
+    append_deck_footer(&mut lines, deck, area, app.scan_study_navigation_active());
     lines
 }
 
@@ -410,12 +410,26 @@ pub(super) fn job_state_style(state: &str) -> Style {
     }
 }
 
-fn append_deck_footer(lines: &mut Vec<Line<'static>>, deck: &CampaignRouteState, area: Rect) {
+fn append_deck_footer(
+    lines: &mut Vec<Line<'static>>,
+    deck: &CampaignRouteState,
+    area: Rect,
+    linked_study: bool,
+) {
     if !deck.has_dispatcher_failure_notice() {
         append_campaign_notice(lines, deck, area);
     }
     lines.push(blank());
-    lines.extend(command_list_lines(deck_commands(deck), area.width as usize));
+    let commands = deck_commands(deck)
+        .iter()
+        .copied()
+        .filter(|command| show_deck_command(command, linked_study))
+        .collect::<Vec<_>>();
+    lines.extend(command_list_lines(&commands, area.width as usize));
+}
+
+fn show_deck_command(command: &str, linked_study: bool) -> bool {
+    !linked_study || !matches!(command, "q list" | "q jobs")
 }
 
 fn append_campaign_notice(lines: &mut Vec<Line<'static>>, deck: &CampaignRouteState, area: Rect) {
@@ -894,7 +908,7 @@ mod tests {
         deck.notice = Some("Context result unavailable. Inspect the completed attempt; a replacement draft requires separate approval.".into());
         for width in [40, 60, 80, 96, 120, 160] {
             let mut lines = Vec::new();
-            append_deck_footer(&mut lines, &deck, Rect::new(0, 0, width, 48));
+            append_deck_footer(&mut lines, &deck, Rect::new(0, 0, width, 48), false);
             let text = lines
                 .iter()
                 .map(ToString::to_string)

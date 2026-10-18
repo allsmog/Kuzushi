@@ -45,6 +45,7 @@ pub(crate) use map::{
 };
 use phase_bodies::{fix_phase_model, review_phase_model};
 use scan::scan_phase_model;
+pub(crate) use scan::study::{ScanStudyModel, ScanStudyQueue};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PhaseCockpitModel {
@@ -112,6 +113,7 @@ pub(crate) enum PhaseCockpitBody {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ScanPhaseModel {
+    pub(crate) study: Option<ScanStudyModel>,
     pub(crate) scope: String,
     pub(crate) plan: String,
     pub(crate) attempt: Option<ScanAttemptModel>,
@@ -496,12 +498,13 @@ pub(super) fn phase_cockpit_model_for_phase_with_journey(
     phase: WorkflowPhase,
     journey: Option<&JourneyModel>,
 ) -> PhaseCockpitModel {
-    let header = engagement_header_model(app, phase, journey);
+    let mut header = engagement_header_model(app, phase, journey);
     let result = header
         .result_card
         .as_ref()
         .filter(|card| card.has_result_actions());
     let body = phase_body(app, phase, result);
+    scan::study::apply_header(&body, &mut header);
     PhaseCockpitModel {
         phase,
         header,

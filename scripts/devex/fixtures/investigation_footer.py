@@ -22,9 +22,40 @@ def active_work(root, evidence):
     assert {key: value["state"] for key, value in jobs.items()} == {key: value["state"] for key, value in before["jobs"].items()}
     assert len(fixture.investigation.calls(evidence)) == 3
     assert fixture.investigation.accounting(root, plan["investigationId"])["reservations"] == [3, 1, 0]
+    screen = subprocess.check_output(["tmux", "capture-pane", "-p", "-t", owned_pane(root)], text=True)
+    assert "Ledger refresh failed" not in screen, "An unfinished Scan must not fail the findings reader"
+    assert "NEXT run discovery-only" in screen, "An engine result cannot complete the accepted study"
+    for label in ["APPROVED STUDY", "1/3 complete", "1 running", "1 queued"]:
+        assert label in screen, "Missing finite study progress: " + label
+    assert "legacy inferred" not in screen
+    from investigation_brief import native
+    page = native(root, evidence, "active-study-page", "findings:list",
+        {"batchId": plan["campaignId"], "limit": 20})["data"]
+    assert page["batchId"] == plan["campaignId"] and page["page"]["total"] == 2
+    assert len(page["findings"]) == 2, "Retain the completed pass while its sibling is unfinished"
+    assert len(fixture.investigation.calls(evidence)) == 3
+    assert fixture.queue(root, plan) == jobs
     (evidence / "active-footer-verified.json").write_text(json.dumps({"sameDispatcher": True,
         "sameAdmittedBridge": True, "newProviderRequests": 0, "fixedJobs": len(jobs), "calls": 3,
-        "unsettled": 1, "queueStatesUnchanged": True}) + "\n")
+        "unsettled": 1, "queueStatesUnchanged": True, "ledgerRefreshErrorAbsent": True,
+        "authenticatedStudyFindings": len(page["findings"]), "nextRemainsScan": True,
+        "studyProgress": {"complete": 1, "running": 1, "queued": 1}}) + "\n")
+
+
+def study_deck(root, evidence):
+    import investigation_cancellation as fixture
+    plan = fixture.scan_plan(root)
+    screen = subprocess.check_output(["tmux", "capture-pane", "-p", "-t", owned_pane(root)], text=True)
+    assert plan["campaignId"] in screen and "Jobs: 3" in screen
+    assert len(fixture.investigation.calls(evidence)) == 3
+    with (evidence / "study-link-verified.jsonl").open("a") as output:
+        output.write(json.dumps({"campaignId": plan["campaignId"], "samePlan": True, "calls": 3}) + "\n")
+
+
+def study_summary_visible(screen, count, kind):
+    if (count, kind) != ("3/6", "workbench"):
+        return True
+    return all(label in screen for label in ["APPROVED STUDY", "1/3 complete", "1 running", "1 queued"])
 
 
 def controls_visible(rows, kind):
@@ -43,7 +74,8 @@ def verify(root, evidence, count, kind):
         screen = subprocess.check_output(["tmux", "capture-pane", "-p", "-t", pane], text=True)
         rows = screen.splitlines()
         footer = next((row for row in rows[-12:] if "⛭" in row), "")
-        if controls_visible(rows, kind) and "calls " + count in footer and screen == previous:
+        if controls_visible(rows, kind) and "calls " + count in footer and screen == previous and study_summary_visible(screen, count, kind):
+            assert "Ledger refresh failed" not in screen, "An unfinished Scan must not fail the findings reader"
             for diagnostic in [" route", "notify:", "focus unknown"]:
                 assert diagnostic not in footer, "Diagnostic crowded the investigation footer: " + footer
             dimensions = subprocess.check_output(["tmux", "display-message", "-p", "-t", pane,
@@ -63,5 +95,7 @@ if __name__ == "__main__":
     assert root.name == "fixture-target" and root.parent == evidence
     if sys.argv[3] == "active":
         active_work(root, evidence)
+    elif sys.argv[3] == "study":
+        study_deck(root, evidence)
     else:
         verify(root, evidence, sys.argv[3], sys.argv[4])

@@ -13,6 +13,7 @@ pub(super) fn active_view_hydration_keys(app: &ShellApp) -> Vec<ViewHydrationKey
         .unwrap_or_default();
     append_phase_receipt_outcome_keys(app, &mut keys);
     keys.extend(app.investigation_allowance_key());
+    keys.extend(app.scan_study_progress_key());
     append_map_context_keys(app, &mut keys);
     append_context_snapshot_key(app, &mut keys);
     append_checkpoint_revision_key(

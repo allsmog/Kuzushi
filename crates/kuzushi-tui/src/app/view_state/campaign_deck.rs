@@ -52,6 +52,7 @@ pub struct CampaignRouteState {
     pub(crate) active_batch_report: Option<kuzushi_core::findings::BatchOccurrenceReport>,
     /// Recorded observation membership, independent of completed-pass recurrence.
     pub(crate) active_batch_observation_fingerprints: BTreeSet<String>,
+    pub(crate) scan_study_origin: Option<crate::app::state_transitions::LinkedFindingsOrigin>,
 }
 
 impl Default for CampaignRouteState {
@@ -77,6 +78,7 @@ impl Default for CampaignRouteState {
             active_batch_id: None,
             active_batch_report: None,
             active_batch_observation_fingerprints: BTreeSet::new(),
+            scan_study_origin: None,
         }
     }
 }

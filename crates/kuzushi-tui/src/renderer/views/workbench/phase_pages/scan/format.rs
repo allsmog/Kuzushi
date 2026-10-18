@@ -259,6 +259,7 @@ mod tests {
     #[test]
     fn receipt_rerun_guidance_keeps_the_owner_options_instead_of_an_empty_engine_command() {
         let model = super::ScanPhaseModel {
+            study: None,
             scope: "2 exact source files".into(),
             plan: "saved selection".into(),
             engine_outcomes: Vec::new(),

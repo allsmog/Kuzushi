@@ -2,6 +2,8 @@ use super::*;
 use crate::run_artifacts::{record_tool_run_started, ToolRunRecord};
 use serde_json::json;
 
+mod unpublished;
+
 fn receipt(target: &Path) -> PhaseStageReceipt {
     PhaseStageReceipt {
         phase: WorkflowPhase::Scan,

@@ -58,6 +58,7 @@ mod relationships;
 mod remediation_projection;
 mod report_reads;
 mod review_source;
+mod scan_study;
 use report_reads::ReportReadCache;
 mod run_request_context;
 mod scanned_snippet;
@@ -123,6 +124,7 @@ pub(crate) struct WorkbenchCache {
     run_result_document: Option<(PathBuf, ViewHydrationKey, RunResultDocumentRead)>,
     run_request_context: Option<(PathBuf, String, crate::app::RunRequestContextRead)>,
     investigation_allowance: Option<investigation_allowance::InvestigationAllowanceCache>,
+    scan_study_progress: Option<scan_study::ScanStudyProgressCache>,
     phase_receipt_outcomes: BTreeMap<
         (PathBuf, String),
         Result<Option<kuzushi_core::workflow_attempts::PhaseAttemptOutcome>, String>,

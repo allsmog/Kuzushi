@@ -250,9 +250,15 @@ pub(super) fn workbench_keybindings_for_plan(
     let mut layout = workbench_layout_keybindings(app, plan);
     yield_last_row_key_to_review_ledger(&ledger, &mut layout);
     let mut bindings = workbench_return_keybindings(app, plan);
+    bindings.extend(scan_study_keybindings(app));
     bindings.extend(ledger);
     bindings.extend(layout);
     bindings
+}
+
+fn scan_study_keybindings(app: &ShellApp) -> Option<ViewKeybinding> {
+    app.scan_study_progress_key()
+        .map(|_| bind_char('c', "c", "study jobs", ViewHotkeyAction::WorkbenchStudyJobs))
 }
 
 /// Review's ledger owns `G` (finding groups) and is searched first, so a

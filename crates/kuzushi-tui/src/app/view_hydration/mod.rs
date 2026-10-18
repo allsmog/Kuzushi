@@ -18,6 +18,7 @@ mod reader_tests;
 mod report_refresh_tests;
 mod requests;
 mod runtime;
+mod scan_study;
 #[cfg(test)]
 mod study_usage_tests;
 #[cfg(test)]
@@ -41,6 +42,8 @@ pub(crate) type RunRequestContextRead =
     Result<Arc<kuzushi_core::run_artifacts::RunRequestContext>, String>;
 pub(crate) type InvestigationAllowanceRead =
     Result<Option<Arc<kuzushi_core::allowance::AllowanceSnapshot>>, String>;
+pub(crate) type ScanStudyProgressRead =
+    Result<Arc<kuzushi_core::capabilities::campaign::snapshot::CampaignSnapshot>, String>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FindingReviewSource {
@@ -242,6 +245,9 @@ pub(crate) enum ViewHydrationKey {
     InvestigationAllowance {
         run_refs: Vec<String>,
     },
+    ScanStudyProgress {
+        campaign_id: String,
+    },
     PhaseReceiptOutcome {
         attempt_id: String,
     },
@@ -338,6 +344,7 @@ pub(crate) enum ViewHydrationValue {
     RunResultDocument(RunResultDocumentRead),
     RunRequestContext(RunRequestContextRead),
     InvestigationAllowance(InvestigationAllowanceRead),
+    ScanStudyProgress(ScanStudyProgressRead),
     PhaseReceiptOutcome(
         Result<Option<kuzushi_core::workflow_attempts::PhaseAttemptOutcome>, String>,
     ),

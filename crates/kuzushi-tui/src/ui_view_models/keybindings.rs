@@ -137,6 +137,7 @@ fn owned_input_bindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
         return Some(system::pending_confirm_keybindings(app));
     }
     batch_config_bindings(app)
+        .or_else(|| linked_study_bindings(app))
         .or_else(|| relationships::owned_bindings(app))
         .or_else(|| lessons::owned_bindings(app))
         .or_else(|| catalog::owned_picker_keybindings(app))
@@ -144,6 +145,19 @@ fn owned_input_bindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
         .or_else(|| workbench::prove_detail_bindings(app))
         .or_else(|| run_artifact::keybindings(app))
         .or_else(|| composer_owned_bindings(app))
+}
+
+fn linked_study_bindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
+    if !app.scan_study_navigation_active() || app.input_mode() != crate::InputMode::Navigate {
+        return None;
+    }
+    let mut bindings = Vec::new();
+    push_view_keybindings(&mut bindings, app);
+    let mut keys = std::collections::BTreeSet::new();
+    bindings.retain(|binding| keys.insert(binding.key.clone()));
+    bindings.push(bind("Ctrl+G", "palette"));
+    bindings.push(interrupt_binding(app));
+    Some(apply_operator_chrome_overrides(bindings, app))
 }
 
 fn answer_bindings(app: &ShellApp) -> Vec<FooterKeybinding> {

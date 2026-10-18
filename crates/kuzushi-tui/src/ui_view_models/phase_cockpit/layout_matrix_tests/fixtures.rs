@@ -79,6 +79,7 @@ fn fixture_hot_modules(richness: usize) -> RiskByModule {
 fn scan_fixture(state: SemanticFixture) -> ScanPhaseModel {
     let richness = state.richness();
     ScanPhaseModel {
+        study: None,
         scope: "fixture/**/*.rs".to_string(),
         plan: "deterministic fixture".to_string(),
         attempt: (richness >= 2).then(|| fixture_scan_attempt(richness, state)),

@@ -54,7 +54,9 @@ The next repair must distinguish an unpublished nonterminal result from missing
 or corrupt completed evidence, preserve authenticated membership and prevent
 fallback to unauthenticated sidecars. Add regression coverage and strengthen
 the held-request journey assertion before claiming this active-work state is
-qualified. This checkpoint records the defect and does not fix it.
+qualified. This checkpoint records the defect and does not fix it. The later
+[unpublished Scan receipt repair](unpublished-scan-receipts-2026-10-17.md)
+addresses it with regression tests and strengthened native checks.
 
 Local evidence is under `/tmp/kuzushi-investigation-footer-20261017`, including
 `native-v1/native-evidence.json`, `native-v1/footer-evidence.json`, the frozen
