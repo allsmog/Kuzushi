@@ -1,5 +1,14 @@
 # Bounded investigation acceptance ledger
 
+The [DFD handoff](../assessments/dfd-study-2026-10-18.md) adds explicit finite
+scan planning from exact diagram source evidence and its displayed context.
+The parent draft, diagram return and shared accounting survive approved-job
+navigation. Native J337 records 61 machine passes, zero failures, 50 capture
+pairs and six pending human judgments. Three installed-scanner jobs produce six
+observations over two selected files, with two retained deferrals and no provider
+request. All 64 focused Rust checks, build, lint and risk checks pass. This closes
+the concrete planning link; full diagram usefulness and broader UX remain open.
+
 The [scope-tree increment](../assessments/scope-tree-2026-10-18.md) implements the
 previously missing selectable membership tree, bounded paging, exact member
 actions and visible common/local context associations. The literal-path Review
@@ -629,7 +638,7 @@ original requirements remain open. No new live model request is made.
 | Keyboard-only journey, visible actions, palette/composer ownership, draft/selection/scroll continuity, six sizes and plain/no-color | J121/J206 and focused input, context, findings and recovery tests; [Review readers](../assessments/review-reader-controls-2026-10-15.md) adds distinct groups/goals controls, retained draft and paste reading, protected filter drafting, visible bulk return and native reversible triage | Scoped. Per-journey human judgments remain pending; machine state checks are not operator delight approval. |
 | Typing/scroll/resize under active work; background focus and cancellation | Logs and inventory probes, warmed Review tests, and [approved study progress](../assessments/approved-study-progress-2026-10-17.md) through study navigation, palette return and 40-column resize | Scoped. Native checks retain the original dispatcher/request, draft, fixed queue, completed-pass findings and accounting. Recorded queue states are not process-liveness claims. This does not qualify every active surface or physical/reference latency. |
 | One complete journey including cancellation, partial work, exhausted allowance and restart | [Current J121 evidence](../assessments/approved-study-progress-2026-10-17.md): 185 machine passes, zero failures, 115 capture pairs, one retained cancellation and no live requests | Scoped. The held request preserves completed-pass membership, finite counts, study navigation, draft and call accounting without a refresh error or premature completion. Partial Report, explicit attempt/call approvals, final acceptance and restart remain covered. Nineteen human judgments, historical attribution and other failure combinations remain open. J275 separately qualifies cumulative attempt presentation on retained reader history. |
-| DFD links to context/evidence/findings/scoped actions and understandable next proposals | Map/DFD view models, linked readers and scope/proposal actions | Scoped. Reconcile all concrete element/action links and human diagram usefulness. |
+| DFD links to context/evidence/findings/scoped actions and understandable next proposals | Map/DFD view models, linked readers and [bounded scan planning](../assessments/dfd-study-2026-10-18.md) | Scoped. Exact source/context planning and return have focused and native evidence. Reconcile remaining element/action links, proposal quality and human diagram usefulness; six J337 judgments remain open. |
 | Sequential real-model validation under approved allowance | [Owned application Scan](../assessments/live-application-scan-2026-10-15.md), [standard Review](../assessments/live-application-review-2026-10-15.md), [source-input Review](../assessments/live-source-review-2026-10-15.md) and [supporting-code Review](../assessments/live-supporting-review-2026-10-15.md): three Scan calls and three separately approved Review calls, with durable observations, opinions, export and restart | Scoped. Fourteen cumulative experiment requests used, reaching the approved maximum. All six current-investigation calls are settled, including three protected Review calls. No capacity or follow-up approval remains. One supporting-code opinion establishes the source path while disclosing unproven deployed exposure; general model usefulness and full investigation qualification remain open. |
 | Focused checks, shared dispatch, workspace build, risk proxy and exact summary verification | Named assessment receipts and signed clean-commit verification | Scoped. Local quick checks do not prove the full Rust suite, CI/platform matrix, release qualification or the complete product outcome. |
 

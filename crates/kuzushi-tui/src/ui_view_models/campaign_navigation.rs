@@ -4,7 +4,7 @@ use crate::state_transitions::ViewHotkeyAction;
 
 /// Project the same return binding searched by the active view dispatcher.
 pub(crate) fn linked_study_return_binding(app: &ShellApp) -> Option<FooterKeybinding> {
-    if !app.scan_study_navigation_active()
+    if !app.study_navigation_return_active()
         || app.input_mode() != crate::InputMode::Navigate
         || app.notice_captures_escape()
     {

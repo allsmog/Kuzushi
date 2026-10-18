@@ -1429,7 +1429,7 @@ impl ShellApp {
     }
 
     fn handle_scan_study_back_key(&mut self, key: KeyEvent) -> bool {
-        if !self.scan_study_navigation_active() {
+        if !self.study_navigation_return_active() {
             return false;
         }
         self.handle_view_hotkey(key).handled

@@ -515,6 +515,7 @@ fn push_dfd_keybindings(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp) {
     if app.router.scene().dfd_focused() {
         bindings.push(bind("j/k/↑/↓", "context"));
         bindings.push(bind("f", "findings at paths"));
+        bindings.push(bind("s", "plan scan"));
         bindings.push(bind("g", "regenerate scope"));
         bindings.push(bind("Enter", "topology"));
         bindings.push(bind("Esc", "collapse"));
@@ -534,6 +535,7 @@ fn push_dfd_keybindings(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp) {
     }
     bindings.push(bind("j/k/↑/↓", "select"));
     bindings.push(bind("f", "findings at paths"));
+    bindings.push(bind("s", "plan scan"));
     bindings.push(bind("g", "regenerate scope"));
     if model.link_state == crate::ui_view_models::DfdLinkState::LegacyNeedsRebuild {
         bindings.push(bind("Enter", "rebuild linked context"));

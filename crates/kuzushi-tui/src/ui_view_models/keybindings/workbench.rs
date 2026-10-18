@@ -123,6 +123,8 @@ fn append_map_page_controls(bindings: &mut Vec<FooterKeybinding>, page: crate::s
         }
         crate::scene3d::VizPage::Dfd => {
             bindings.push(bind("j/k/↑/↓", "select"));
+            bindings.push(bind("f", "findings at paths"));
+            bindings.push(bind("s", "plan scan"));
             bindings.push(bind("g", "regenerate scope"));
             bindings.push(bind("Enter", "context"));
         }

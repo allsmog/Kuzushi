@@ -49,7 +49,9 @@ pub use context_matrix::{
 };
 mod study_receipt;
 mod study_resources;
-pub use map_allowance::{load_accepted_map_allowance, load_selected_map_history_allowance};
+pub use map_allowance::{
+    load_accepted_map_allowance, load_map_run_allowance, load_selected_map_history_allowance,
+};
 pub use study_resources::campaign_preview::{
     CaseResourceEvidenceV1, ResourceScenario, StudyResourceEvidenceV1,
 };

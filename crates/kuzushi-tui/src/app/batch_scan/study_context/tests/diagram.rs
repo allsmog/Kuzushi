@@ -64,6 +64,72 @@ fn screen(app: &mut ShellApp, width: u16, height: u16) -> String {
 }
 
 #[test]
+fn scan_plan_keeps_inspected_context_accounting_and_the_entire_parent_draft() {
+    let (root, mut app, selected, active) = graph_fixture();
+    app.set_input("unsent\noperator draft");
+    app.set_cursor(4);
+    key(&mut app, KeyCode::Char('v'));
+    key(&mut app, KeyCode::Down);
+    key(&mut app, KeyCode::Enter);
+    let parent = app
+        .router
+        .campaign_mut()
+        .batch_scan_config
+        .as_mut()
+        .unwrap();
+    parent.study.investigation_id = "shared-diagram-investigation".into();
+    parent.study.max_provider_calls = Some(9);
+    parent.study.protected_review_calls = Some(3);
+    parent.study.max_job_attempts = 4;
+    parent.detail_scroll = 7;
+    let previous = parent.clone();
+    key(&mut app, KeyCode::Char('s'));
+    let child = app
+        .router
+        .campaign()
+        .batch_scan_config
+        .as_ref()
+        .unwrap()
+        .clone();
+    assert_ne!(
+        child.checkpoint_id,
+        previous.checkpoint_id,
+        "{}",
+        screen(&mut app, 120, 36)
+    );
+    assert_eq!(
+        child.study.investigation_id,
+        previous.study.investigation_id
+    );
+    assert_eq!(child.study.max_provider_calls, Some(9));
+    assert_eq!(child.study.protected_review_calls, Some(3));
+    assert_eq!(child.study.max_job_attempts, 1);
+    assert_eq!(
+        child.study.scan_input.as_ref().unwrap()["threatModelRef"],
+        json!(selected)
+    );
+    assert_eq!(
+        child.study.scan_input.as_ref().unwrap()["paths"],
+        json!(["main.rs"])
+    );
+    assert!(child.study.plan_identity().is_none() && !child.study.approved());
+    app.finish_closing_study();
+    let restored = app.router.campaign().batch_scan_config.as_ref().unwrap();
+    assert_eq!(restored.checkpoint_id, previous.checkpoint_id);
+    assert_eq!(restored.study, previous.study);
+    assert_eq!(restored.context_picker, previous.context_picker);
+    assert_eq!(restored.detail_scroll, 7);
+    assert_eq!((app.input(), app.cursor()), ("unsent\noperator draft", 4));
+    assert_eq!(
+        load_active_threat_model(root.path())
+            .unwrap()
+            .unwrap()
+            .model_ref,
+        active
+    );
+}
+
+#[test]
 fn diagram_uses_inspected_revision_and_returns_to_the_exact_context_draft() {
     let (root, mut app, selected, active) = graph_fixture();
     app.set_input("unsent\noperator draft");
@@ -161,6 +227,7 @@ fn diagram_and_full_details_are_reachable_at_every_viewport_and_in_plain_output(
             assert!(
                 rendered.contains("CONTEXT DATA FLOW")
                     && rendered.contains("Esc context")
+                    && rendered.contains("s plan scan")
                     && rendered.contains("Enter details"),
                 "{width}x{height}: {rendered}"
             );

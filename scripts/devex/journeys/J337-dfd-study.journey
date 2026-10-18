@@ -1,0 +1,172 @@
+name: Diagram evidence plans finite discovery and preserves context and navigation
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR SEMGREP_APP_TOKEN SEMGREP_AGENT_TOKEN
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dfd_study.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: run threat-model:import {"path":".kuzushi/manual-context.json","label":"Beta","activate":true}
+require-live-snap: 30 threat-model:import saved | active-beta
+submit: map
+require-live-snap: 25 SYSTEM SUMMARY | beta-map
+nav-mode:
+keys: u
+require-live-snap: 25 Map ✓ | accepted-beta
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dfd_study.py @TMP_TARGET @ART mapped
+submit: use sast
+submit: options sast:scan
+submit: set taskMode manual
+submit: set tasks semgrep
+paste-file: @ART/rule-setting.txt
+keys: Enter
+submit: set semgrepTimeoutMs 60000
+submit: map
+require-live-snap: 20 SYSTEM SUMMARY | map-return
+nav-mode:
+keys: Tab z
+require-live-snap: 20 s plan scan | diagram-action
+resize: 160x48
+live-snap: action-160x48
+expect: s plan scan
+resize: 96x89
+live-snap: action-96x89
+expect: s plan scan
+resize: 80x24
+live-snap: action-80x24
+expect: s plan scan
+resize: 60x20
+live-snap: action-60x20
+expect: s plan scan
+resize: 40x12
+live-snap: action-40x12
+expect: s plan scan
+expect: f findings
+expect: back
+ask: Are selection, saved findings, scan planning, context inspection and Back discoverable across all six terminal sizes?
+resize: 120x36
+keys: s
+require-live-snap: 20 repository file evidence | missing-evidence
+keys: Escape
+nav-mode:
+keys: Down s
+require-live-snap: 20 PLAN A STUDY | beta-draft-only
+expect: No jobs started
+keys: Escape
+require-live-snap: 20 s plan scan | returned-beta-diagram
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dfd_study.py @TMP_TARGET @ART navigation
+submit: scan batch
+require-live-snap: 20 PLAN A STUDY | parent-study
+keys: Enter
+type: 5
+keys: Enter
+require-live-snap: 20 5 passes · 1 worker(s) | parent-five-passes
+keys: Down Down Down Enter Up Enter
+require-live-snap: 25 CONTEXT SUMMARY | inspected-inactive-alpha
+expect: Alpha
+keys: v Down Enter
+require-live-snap: 20 COMPONENT · Alpha receiver | selected-alpha-context
+keys: s
+require-live-snap: 20 PLAN A STUDY | alpha-child
+expect: Three passes, one worker
+expect: No jobs started
+expect: 2 exact source paths
+expect: " app /lib.py"
+resize: 160x48
+live-snap: child-160x48
+resize: 96x89
+live-snap: child-96x89
+resize: 80x24
+live-snap: child-80x24
+resize: 60x20
+live-snap: child-60x20
+resize: 40x12
+live-snap: child-40x12
+keys: z Home
+live-snap: child-reader-40x12-first
+keys: NPage
+live-snap: child-reader-40x12-middle
+keys: End
+live-snap: child-reader-40x12-last
+ask: Can the operator inspect the proposed paths, selected immutable context, three-pass workload and separate approval through all six plan layouts and the complete narrow reader?
+keys: z
+resize: 120x36
+keys: Escape
+require-live-snap: 20 COMPONENT · Alpha receiver | exact-parent-return
+expect: Element: api
+ask: Does Back restore the inspected inactive context and selected evidence, while keeping the earlier five-pass draft separate from the new three-pass proposal?
+keys: s
+require-live-snap: 20 PLAN A STUDY | new-explicit-proposal
+keys: Enter Enter
+require-live-snap: 25 CONTEXT SUMMARY | child-context
+keys: v Down s
+require-live-snap: 20 No nested work added | nested-proposal-refused
+keys: Escape Escape
+require-live-snap: 20 PLAN A STUDY | child-form-return
+keys: Down Down Enter
+type: 1
+keys: Enter Down Enter
+type: 1
+keys: Enter L
+require-live-snap: 35 Draft ready | three-job-plan
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dfd_study.py @TMP_TARGET @ART draft
+keys: L Home
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | allowance-review
+expect: 3 fixed jobs
+expect: Total provider calls: 1
+expect: Protected review calls: 1
+keys: End
+require-live-snap: 20 y approve | specific-approval
+keys: y
+require-live-snap: 25 Approval saved | approved-three-jobs
+keys: L
+require-live-snap: 25 L starts its fixed jobs | approved-job-browser
+expect: diagram
+ask: Does the job browser keep a visible return to the original diagram and require a separate launch after exact work and allowance approval?
+keys: L
+require-live-snap: 25 dispatcher pid | launched
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dfd_study.py @TMP_TARGET @ART completed
+keys: r
+require-live-snap: 25 3 completed | finished
+keys: q
+require-live-snap: 20 COMPONENT · Alpha receiver | completed-return-to-parent
+expect: Element: api
+keys: Escape Escape
+require-live-snap: 20 PLAN A STUDY | retained-parent-study
+expect: 5 passes · 1 worker(s)
+ask: After actual discovery, does returning retain the original diagram, context selection and five-pass parent draft without starting its work or scanning other files?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 3 completed | recovered-fixed-work
+submit: workbench
+require-live-snap: 25 Viewing Scan | completed-scan
+nav-mode:
+keys: n
+require-live-snap: 25 Viewing Review | accepted-scan
+paste-file: @ART/open-spaced.txt
+keys: Enter
+require-live-snap: 25 print("OWNER_POLICY_REVIEW") | literal-source
+expect-not: live source missing or changed
+submit: decision deferred Spaced source owner review
+paste-file: @ART/open-plain.txt
+keys: Enter
+require-live-snap: 25 FINDING | second-source
+submit: decision deferred Ordinary source owner review
+submit: report
+require-live-snap: 25 Evidence: 6 producer observations | faithful-report
+keys: j j j
+require-live-snap: 20 format json (4/6) | json-format
+keys: Enter
+require-live-snap: 25 EXPORTED | exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dfd_study.py @TMP_TARGET @ART exported
+ask: Does no-color restart retain the three completed jobs, six observations and two deferred findings, with the inactive context frozen and global Beta unchanged?
+keys: C-c
+require-exit: 10

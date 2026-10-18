@@ -39,8 +39,8 @@ impl ShellApp {
         {
             return None;
         }
-        if code == KeyCode::Char('f') {
-            return Some(self.open_context_diagram_findings());
+        if let Some(update) = self.handle_diagram_link_key(code) {
+            return Some(update);
         }
         match code {
             KeyCode::Esc | KeyCode::Char('q') => self.close_context_diagram(),
@@ -50,6 +50,14 @@ impl ShellApp {
             _ => self.page_context_diagram(code),
         }
         Some(InputUpdate::handled())
+    }
+
+    fn handle_diagram_link_key(&mut self, code: KeyCode) -> Option<InputUpdate> {
+        match code {
+            KeyCode::Char('f') => Some(self.open_context_diagram_findings()),
+            KeyCode::Char('s') => Some(self.open_context_diagram_study()),
+            _ => None,
+        }
     }
 
     fn close_context_diagram(&mut self) {
@@ -69,6 +77,21 @@ impl ShellApp {
         };
         let selection = state.selection;
         self.open_dfd_finding_query(&preview.dfd, selection, None)
+    }
+
+    fn open_context_diagram_study(&mut self) -> InputUpdate {
+        let Some(picker) = self.study_context_picker() else {
+            return InputUpdate::handled();
+        };
+        let Some((state, preview)) = picker.diagram.as_ref().zip(picker.preview.clone()) else {
+            return InputUpdate::handled();
+        };
+        let selection = state.selection;
+        let reference = picker
+            .selected
+            .clone()
+            .ok_or_else(|| "Inspect a saved context revision first.".into());
+        self.open_dfd_scan_study(&preview.dfd, selection, None, reference)
     }
 
     fn edit_context_diagram(&mut self, edit: impl FnOnce(&mut StudyContextDiagram)) {

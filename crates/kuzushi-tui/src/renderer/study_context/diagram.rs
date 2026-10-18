@@ -92,12 +92,12 @@ fn render_controls(frame: &mut Frame<'_>, area: Rect, progress: Option<&str>) {
         2,
     );
     let action = progress.map_or_else(
-        || "Enter details".into(),
-        |range| format!("Enter diagram · PgUp/Dn {range}"),
+        || "Esc context · Enter details".into(),
+        |range| format!("Esc context · Enter graph · PgUp/Dn {range}"),
     );
     frame.render_widget(
         Paragraph::new(vec![
-            Line::styled("↑↓ · f findings · Esc context", theme::muted()),
+            Line::styled("↑↓ · f findings · s plan scan", theme::muted()),
             Line::styled(action, theme::accent()),
         ]),
         controls,

@@ -20,6 +20,14 @@ pub fn load_selected_map_history_allowance(root: &Path) -> Result<Option<Allowan
     )
 }
 
+/// Explicit diagram follow-ups retain the accounting of their displayed Map runs.
+pub fn load_map_run_allowance(root: &Path, runs: &[String]) -> Result<Option<AllowanceSnapshot>> {
+    allowance_from_context(
+        root,
+        crate::workflow_attempts::load_map_run_context(root, runs)?,
+    )
+}
+
 fn allowance_from_context(
     root: &Path,
     context: Option<crate::workflow_attempts::MapRunContext>,

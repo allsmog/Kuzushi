@@ -7,6 +7,7 @@ use kuzushi_core::capabilities::threat_model::{
 use std::path::PathBuf;
 
 mod map_context;
+pub(crate) use map_context::displayed_threat_model_ref;
 pub(crate) use map_context::map_context_run_refs;
 pub(crate) use map_context::recorded_map_context_issue;
 

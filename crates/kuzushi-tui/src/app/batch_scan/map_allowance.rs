@@ -12,6 +12,16 @@ pub(super) fn restore_map_history_allowance(config: &mut BatchScanConfig) {
     apply_map_allowance(config, result);
 }
 
+pub(super) fn restore_diagram_map_allowance(config: &mut BatchScanConfig, runs: Option<&[String]>) {
+    let result = match runs {
+        Some(runs) => {
+            kuzushi_core::capabilities::campaign::load_map_run_allowance(&config.target, runs)
+        }
+        None => kuzushi_core::capabilities::campaign::load_accepted_map_allowance(&config.target),
+    };
+    apply_map_allowance(config, result);
+}
+
 fn apply_map_allowance(
     config: &mut BatchScanConfig,
     result: anyhow::Result<Option<kuzushi_core::allowance::AllowanceSnapshot>>,

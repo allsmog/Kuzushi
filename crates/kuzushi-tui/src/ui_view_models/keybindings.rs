@@ -151,7 +151,7 @@ fn owned_input_bindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
 }
 
 fn linked_study_bindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
-    if !app.scan_study_navigation_active() || app.input_mode() != crate::InputMode::Navigate {
+    if !app.study_navigation_return_active() || app.input_mode() != crate::InputMode::Navigate {
         return None;
     }
     let mut bindings = Vec::new();
