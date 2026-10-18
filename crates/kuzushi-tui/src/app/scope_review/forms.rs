@@ -82,11 +82,11 @@ impl ScopeEditForm {
                 reason: self.text(0)?,
             },
             ScopeEditKind::ExcludePath => ScanScopeEdit::ExcludePath {
-                path: self.text(0)?,
+                path: self.literal_path(0)?,
                 reason: self.text(1)?,
             },
             ScopeEditKind::IncludePath => ScanScopeEdit::IncludePath {
-                path: self.exact_recorded_path()?,
+                path: self.literal_path(0)?,
             },
             ScopeEditKind::Split => ScanScopeEdit::Split {
                 scope_id: id,
@@ -113,15 +113,29 @@ impl ScopeEditForm {
         Ok(text.into())
     }
 
-    fn exact_recorded_path(&self) -> Result<String> {
+    fn literal_path(&self, index: usize) -> Result<String> {
         let path = self
             .fields
-            .first()
-            .context("Missing recorded exclusion path")?
+            .get(index)
+            .context("Missing source path")?
             .1
             .text();
-        anyhow::ensure!(!path.is_empty(), "Choose an exact recorded exclusion path");
+        anyhow::ensure!(!path.is_empty(), "Choose an exact source path");
         Ok(path.into())
+    }
+
+    pub(super) fn path_lines(&self, index: usize) -> Result<Vec<String>> {
+        let text = self
+            .fields
+            .get(index)
+            .context("Missing source paths")?
+            .1
+            .text();
+        Ok(text
+            .lines()
+            .filter(|line| !line.is_empty())
+            .map(str::to_owned)
+            .collect())
     }
 
     fn lines(&self, index: usize) -> Vec<String> {
@@ -139,7 +153,7 @@ impl ScopeEditForm {
         let mut child = self.template.clone();
         child.id = format!("{}-r{revision}-{}", self.child_id_prefix, offset / 2 + 1);
         child.name = self.text(offset)?;
-        child.paths = self.lines(offset + 1);
+        child.paths = self.path_lines(offset + 1)?;
         child.rationale = format!(
             "Operator split {} into this boundary. Inherited rationale: {}",
             self.template.name, self.template.rationale

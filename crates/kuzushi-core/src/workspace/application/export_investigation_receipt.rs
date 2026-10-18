@@ -1,4 +1,4 @@
-//! Add study receipts without changing CSV or external scanner file contracts.
+//! Add study receipts and qualify external completion without changing file shapes.
 use super::investigation_report::InvestigationReportDocument;
 use super::*;
 
@@ -14,8 +14,21 @@ pub(super) fn attach_receipt(
         WorkspaceExportFormat::Json => attach_json(body, receipt, false),
         WorkspaceExportFormat::Sarif => attach_json(body, receipt, true),
         WorkspaceExportFormat::Jsonl => attach_jsonl(body, receipt),
+        WorkspaceExportFormat::VulnFindings => attach_scanner_completion(body, receipt),
         _ => Ok(body),
     }
+}
+
+fn attach_scanner_completion(
+    body: String,
+    receipt: &InvestigationReportDocument,
+) -> Result<String> {
+    let work = receipt.work_counts();
+    let mut document: serde_json::Value = serde_json::from_str(&body)?;
+    document["scan_completed"] = json!(
+        work.planned > 0 && work.completed == work.planned && work.failed == 0 && work.pending == 0
+    );
+    Ok(serde_json::to_string_pretty(&document)?)
 }
 
 fn attach_json(body: String, receipt: &InvestigationReportDocument, sarif: bool) -> Result<String> {

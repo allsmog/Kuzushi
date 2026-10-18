@@ -266,7 +266,7 @@ fn sast_run_filter_options() -> Vec<OptionSpec> {
         opt(
             "paths",
             OptionType::StringList,
-            "Optional workspace-relative path roots to scan.",
+            "Optional workspace-relative path roots to scan. JSON array entries preserve spaces; comma-separated shorthand trims entries.",
         )
         .aliases(&["includePaths", "include_paths"]),
         opt("scanScopeRef", OptionType::Json,

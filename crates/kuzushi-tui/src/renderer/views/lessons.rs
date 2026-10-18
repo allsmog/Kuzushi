@@ -8,18 +8,32 @@ mod context;
 mod form;
 mod generation;
 mod reader;
+mod replacement;
 pub(crate) use reader::lesson_reader_scroll;
 
 pub(super) fn lesson_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
-    if app.router.lessons.context_selecting {
-        return context::context_lines(app, area);
-    }
-    if app.router.lessons.form_visible {
-        if let Some(draft) = &app.router.lessons.form {
-            return form::form_lines(app, draft, area);
-        }
+    if let Some(lines) = modal_lines(app, area) {
+        return lines;
     }
     super::shell_view_lines::default_scrolled_lines(app, area, browser_document_lines(app, area))
+}
+
+fn modal_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'static>>> {
+    if let Some(form) = &app.router.lessons.replacement_form {
+        return Some(replacement::replacement_lines(form, area));
+    }
+    if app.router.lessons.context_selecting {
+        return Some(context::context_lines(app, area));
+    }
+    if app.router.lessons.form_visible {
+        return app
+            .router
+            .lessons
+            .form
+            .as_ref()
+            .map(|draft| form::form_lines(app, draft, area));
+    }
+    None
 }
 
 fn browser_document_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {

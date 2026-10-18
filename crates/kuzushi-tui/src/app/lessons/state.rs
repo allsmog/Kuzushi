@@ -9,6 +9,7 @@ pub(crate) struct LessonsRouteState {
     pub(crate) offset: usize,
     pub(crate) selected: Vec<SelectedLesson>,
     pub(crate) form: Option<LessonForm>,
+    pub(crate) replacement_form: Option<LessonForm>,
     pub(crate) form_visible: bool,
     pub(crate) notice: Option<String>,
     pub(crate) context_cursor: usize,
@@ -35,8 +36,30 @@ pub(crate) struct LessonForm {
     pub(crate) target: PathBuf,
     pub(crate) action: LessonFormAction,
     pub(crate) fields: [FieldEditor; 4],
+    initial_text: [String; 4],
     pub(crate) focused: usize,
     pub(crate) confirming: bool,
+}
+
+impl LessonForm {
+    pub(super) fn new(target: PathBuf, action: LessonFormAction, fields: [FieldEditor; 4]) -> Self {
+        let initial_text = std::array::from_fn(|index| fields[index].text().to_owned());
+        Self {
+            target,
+            action,
+            fields,
+            initial_text,
+            focused: 0,
+            confirming: false,
+        }
+    }
+
+    pub(super) fn has_unsaved_changes(&self) -> bool {
+        self.fields
+            .iter()
+            .zip(&self.initial_text)
+            .any(|(field, original)| field.text() != original)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

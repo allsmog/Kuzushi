@@ -2,9 +2,14 @@ use super::*;
 
 impl ShellApp {
     pub(crate) fn lesson_reading_is_active(&self) -> bool {
-        if self.shell_view() != ShellView::Lessons {
+        if self.shell_view() != ShellView::Lessons || self.router.lessons.replacement_form.is_some()
+        {
             return false;
         }
+        self.lesson_document_is_readable()
+    }
+
+    fn lesson_document_is_readable(&self) -> bool {
         if self.router.lessons.context_selecting {
             return self.router.lessons.context_confirm.is_some();
         }

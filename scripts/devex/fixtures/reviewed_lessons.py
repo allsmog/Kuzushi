@@ -40,7 +40,7 @@ def prepare(root, evidence):
 def verify(root, evidence, stage):
     page = execute(root, Path(os.environ["HOME"]), evidence, "lessons-" + stage, "findings:lessons", {})
     rows = page["rows"]
-    expected = {"empty": None, "draft-confirmation": None, "draft": "draft", "accept-confirmation": "draft",
+    expected = {"empty": None, "replacement-choice": None, "draft-confirmation": None, "draft": "draft", "accept-confirmation": "draft",
         "accepted": "accepted", "copy-confirmation": "accepted", "copy": "accepted", "retained-copy": "accepted", "retired": "retired", "restart": "retired"}[stage]
     if expected is None:
         assert rows == []

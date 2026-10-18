@@ -12,6 +12,7 @@ pub(crate) use state::{
 mod context;
 mod form;
 mod reader;
+mod replacement;
 mod write;
 
 impl ShellApp {
@@ -77,6 +78,9 @@ impl ShellApp {
         &mut self,
         key: KeyEvent,
     ) -> Option<state_transitions::InputUpdate> {
+        if self.handle_lesson_replacement_key(key) {
+            return Some(state_transitions::InputUpdate::handled());
+        }
         if self.handle_lesson_reading_key(key) {
             return Some(state_transitions::InputUpdate::handled());
         }

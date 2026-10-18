@@ -40,17 +40,7 @@ fn uncovered_paths(review: &ScanScopeReview) -> Vec<String> {
 
 impl ScopeEditForm {
     pub(super) fn new_discovery_scope(&self) -> anyhow::Result<ScanScopeEdit> {
-        let field = self
-            .fields
-            .get(1)
-            .ok_or_else(|| anyhow::anyhow!("Missing source paths"))?;
-        let paths = field
-            .1
-            .text()
-            .lines()
-            .filter(|line| !line.is_empty())
-            .map(str::to_owned)
-            .collect();
+        let paths = self.path_lines(1)?;
         Ok(ScanScopeEdit::AddScope {
             scope: ProposedScanScope {
                 id: self.template.id.clone(),

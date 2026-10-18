@@ -138,7 +138,7 @@ fn draft_confirmation_lines(form: &LessonForm, width: u16) -> Vec<Line<'static>>
     lines
 }
 
-fn form_title(form: &LessonForm) -> String {
+pub(super) fn form_title(form: &LessonForm) -> String {
     match &form.action {
         LessonFormAction::Draft { .. } => "LESSON DRAFT".into(),
         LessonFormAction::Review { state, .. } => format!("{:?} LESSON", state).to_uppercase(),

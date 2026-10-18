@@ -115,7 +115,7 @@ fn validate_taint_scope(input: &Value, scopes: &[ScanScope]) -> Result<()> {
 
 pub(super) fn scope_paths(input: &Value) -> Result<Vec<String>> {
     Ok(
-        super::input::string_list_input(input, &["paths", "includePaths", "include_paths"])?
+        super::input::path_list_input(input, &["paths", "includePaths", "include_paths"])?
             .unwrap_or_default(),
     )
 }

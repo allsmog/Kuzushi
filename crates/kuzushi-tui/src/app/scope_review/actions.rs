@@ -135,7 +135,12 @@ impl ShellApp {
         state.menu = None;
         state.form = Some(ScopeEditForm::for_scope(kind, &scope));
         state.scroll = 0;
-        state.notice = None;
+        state.notice = match kind {
+            ScopeEditKind::Split | ScopeEditKind::ExcludePath => {
+                Some("Paths are literal. Leading and trailing spaces are part of a name.".into())
+            }
+            _ => None,
+        };
     }
 
     fn open_scope_merge(&mut self) {

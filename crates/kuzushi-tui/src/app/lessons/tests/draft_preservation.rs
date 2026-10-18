@@ -84,7 +84,7 @@ fn a_retired_selected_revision_blocks_the_copy_and_keeps_the_draft() {
     );
 }
 
-fn accepted_lesson(
+pub(super) fn accepted_lesson(
     store: &kuzushi_core::FindingStore,
     target: &std::path::Path,
     finding_id: i64,

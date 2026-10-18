@@ -7,9 +7,20 @@ fn fixture() -> (
     crate::V2Config,
     ScanScopeRef,
 ) {
+    fixture_with_member("included.env")
+}
+
+fn fixture_with_member(
+    member: &str,
+) -> (
+    tempfile::TempDir,
+    WorkspaceTarget,
+    crate::V2Config,
+    ScanScopeRef,
+) {
     let root = tempfile::tempdir().unwrap();
     std::fs::write(
-        root.path().join("included.env"),
+        root.path().join(member),
         "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n",
     )
     .unwrap();
@@ -47,6 +58,33 @@ fn fixture() -> (
         scope_id: "repository".into(),
     };
     (root, workspace, config, reference)
+}
+
+#[test]
+fn literal_native_membership_survives_prepared_paths_and_accepted_scope_dispatch() {
+    for accepted in [false, true] {
+        let (_root, workspace, config, reference) = fixture_with_member(" included.env ");
+        let registry = ModuleRegistry::with_v2_builtins();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let mut ctx = context(&workspace, &config);
+        ctx.findings_store = Some(&store);
+        let mut input = json!({"taskMode":"manual","tasks":["secret-scan"],"mcps":false,"triage":false,"verify":false,"autoPatch":false});
+        if accepted {
+            input["scanScopeRef"] = json!(reference);
+        } else {
+            input["paths"] = json!([" included.env "]);
+        }
+        let prepared = registry
+            .prepare_dispatch_input("sast:scan", input, &ctx, None)
+            .unwrap();
+        let output = registry
+            .dispatch_prepared_input_with_runtime(prepared, &ctx, None)
+            .unwrap();
+        assert_eq!(output["status"], "completed");
+        let findings = store.list_findings(20).unwrap();
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].file_path, " included.env ");
+    }
 }
 
 fn context<'a>(

@@ -12,7 +12,8 @@ pub(crate) fn findings_to_vuln_findings(
 ) -> Result<String> {
     let findings: Vec<serde_json::Value> = records.iter().map(vuln_finding_row).collect();
     Ok(serde_json::to_string_pretty(&json!({
-        "scan_completed": true,
+        // Completion needs the authenticated selected-plan receipt, attached later.
+        "scan_completed": false,
         "vulnerabilities_found": !findings.is_empty(),
         "findings": findings,
     }))?)
@@ -102,7 +103,7 @@ mod tests {
     fn renders_the_external_schema_with_severity_and_confidence_mapping() {
         let body = findings_to_vuln_findings(&[record("critical")]).unwrap();
         let value: serde_json::Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(value["scan_completed"], true);
+        assert_eq!(value["scan_completed"], false);
         assert_eq!(value["vulnerabilities_found"], true);
         let row = &value["findings"][0];
         assert_eq!(row["severity"], "HIGH");
@@ -118,6 +119,7 @@ mod tests {
     fn empty_record_set_is_an_honest_no_findings_report() {
         let body = findings_to_vuln_findings(&[]).unwrap();
         let value: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(value["scan_completed"], false);
         assert_eq!(value["vulnerabilities_found"], false);
         assert_eq!(value["findings"].as_array().unwrap().len(), 0);
     }

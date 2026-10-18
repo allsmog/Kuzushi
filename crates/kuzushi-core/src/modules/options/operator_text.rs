@@ -108,4 +108,23 @@ mod tests {
             assert!(coerce_option_text(&spec, invalid).is_err());
         }
     }
+
+    #[test]
+    fn literal_list_entries_preserve_edge_spaces_and_whitespace_only_names() {
+        let spec = opt("paths", OptionType::StringList, "source paths");
+        let paths = serde_json::json!([" app ", "note.rs ", " "]);
+        assert_eq!(coerce_option_value(&spec, paths.clone()).unwrap(), paths);
+        assert_eq!(
+            coerce_option_text(&spec, &paths.to_string()).unwrap(),
+            paths
+        );
+        assert_eq!(
+            coerce_option_text(&spec, r#"" app ""#).unwrap(),
+            serde_json::json!([" app "])
+        );
+        assert_eq!(
+            coerce_option_text(&spec, " app , docs ").unwrap(),
+            serde_json::json!(["app", "docs"])
+        );
+    }
 }

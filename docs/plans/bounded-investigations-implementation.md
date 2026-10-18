@@ -1,5 +1,25 @@
 # Bounded investigations implementation
 
+The [unfinished lesson form repair](../assessments/lesson-form-recovery-2026-10-18.md)
+preserves text and caret before another draft, edit or review action. Resume and
+back are safe defaults; explicit discard opens the requested form without a
+write. All 28 lesson TUI checks, the workspace build, TUI Clippy and risk gate
+pass. Sequential J118/J120 record 78 machine passes, zero failures and 80 capture
+pairs; twenty terminal-cell replays were inspected. Seventeen human judgments
+remain pending. No live request is added. Four delivery items remain locally
+verified and five remain open. This draft on main follows `2b31d9267d` and includes
+the Report correction below.
+
+The [lesson Report checkpoint](../assessments/lesson-report-acceptance-2026-10-18.md)
+repairs an unconditional completed-scan claim in external exports. Completion
+requires an authenticated selected plan with all nonzero work finished. All 118
+focused Rust checks, the workspace build, Core Clippy and risk gate pass. Final
+J120 records 29 machine passes, zero failures, 28 capture pairs and seven pending
+human judgments; fourteen terminal-cell replays were inspected. Four exact lesson
+states survive supported exports and restart, with omissions disclosed in lossy
+formats. No live request is added. Four delivery items remain locally verified
+and five remain open. This is a draft on main after `2b31d9267d`.
+
 The [lesson generation checkpoint](../assessments/lesson-generation-acceptance-2026-10-18.md)
 repairs skipped evidence during narrow-terminal paging and distinguishes historical
 source from evidence-text size and provider attempts. Twenty-four Core and
@@ -845,6 +865,17 @@ Record focused tests and integration results here as work completes. Live model
 validation requires an explicitly approved test allowance and runs sequentially.
 
 ## Current implementation evidence
+
+October 18, 2026: [Literal scope membership](../assessments/literal-scope-membership-2026-10-18.md)
+repairs path trimming in scope forms, typed option lists and shared scanner
+resolution. Final J335 completes six approved static jobs over distinct spaced
+and ordinary paths, with nine observations, three identities, three explicit
+deferrals and no provider requests. Its 70 machine checks pass; six human
+judgments remain pending. There are 219 distinct focused Rust passes, a workspace
+build, lint and risk checks. Review's spaced-path source badge still needs a fix.
+The scope browser remains a flat list with paged members; selectable tree
+navigation and visible context inheritance/local overrides remain concrete work.
+Delivery remains four closed items and five open items.
 
 October 15, 2026: [Scope membership audit](../assessments/scope-membership-2026-10-15.md)
 reproduces stale inventory after staging an existing untracked file without

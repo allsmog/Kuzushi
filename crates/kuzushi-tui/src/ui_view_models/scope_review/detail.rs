@@ -5,35 +5,64 @@ pub(crate) fn scope_detail(state: &ScopeReviewState) -> Vec<String> {
     let Some(review) = &state.review else {
         return vec!["Build a bounded repository inventory first.".into(), "The initial draft keeps the whole repository together. You choose whether to split it. This action makes no model requests.".into(), "Optional AI suggestions are available from Actions after inventory. Scope review and scan approval remain separate.".into()];
     };
-    let mut lines = if let Some(form) = state
+    let mut lines = current_detail(state);
+    lines.push(String::new());
+    lines.extend(source_detail(review));
+    lines.extend(generation_detail(review));
+    lines
+}
+
+fn current_detail(state: &ScopeReviewState) -> Vec<String> {
+    if let Some(lines) = editor_detail(state) {
+        return lines;
+    }
+    if state.menu.is_some() {
+        return menu_detail(state);
+    }
+    if let Some(files) = &state.files {
+        return file_detail(files);
+    }
+    selected_detail(state)
+}
+
+fn editor_detail(state: &ScopeReviewState) -> Option<Vec<String>> {
+    if let Some(form) = state
         .form
         .as_ref()
         .filter(|form| form.kind == crate::app::ScopeEditKind::AiPriorities)
     {
-        vec!["Suggest boundaries for the entire repository inventory.".into(),
+        return Some(vec!["Suggest boundaries for the entire repository inventory.".into(),
             "One proposal request, at most eight primary scopes, no recursive subdivision. The next screen reviews model and shared allowance before execution.".into(),
-            format!("Architecture context: {}. F3 changes this choice.", if form.omit_context { "explicitly omitted" } else { "accepted Map revision, when available" })]
-    } else if state.accepting {
-        acceptance_detail(state)
-    } else if state.merge_target.is_some() {
-        vec!["Choose the destination scope. Its boundary will include both scopes' source files, dependencies and questions. Coverage is recomputed before saving. No jobs start.".into()]
-    } else if state.menu.is_some() {
-        menu_detail(state)
-    } else if let Some(files) = &state.files {
-        let mut lines = vec![format!(
-            "Files {}..{} of {}",
-            files.page.offset + usize::from(!files.page.files.is_empty()),
-            files.page.offset + files.page.files.len(),
-            files.page.total
-        )];
-        lines.extend(files.page.files.clone());
-        lines
+            format!("Architecture context: {}. F3 changes this choice.", architecture_context(form))]);
+    }
+    if state.accepting {
+        return Some(acceptance_detail(state));
+    }
+    state.merge_target.map(|_| vec!["Choose the destination scope. Its boundary will include both scopes' source files, dependencies and questions. Coverage is recomputed before saving. No jobs start.".into()])
+}
+
+fn architecture_context(form: &crate::app::ScopeEditForm) -> &'static str {
+    if form.omit_context {
+        "explicitly omitted"
     } else {
-        selected_detail(state)
-    };
-    lines.push(String::new());
-    lines.extend(source_detail(review));
-    lines.extend(generation_detail(review));
+        "accepted Map revision, when available"
+    }
+}
+
+fn file_detail(files: &crate::app::ScopeFiles) -> Vec<String> {
+    let mut lines = vec![format!(
+        "Files {}..{} of {}",
+        files.page.offset + usize::from(!files.page.files.is_empty()),
+        files.page.offset + files.page.files.len(),
+        files.page.total
+    )];
+    lines.extend(
+        files
+            .page
+            .files
+            .iter()
+            .map(|path| super::paths::display_path(path)),
+    );
     lines
 }
 
@@ -92,7 +121,15 @@ fn selected_heading(
 ) -> Vec<String> {
     let mut lines = vec![
         scope.name.clone(),
-        format!("Boundary: {}", scope.paths.join(", ")),
+        format!(
+            "Boundary: {}",
+            scope
+                .paths
+                .iter()
+                .map(|path| super::paths::display_path(path))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
     ];
     lines.extend(super::workload::summary(state));
     lines.extend([
@@ -126,7 +163,7 @@ fn coverage_detail(review: &kuzushi_core::workspace::ScanScopeReview) -> Vec<Str
             .identity_omissions
             .files
             .iter()
-            .map(|file| format!("Unbound: {file}")),
+            .map(|file| format!("Unbound: {}", super::paths::display_path(file))),
     );
     lines.push("Press f to read this category's files. Exclusions and overlap need separate acknowledgement. Uncovered or unbound included files block acceptance.".into());
     lines

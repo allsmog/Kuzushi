@@ -1,5 +1,34 @@
 # Bounded investigation acceptance ledger
 
+The [literal membership checkpoint](../assessments/literal-scope-membership-2026-10-18.md)
+records 219 distinct focused Rust passes and final J335 with 70 machine passes,
+zero failures and six pending human judgments. Six fixed static jobs retain
+nine observations over three literal source paths, with no model request.
+Review's spaced-path live-source badge is a known follow-up. Scope review still
+needs the requested selectable file tree and visible inherited/local context;
+its existing boundary list and paged reader do not satisfy that full contract.
+No broad milestone closes from this checkpoint.
+
+The [unfinished lesson form repair](../assessments/lesson-form-recovery-2026-10-18.md)
+preserves text and caret before another draft, edit or review action. Resume and
+back are safe defaults; explicit discard opens the requested form without a
+write. All 28 lesson TUI checks, the workspace build, TUI Clippy and risk gate
+pass. Sequential J118/J120 record 78 machine passes, zero failures and 80 capture
+pairs; twenty terminal-cell replays were inspected. Seventeen human judgments
+remain pending. No live request is added. Four delivery items remain locally
+verified and five remain open. This draft on main follows `2b31d9267d` and includes
+the Report correction below.
+
+The [lesson Report checkpoint](../assessments/lesson-report-acceptance-2026-10-18.md)
+repairs an unconditional completed-scan claim in external exports. Completion
+requires an authenticated selected plan with all nonzero work finished. All 118
+focused Rust checks, the workspace build, Core Clippy and risk gate pass. Final
+J120 records 29 machine passes, zero failures, 28 capture pairs and seven pending
+human judgments; fourteen terminal-cell replays were inspected. Four exact lesson
+states survive supported exports and restart, with omissions disclosed in lossy
+formats. No live request is added. Four delivery items remain locally verified
+and five remain open. This is a draft on main after `2b31d9267d`.
+
 The [lesson generation checkpoint](../assessments/lesson-generation-acceptance-2026-10-18.md)
 repairs skipped evidence during narrow-terminal paging and distinguishes historical
 source from evidence-text size and provider attempts. Twenty-four Core and

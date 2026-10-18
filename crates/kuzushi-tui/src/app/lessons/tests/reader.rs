@@ -43,7 +43,7 @@ fn press(app: &mut ShellApp, code: KeyCode) {
     );
 }
 
-fn render(app: &ShellApp, width: u16, height: u16) -> String {
+pub(super) fn render(app: &ShellApp, width: u16, height: u16) -> String {
     use ratatui::{backend::TestBackend, Terminal};
     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     terminal

@@ -8,6 +8,7 @@ mod additions;
 mod enumeration;
 mod file_boundaries;
 mod findings;
+mod literal_paths;
 mod source;
 mod suggestion;
 mod workload;

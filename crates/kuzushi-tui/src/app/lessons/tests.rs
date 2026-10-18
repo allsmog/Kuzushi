@@ -2,6 +2,7 @@ use super::*;
 mod draft_preservation;
 mod fixture;
 mod reader;
+mod replacement;
 
 #[test]
 fn lesson_preparation_failure_is_visible_without_losing_draft_or_focus() {

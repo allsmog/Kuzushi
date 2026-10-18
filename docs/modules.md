@@ -1145,6 +1145,13 @@ and external scanner files preserve their existing rows. Omission of `campaignId
 retains the existing workspace-history export. Completeness filters describe
 human review, not repository coverage. Unknown dollar totals remain unknown.
 
+The external scanner format's `scan_completed` flag is true only for a selected
+authenticated study with nonzero planned work, every job completed and no failed
+or pending jobs. Workspace history uses false because it has no selected finite
+plan. This flag does not establish complete repository coverage or confirm a
+finding. Existing saved exports retain their original values; re-export them to
+obtain the corrected completion flag. The file shape and tool options are unchanged.
+
 Fresh single-study, context-matrix and scope-study receipts also include
 `reassessmentRequiredCount`. It counts distinct reported findings with a retained
 terminal decision whose source applicability requires reassessment, separately
@@ -1428,10 +1435,17 @@ returns an error before changing the stored option. Structured `run --input`
 JSON strings retain their existing literal values.
 Shell list options also accept a complete JSON array of strings. A quoted JSON
 string represents one list entry, including commas in a rule filename;
-unquoted comma-separated values keep their existing behavior. Malformed arrays
+typed array entries and quoted strings preserve spaces at either end.
+Unquoted comma-separated values keep their existing trimming behavior. Malformed arrays
 and non-string entries refuse before storage. `set` and `setg` completion
 distinguishes option names from values: named descriptor choices and boolean
 values can complete, while free-form values remain the operator's text.
+Scope split, include and exclude forms preserve literal paths. Boundary and
+file readers quote paths with edge whitespace so operators can distinguish
+them. Accepted scope members remain exact through shared prepared dispatch and
+scanner resolution. Full-mode scope files skip empty lines and preserve every
+other line as a path. Use a new explicitly approved plan after a recorded
+descriptor mismatch; a completed or failed earlier plan grants no new jobs.
 Legacy public scan helpers still return a coverage error after persisting
 observations. The native SAST runner also retains earlier observations that passed scope checks
 when a later native engine fails or cancellation stops the fixed plan. Coverage records
@@ -3857,6 +3871,13 @@ an explicit invocation; the TUI binds its final confirmation to the exact
 prepared operation. An unapproved agent tool call cannot accept or reuse a
 lesson.
 
+Escape retains an unfinished lesson form in the current target's shell session.
+Starting a different draft, edit or review action preserves modified text and
+offers Enter to resume, Escape to return to the list, or uppercase `D` to
+discard it and open the requested form. Discarding this text does not write a
+lesson or finding decision. Unchanged forms need no discard choice. Paste and
+other shortcuts stay owned by the visible choice.
+
 `threat-model:reuse-lessons` accepts an exact `threatModelRef` and zero to eight
 exact accepted lesson references. It creates a separate inactive context copy;
 zero references remove a previous lesson selection from that copy. The operator
@@ -3871,9 +3892,16 @@ Lesson action runs are excluded from automatic artifact context. Saved run
 documents carrying reviewed lesson snapshots, and the shared reviewed-lesson
 digest, are excluded too. The active compatibility mirror is indexed without
 its lesson selection. This prevents general artifact search from selecting
-historical lessons on the operator's behalf. Lesson generation with a model,
-cross-workspace lesson transfer and lesson-aware investigation report export
-remain pending. The current manual flow makes no model requests.
+historical lessons on the operator's behalf.
+
+`findings:lesson-generate` proposes a draft from an exact human-confirmed
+observation and bounded captured source under the shared investigation allowance.
+It makes one logical synthesis request; transport retries consume that same
+allowance. Missing source captures are disclosed rather than replaced with
+current source. Human acceptance and context copying remain separate actions.
+Report preserves linked lesson records in JSON, JSONL, SARIF and Markdown bundle;
+CSV and the external scanner format disclose their omission. Cross-workspace
+lesson transfer remains unqualified. The manual flow makes no model requests.
 
 ### Recorded evidence imports
 

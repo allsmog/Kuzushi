@@ -1,0 +1,223 @@
+name: Literal scope edits preserve membership through bounded discovery and report
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR SEMGREP_APP_TOKEN SEMGREP_AGENT_TOKEN
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0
+require-shell: python3 -B @REPO/scripts/devex/fixtures/literal_scope_membership.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+submit: run context:build {"enrichment":false}
+require-live-snap: 35 context:build indexed 3 files | source-context
+submit: use threat-model
+submit: options threat-model:import
+submit: set path .kuzushi/manual-context.json
+submit: set activate false
+submit: set label Owned literal source
+submit: run threat-model:import
+require-live-snap: 35 threat-model:import saved | imported-context
+submit: map
+require-live-snap: 25 SYSTEM SUMMARY | map-result
+nav-mode:
+keys: u
+require-live-snap: 25 Map ✓ | accepted-map
+submit: use sast
+submit: options sast:scan
+submit: set taskMode manual
+submit: set tasks semgrep
+paste-file: @ART/rule-setting.txt
+keys: Enter
+submit: set semgrepTimeoutMs 60000
+submit: scopes
+require-live-snap: 25 Enter / c build inventory | empty-scopes
+keys: c
+require-live-snap: 35 DRAFT SCOPES | whole-inventory
+expect: all: 3 jobs
+keys: Enter Down Enter
+require-live-snap: 20 First scope name | split-name
+type: Spaced app
+keys: Tab
+paste-file: @ART/spaced-path.txt
+resize: 160x48
+live-snap: literal-field-160x48
+resize: 96x89
+live-snap: literal-field-96x89
+resize: 80x24
+live-snap: literal-field-80x24
+resize: 60x20
+live-snap: literal-field-60x20
+resize: 40x12
+live-snap: literal-field-40x12
+ask: Does the field retain both edge spaces, with a visible caret and literal-path guidance across all six sizes?
+resize: 120x36
+keys: Tab
+type: Other source
+keys: Tab
+paste-file: @ART/other-paths.txt
+keys: F2
+require-live-snap: 25 r2 | exact-split
+expect: all: 6 jobs
+expect: Boundary: " app "
+require-shell: python3 -B @REPO/scripts/devex/fixtures/literal_scope_membership.py @TMP_TARGET @ART split
+keys: f
+require-live-snap: 20 Files 1..1 of 1 | literal-member
+expect: " app /lib.py"
+keys: Escape
+require-live-snap: 20 Enter menu | member-back
+keys: Enter /
+type: Exclude a file or directory
+require-live-snap: 20 ▸ Exclude a file or directory | exclude-action
+keys: Enter
+require-live-snap: 20 File or directory path | exclusion-field
+paste-file: @ART/spaced-path.txt
+keys: Tab
+type: Defer only the literal spaced directory.
+keys: F2
+require-live-snap: 25 r3 | excluded-exact-directory
+expect: all: 3 jobs
+require-shell: python3 -B @REPO/scripts/devex/fixtures/literal_scope_membership.py @TMP_TARGET @ART excluded
+keys: Down Down Down f
+require-live-snap: 20 Files 1..1 of 1 | excluded-member
+expect: " app /lib.py"
+ask: Does exclusion affect only the literal spaced directory while ordinary app remains included, with the reduced workload visible before approval?
+keys: Escape
+require-live-snap: 20 Enter menu | excluded-back
+keys: Enter /
+type: Include an excluded file or directory
+require-live-snap: 20 ▸ Include an excluded file or directory | include-action
+keys: Enter
+require-live-snap: 20 Exact recorded exclusion path | literal-restoration
+keys: Enter
+require-live-snap: 25 r4 | restored-exact-directory
+expect: all: 6 jobs
+require-shell: python3 -B @REPO/scripts/devex/fixtures/literal_scope_membership.py @TMP_TARGET @ART restored
+keys: Enter /
+type: Exclude a file or directory
+require-live-snap: 20 ▸ Exclude a file or directory | invalid-action
+keys: Enter
+paste-file: @ART/invalid-path.txt
+keys: Tab
+type: Invalid literal must not become a root exclusion.
+keys: F2
+require-live-snap: 25 Action stopped | invalid-literal-refused
+require-shell: python3 -B @REPO/scripts/devex/fixtures/literal_scope_membership.py @TMP_TARGET @ART invalid
+ask: Does the invalid literal stay in its failed form, with the saved scope revision and all source membership unchanged and no work started?
+keys: Escape
+require-live-snap: 20 Enter menu | invalid-back
+keys: Enter /
+type: Use whole repository
+require-live-snap: 20 ▸ Use whole repository | whole-action
+keys: Enter
+require-live-snap: 25 r5 | whole-repository-option
+expect: all: 3 jobs
+require-shell: python3 -B @REPO/scripts/devex/fixtures/literal_scope_membership.py @TMP_TARGET @ART whole
+keys: Enter Down Enter
+require-live-snap: 20 First scope name | split-again
+type: Spaced app
+keys: Tab
+paste-file: @ART/spaced-path.txt
+keys: Tab
+type: Other source
+keys: Tab
+paste-file: @ART/other-paths.txt
+keys: F2
+require-live-snap: 25 r6 | restored-finite-boundaries
+expect: Boundary: " app "
+resize: 160x48
+live-snap: boundary-160x48
+resize: 96x89
+live-snap: boundary-96x89
+resize: 80x24
+live-snap: boundary-80x24
+resize: 60x20
+live-snap: boundary-60x20
+resize: 40x12
+live-snap: boundary-40x12
+keys: NPage
+live-snap: boundary-detail-40x12
+ask: Are the quoted literal boundary, source limitations and finite workload readable across all six sizes, with the whole-repository choice still available?
+resize: 120x36
+keys: a
+require-live-snap: 20 Accept exact boundaries | acceptance
+keys: Enter End Enter
+require-live-snap: 25 ACCEPTED SCOPES | accepted-boundaries
+require-shell: python3 -B @REPO/scripts/devex/fixtures/literal_scope_membership.py @TMP_TARGET @ART accepted
+keys: Space Down Space
+require-live-snap: 20 2 boundaries marked | selected-boundaries
+keys: p
+require-live-snap: 25 PLAN A STUDY | finite-study
+expect: 6 fixed discovery jobs
+keys: Down Down Down Down Down Enter
+require-live-snap: 20 Total calls | total-calls
+type: 1
+keys: Enter Down Enter
+require-live-snap: 20 Protected review | protected-calls
+type: 1
+keys: Enter L
+require-live-snap: 35 Scope draft ready | frozen-plan
+require-shell: python3 -B @REPO/scripts/devex/fixtures/literal_scope_membership.py @TMP_TARGET @ART draft
+keys: L Home
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | work-approval
+expect: 6 fixed jobs
+expect: Total provider calls: 1
+expect: Protected review calls: 1
+keys: End
+require-live-snap: 20 y approve | allowance-approval
+keys: y
+require-live-snap: 25 Approval saved | approved-plan
+keys: L
+require-live-snap: 25 L starts its fixed jobs | fixed-jobs
+keys: L
+require-live-snap: 25 dispatcher pid | launched
+require-shell: python3 -B @REPO/scripts/devex/fixtures/literal_scope_membership.py @TMP_TARGET @ART completed
+keys: r
+require-live-snap: 25 6 completed | completed-jobs
+submit: workbench
+require-live-snap: 25 Viewing Scan | scan-results
+nav-mode:
+keys: n
+require-live-snap: 25 Viewing Review | accepted-scan
+paste-file: @ART/open-spaced.txt
+keys: Enter
+require-live-snap: 25 FINDING | spaced-finding
+submit: decision deferred Spaced directory owner policy review
+paste-file: @ART/open-plain.txt
+keys: Enter
+require-live-snap: 25 FINDING | plain-finding
+submit: decision deferred Plain directory owner policy review
+paste-file: @ART/open-root.txt
+keys: Enter
+require-live-snap: 25 FINDING | root-finding
+submit: decision deferred Loose root owner policy review
+submit: report
+require-live-snap: 25 Scope study: | report
+expect: 2 boundaries
+expect: 0 committed / 1 calls
+keys: j j j
+require-live-snap: 20 format json (4/6) | json-format
+keys: Enter
+require-live-snap: 25 EXPORTED | json-export
+require-shell: python3 -B @REPO/scripts/devex/fixtures/literal_scope_membership.py @TMP_TARGET @ART exported
+keys: Down Down
+require-live-snap: 20 format vuln-findings (6/6) | external-format
+keys: Enter
+require-live-snap: 25 EXPORTED | external-export
+require-shell: python3 -B @REPO/scripts/devex/fixtures/literal_scope_membership.py @TMP_TARGET @ART external
+ask: Do actual scans keep the two directory names and loose root file distinct, with separate recurrence, unchanged severity, explicit human deferrals and a completed-plan receipt in export?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 6 completed | recovered-jobs
+submit: report
+require-live-snap: 25 Scope study: | recovered-report
+require-shell: python3 -B @REPO/scripts/devex/fixtures/literal_scope_membership.py @TMP_TARGET @ART restart
+ask: Does no-color restart retain the exact accepted boundaries, six completed jobs, nine observations and three decisions without another job or model request?
+keys: C-c
+require-exit: 10

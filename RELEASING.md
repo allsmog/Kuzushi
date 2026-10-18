@@ -1,5 +1,34 @@
 # Releasing Kuzushi
 
+## Literal scope paths
+
+Explicit `StringList` JSON arrays and quoted operator entries now preserve
+leading and trailing spaces in each string. Empty strings remain invalid.
+Comma-separated shorthand retains its existing trimming behavior. Use arrays
+or quoted entries for filenames with spaces at either end or literal commas.
+
+Scope forms, scanner path resolution, accepted-scope dispatch and full-mode
+scope-file lines preserve those names too. Blank scope-file lines are skipped;
+nonempty lines are literal paths. Tool names, aliases and artifact schemas are
+unchanged. Reprepare and approve a new plan if the updated path option
+description changes a recorded descriptor digest. Failed jobs from an older
+plan remain failed until an operator approves new work.
+
+## External report scan completion
+
+The `vuln-findings` export retains its existing schema and boolean
+`scan_completed` field. Previously that field was always `true`, including
+workspace history and unfinished studies. It is now `true` only when an
+authenticated selected study has nonzero planned work, all of it completed,
+and no pending or failed jobs. Workspace-history exports use `false` because
+they do not identify a finite scan plan.
+
+Consumers must treat this flag as completion of the selected planned work,
+not proof of complete repository coverage, vulnerability confirmation or a fix.
+Use the companion investigation receipt for source, scope and partial-work
+details. Re-export older reports to obtain the corrected flag; saved exports,
+finding decisions, lessons, tool names and options remain unchanged.
+
 ## Discovery retains rediscovered observations
 
 `agentic-sast:scan` no longer attaches the prior-findings MCP server or tells

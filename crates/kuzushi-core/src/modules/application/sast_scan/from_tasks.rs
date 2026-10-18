@@ -657,7 +657,7 @@ fn scan_scope_paths(input: &Value) -> Vec<String> {
             values
                 .iter()
                 .filter_map(Value::as_str)
-                .map(|path| path.trim().trim_end_matches('/').to_string())
+                .map(|path| path.trim_end_matches('/').to_string())
                 .filter(|path| !path.is_empty())
                 .collect()
         })
@@ -783,6 +783,21 @@ fn findings_count_excluding_review_candidates(
 #[cfg(test)]
 mod canonical_report_cost_tests {
     use super::*;
+
+    #[test]
+    fn literal_scan_paths_survive_agentic_scope_derivation() {
+        let input = json!({"paths": [" app /", "note.rs "]});
+        assert_eq!(
+            agentic_scoped_input(&input)["includePatterns"],
+            json!([" app ", " app /*", "note.rs ", "note.rs /*"])
+        );
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join(" app ")).unwrap();
+        assert_eq!(
+            single_scope_directory(&json!({"paths": [" app "]}), Some(root.path())),
+            Some(" app ".into())
+        );
+    }
 
     #[test]
     fn scan_paths_scope_the_agentic_inventory_after_shared_guard_validation() {

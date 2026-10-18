@@ -32,6 +32,36 @@ ask: Is the active field readable at each size with its cursor and clear edit, r
 resize: 120x36
 keys: Escape
 require-live-snap: 20 REUSABLE LESSONS | retained-browser
+keys: n
+require-live-snap: 20 UNFINISHED LESSON | replacement-choice
+require-shell: python3 -B @REPO/scripts/devex/fixtures/reviewed_lessons.py replacement-choice @TMP_TARGET @ART
+paste-file: @ART/limits.txt
+keys: g PageDown Home
+live-snap: guarded-shortcuts
+resize: 160x48
+live-snap: guard-160x48
+resize: 96x89
+live-snap: guard-96x89
+resize: 80x24
+live-snap: guard-80x24
+resize: 60x20
+live-snap: guard-60x20
+resize: 40x12
+require-live-snap: 20 UNFINISHED LESSON | guard-40x12
+expect: Enter resume
+expect: Esc back
+expect: D discard/open
+ask: Are resume, back and explicit discard clear across all six sizes, with paste and hidden shortcuts unable to edit or submit the retained form?
+resize: 120x36
+keys: Enter
+require-live-snap: 20 Unicode café | resumed-by-default
+expect-not: Historical guidance only. Current source
+keys: Escape
+require-live-snap: 20 REUSABLE LESSONS | retained-before-second-choice
+keys: n
+require-live-snap: 20 UNFINISHED LESSON | replacement-choice-again
+keys: Escape
+require-live-snap: 20 REUSABLE LESSONS | canceled-replacement
 keys: d
 require-live-snap: 20 Unicode café | resumed-draft
 keys: Tab
@@ -111,6 +141,17 @@ require-shell: python3 -B @REPO/scripts/devex/fixtures/reviewed_lessons.py retai
 ask: Can the unsubmitted multiline draft be resumed after copying accepted lessons, without saving that draft or changing its text and selected field?
 keys: Escape
 keys: t
+require-live-snap: 20 UNFINISHED LESSON | retirement-choice
+expect: RETIRED LESSON
+require-shell: python3 -B @REPO/scripts/devex/fixtures/reviewed_lessons.py retained-copy @TMP_TARGET @ART
+keys: Enter
+require-live-snap: 20 Keep this unsubmitted note | retirement-resumes-draft
+keys: Escape
+require-live-snap: 20 REUSABLE LESSONS | retained-before-retirement-choice
+keys: t
+require-live-snap: 20 UNFINISHED LESSON | retirement-choice-again
+ask: Does choosing retirement preserve the separate unfinished draft until explicit discard, while Enter resumes it without changing any saved lesson or finding decision?
+keys: D
 paste-file: @ART/retire.txt
 keys: Enter
 require-live-snap: 20 CONFIRM RETIRED LESSON | retire-confirmation

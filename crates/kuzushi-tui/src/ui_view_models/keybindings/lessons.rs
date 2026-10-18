@@ -44,9 +44,21 @@ fn browser_bindings(app: &ShellApp) -> Vec<FooterKeybinding> {
 }
 
 fn dialog_bindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
+    if app.router.lessons.replacement_form.is_some() {
+        return Some(vec![
+            bind("Enter", "resume"),
+            bind("Esc", "back"),
+            bind("D", "discard/open"),
+            interrupt_binding(app),
+        ]);
+    }
     if app.router.lessons.context_selecting {
         return Some(context_bindings(app));
     }
+    form_bindings(app)
+}
+
+fn form_bindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
     if !app.router.lessons.form_visible {
         return None;
     }

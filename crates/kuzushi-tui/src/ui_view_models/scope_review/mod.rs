@@ -1,6 +1,7 @@
 //! Pure scope-review projections. No workspace reads or dispatch policy.
 mod action_search;
 mod detail;
+mod paths;
 pub(crate) use action_search::scope_search_label;
 mod source;
 mod workload;

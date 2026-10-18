@@ -45,7 +45,7 @@ pub(crate) fn require_directory_scope(scope: &ScanScope, engines: &str) -> Resul
 
 pub(crate) fn normalized_scan_path(path: &str) -> Result<String> {
     let mut parts = Vec::new();
-    for component in Path::new(path.trim()).components() {
+    for component in Path::new(path).components() {
         match component {
             std::path::Component::Normal(part) => parts.push(part.to_string_lossy().to_string()),
             std::path::Component::CurDir => {}
@@ -57,3 +57,6 @@ pub(crate) fn normalized_scan_path(path: &str) -> Result<String> {
     anyhow::ensure!(!parts.is_empty(), "Scan scope paths must not be empty");
     Ok(parts.join("/"))
 }
+
+#[cfg(test)]
+mod tests;

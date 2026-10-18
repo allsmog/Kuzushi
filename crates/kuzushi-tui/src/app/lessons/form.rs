@@ -23,18 +23,14 @@ impl ShellApp {
             self.router.lessons.notice=Some("Open a confirmed finding in Review, then use lessons to draft from that exact generation.".into());
             return;
         }
-        self.router.lessons.form = Some(LessonForm {
+        self.request_lesson_form(LessonForm::new(
             target,
-            action: LessonFormAction::Draft {
+            LessonFormAction::Draft {
                 finding_id,
                 reference,
             },
             fields,
-            focused: 0,
-            confirming: false,
-        });
-        self.router.lessons.form_visible = true;
-        self.router.lessons.notice = None;
+        ));
     }
 
     pub(super) fn begin_lesson_review(&mut self, state: LessonState) {
@@ -47,15 +43,11 @@ impl ShellApp {
         let Some(target) = self.target_owned() else {
             return;
         };
-        self.router.lessons.form = Some(LessonForm {
+        self.request_lesson_form(LessonForm::new(
             target,
-            action: LessonFormAction::Review { record, state },
-            fields: Default::default(),
-            focused: 0,
-            confirming: false,
-        });
-        self.router.lessons.form_visible = true;
-        self.router.lessons.notice = None;
+            LessonFormAction::Review { record, state },
+            Default::default(),
+        ));
     }
 
     pub(super) fn handle_lesson_form_key(&mut self, key: KeyEvent) {
@@ -108,7 +100,17 @@ impl ShellApp {
     }
 
     pub(crate) fn paste_lesson_field(&mut self, text: &str) -> bool {
-        if self.shell_view() != ShellView::Lessons || !self.router.lessons.form_visible {
+        if self.shell_view() != ShellView::Lessons {
+            return false;
+        }
+        if self.router.lessons.replacement_form.is_some() {
+            return true;
+        }
+        self.paste_visible_lesson_form(text)
+    }
+
+    fn paste_visible_lesson_form(&mut self, text: &str) -> bool {
+        if !self.router.lessons.form_visible {
             return false;
         }
         let Some(form) = self.router.lessons.form.as_mut() else {

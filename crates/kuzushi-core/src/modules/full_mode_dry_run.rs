@@ -38,7 +38,7 @@ fn read_implicit_full_mode_scope(
 }
 
 fn full_mode_input_paths(input: &Value) -> Result<Option<Vec<std::path::PathBuf>>> {
-    let Some(paths) = string_list_input(input, &["paths", "includePaths", "include_paths"])? else {
+    let Some(paths) = path_list_input(input, &["paths", "includePaths", "include_paths"])? else {
         return Ok(None);
     };
     anyhow::ensure!(
@@ -120,7 +120,6 @@ pub(crate) fn read_full_mode_scope_file(
 
 pub(crate) fn full_mode_scope_lines(body: &str) -> Vec<std::path::PathBuf> {
     body.lines()
-        .map(str::trim)
         .filter(|line| !line.is_empty())
         .map(std::path::PathBuf::from)
         .collect()
@@ -239,9 +238,22 @@ pub(crate) fn required_full_mode_runtime(
 
 #[cfg(test)]
 mod tests {
-    use super::full_mode_input_paths;
+    use super::{full_mode_input_paths, full_mode_scope_lines};
     use serde_json::json;
     use std::path::PathBuf;
+
+    #[test]
+    fn literal_paths_survive_input_and_scope_file_lines() {
+        let expected = vec![PathBuf::from(" app /lib.py"), PathBuf::from("note.rs ")];
+        assert_eq!(
+            full_mode_input_paths(&json!({"paths": [" app /lib.py", "note.rs "]})).unwrap(),
+            Some(expected.clone())
+        );
+        assert_eq!(
+            full_mode_scope_lines(" app /lib.py\n\nnote.rs \n"),
+            expected
+        );
+    }
 
     #[test]
     fn changed_file_paths_scope_full_mode_without_a_sidecar_file() {

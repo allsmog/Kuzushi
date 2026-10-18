@@ -177,6 +177,15 @@ fn changed_confirmation_remains_exportable_but_is_ineligible_for_context() {
 }
 
 #[test]
+fn workspace_history_does_not_claim_a_completed_scan() {
+    let f = Fixture::new();
+    let body = fs::read(f.export("history.json", WorkspaceExportFormat::VulnFindings)).unwrap();
+    let document: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(document["scan_completed"], false);
+    assert_eq!(document["findings"].as_array().unwrap().len(), 1);
+}
+
+#[test]
 fn attachment_matches_generation_even_when_export_order_differs_and_omissions_are_named() {
     let f = Fixture::new();
     f.draft("Bound to greeting");

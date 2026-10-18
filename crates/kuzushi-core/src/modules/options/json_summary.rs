@@ -230,7 +230,6 @@ pub(in crate::modules) fn coerce_string_list_items(items: Vec<Value>) -> Result<
         .into_iter()
         .map(|item| {
             item.as_str()
-                .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .map(|value| Value::String(value.to_string()))
                 .context("must contain only non-empty strings")
