@@ -33,18 +33,18 @@ fn status_footer_text(left: &[String], right: String, width: usize) -> String {
         return fit(&right, width);
     };
     let first = fit(first, width);
-    let remaining = width.saturating_sub(display_width(&first) + 3);
-    if remaining == 0 {
-        return first;
-    }
-    let right = fit(&right, remaining);
-    let detail_budget = remaining.saturating_sub(display_width(&right) + 1);
+    let right = fit(&right, width.saturating_sub(display_width(&first) + 1));
+    let detail_budget = width.saturating_sub(display_width(&first) + display_width(&right) + 4);
     let first_detail_width = rest.first().map_or(0, |segment| display_width(segment));
     let details = if detail_budget >= first_detail_width {
         join_segments(rest)
     } else {
         String::new()
     };
+    if details.is_empty() {
+        return justify_prefer_right(first, right, width);
+    }
+    let remaining = width.saturating_sub(display_width(&first) + 3);
     format!(
         "{first} · {}",
         justify_prefer_right(details, right, remaining)

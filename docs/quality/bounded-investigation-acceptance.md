@@ -1,5 +1,12 @@
 # Bounded investigation acceptance ledger
 
+The [investigation status checkpoint](../assessments/investigation-status-2026-10-17.md)
+simplifies phase footers and binds Report's counter to its authenticated viewed
+investigation. There are 99 distinct focused passes and J121 has 176 machine
+passes, zero failures and 19 pending human judgments. Visual inspection found
+an active Scan receipt error that remains unfixed and is recorded in the
+assessment. No new live request is added; all nine broad milestones stay open.
+
 The [recorded scope findings qualification](../assessments/recorded-scope-findings-2026-10-17.md)
 adds authenticated accepted-scope filters across shared dispatch, CLI and TUI.
 Historical membership precedes paging and preserves current aliases and

@@ -22,6 +22,8 @@ pub(crate) fn report_source_history_coverage(
 
 mod review;
 pub(crate) use review::{report_review_footer_summary, report_review_summary};
+mod allowance;
+pub(crate) use allowance::report_allowance_calls;
 
 pub(crate) fn report_investigation_state(
     app: &ShellApp,

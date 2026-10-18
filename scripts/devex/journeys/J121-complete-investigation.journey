@@ -75,6 +75,7 @@ require-live-snap: 30 RESULT READY | map-result-loading
 require-live-snap: 30 Rust greeting writer | pending-map
 ask: Does the executed producer chain reach a source-grounded Map for explicit acceptance, with no injected completed queue, finding or global context activation?
 keys: u
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 1/6 workbench
 require-live-snap: 25 Map ✓ | accepted-map
 expect-not: workspace:stale inventory
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART map-accepted
@@ -110,6 +111,26 @@ require-live-snap: 25 L starts its fixed jobs | discovery-jobs
 keys: L
 require-live-snap: 25 dispatcher pid | discovery-running
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART admitted
+submit: workbench
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 3/6 workbench
+require-live-snap: 20 calls 3/6 | admitted-workbench
+type: Held scan draft λ
+keys: C-g
+require-live-snap: 20 COMMAND PALETTE | admitted-workbench-palette
+keys: Escape
+require-live-snap: 20 Held scan draft λ | admitted-workbench-return
+resize: 40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 3/6 workbench
+require-live-snap: 20 Held scan draft λ | admitted-workbench-40x12
+expect: calls 3/6
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART active
+ask: While the admitted request is still waiting, do the call counter, typed draft, palette return and compact controls stay usable without another job or request?
+resize: 120x36
+keys: C-u
+paste-file: @ART/scan-command.txt
+keys: Enter
+nav-mode:
+require-live-snap: 20 Jobs: 3 | admitted-campaign-return
 keys: K
 require-live-snap: 20 Stop requested || Stopped by operator | cancellation-requested
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART canceled
@@ -185,10 +206,12 @@ nav-mode:
 keys: u
 require-live-snap: 25 partial acknowledged | accepted-partial
 keys: Home
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 4/6 workbench
 require-live-snap: 20 findings 2 distinct | partial-counts-120x36
 expect: 3 observations
 expect: calls 4/6
 resize: 160x48
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 4/6 workbench
 require-live-snap: 20 calls 4/6 | partial-counts-160x48
 expect: INVESTIGATION ALLOWANCE
 expect: 2 Review protected
@@ -197,13 +220,17 @@ expect: cost not recorded
 expect: scope: ./fixture-target · Scan
 expect-not: scope: F-0001
 resize: 96x89
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 4/6 workbench
 require-live-snap: 20 calls 4/6 | partial-counts-96x89
 resize: 80x24
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 4/6 workbench
 require-live-snap: 20 calls 4/6 | partial-counts-80x24
 resize: 60x20
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 4/6 workbench
 require-live-snap: 20 calls 4/6 | partial-counts-60x20
 resize: 40x12
 keys: Home
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 4/6 workbench
 require-live-snap: 20 findings 2 distinct | partial-counts-40x12
 expect: 3 observations
 expect: calls 4/6
@@ -212,6 +239,7 @@ resize: 120x36
 keys: Escape
 paste-file: @ART/open-recurring.txt
 keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 4/6 workbench
 require-live-snap: 25 Labeled recurring observation | recurring-finding
 submit: dismiss false_positive Labeled synthetic greeting; no defect is claimed
 require-live-snap: 25 rejected_false_positive | false-positive-decision
@@ -221,6 +249,7 @@ require-live-snap: 25 Labeled later-only observation | second-finding
 submit: decision deferred Labeled offline workflow decision; retain raw observations
 require-live-snap: 25 deferred | deferred-decision
 submit: report
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 4/6 report
 require-live-snap: 25 0 pending · TP: 0 · FP: 1 · 1 deferred | partial-report
 expect: 4 committed / 6 calls
 expect: 2 protected review remaining
@@ -296,6 +325,7 @@ require-live-snap: 25 json · 2 finding(s) | final-export
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART final-report
 resize: 160x48
 keys: Home
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 5/7 report
 require-live-snap: 25 format json (4/6) · all | report-160x48
 expect: scope: ./fixture-target · Report
 expect-not: scope: F-0001
@@ -303,18 +333,22 @@ expect: Model: openai-oauth:gpt-5.5
 expect-not: Model: openai-codex:gpt-5.5
 resize: 96x89
 keys: Home
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 5/7 report
 require-live-snap: 25 format json (4/6) · all | report-96x89
 expect: Model: openai-oauth:gpt-5.5
 resize: 80x24
 keys: Home
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 5/7 report
 require-live-snap: 25 format json (4/6) · all | report-80x24
 expect: Shared allowance:
 resize: 60x20
 keys: Home
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 5/7 report
 require-live-snap: 25 format json (4/6) · all | report-60x20
 expect: Shared allowance:
 resize: 40x12
 keys: Home
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 5/7 report
 require-live-snap: 25 format json (4/6) · all | report-40x12
 expect: FP: 1
 keys: End
@@ -330,11 +364,14 @@ env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=
 launch: --target @TMP_TARGET
 require-live-snap: 30 KUZUSHI | restarted
 submit: workbench
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 5/7 workbench
 require-live-snap: 25 calls 5/7 | recovered-workbench-120x36
 resize: 40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 5/7 workbench
 require-live-snap: 20 calls 5/7 | recovered-workbench-40x12
 resize: 120x36
 submit: report
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 5/7 report
 require-live-snap: 25 5 committed / 7 calls | recovered-report
 expect: 0 pending · TP: 0 · FP: 1 · 1 deferred
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART restart

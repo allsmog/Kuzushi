@@ -148,12 +148,108 @@ fn cache_document(app: &ShellApp, document: InvestigationReportDocument) {
 }
 
 #[test]
+fn report_calls_follow_selected_receipt_refresh_and_failure_without_a_workspace_fallback() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(
+        root.path().join("README.md"),
+        "Owned report calls fixture.\n",
+    )
+    .unwrap();
+    let workspace = WorkspaceTarget::new(root.path()).unwrap();
+    let config = V2Config::default();
+    let context = kuzushi_core::ToolExecutionContext {
+        config: &config,
+        workspace: Some(&workspace),
+        findings_store: None,
+        trace: None,
+        cancellation: None,
+        authorization: Default::default(),
+    };
+    let registry = kuzushi_core::ModuleRegistry::with_v2_builtins();
+    let plan = registry.execute_tool("campaign:study", serde_json::json!({
+        "campaignId":"owned-report-calls", "investigationId":"owned-report-calls",
+        "scanInput":{"taskMode":"manual", "tasks":["license-scan"], "threatModelRef":null, "scanContextRef":null}
+    }), &context).unwrap();
+    let approval = registry.prepare_dispatch_input("campaign:approve-allowance", serde_json::json!({
+        "campaignId":"owned-report-calls", "investigationId":"owned-report-calls",
+        "expectedRevision":0, "campaignPlanSha256":plan["data"]["planSha256"],
+        "campaignJobs":3, "maxJobAttempts":1, "model":"openai-codex:gpt-5.5",
+        "maxProviderCalls":7, "protectedReviewCalls":2, "reason":"Offline report reader; no jobs start"
+    }), &context, None).unwrap().authorize_explicit_headless();
+    registry
+        .dispatch_prepared_input_with_runtime(approval, &context, None)
+        .unwrap();
+    let document = kuzushi_core::workspace::load_investigation_report_document(
+        &workspace,
+        "owned-report-calls",
+    )
+    .unwrap();
+    let mut app = workspace_app(root.path());
+    app.router
+        .report_mut()
+        .set_study(Some(crate::app::ReportStudyRef {
+            campaign_id: "owned-report-calls".into(),
+            plan_sha256: document.summary().plan_sha256.into(),
+        }));
+    assert_eq!(
+        report_allowance_calls(&app).as_deref(),
+        Some("calls loading")
+    );
+    cache_document(&app, document.clone());
+    assert_eq!(report_allowance_calls(&app).as_deref(), Some("calls 0/7"));
+    assert_eq!(
+        crate::ui_view_models::status_footer_model(&app).compact_right_segments,
+        ["calls 0/7"]
+    );
+    app.router.report_mut().toggle_scope();
+    assert!(
+        report_allowance_calls(&app).is_none(),
+        "Workspace history cannot borrow a selected allowance"
+    );
+    app.router.report_mut().toggle_scope();
+    app.set_input("Retained report draft");
+    app.set_cursor(5);
+    app.open_report_from_current_origin();
+    assert_eq!(
+        report_allowance_calls(&app).as_deref(),
+        Some("previous calls 0/7")
+    );
+    app.workbench_cache()
+        .borrow_mut()
+        .apply_view_hydration(ViewHydrationResult {
+            target: root.path().into(),
+            key: app.report_hydration_key(),
+            value: ViewHydrationValue::InvestigationReport(Err(
+                "Owned unavailable report ledger".into()
+            )),
+        });
+    assert_eq!(
+        report_allowance_calls(&app).as_deref(),
+        Some("calls unavailable")
+    );
+    app.open_report_from_current_origin();
+    assert_eq!(
+        report_allowance_calls(&app).as_deref(),
+        Some("calls loading")
+    );
+    cache_document(&app, document);
+    assert_eq!(report_allowance_calls(&app).as_deref(), Some("calls 0/7"));
+    assert_eq!((app.input(), app.cursor()), ("Retained report draft", 5));
+    app.set_shell_view(ShellView::Workbench);
+    assert!(report_allowance_calls(&app).is_none());
+}
+
+#[test]
 fn failed_study_reader_replaces_previous_content_and_requires_explicit_retry() {
     let root = tempfile::tempdir().unwrap();
     let document = study_document(root.path());
     let mut app = workspace_app(root.path());
     app.router.report_mut().toggle_scope();
     cache_document(&app, document);
+    assert!(
+        report_allowance_calls(&app).is_none(),
+        "Legacy receipts do not invent an allowance"
+    );
     assert_eq!(
         report_export_campaign(&app).unwrap().as_deref(),
         Some("owned-report-reader")

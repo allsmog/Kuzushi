@@ -212,14 +212,54 @@ fn shared_call_counter_survives_source_warning_and_longest_policy_at_every_viewp
                     .map(|cell| cell.symbol())
                     .collect();
                 assert!(text.contains("calls 4/6"), "{width}x{height}: {text}");
-                assert!(text.contains("autonomy:review"), "{width}x{height}: {text}");
+                let policy = if width < 80 {
+                    "⛭ review"
+                } else {
+                    "autonomy:review"
+                };
+                assert!(text.contains(policy), "{width}x{height}: {text}");
                 let warning = if width < 80 {
                     "⚠ source"
                 } else {
-                    "history:check source"
+                    "Source unchecked"
                 };
                 assert!(text.contains(warning), "{width}x{height}: {text}");
             }
         }
+    }
+}
+
+#[test]
+fn unavailable_allowance_keeps_its_warning_source_attention_and_ceiling_at_40_columns() {
+    use ratatui::{backend::TestBackend, Terminal};
+    let root = tempfile::tempdir().unwrap();
+    let mut app = app_with_attempts(root.path());
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Review));
+    app.config_mut().autonomy = kuzushi_core::modules::autonomy::AutonomyPosture::Review;
+    app.domain_mut().set_returning_source_unverified(true);
+    app.workbench_cache()
+        .borrow_mut()
+        .apply_view_hydration(ViewHydrationResult {
+            target: app.target_owned().unwrap(),
+            key: app.investigation_allowance_key().unwrap(),
+            value: ViewHydrationValue::InvestigationAllowance(Err(
+                "Owned unavailable allowance".into()
+            )),
+        });
+    let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+    terminal
+        .draw(|frame| crate::renderer::render_app(frame, &app))
+        .unwrap();
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    for expected in ["calls unavailable", "⛭ review", "⚠ source"] {
+        assert!(text.contains(expected), "Missing {expected}: {text}");
     }
 }

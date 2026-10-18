@@ -34,10 +34,7 @@ pub(crate) fn investigation_allowance_model(app: &ShellApp) -> Option<Investigat
 }
 
 fn present(snapshot: &AllowanceSnapshot) -> InvestigationAllowanceModel {
-    let calls = format!(
-        "calls {}/{}",
-        snapshot.committed_calls, snapshot.limits.max_provider_calls
-    );
+    let calls = calls_label(snapshot);
     InvestigationAllowanceModel {
         calls: calls.clone(),
         rows: vec![
@@ -54,6 +51,13 @@ fn present(snapshot: &AllowanceSnapshot) -> InvestigationAllowanceModel {
             "report · full limits".into(),
         ],
     }
+}
+
+pub(super) fn calls_label(snapshot: &AllowanceSnapshot) -> String {
+    format!(
+        "calls {}/{}",
+        snapshot.committed_calls, snapshot.limits.max_provider_calls
+    )
 }
 
 fn safe(value: String) -> String {

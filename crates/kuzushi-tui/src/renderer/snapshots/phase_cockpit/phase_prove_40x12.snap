@@ -11,7 +11,7 @@ KUZUSHI · Viewing Prove · next Review
 │F-0001 [●●●] 1src runtime critical
 │STATUS runtime_verified · [●●●]
 │NEXT   patch F-0001
-⛭ autonomy:fix ·   6 findings · 1 C ·...
+⛭ autonomy:fix   6 findings · 1 C · 2...
 ────────────────────────────────────────
  Ctrl+C request abort
  Esc prompt

@@ -89,7 +89,7 @@ views  [summary] · dfd  ·  Tab cycles · z zoom
 │                                                                                              │
 └──────────────────────────────────────────────────────────────────────────────────────────────┘
 unverified · ./phase-target · rev:unknown · repo index:current · indexed=3 total=3 · 3 nodes ·...
-⛭ autonomy:fix · run route · ⠋ context:build · 42s ·...     6 findings / 1 crit / 2 high / 2 med
+⛭ autonomy:fix · ⠋ context:build · 42s · 1/2 ·...           6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt
 ◇ MAP VIEW › NAVIGATE · Shift+Tab phase→ j/k component · Enter DFD · Tab map view · z zoom · Esc

@@ -8,6 +8,8 @@ use super::{
 use crate::app::ReviewMode;
 use crate::ShellView;
 
+mod investigation;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StatusFooterModel {
     pub(crate) left_segments: Vec<String>,
@@ -18,16 +20,21 @@ pub(crate) struct StatusFooterModel {
 
 pub(crate) fn status_footer_model(app: &ShellApp) -> StatusFooterModel {
     let (mut right, mut compact_right) = status_footer_findings_segments(app);
-    let allowance = super::investigation_allowance::investigation_allowance_model(app);
+    let allowance = super::report_summary::report_allowance_calls(app).or_else(|| {
+        super::investigation_allowance::investigation_allowance_model(app)
+            .map(|allowance| allowance.calls)
+    });
     let has_allowance = allowance.is_some();
     if let Some(allowance) = allowance {
-        right = format!("{} · {right}", allowance.calls);
-        compact_right = allowance.calls;
+        right = format!("{allowance} · {right}");
+        compact_right = allowance;
     }
     StatusFooterModel {
-        left_segments: status_footer_left_segments(app),
+        left_segments: investigation::full_segments(app)
+            .unwrap_or_else(|| status_footer_left_segments(app)),
         right_segments: vec![right],
-        compact_left_segments: compact_status_footer_left_segments(app, has_allowance),
+        compact_left_segments: investigation::compact_segments(app, has_allowance)
+            .unwrap_or_else(|| compact_status_footer_left_segments(app, has_allowance)),
         compact_right_segments: vec![compact_right],
     }
 }

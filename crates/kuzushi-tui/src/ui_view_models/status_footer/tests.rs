@@ -426,15 +426,12 @@ fn operator_ceiling_leads_full_and_compact_footers() {
     app.config_mut().autonomy = kuzushi_core::modules::autonomy::AutonomyPosture::Review;
     app.set_shell_view(ShellView::Report);
     let model = status_footer_model(&app);
-    for segments in [model.left_segments, model.compact_left_segments] {
-        assert_eq!(
-            segments.first().map(String::as_str),
-            Some("⛭ autonomy:review")
-        );
-        assert_eq!(
-            segments.iter().filter(|s| s.contains("autonomy:")).count(),
-            1
-        );
+    for (segments, expected) in [
+        (model.left_segments, "⛭ autonomy:review"),
+        (model.compact_left_segments, "⛭ review"),
+    ] {
+        assert_eq!(segments.first().map(String::as_str), Some(expected));
+        assert_eq!(segments.iter().filter(|s| s.starts_with('⛭')).count(), 1);
     }
 }
 

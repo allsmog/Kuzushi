@@ -11,7 +11,7 @@ KUZUSHI · Viewing Review · ● LIVE
 │▸F-0001 C runtime verified s1
 │  SQL injection reaches query
 │
-⛭ autonomy:fix ·   6 findings · 1 C ·...
+⛭ fix       6 findings · 1 C · 2 H · 2 M
 ────────────────────────────────────────
  Ctrl+C request abort
  Esc prompt

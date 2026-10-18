@@ -7,7 +7,7 @@ size: 96x89
 KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · repo index ready
  Map ✓ · Scan ✓ · Review ● · Report
  ▸ NEXT review 6 remaining findings (6 total)
- B review decision backlog · Enter finding details · findings reset list · z open heatmap
+ B review decision backlog · Enter finding details · findings full queue · z open heatmap
 │▸ FINDINGS · 6                     │F-0001 · FINDING · Y · review current source · t · source t
 │6 of 6 · [completeness:all]        │F-0001 · needs_review · critical
 │[order: proof > severity]          │Evidence: verified L4 · sources:1
@@ -36,6 +36,10 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · 
 │  Debug endpoint remains enabled   │    attacker-controlled input reaches a security...
 │  sources:1 · @– · open            │
 │  src/config.rs:5                  │── REVIEW ACTIONS ──
+│                                   │  Reopen this observation: open
+│                                   │  generation:1364509416246451584
+│                                   │  This reference belongs to this workspace. List aliases
+│                                   │  can change as findings arrive.
 │                                   │  Record a verdict with a reason; earlier decisions
 │                                   │  remain in history.
 │                                   │  triage: `decision <confirmed|deferred|needs_review>
@@ -85,11 +89,7 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · 
 │                                   │
 │                                   │
 │                                   │
-│                                   │
-│                                   │
-│                                   │
-│                                   │
-⛭ autonomy:fix · run route · ⠋ context:build · 42s ·...     6 findings / 1 crit / 2 high / 2 med
+⛭ autonomy:fix · ⠋ context:build · 42s · 1/2 ·...           6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt
 ▣ REVIEW VIEW › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt
