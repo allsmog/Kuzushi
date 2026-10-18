@@ -1,21 +1,6 @@
 use super::*;
 use std::path::{Component, Path, PathBuf};
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct DfdReviewOrigin {
-    target: PathBuf,
-    query: String,
-    view: ShellView,
-    input_mode: crate::InputMode,
-    overlay_origin: Option<ShellView>,
-    overlay_input_mode: Option<crate::InputMode>,
-    workbench: crate::app::WorkbenchRouteState,
-    findings: crate::app::FindingsRouteState,
-    findings_page: kuzushi_core::findings::FindingPageRequest,
-    navigation: crate::app::NavigationRouteState,
-    batch_config: Option<Box<crate::app::BatchScanConfig>>,
-}
-
 impl ShellApp {
     pub(super) fn is_dfd_findings_key(&self, key: KeyEvent) -> bool {
         self.router.scene().page() == crate::scene3d::VizPage::Dfd && key.code == KeyCode::Char('f')
@@ -44,13 +29,7 @@ impl ShellApp {
             Err(error) => return self.refuse_dfd_finding_query(error),
         };
         let expression = format!("files:{}", serde_json::json!(paths));
-        let mut origin = self.capture_dfd_review_origin(target, expression.clone());
-        origin.batch_config = self
-            .router
-            .campaign_mut()
-            .batch_scan_config
-            .take()
-            .map(Box::new);
+        let origin = self.capture_linked_findings_origin(target, expression.clone());
         let update = self.reduce_hotkey_command(ShellCommand::FindingsFilter(expression));
         self.router.scene_mut().set_dfd_review_origin(origin);
         self.set_input_mode(crate::InputMode::Navigate);
@@ -106,22 +85,6 @@ impl ShellApp {
         Ok((target, paths))
     }
 
-    fn capture_dfd_review_origin(&self, target: PathBuf, query: String) -> DfdReviewOrigin {
-        DfdReviewOrigin {
-            target,
-            query,
-            view: self.shell_view(),
-            input_mode: self.input_mode(),
-            overlay_origin: self.router.overlay_origin(),
-            overlay_input_mode: self.router.overlay_input_mode(),
-            workbench: self.router.workbench().clone(),
-            findings: self.router.findings().clone(),
-            findings_page: self.findings_page_request(self.active_findings_filter().as_deref()),
-            navigation: self.router.navigation().clone(),
-            batch_config: None,
-        }
-    }
-
     pub(crate) fn dfd_review_return_is_available(&self) -> bool {
         self.router
             .scene()
@@ -150,32 +113,12 @@ impl ShellApp {
         if !self.dfd_review_origin_matches(&origin) {
             return false;
         }
-        self.set_shell_view(origin.view);
-        *self.router.workbench_mut() = origin.workbench;
-        *self.router.findings_mut() = origin.findings;
-        *self.router.navigation_mut() = origin.navigation;
-        self.router.campaign_mut().batch_scan_config = origin.batch_config.map(|config| *config);
-        self.router.set_overlay_origin(origin.overlay_origin);
-        self.router
-            .set_overlay_input_mode(origin.overlay_input_mode);
-        self.set_input_mode(origin.input_mode);
-        self.router
-            .navigation_mut()
-            .accept_back_transition(origin.view);
-        self.runtime_state.requested_findings_page = Some(origin.findings_page);
-        self.defer_findings_refresh(
-            FindingsRefresh {
-                announce: false,
-                filter: self.active_findings_filter().clone(),
-            },
-            Vec::new(),
-        );
+        self.restore_linked_findings_origin(origin);
         true
     }
 
     fn dfd_review_origin_matches(&self, origin: &DfdReviewOrigin) -> bool {
-        self.target() == Some(origin.target.as_path())
-            && self.router.workbench().page() == Some(crate::app::WorkbenchPage::Review)
+        self.linked_findings_origin_matches(origin)
     }
 }
 

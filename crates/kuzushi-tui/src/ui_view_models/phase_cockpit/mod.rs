@@ -552,7 +552,7 @@ fn engagement_header_model(
         cost_invalid: app.session().cost_accounting_error().is_some(),
         budget_usd: app.session().session_budget_usd(),
         liveness: super::work_liveness(app),
-        finding_filter: app.active_findings_filter().clone(),
+        finding_filter: super::findings::scope_filter::display(app),
         phase_rail: guidance.phase_rail,
         next_action: result_next.unwrap_or(guidance.next_action),
         next_tools: result_card

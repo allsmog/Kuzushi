@@ -1,4 +1,8 @@
 #[cfg(test)]
+#[path = "tests/scope_filters.rs"]
+mod scope_filter_tests;
+
+#[cfg(test)]
 mod tests {
     use crate::adapters::auth_bridge::{bridge_ping_error, bridge_ping_summary};
     use crate::adapters::auth_oauth::{

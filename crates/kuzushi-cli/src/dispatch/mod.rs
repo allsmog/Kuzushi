@@ -257,6 +257,8 @@ mod tests {
             },
             Command::Findings {
                 command: None,
+                scope: Vec::new(),
+                scope_record: Vec::new(),
                 limit: 50,
                 severity: Vec::new(),
                 verdict: Vec::new(),

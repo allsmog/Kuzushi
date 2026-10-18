@@ -40,6 +40,12 @@ pub enum RecordedRequestScope {
     NotRecorded,
 }
 
+/// Authenticate historical discovery membership without loading allowance state.
+pub fn load_run_request_scope(target: &Path, run_id: &str) -> Result<RecordedRequestScope> {
+    let input = authenticated_input(target, run_id)?;
+    scope(&WorkspaceTarget::new(target)?, &input)
+}
+
 pub fn load_run_request_context(target: &Path, run_id: &str) -> Result<RunRequestContext> {
     let input = authenticated_input(target, run_id)?;
     let workspace = WorkspaceTarget::new(target)?;

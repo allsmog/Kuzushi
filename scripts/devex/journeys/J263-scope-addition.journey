@@ -9,7 +9,8 @@ launch: --target @TMP_TARGET
 require-live-snap: 30 KUZUSHI | ready
 submit: scopes
 require-live-snap: 25 DRAFT SCOPES | copied-model-boundaries
-keys: Enter End
+keys: Enter /
+type: Add discovery scope
 require-live-snap: 20 Add discovery scope | add-action
 keys: Enter
 require-live-snap: 20 ADD DISCOVERY SCOPE | new-boundary-name
@@ -22,8 +23,14 @@ type: ../outside
 keys: F2
 require-live-snap: 25 Action stopped | invalid-membership
 require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_addition.py @TMP_TARGET @ART @TMP_HOME invalid
-keys: Escape Enter End Enter
+keys: Escape
+require-live-snap: 20 DRAFT SCOPES | cancelled-private-draft
+keys: Enter /
+type: Add discovery scope
+require-live-snap: 20 ▸ Add discovery scope | reopen-add-action
+keys: Enter
 require-live-snap: 20 ../outside | restored-private-draft
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_addition.py @TMP_TARGET @ART @TMP_HOME restored
 ask: Does invalid membership retain the edited draft and cursor, with the saved proposal unchanged and no model request or scan?
 keys: C-Home C-k
 paste-file: @ART/greeting-members.txt

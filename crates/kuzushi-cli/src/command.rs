@@ -26,6 +26,12 @@ pub(crate) enum Command {
     Findings {
         #[command(subcommand)]
         command: Option<FindingsCommand>,
+        /// Accepted scope ids from recorded requests, across saved revisions.
+        #[arg(long = "scope", value_delimiter = ',')]
+        scope: Vec<String>,
+        /// Exact accepted proposal record hash; combine with --scope for one boundary revision.
+        #[arg(long = "scope-record", value_delimiter = ',')]
+        scope_record: Vec<String>,
         /// Maximum number of findings to list.
         #[arg(long, default_value_t = 50)]
         limit: usize,

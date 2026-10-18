@@ -11,8 +11,11 @@ use std::collections::BTreeMap;
 mod anchor;
 mod batch_membership;
 mod cursor;
+mod scope_membership;
 pub use anchor::{finding_page_anchor_index, finding_page_continuity_anchor};
 use batch_membership::{matching_report, BatchPageMembership};
+pub use scope_membership::FindingScopeFilterReceipt;
+use scope_membership::ScopePageMembership;
 #[cfg(test)]
 mod tests;
 use cursor::{page_offset, query_binding, window_report};
@@ -76,6 +79,8 @@ pub struct FindingPageMetadata {
     pub previous_cursor: Option<String>,
     pub anchors: Vec<String>,
     pub continuity_anchors: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope_filter: Option<FindingScopeFilterReceipt>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -122,25 +127,13 @@ fn read_finding_page_projection(
     request: &FindingPageRequest,
 ) -> Result<FindingPageSnapshot> {
     let before = store.projection_meta()?;
-    let runs = provenance_runs(workspace, filter)?;
-    let membership =
-        BatchPageMembership::load(store, workspace, filter.batch_id.as_deref(), policy)?;
-    let report = matching_report(store, filter, policy, membership.as_ref())?;
-    let mut report = apply_provenance(report, filter, &runs);
-    order_matching_rows(&mut report, request.order);
-    let binding = query_binding(
-        workspace,
-        filter,
-        policy,
-        request.order,
-        &report,
-        &runs,
-        membership.as_ref(),
-    )?;
+    let mut query = load_matching_query(store, workspace, filter, policy)?;
+    order_matching_rows(&mut query.report, request.order);
+    let binding = query_binding(workspace, filter, policy, request.order, &query)?;
     let offset = request_offset(
         request,
         &binding,
-        &report,
+        &query.report,
         filter.limit.min(FindingListFilter::MAX_LIMIT),
     )?;
     anyhow::ensure!(
@@ -148,16 +141,19 @@ fn read_finding_page_projection(
         "Findings changed while reading; reload the first page"
     );
     window_report(
-        report,
+        query.report,
         filter.limit.min(FindingListFilter::MAX_LIMIT),
         offset,
         &binding,
         before.applied_seq,
         request.order,
     )
-    .map(|page| FindingPageSnapshot {
-        page,
-        study: membership.map(|membership| membership.report),
+    .map(|mut page| {
+        page.page.scope_filter = query.scope.map(|scope| scope.receipt);
+        FindingPageSnapshot {
+            page,
+            study: query.batch.map(|membership| membership.report),
+        }
     })
 }
 
@@ -174,11 +170,39 @@ pub(super) fn matching_report_with_provenance(
     filter: &FindingListFilter,
     policy: IdentityFoldPolicy,
 ) -> Result<FindingListReport> {
+    let query = load_matching_query(store, workspace, filter, policy)?;
+    anyhow::ensure!(query.scope.as_ref().is_none_or(|scope| scope.receipt.unavailable_runs.is_empty()),
+        "Scope history is incomplete; inspect findings:list for unavailable runs before grouping findings");
+    Ok(query.report)
+}
+
+struct MatchingPageQuery {
+    report: FindingListReport,
+    runs: BTreeMap<String, RunSummary>,
+    batch: Option<BatchPageMembership>,
+    scope: Option<ScopePageMembership>,
+}
+
+fn load_matching_query(
+    store: &FindingStore,
+    workspace: &WorkspaceTarget,
+    filter: &FindingListFilter,
+    policy: IdentityFoldPolicy,
+) -> Result<MatchingPageQuery> {
     let runs = provenance_runs(workspace, filter)?;
-    let membership =
-        BatchPageMembership::load(store, workspace, filter.batch_id.as_deref(), policy)?;
-    let report = matching_report(store, filter, policy, membership.as_ref())?;
-    Ok(apply_provenance(report, filter, &runs))
+    let batch = BatchPageMembership::load(store, workspace, filter.batch_id.as_deref(), policy)?;
+    let scope = ScopePageMembership::load(store, workspace, filter, policy, batch.as_ref())?;
+    let report = matching_report(store, filter, policy, batch.as_ref())?;
+    let mut report = apply_provenance(report, filter, &runs);
+    if let Some(scope) = &scope {
+        scope.apply(&mut report);
+    }
+    Ok(MatchingPageQuery {
+        report,
+        runs,
+        batch,
+        scope,
+    })
 }
 
 fn request_offset(
@@ -221,7 +245,7 @@ fn provenance_runs(
     workspace: &WorkspaceTarget,
     filter: &FindingListFilter,
 ) -> Result<BTreeMap<String, RunSummary>> {
-    if !filter.has_provenance_filter() {
+    if !filter.has_provenance_filter() || filter.has_scope_filter() {
         return Ok(BTreeMap::new());
     }
     Ok(crate::list_run_summaries(workspace.root())?
@@ -235,6 +259,9 @@ fn apply_provenance(
     filter: &FindingListFilter,
     runs: &BTreeMap<String, RunSummary>,
 ) -> FindingListReport {
+    if filter.has_scope_filter() {
+        return report;
+    }
     let (findings, aliases) = report
         .findings
         .into_iter()

@@ -255,21 +255,19 @@ fn provenance_cursor_tracks_only_runs_that_supply_the_matching_findings() {
         &request
     )
     .is_ok());
-    let report =
-        matching_report_with_provenance(&store, &workspace, &filter, IdentityFoldPolicy::Legacy)
-            .unwrap();
-    let mut runs = provenance_runs(&workspace, &filter).unwrap();
+    let mut query =
+        load_matching_query(&store, &workspace, &filter, IdentityFoldPolicy::Legacy).unwrap();
     let before = query_binding(
         &workspace,
         &filter,
         IdentityFoldPolicy::Legacy,
         FindingPageOrder::Ledger,
-        &report,
-        &runs,
-        None,
+        &query,
     )
     .unwrap();
-    runs.get_mut("fixture-a")
+    query
+        .runs
+        .get_mut("fixture-a")
         .unwrap()
         .target_git
         .as_mut()
@@ -280,9 +278,7 @@ fn provenance_cursor_tracks_only_runs_that_supply_the_matching_findings() {
         &filter,
         IdentityFoldPolicy::Legacy,
         FindingPageOrder::Ledger,
-        &report,
-        &runs,
-        None,
+        &query,
     )
     .unwrap();
     assert_ne!(before, changed);
@@ -362,7 +358,7 @@ fn provenance_filter_reaches_a_row_beyond_the_legacy_cap() {
     assert_eq!(page.report.findings[0].message, "Synthetic candidate 0000");
 }
 
-fn write_revision(workspace: &WorkspaceTarget, run: &str, digit: char) {
+pub(super) fn write_revision(workspace: &WorkspaceTarget, run: &str, digit: char) {
     let mut summary = RunSummary::running(
         run,
         "fixture:scan",

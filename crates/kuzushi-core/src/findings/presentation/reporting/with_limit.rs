@@ -3,6 +3,7 @@ use crate::query::{tokenize_filter_expression, FilterToken};
 use crate::run_artifacts::RunSummary;
 use std::collections::BTreeMap;
 mod batch_filter;
+mod scope_filter;
 use batch_filter::bind_batch_filter;
 
 #[cfg(test)]
@@ -26,6 +27,15 @@ impl FindingListFilter {
 
     fn apply_filter_input(&mut self, input: &Value) -> Result<()> {
         self.apply_filter_expression_input(input)?;
+        self.scope_id.extend(scope_filter::ids(string_values_any(
+            input,
+            &["scopeId", "scope_id", "scope"],
+        )?)?);
+        self.scope_record
+            .extend(scope_filter::records(string_values_any(
+                input,
+                &["scopeRecord", "scope_record"],
+            )?)?);
         self.batch_id = bind_batch_filter(
             self.batch_id.take(),
             string_values_any(input, &["batchId", "batch_id", "batch"])?,
@@ -127,6 +137,8 @@ impl FindingListFilter {
     ) -> Result<Self> {
         Ok(Self {
             batch_id: None,
+            scope_id: Vec::new(),
+            scope_record: Vec::new(),
             severity: parsed_part_severities(severity)?,
             verdict: parsed_part_verdicts(verdict)?,
             triage_state: Vec::new(),
@@ -152,6 +164,12 @@ impl FindingListFilter {
     /// `triage_state` filter used by the `state:` expression and tool option.
     pub fn with_triage_states(mut self, states: Vec<String>) -> Result<Self> {
         self.triage_state.extend(parsed_triage_states(states)?);
+        Ok(self)
+    }
+
+    pub fn with_scope_filters(mut self, ids: Vec<String>, records: Vec<String>) -> Result<Self> {
+        self.scope_id.extend(scope_filter::ids(ids)?);
+        self.scope_record.extend(scope_filter::records(records)?);
         Ok(self)
     }
 
@@ -212,6 +230,8 @@ impl FindingListFilter {
                 .extend(values.into_iter().map(normalize_filter_value)),
             FilterKey::Limit => self.limit = parse_limit_token(values)?,
             FilterKey::Batch => self.batch_id = bind_batch_filter(self.batch_id.take(), values)?,
+            FilterKey::Scope => self.scope_id.extend(scope_filter::ids(values)?),
+            FilterKey::ScopeRecord => self.scope_record.extend(scope_filter::records(values)?),
         }
         Ok(())
     }
@@ -260,6 +280,10 @@ impl FindingListFilter {
         !self.revision_sha.is_empty() || !self.branch.is_empty() || self.dirty.is_some()
     }
 
+    pub fn has_scope_filter(&self) -> bool {
+        !self.scope_id.is_empty() || !self.scope_record.is_empty()
+    }
+
     pub fn matches_run_provenance(
         &self,
         finding: &Finding,
@@ -271,6 +295,10 @@ impl FindingListFilter {
         let Some(summary) = finding.scan_id.as_ref().and_then(|run_id| runs.get(run_id)) else {
             return false;
         };
+        self.matches_summary_provenance(summary)
+    }
+
+    pub(crate) fn matches_summary_provenance(&self, summary: &RunSummary) -> bool {
         let Some(git) = summary.target_git.as_ref() else {
             return false;
         };
@@ -640,6 +668,8 @@ fn parsed_sources(values: Vec<String>) -> Result<Vec<VulnSource>> {
 
 enum FilterKey {
     Batch,
+    Scope,
+    ScopeRecord,
     Rank,
     Verdict,
     State,
@@ -661,6 +691,8 @@ impl FilterKey {
     fn parse(key: &str) -> Result<Self> {
         match normalize_filter_key(key).as_str() {
             "batch" | "batchid" => Ok(Self::Batch),
+            "scope" | "scopeid" => Ok(Self::Scope),
+            "scoperecord" => Ok(Self::ScopeRecord),
             "rank" | "severity" => Ok(Self::Rank),
             "verdict" | "decision" | "conf" | "confirmation" => Ok(Self::Verdict),
             "state" | "triage" => Ok(Self::State),
@@ -676,7 +708,7 @@ impl FilterKey {
             "dirty" => Ok(Self::Dirty),
             "run" | "runid" | "scan" => Ok(Self::Run),
             "limit" => Ok(Self::Limit),
-            "owner" | "changed" | "strategy" | "strat" | "scope" => unsupported_future_key(key),
+            "owner" | "changed" | "strategy" | "strat" => unsupported_future_key(key),
             other => anyhow::bail!("unknown findings:list filter key {other:?}"),
         }
     }

@@ -167,9 +167,20 @@ fn menu_detail(state: &ScopeReviewState) -> Vec<String> {
         13 => "Copy the selected primary boundary into shared context. Its original discovery membership stays unchanged. Every selected scan boundary may receive these files as context, with no additional discovery job. The new revision needs acceptance and a new study approval.",
         14 => "Remove the shared context selection while retaining primary discovery boundaries. Referencing dependencies must be edited first. Earlier accepted revisions and study plans stay unchanged. No work starts.",
         15 => "Add one named discovery boundary using exact files or directory prefixes. Complete uncovered lists of at most 32 files are prefilled; larger or partial lists require explicit paths. Coverage and overlap are recomputed. Acceptance, job planning and spending approval remain separate.",
+        16 => "Read saved findings for this exact accepted boundary across recorded studies. Membership comes from authenticated requests, not file paths. Current ledger decisions stay authoritative. No discovery or model work starts. q returns to these boundaries or this action search.",
+        17 => "Reload saved boundaries and current repository facts. Keep the selected boundary and earlier immutable revisions. This does not build a new inventory, start scans or make model requests.",
         _ => "Create a separate inventory draft for the current source. Earlier immutable revisions remain available. No model requests are made.",
     };
     let mut lines = vec![description.into()];
+    if state.menu == Some(16) {
+        lines.insert(
+            0,
+            selected_scope(state).map_or_else(
+                || "Select an accepted boundary first.".into(),
+                |scope| format!("Saved findings for {}", scope.name),
+            ),
+        );
+    }
     if selected_scope(state).is_none() && state.menu.unwrap_or(0) < 6 {
         lines.push("Select a scope before using this action.".into());
     }

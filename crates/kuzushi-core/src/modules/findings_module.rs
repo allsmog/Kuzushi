@@ -258,6 +258,11 @@ fn findings_triage_options() -> Vec<OptionSpec> {
 
 fn findings_provenance_options() -> Vec<OptionSpec> {
     vec![
+        opt("scopeId", OptionType::StringList, "Accepted discovery scope ids from authenticated recorded requests. Matches historical observations, never file paths. Without scopeRecord, includes all recorded revisions of each id.")
+            .aliases(&["scope", "scope_id"]),
+        opt("scopeRecord", OptionType::StringList, "Exact accepted proposal record hashes. Combine with scopeId to select one historical boundary revision.")
+            .aliases(&["scope_record"])
+            .advanced(),
         opt("runId", OptionType::StringList, "Scan/run id filter.")
             .aliases(&["run_id", "run"])
             .advanced(),

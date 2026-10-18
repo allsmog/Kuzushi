@@ -181,8 +181,8 @@ fn collect_filtered_findings(
     filter: &FindingListFilter,
 ) -> Result<FindingListReport> {
     anyhow::ensure!(
-        filter.batch_id.is_none(),
-        "Study membership needs the workspace findings reader; use findings:list"
+        filter.batch_id.is_none() && !filter.has_scope_filter(),
+        "Study or scope membership needs the workspace findings reader; use findings:list"
     );
     // Aliases are positional over the sorted whole ledger, so they must be
     // assigned here — before filtering — and travel with the kept rows.

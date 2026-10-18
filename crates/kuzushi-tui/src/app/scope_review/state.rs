@@ -8,6 +8,7 @@ use std::{path::PathBuf, sync::Arc};
 pub(crate) struct ScopeReviewState {
     pub target: PathBuf,
     pub open: bool,
+    pub findings_origin: Option<crate::app::state_transitions::LinkedFindingsOrigin>,
     pub review: Option<Arc<ScanScopeReview>>,
     pub cursor: usize,
     pub study_scope_ids: std::collections::BTreeSet<String>,
@@ -30,6 +31,7 @@ impl ScopeReviewState {
         Self {
             target,
             open: true,
+            findings_origin: None,
             review: None,
             cursor: 0,
             study_scope_ids: Default::default(),

@@ -246,9 +246,11 @@ pub(super) fn workbench_keybindings_for_plan(
     app: &ShellApp,
     plan: Option<&crate::ui_view_models::PhasePresentationPlan>,
 ) -> Vec<ViewKeybinding> {
-    let mut bindings = review_ledger_keybindings(app);
+    let ledger = review_ledger_keybindings(app);
     let mut layout = workbench_layout_keybindings(app, plan);
-    yield_last_row_key_to_review_ledger(&bindings, &mut layout);
+    yield_last_row_key_to_review_ledger(&ledger, &mut layout);
+    let mut bindings = workbench_return_keybindings(app, plan);
+    bindings.extend(ledger);
     bindings.extend(layout);
     bindings
 }
@@ -395,7 +397,6 @@ fn workbench_layout_keybindings(
         page,
         crate::ui_view_models::review_backlog_active(app),
     ));
-    bindings.extend(workbench_return_keybindings(app, plan));
     bindings
 }
 
@@ -523,6 +524,9 @@ fn workbench_return_keybindings(
 }
 
 fn diagram_return_keybindings(app: &ShellApp) -> Vec<ViewKeybinding> {
+    if app.scope_findings_return_is_available() {
+        return vec![bind_char('q', "q", "scopes", ViewHotkeyAction::Back)];
+    }
     if app.dfd_review_return_is_available() {
         return vec![bind_char('q', "q", "diagram", ViewHotkeyAction::Back)];
     }

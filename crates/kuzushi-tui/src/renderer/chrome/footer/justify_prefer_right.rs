@@ -91,11 +91,12 @@ fn review_navigation_rows(
     bindings: Vec<(String, String)>,
 ) -> (Vec<(String, String)>, Vec<(String, String)>) {
     const READER_KEYS: [&str; 3] = ["Esc", "Enter", "End"];
-    let (mut reader, mut actions): (Vec<_>, Vec<_>) = bindings
-        .into_iter()
-        .partition(|(key, label)| label == "diagram" || READER_KEYS.contains(&key.as_str()));
+    let (mut reader, mut actions): (Vec<_>, Vec<_>) =
+        bindings.into_iter().partition(|(key, label)| {
+            is_linked_reader_return(label) || READER_KEYS.contains(&key.as_str())
+        });
     reader.sort_by_key(|(key, label)| {
-        if label == "diagram" {
+        if is_linked_reader_return(label) {
             return 0;
         }
         1 + READER_KEYS
@@ -110,6 +111,10 @@ fn review_navigation_rows(
         _ => 2,
     });
     (reader, actions)
+}
+
+fn is_linked_reader_return(label: &str) -> bool {
+    matches!(label, "diagram" | "scopes")
 }
 
 fn compact_reader_binding((key, label): (String, String)) -> (String, String) {
@@ -535,6 +540,29 @@ mod tests {
                 text.contains("Esc prompt") && text.contains("Ctrl+F filter"),
                 "{text}"
             );
+        }
+    }
+
+    #[test]
+    fn compact_review_prioritizes_scope_return_without_losing_filter_or_input_owner() {
+        let bindings = [
+            ("Esc", "prompt"),
+            ("Enter", "detail"),
+            ("End", "last"),
+            ("Ctrl+F", "filter"),
+            ("G", "groups"),
+            ("q", "scopes"),
+        ]
+        .into_iter()
+        .map(|(key, label)| (key.into(), label.into()))
+        .collect();
+        let (top, bottom) = review_navigation_rows(bindings);
+        let (top, overflow) = keybindings_line_for_wrapped_row(top, 40, OverflowHint::Defer);
+        let (bottom, _) =
+            keybindings_line_for_wrapped_row(bottom, 40, OverflowHint::ShowIf(overflow));
+        let text = [line_text(&top), line_text(&bottom)].join("\n");
+        for expected in ["q scopes", "Esc prompt", "Ctrl+F filter"] {
+            assert!(text.contains(expected), "{text}");
         }
     }
 

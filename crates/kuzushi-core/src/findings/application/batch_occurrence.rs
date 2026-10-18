@@ -115,13 +115,20 @@ pub struct BatchOccurrenceReport {
 }
 
 impl BatchOccurrenceReport {
+    pub(in crate::findings) fn retained_observation_run_ids(
+        &self,
+        root: &Path,
+    ) -> Result<Vec<String>> {
+        load::observation_run_refs(root, &self.all_attempt_run_ids())
+    }
+
     pub(in crate::findings) fn retained_representative_fingerprints(
         &self,
         root: &Path,
         store: &FindingStore,
         policy: IdentityFoldPolicy,
     ) -> Result<std::collections::BTreeSet<String>> {
-        let runs = load::observation_run_refs(root, &self.all_attempt_run_ids())?;
+        let runs = self.retained_observation_run_ids(root)?;
         store.finding_fingerprints_observed_in_runs(&runs, policy)
     }
 

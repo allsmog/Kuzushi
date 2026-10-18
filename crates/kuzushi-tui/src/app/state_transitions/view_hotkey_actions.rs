@@ -802,7 +802,7 @@ impl ShellApp {
         );
     }
 
-    pub(super) fn reduce_hotkey_command(&mut self, command: ShellCommand) -> InputUpdate {
+    pub(crate) fn reduce_hotkey_command(&mut self, command: ShellCommand) -> InputUpdate {
         let update = self.reduce_command_message(command);
         if update.handled {
             InputUpdate::handled_with_effects(update.effects)

@@ -195,7 +195,7 @@ fn scope_navigation_controls(state: &ScopeReviewState) -> [&'static str; 2] {
     }
     [
         "↑↓ Space mark · p plan · Enter menu",
-        "f files  r reload  PgUp/Dn  Esc back",
+        "v findings f files PgUp/Dn Esc back",
     ]
 }
 

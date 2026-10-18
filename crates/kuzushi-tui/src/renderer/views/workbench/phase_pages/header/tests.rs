@@ -61,6 +61,16 @@ fn compact_review_header_keeps_identity_and_stale_revision_warning() {
 }
 
 #[test]
+fn compact_review_keeps_the_selected_scope_visible() {
+    let mut header = scan_header(None);
+    header.phase = kuzushi_core::WorkflowPhase::Review;
+    header.finding_filter = Some("scope app · exact record · 3 runs".into());
+    let lines = compact_review_header_lines(&header, 40);
+    assert_eq!(lines.len(), 2);
+    assert!(lines[1].to_string().contains("scope app · exact record"));
+}
+
+#[test]
 fn scan_receipt_stays_compact_and_discloses_details_without_crowding_out_evidence() {
     let card = keyed_result_card();
     let rows = result_card_render_rows(

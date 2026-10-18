@@ -1,5 +1,21 @@
 # Releasing Kuzushi
 
+- Findings add accepted-scope filters: `scopeId` (`scope`, `scope_id`) and
+  `scopeRecord` (`scope_record`), with `scope:` and `scope-record:` expressions.
+  CLI `findings` adds `--scope` and `--scope-record`. Scope-filtered JSON adds
+  `page.scopeFilter`; unfiltered CLI JSON is unchanged. The accepted-scope
+  browser opens this historical view with `v` or its searchable action menu.
+- Membership uses authenticated recorded requests and exact accepted records,
+  including older matching observations behind current consolidated rows.
+  Missing metadata is partial, not zero history. Scope, run, study and source
+  constraints apply to the same observation run. The reader refuses more than
+  4096 candidate runs; narrow with `run:` or `batch:`. No discovery starts.
+- Existing ledger, scope, plan and allowance artifacts are unchanged. Reload
+  the first findings page after upgrading because continuation cursors bind the
+  extended query. Rust exhaustive `FindingListFilter` and page metadata literals
+  must initialize the additive scope fields or use constructors and `Default`.
+  See [qualification](docs/assessments/recorded-scope-findings-2026-10-17.md).
+
 - Newly prepared scanner context includes the selected system overview, capped
   at 200 Unicode characters with exact truncation notices in its preview.
   Existing frozen projections and approved jobs retain their recorded bytes.

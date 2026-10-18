@@ -106,7 +106,29 @@ impl crate::findings::FindingListPage {
             "Page: {} loaded, starting at {} of {} matching",
             self.page.loaded, self.page.offset, self.page.total
         ));
+        if let Some(scope) = &self.page.scope_filter {
+            lines.push(scope.output());
+        }
         crate::module_result::completed_output_result(self.report.summary(), lines.join("\n"), data)
+    }
+}
+
+impl crate::findings::FindingScopeFilterReceipt {
+    pub fn output(&self) -> String {
+        let mut lines = vec![format!("Scope history: {} matching recorded runs; {} unbound; {} unavailable. Findings are current ledger identities with matching historical observations.", self.matched_runs, self.unbound_runs, self.unavailable_runs.len())];
+        for reference in &self.references {
+            lines.push(format!(
+                "Scope {}: {} r{} · record {}",
+                reference.scope_id,
+                reference.proposal.proposal_id,
+                reference.proposal.revision,
+                reference.proposal.record_hash
+            ));
+        }
+        if !self.unavailable_runs.is_empty() {
+            lines.push(format!("Scope metadata unavailable for: {}. Counts describe readable matching history only.", self.unavailable_runs.join(", ")));
+        }
+        lines.join("\n")
     }
 }
 

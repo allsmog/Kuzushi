@@ -32,6 +32,7 @@ pub use finding_page::{
     finding_page_anchor, finding_page_anchor_index, finding_page_continuity_anchor,
     read_finding_page, read_finding_page_snapshot, FindingListPage, FindingPageAnchorMissing,
     FindingPageMetadata, FindingPageOrder, FindingPageRequest, FindingPageSnapshot,
+    FindingScopeFilterReceipt,
 };
 mod generic_tool_findings;
 mod identity_audit;

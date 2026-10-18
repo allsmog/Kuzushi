@@ -79,6 +79,7 @@ pub use application::{
     finding_page_anchor, finding_page_anchor_index, finding_page_continuity_anchor,
     read_finding_page, read_finding_page_snapshot, FindingListPage, FindingPageAnchorMissing,
     FindingPageMetadata, FindingPageOrder, FindingPageRequest, FindingPageSnapshot,
+    FindingScopeFilterReceipt,
 };
 #[cfg(test)]
 pub(crate) use domain::test_verified_receipt;

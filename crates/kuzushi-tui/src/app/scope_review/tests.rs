@@ -6,6 +6,7 @@ use ratatui::{backend::TestBackend, Terminal};
 mod action_search;
 mod additions;
 mod file_boundaries;
+mod findings;
 mod source;
 mod suggestion;
 

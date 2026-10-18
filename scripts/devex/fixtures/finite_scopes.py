@@ -132,6 +132,9 @@ if __name__ == "__main__":
     if sys.argv[3] == "seed":
         prepare(root, evidence, Path(sys.argv[4]).resolve())
         prepare_map_context(root)
+    elif sys.argv[3].startswith("scope-"):
+        from scope_findings import verify as verify_scope_findings
+        verify_scope_findings(root, evidence, sys.argv[3], selected_plan(root, evidence))
     else:
         verify(root, evidence, sys.argv[3])
         if sys.argv[3] == "restarted":

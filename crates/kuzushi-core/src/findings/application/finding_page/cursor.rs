@@ -17,10 +17,12 @@ pub(super) fn query_binding(
     filter: &FindingListFilter,
     policy: IdentityFoldPolicy,
     order: FindingPageOrder,
-    report: &FindingListReport,
-    runs: &BTreeMap<String, RunSummary>,
-    membership: Option<&BatchPageMembership>,
+    query: &MatchingPageQuery,
 ) -> Result<String> {
+    let report = &query.report;
+    let runs = &query.runs;
+    let membership = query.batch.as_ref();
+    let scope = query.scope.as_ref();
     // Run bookkeeping advances the projection without changing this query.
     // Bind materialized finding facts and decisions, preserving actual drift
     // checks while permitting a fresh headless invocation for the next page.
@@ -32,6 +34,9 @@ pub(super) fn query_binding(
     digest.update(signature.as_bytes());
     if let Some(membership) = membership {
         digest.update(&membership.signature);
+    }
+    if let Some(scope) = scope {
+        digest.update(serde_json::to_vec(&scope.receipt)?);
     }
     digest.update(serde_json::to_vec(&report.aliases)?);
     digest.update(serde_json::to_vec(&report.review_decisions)?);
@@ -131,6 +136,7 @@ fn page_metadata(
             .iter()
             .map(finding_page_continuity_anchor)
             .collect(),
+        scope_filter: None,
     })
 }
 

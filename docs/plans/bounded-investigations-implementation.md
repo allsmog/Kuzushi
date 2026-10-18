@@ -1,5 +1,15 @@
 # Bounded investigations implementation
 
+The [recorded scope findings qualification](../assessments/recorded-scope-findings-2026-10-17.md)
+adds authenticated accepted-scope filters across shared dispatch, CLI and TUI.
+Historical membership precedes paging and preserves current aliases and
+verdicts. Back restores scope navigation and drafts; unreadable metadata stays
+partial. All 256 distinct focused Rust tests, the build, Clippy and ten
+repository gates pass. Final sequential J127/J263 have 105 machine passes,
+zero failures and 93 capture pairs. Eighteen terminal-cell replays were
+inspected; twelve human judgments and all nine broad milestones remain open.
+No new live request is added.
+
 The [scoped investigation qualification](../assessments/scoped-investigation-context-2026-10-17.md)
 covers explicit Map and Scan selection, isolated local context, six fixed jobs,
 human triage, export and restart. New projections include the bounded system

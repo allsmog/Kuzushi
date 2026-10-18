@@ -18,6 +18,8 @@ pub(crate) const SCOPE_ACTIONS: &[&str] = &[
     "Use boundary as shared context",
     "Remove shared context",
     "Add discovery scope",
+    "View saved findings",
+    "Reload saved boundaries",
 ];
 
 impl ShellApp {
@@ -67,6 +69,8 @@ impl ShellApp {
 
     fn apply_shared_context_menu(&mut self, index: usize) -> InputUpdate {
         match index {
+            16 => self.open_selected_scope_findings(),
+            17 => self.refresh_scope_head(),
             13 => self.create_selected_shared_context(),
             14 => self.send_scope_edit(ScanScopeEdit::RemoveSharedContext),
             15 => {

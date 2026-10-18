@@ -198,6 +198,9 @@ fn normalize_lifecycle_status(value: &str) -> String {
 pub struct FindingListFilter {
     /// Recorded study membership, resolved by the workspace application reader.
     pub batch_id: Option<String>,
+    /// Recorded accepted boundary ids, independent of representative file paths.
+    pub scope_id: Vec<String>,
+    pub scope_record: Vec<String>,
     pub severity: Vec<Severity>,
     pub verdict: Vec<FindingVerdictFilter>,
     pub triage_state: Vec<FindingTriageStateFilter>,
@@ -231,6 +234,8 @@ impl Default for FindingListFilter {
     fn default() -> Self {
         Self {
             batch_id: None,
+            scope_id: Vec::new(),
+            scope_record: Vec::new(),
             severity: Vec::new(),
             verdict: Vec::new(),
             triage_state: Vec::new(),

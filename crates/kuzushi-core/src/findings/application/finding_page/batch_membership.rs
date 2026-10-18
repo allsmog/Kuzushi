@@ -42,6 +42,11 @@ pub(super) fn matching_report(
 ) -> Result<FindingListReport> {
     let mut ledger_filter = filter.clone();
     ledger_filter.batch_id = None;
+    ledger_filter.scope_id.clear();
+    ledger_filter.scope_record.clear();
+    if filter.has_scope_filter() {
+        ledger_filter.run_id.clear();
+    }
     let mut report = store.matching_findings_for_page(&ledger_filter, policy)?;
     let Some(membership) = membership else {
         return Ok(report);

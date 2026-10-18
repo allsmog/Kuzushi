@@ -102,12 +102,16 @@ impl ShellApp {
             .router
             .scope_review_mut()
             .as_mut()
-            .filter(|state| state.menu.is_none() || !state.open)
+            .filter(|state| clear_search_after_action(state))
         {
             state.menu_search = None;
         }
         update
     }
+}
+
+fn clear_search_after_action(state: &ScopeReviewState) -> bool {
+    state.menu.is_none() || (!state.open && state.findings_origin.is_none())
 }
 
 fn begins_search(key: KeyEvent) -> bool {

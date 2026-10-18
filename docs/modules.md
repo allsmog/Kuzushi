@@ -1317,8 +1317,34 @@ pagination. `batch_id` and `batch` are aliases; the filter expression accepts
 `batch:<id>`. This includes cancelled and superseded attempts. Rows retain their
 global aliases, latest canonical observations and saved decisions. Membership
 does not mean that a row's displayed observation came from the selected study,
-and it does not increase completed-pass recurrence. The general `scope:` filter
-remains unsupported.
+and it does not increase completed-pass recurrence.
+
+`findings:list scopeId=["app"]` selects identities with observations in
+authenticated accepted scope requests. `scope` and `scope_id` are aliases;
+expressions accept `scope:app`. Ids are case sensitive and span recorded
+revisions. Add `scopeRecord` (alias `scope_record`) or `scope-record:<hash>`
+to select an exact accepted proposal record. Hashes require all 64 characters.
+File paths never supply accepted-scope membership. Scope, run, study and
+SHA/branch/dirty constraints must match the same observation run. Rows retain
+current canonical observations, whole-ledger aliases and decisions.
+
+The page's additive `scopeFilter` receipt names matching run ids and accepted
+references, counts unbound runs and lists unavailable metadata. Altered or
+missing requests are excluded from known matches and disclosed as partial scope
+history. Such a query cannot establish complete coverage or a fix. Group readers
+refuse partial scope history because their return type cannot carry the receipt.
+The reader checks at most 4096 candidate observation runs; run-prefix and exact
+study membership narrow candidates before that cap. Overflow requires an
+explicit `run:` or `batch:` filter, with no history truncation or deletion.
+
+The CLI offers `findings --scope app --scope-record <hash>` through the same
+parser and page reader. Scope-filtered JSON includes the page receipt. The TUI's
+accepted-scope browser offers `v` and a searchable saved-findings action. It opens
+the exact record across saved studies, with no new discovery or model work.
+Back restores the scope cursor, reading position, composer, prior filter and
+selected study. The active scope remains visible in compact Review headers;
+unreadable scope metadata is labeled partial. Drafts and file readers cannot
+trigger the action.
 
 The shell binds selected-study Review to the same workspace reader. Opening or
 clearing a study reloads the matching page while retaining ordinary filters and

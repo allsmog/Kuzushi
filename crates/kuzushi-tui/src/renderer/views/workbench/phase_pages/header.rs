@@ -9,6 +9,12 @@ pub(in crate::renderer::views) fn compact_review_header_lines(
 ) -> Vec<Line<'static>> {
     let mut lines = vec![identity_line(header, width)];
     lines.extend(checkpoint_drift_line(header, width));
+    lines.extend(
+        header
+            .finding_filter
+            .as_deref()
+            .map(|filter| finding_filter_line(filter, width)),
+    );
     lines
 }
 

@@ -2,6 +2,38 @@
 use super::*;
 
 impl FindingStore {
+    pub(in crate::findings) fn observed_run_ids(
+        &self,
+        max_runs: usize,
+        prefixes: &[String],
+        exact: Option<&[String]>,
+    ) -> Result<Vec<String>> {
+        let mut statement = self.conn.prepare(
+            "select distinct run_id, length(cast(run_id as blob)) from finding_observations
+             where (?2 = '[]' or exists(select 1 from json_each(?2) where substr(lower(run_id),1,length(value)) = value))
+               and (?3 is null or run_id in (select value from json_each(?3)))
+             order by run_id limit ?1",
+        )?;
+        let prefixes = serde_json::to_string(prefixes)?;
+        let exact = exact.map(serde_json::to_string).transpose()?;
+        let mut rows = statement.query(params![
+            i64::try_from(max_runs.saturating_add(1))?,
+            prefixes,
+            exact
+        ])?;
+        let mut ids = Vec::new();
+        while let Some(row) = rows.next()? {
+            anyhow::ensure!(ids.len() < max_runs, "Scope history exceeds {max_runs} observation runs; add run:<prefix> or batch:<id> to narrow this query");
+            let bytes = usize::try_from(row.get::<_, i64>(1)?)?;
+            anyhow::ensure!(
+                bytes <= 512,
+                "Observation run id exceeds the bounded reader limit"
+            );
+            ids.push(row.get(0)?);
+        }
+        Ok(ids)
+    }
+
     pub(crate) fn observation_history_window(
         &self,
         max_rows: usize,

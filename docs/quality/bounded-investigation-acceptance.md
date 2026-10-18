@@ -1,5 +1,15 @@
 # Bounded investigation acceptance ledger
 
+The [recorded scope findings qualification](../assessments/recorded-scope-findings-2026-10-17.md)
+adds authenticated accepted-scope filters across shared dispatch, CLI and TUI.
+Historical membership precedes paging and preserves current aliases and
+verdicts. Back restores scope navigation and drafts; unreadable metadata stays
+partial. All 256 distinct focused Rust tests, the build, Clippy and ten
+repository gates pass. Final sequential J127/J263 have 105 machine passes,
+zero failures and 93 capture pairs. Eighteen terminal-cell replays were
+inspected; twelve human judgments and all nine broad milestones remain open.
+No new live request is added.
+
 The [scoped investigation qualification](../assessments/scoped-investigation-context-2026-10-17.md)
 covers explicit Map and Scan selection, isolated local context, six fixed jobs,
 human triage, export and restart. New projections include the bounded system
@@ -332,7 +342,7 @@ and all nine broad milestones remain open.
 The [study Review paging checkpoint](../assessments/study-review-paging-2026-10-16.md)
 moves study membership before pagination, preserves global aliases, decisions
 and retained attempts, and retains a selected study when its metadata fails.
-The global `scope:` filter remains unsupported. There are 402 focused passes,
+At that checkpoint the global `scope:` filter was unsupported. There are 402 focused passes,
 a passing build and ten passing summary gates. Final J313/J304 add 87 machine
 passes, zero failures and ten pending human judgments across 74 capture pairs.
 One compatibility chain-screen test remains open. The operator selected
@@ -411,7 +421,7 @@ original requirements remain open. No new live model request is made.
 | Raw observations, provenance, reversible duplicates/relationships and human decisions | Findings ledger/application services; relationship and Review journeys | Scoped. Keep related variants and uncertain matches distinct from duplicates. Reconcile scale and all interface paths. |
 | Report totals, selected membership and original severity | [Report decision summary](../assessments/report-decision-summary-2026-10-17.md); shared source-applicability fold; J279/J199 | Scoped. Study/workspace counts stay distinct, FP and deferred states survive export/restart, and known missing/regressed ledgers are unavailable. Eight human judgments, large-ledger behavior, metadata density and reference parity remain open. |
 | SHA/content-aware comparison and honest recurrence | Finding identity/source history, batch occurrence, J121 dirty-source reassessment and retained FP/deferral decisions; [attempt and recurrence evidence](../assessments/attempts-and-recurrence-2026-10-15.md) adds exact run membership and canceled/superseded-only zero recurrence; [scope source comparison](../assessments/scope-source-comparison-2026-10-15.md) adds visible revision differences and unchecked matching SHAs before new work; [current SHA workflow](../assessments/source-identity-header-2026-10-17.md) adds actual two-commit, same-SHA dirty-content and source-qualified review in J196/J199 | Scoped. A missing later observation never establishes a fix or safe cross-branch decision reuse. Current J196/J199 have 90 machine passes and five pending human judgments over deterministic policy observations; nondeterministic model quality and other scanner bindings remain open. J275 is explicitly synthetic reader evidence, not discovery quality validation. J277 has 33 machine passes and six pending human judgments; it contains no findings and establishes no fix. |
-| Severity, confidence, recurrence and scope views | Review queue, canonical filters, batch occurrence and scope-case views | Scoped. The general `findings:list` filter explicitly rejects `scope`; existing scope access is through study/case views. Do not claim a global scope filter exists. |
+| Severity, confidence, recurrence and scope views | Review queue, canonical filters, batch occurrence, scope-case views and [recorded scope filtering](../assessments/recorded-scope-findings-2026-10-17.md) | Scoped. `findings:list`, CLI and shell share authenticated accepted-scope membership before paging. Scope, run, study and source predicates must match the same observation run. Missing metadata is partial; global aliases and human decisions stay authoritative. Scale, cancellation and full UX qualification remain open. |
 | Goal-relevance view separate from finding verdicts | `findings:goals`, `findings:goal-assess`, Review `O`/`goals`, immutable audit history and export; [goal relevance evidence](../assessments/goal-relevance-2026-10-15.md) | Scoped. Manual assessments bind exact saved briefs and recorded observations, with reversible clears and conflict review. J274 verifies the six-size browser, compact forms and no-color restart. Large histories, rapid key sequences and human UX acceptance remain open. |
 | Accepted findings produce draft lessons; only reviewed lessons enter future accepted context | Finding lesson tools, `threat-model:reuse-lessons`, eligibility validation and retirement tests; [integrated J304](../assessments/reviewed-learning-loop-2026-10-16.md) verifies exact frozen lesson text in three actual adapter requests, six completed local jobs, retirement refusal and restart | Scoped. Transport is intercepted and the lesson is manually reviewed policy guidance. This is not live inference or generated-lesson usefulness evidence; keep legacy imported patterns explicitly unverified. Six human judgments remain pending. |
 | Source-only variants and next-investigation proposals have their own approved question, scope and allowance | Proposal/context study machinery and experimental source-pattern adapters | Scoped. Do not credit unaccepted drafts as executed follow-ups or useful variant coverage. |

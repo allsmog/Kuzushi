@@ -214,6 +214,7 @@ impl ShellApp {
             KeyCode::Char('p') => return self.plan_selected_scope(),
             KeyCode::Char(' ') => return self.toggle_study_scope_selection(),
             KeyCode::Char('f') => return self.request_scope_files(0),
+            KeyCode::Char('v') => return self.open_selected_scope_findings(),
             KeyCode::Char('r') => return self.refresh_scope_head(),
             KeyCode::Char(']') => return self.turn_scope_file_page(false),
             KeyCode::Char('[') => return self.turn_scope_file_page(true),
@@ -246,7 +247,7 @@ impl ShellApp {
         self.request_scope_files(offset)
     }
 
-    fn refresh_scope_head(&mut self) -> InputUpdate {
+    pub(super) fn refresh_scope_head(&mut self) -> InputUpdate {
         self.dispatch_scope_request(json!({"operation":"latest"}))
     }
 

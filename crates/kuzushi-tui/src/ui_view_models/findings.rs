@@ -33,6 +33,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const FINDINGS_PREVIEW_LIMIT: usize = 8;
+pub(crate) mod scope_filter;
 const FINDING_DETAIL_SECTION_LIMIT: usize = 8;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -363,7 +364,7 @@ fn join_filter_label(current: String, chip: String) -> String {
 }
 
 fn active_findings_filter_label(app: &ShellApp) -> String {
-    app.active_findings_filter()
+    scope_filter::display(app)
         .as_deref()
         .map(str::trim)
         .filter(|filter| !filter.is_empty())

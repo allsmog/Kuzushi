@@ -92,6 +92,62 @@ nav-mode:
 keys: n
 require-live-snap: 30 Viewing Review | accepted-scan
 keys: Escape
+submit: scopes
+require-live-snap: 25 ACCEPTED SCOPES | scope-findings-origin
+keys: Home v
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART scope-review-frame
+require-live-snap: 25 scope app · exact record · 3 runs | app-scope-findings
+expect: q scopes
+expect: Labeled app observation
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART scope-checked
+resize: 160x48
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART scope-review-frame
+require-live-snap: 25 scope app · exact record | scope-findings-160x48
+resize: 96x89
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART scope-review-frame
+require-live-snap: 25 scope app · exact record | scope-findings-96x89
+resize: 80x24
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART scope-review-frame
+require-live-snap: 25 scope app · exact record | scope-findings-80x24
+resize: 60x20
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART scope-review-frame
+require-live-snap: 25 scope app · exact record | scope-findings-60x20
+resize: 40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART scope-review-frame
+require-live-snap: 25 scope app · exact record | scope-findings-40x12
+expect: q scopes
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART scope-review-frame
+require-live-snap: 25 scope app · exact record | scope-findings-120x36
+ask: Is the exact saved scope clear, and can the operator read App's consolidated finding without starting another scan or losing the marked boundaries?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART scope-hide
+submit: findings refresh
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART scope-partial-frame
+require-live-snap: 25 partial scope app · 1 unread · 2 runs | unread-scope-evidence
+expect: Labeled app observation
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART scope-hidden
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART scope-restore
+submit: findings refresh
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART scope-review-frame
+require-live-snap: 25 scope app · exact record · 3 runs | restored-scope-evidence
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART scope-restored
+nav-mode:
+keys: q
+require-live-snap: 25 ACCEPTED SCOPES | scope-findings-return
+keys: Down Enter /
+type: View saved findings
+require-live-snap: 20 ▸ View saved findings | saved-findings-action
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART scope-action-help
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART scope-other-frame
+require-live-snap: 25 scope other · exact record · 3 runs | other-scope-findings
+expect: Labeled other observation
+ask: Does unreadable scope evidence remain visibly partial, recover without rewriting it, and return to the prior boundary before opening its sibling?
+keys: q
+require-live-snap: 25 Search: View saved findings | saved-findings-action-return
+keys: Escape Escape
+require-live-snap: 25 ACCEPTED SCOPES | other-scope-return
+keys: Escape
 paste-file: @ART/open-app.txt
 keys: Enter
 require-live-snap: 30 Labeled app observation | app-finding
@@ -103,6 +159,7 @@ require-live-snap: 30 Labeled other observation | other-finding
 submit: dismiss false_positive Owned workflow fixture; no defect claimed
 require-live-snap: 30 rejected_false_positive | other-decision
 submit: report
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART scope-report-frame
 require-live-snap: 30 Scope study: | scope-report
 expect: Scope study: 2 boundaries · 1 unplanned
 expect: 6 committed / 8 calls
@@ -117,15 +174,20 @@ require-live-snap: 30 json · 2 finding(s) | scoped-export
 require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART exported
 keys: p Home
 resize: 160x48
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART scope-report-frame
 require-live-snap: 25 format json (4/6) · all | report-160x48
 expect: Study id:
 resize: 96x89
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART scope-report-frame
 require-live-snap: 25 format json (4/6) · all | report-96x89
 resize: 80x24
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART scope-report-frame
 require-live-snap: 25 format json (4/6) · all | report-80x24
 resize: 60x20
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART scope-report-frame
 require-live-snap: 25 format json (4/6) · all | report-60x20
 resize: 40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART scope-report-frame
 require-live-snap: 25 format json (4/6) · all | report-40x12
 keys: NPage
 live-snap: report-page-1-40x12
@@ -163,6 +225,7 @@ resize: 80x24
 launch: --target @TMP_TARGET
 require-live-snap: 30 KUZUSHI | restarted
 submit: report
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART scope-report-frame
 require-live-snap: 30 Scope study: | recovered-report
 expect: Scope study: 2 boundaries · 1 unplanned
 expect: 6 committed / 8 calls

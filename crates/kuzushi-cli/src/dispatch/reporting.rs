@@ -74,6 +74,8 @@ fn dispatch_export_command(command: Command, default_target: Option<PathBuf>) ->
 fn dispatch_findings_command(command: Command, default_target: Option<PathBuf>) -> Result<()> {
     let Command::Findings {
         command,
+        scope,
+        scope_record,
         limit,
         severity,
         mut verdict,
@@ -105,7 +107,8 @@ fn dispatch_findings_command(command: Command, default_target: Option<PathBuf>) 
         confidence,
         limit,
     )?
-    .with_triage_states(state)?;
+    .with_triage_states(state)?
+    .with_scope_filters(scope, scope_record)?;
     findings_command(default_target, filter, json)
 }
 

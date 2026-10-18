@@ -63,6 +63,24 @@ fn absent_scope_and_explicit_omission_do_not_invent_discovery_membership() {
     );
 }
 
+#[test]
+fn scope_only_reads_do_not_depend_on_unavailable_allowance_state() {
+    let root = tempfile::tempdir().unwrap();
+    publish(
+        root.path(),
+        &json!({"scanScopeRef":null,"allowanceRef":{"schemaVersion":999}}),
+    );
+    assert!(load_run_request_context(root.path(), "owned-run")
+        .unwrap()
+        .allowance
+        .is_err());
+    assert_eq!(
+        load_run_request_scope(root.path(), "owned-run").unwrap(),
+        RecordedRequestScope::NotRecorded
+    );
+    assert!(!root.path().join(".kuzushi/v3/index.sqlite3").exists());
+}
+
 fn accepted_scope(workspace: &WorkspaceTarget) -> ScanScopeRef {
     use crate::workspace::{
         accept_scan_scope_proposal, create_scan_scope_proposal, ScopeCoverageApproval,

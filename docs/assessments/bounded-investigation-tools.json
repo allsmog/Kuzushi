@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "sourceCommit": "7a5d3ece7687bb696013e798179607e2ed657f85",
-  "sourceState": "Historical foundation at sourceCommit; current uncommitted registry and functional facts are recorded in currentRegistryCensus and the named checkpoints.",
+  "sourceState": "Historical foundation at sourceCommit; current registry and functional facts are recorded in currentRegistryCensus and the named checkpoints.",
   "catalog": "kuzushi tools --all --json",
   "visibility": "Historical captured baseline: 93 non-hidden operator tools and a 164-tool built-in policy inventory. Later functional additions are recorded below; those baseline counts are not a current registry census.",
   "meaning": "Registry-derived tool audit with scoped execution, consumer, failure and resource evidence. Historical snapshots remain labelled. Current descriptor facts and policy census are in currentRegistryCensus; neither metadata nor one successful envelope establishes general model accuracy.",
@@ -1363,7 +1363,7 @@
       "module": "findings",
       "declaredMaturity": "core",
       "declaredPhase": "review",
-      "purpose": "List persisted findings.",
+      "purpose": "List persisted findings with recorded source, study and accepted-scope filters.",
       "scope": "One explicitly selected owned workspace ledger. Imported observations and suppression rules are management inputs; no scanner or source execution.",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -1384,6 +1384,8 @@
         "order",
         "verdict",
         "state",
+        "scopeId",
+        "scopeRecord",
         "runId",
         "sha",
         "branch",
@@ -1391,23 +1393,26 @@
         "vulnSource",
         "allowanceRef"
       ],
-      "executionEvidence": "Review module contract assessment and J135 native prepared-dispatch lifecycle. Eight suppression, fourteen page, three report, twenty-three TUI phase-result and focused label regressions. Real run and shell execution over two labeled observations; no provider request.",
+      "executionEvidence": "Review module contract assessment and J135 native prepared-dispatch lifecycle. Eight suppression, fourteen page, three report, twenty-three TUI phase-result and focused label regressions. Real run and shell execution over two labeled observations; no provider request. Recorded-scope core regressions and native J127 exercise historical membership before paging, exact accepted records, unavailable metadata, byte-exact recovery and CLI/shared dispatch parity. See recorded-scope-findings-2026-10-17.md for final counts and limitations.",
       "readinessVerdict": "scoped native ledger and artifact-consumer evidence; scale, cancellation, all options and complete investigation acceptance pending",
       "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
       "auditDimensions": {
-        "purposeAndValue": "Native J135 preserves both observations, an independent human dismissal, reversible rule state and the original analysis report source. This demonstrates ledger management, not finding validity or scanner precision.",
-        "phaseAgreement": "Review management uses the Review ceiling and auxiliary phase_result=false; reports remain separate outputs. Reality-derived completion can change when no actionable findings remain, without publishing an auxiliary phase attempt.",
-        "requiredInputs": "Current descriptors and real prepared input are exercised. Suppression actions require a workspace and findings store; remove requires id with declared aliases. Unknown keys and missing id are rejected. All option combinations remain unverified.",
-        "sharedDispatchExecution": "Core tests and native J135 execute through shared prepared dispatch. Module registration and successful envelopes alone are not credited.",
-        "artifactConsumption": "The authoritative ledger feeds paged CLI results and Review with full query/cursor binding. Current J289/J290 read DFD-linked paths from active and inactive contexts, preserve original observations and return filters, and create no investigation jobs.",
-        "failureAndRecovery": "Missing store, malformed rules, missing remove id, unknown options and stale page bindings have focused evidence. No-color restart preserves reopened rule state and human dismissal. Large ledger cancellation is still unverified.",
-        "approvedResources": "These audited actions are runtime-free. J135 records no call reservation, scanner or source execution. Ledger/source/rule IO at scale and cancellation remain unverified; no dollar cost or full resource bound inferred.",
-        "scopeEnforcement": "Runtime-free ledger query, not discovery. Exact filePaths and files JSON expressions preserve case, commas, repeated spaces and citation-like filename suffixes. Matching paths span saved revisions and do not establish source or verdict equivalence.",
-        "interfaceParity": "Headless run and interactive shell consumers have native evidence. All raw findings JSON rows expose separate suppression state. Every CLI option, plain shell projection and scan embedding remain unverified."
+        "purposeAndValue": "Native J135 preserves both observations, an independent human dismissal, reversible rule state and the original analysis report source. This demonstrates ledger management, not finding validity or scanner precision. Accepted boundaries open their recorded observations without inferring scope from filenames or starting discovery.",
+        "phaseAgreement": "Review readers retain current authoritative ledger decisions. A filtered scope page does not change the unfiltered completion corpus or create phase attempts. The serialized descriptor phase-result field alone is not credited as execution or ordering.",
+        "requiredInputs": "Current descriptors and real prepared input are exercised. Suppression actions require a workspace and findings store; remove requires id with declared aliases. Unknown keys and missing id are rejected. All option combinations remain unverified. Accepted-scope selection additionally requires authenticated recorded inputs and immutable accepted proposal records; exact hashes are full 64-character values.",
+        "sharedDispatchExecution": "Core tests and native J135 execute through shared prepared dispatch. Module registration and successful envelopes alone are not credited. Declared scopeId/scopeRecord options and aliases are validated through shared preparation; native scoped CLI and findings:list results agree.",
+        "artifactConsumption": "The authoritative ledger feeds paged CLI results and Review with full query/cursor binding. Current J289/J290 read DFD-linked paths from active and inactive contexts, preserve original observations and return filters, and create no investigation jobs. Historical accepted request membership feeds the same workspace page before pagination, retaining latest representatives and global aliases. Scope and source predicates must match the same recorded observation run.",
+        "failureAndRecovery": "Missing store, malformed rules, missing remove id, unknown options and stale page bindings have focused evidence. No-color restart preserves reopened rule state and human dismissal. Large ledger cancellation is still unverified. Changed request bytes are excluded and disclosed as partial; restoration of the original bytes recovers membership without repair. Invalid scope hashes and excessive candidate histories are refused.",
+        "approvedResources": "These audited actions are runtime-free. J135 records no call reservation, scanner or source execution. Ledger/source/rule IO at scale and cancellation remain unverified; no dollar cost or full resource bound inferred. Scope queries inspect at most 4096 candidate observed runs, narrowed first by run prefix or authenticated study membership. Scope-only request reads do not consult allowance state. Large-history latency and cancellation remain unqualified.",
+        "scopeEnforcement": "Runtime-free ledger query, not discovery. Exact filePaths and files JSON expressions preserve case, commas, repeated spaces and citation-like filename suffixes. Matching paths span saved revisions and do not establish source or verdict equivalence. New scopeId/scopeRecord constraints use accepted request provenance, never paths. Recorded SHA selection is historical evidence and cannot establish that current source was fixed.",
+        "interfaceParity": "Headless run and interactive shell consumers have native evidence. All raw findings JSON rows expose separate suppression state. Every CLI option, plain shell projection and scan embedding remain unverified. Native J127 covers scope shortcut and searchable menu, Back with preserved draft/filter/study, six terminal sizes, CLI and prepared run queries. Formal human judgments remain open."
       },
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "evidence": [
+        "docs/assessments/recorded-scope-findings-2026-10-17.md"
+      ]
     },
     {
       "tool": "findings:relationship",

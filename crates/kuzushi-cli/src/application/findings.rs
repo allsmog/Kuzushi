@@ -15,6 +15,9 @@ pub(crate) fn findings_command(
     let target = require_cli_target("findings", target, None)?;
     let workspace = WorkspaceTarget::new(target)?;
     let store = FindingStore::open(workspace.findings_db_path())?;
+    if filter.has_scope_filter() {
+        return scoped_findings_command(&workspace, &store, &filter, json);
+    }
     let report = store.list_findings_filtered(&filter)?;
 
     if json {
@@ -33,6 +36,33 @@ pub(crate) fn findings_command(
         );
     } else {
         println!("{}", report.output());
+    }
+    Ok(())
+}
+
+fn scoped_findings_command(
+    workspace: &WorkspaceTarget,
+    store: &FindingStore,
+    filter: &FindingListFilter,
+    json: bool,
+) -> Result<()> {
+    let page = kuzushi_core::findings::read_finding_page(
+        store,
+        workspace,
+        filter,
+        kuzushi_core::findings::IdentityFoldPolicy::Legacy,
+        &Default::default(),
+    )?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&page.to_tool_json()["data"])?
+        );
+    } else {
+        println!("{}", page.report.output());
+        if let Some(scope) = page.page.scope_filter {
+            println!("{}", scope.output());
+        }
     }
     Ok(())
 }

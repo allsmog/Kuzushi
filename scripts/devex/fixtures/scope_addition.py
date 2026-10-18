@@ -54,8 +54,12 @@ def current(root, evidence, stage):
     initial = json.loads((evidence / "initial-scopes.json").read_text())
     assert value["record"]["draft"]["sharedScope"] == initial["record"]["draft"]["sharedScope"]
     assert not value["record"]["draft"]["sharedDiscovery"]
-    if stage == "invalid":
+    if stage in {"invalid", "restored"}:
         assert value == initial
+        if stage == "restored":
+            screen = next(evidence.glob("*-restored-private-draft.txt")).read_text()
+            assert "Field 2/3: Files or directories" in screen and "../outside" in screen
+            assert "/Add discovery scope" not in screen, "Menu search must not enter the preserved draft"
     else:
         assert len(value["record"]["draft"]["scopes"]) == 4
         assert value["coverage"]["uncoveredFiles"]["total"] == value["coverage"]["overlaps"]["total"] == 0

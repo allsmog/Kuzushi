@@ -490,8 +490,7 @@ fn review_queue_filter_label(app: &ShellApp, mode: ReviewQueueMode) -> String {
 }
 
 fn review_filter_chips(app: &ShellApp, mode: ReviewQueueMode) -> Vec<String> {
-    let mut chips = app
-        .active_findings_filter()
+    let mut chips = super::findings::scope_filter::display(app)
         .as_deref()
         .map(str::trim)
         .filter(|filter| !filter.is_empty())
