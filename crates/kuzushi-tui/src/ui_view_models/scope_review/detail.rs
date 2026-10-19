@@ -1,5 +1,6 @@
 use super::*;
 use crate::app::{selected_scope, ScopeReviewState};
+use crate::ui_view_models::display_path;
 
 pub(crate) fn scope_detail(state: &ScopeReviewState) -> Vec<String> {
     let Some(review) = &state.review else {
@@ -64,13 +65,7 @@ fn file_detail(files: &crate::app::ScopeFiles) -> Vec<String> {
         files.page.offset + files.page.files.len(),
         files.page.total
     )];
-    lines.extend(
-        files
-            .page
-            .files
-            .iter()
-            .map(|path| super::paths::display_path(path)),
-    );
+    lines.extend(files.page.files.iter().map(|path| display_path(path)));
     lines
 }
 
@@ -134,7 +129,7 @@ fn selected_heading(
             scope
                 .paths
                 .iter()
-                .map(|path| super::paths::display_path(path))
+                .map(|path| display_path(path))
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
@@ -171,7 +166,7 @@ fn coverage_detail(review: &kuzushi_core::workspace::ScanScopeReview) -> Vec<Str
             .identity_omissions
             .files
             .iter()
-            .map(|file| format!("Unbound: {}", super::paths::display_path(file))),
+            .map(|file| format!("Unbound: {}", display_path(file))),
     );
     lines.push("Press f to read this category's files. Exclusions and overlap need separate acknowledgement. Uncovered or unbound included files block acceptance.".into());
     lines
@@ -237,7 +232,7 @@ fn menu_detail(state: &ScopeReviewState) -> Vec<String> {
     };
     let mut lines = state
         .selected_file()
-        .map(|path| format!("Selected file: {}", super::paths::display_path(&path)))
+        .map(|path| format!("Selected file: {}", display_path(&path)))
         .into_iter()
         .collect::<Vec<_>>();
     lines.push(description.into());

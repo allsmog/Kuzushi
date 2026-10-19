@@ -1230,6 +1230,13 @@ pub(crate) fn target_base(app: &ShellApp) -> Option<String> {
     }
 }
 
+/// The location as an operator reads it: repo-relative, with a path whose edge
+/// whitespace would otherwise be invisible quoted. Matching callers want
+/// [`relativize_location`] instead, which leaves the path as recorded.
+pub(crate) fn displayed_location(location: String, base: Option<&str>) -> String {
+    super::display_location(&relativize_location(location, base))
+}
+
 /// Strip the target prefix from a `path:line` location when present, leaving a
 /// repo-relative path; otherwise return it unchanged.
 pub(crate) fn relativize_location(location: String, base: Option<&str>) -> String {
@@ -1683,7 +1690,7 @@ impl FindingListRow {
             severity_tone: SeverityTone::from_severity(projection.severity),
             severity_label: projection.severity_label,
             title: projection.title,
-            location: relativize_location(projection.location, base),
+            location: displayed_location(projection.location, base),
             run_label: provenance.run_label,
             revision_label: provenance.revision_label,
             verdict: projection.verdict_label,
@@ -1989,7 +1996,7 @@ impl FindingDetailModel {
             severity_tone: SeverityTone::from_severity(projection.severity),
             severity_label: finding.severity.as_str().to_string(),
             title: projection.title,
-            location: relativize_location(projection.location, base),
+            location: displayed_location(projection.location, base),
             rule: projection.rule,
             tool: projection.tool,
             vuln_source_label: vuln_source_label(finding),

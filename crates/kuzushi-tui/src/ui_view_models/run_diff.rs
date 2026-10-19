@@ -563,8 +563,8 @@ fn integer_field(value: &serde_json::Value, keys: &[&str]) -> Option<u64> {
 }
 
 fn location_label(file: &str, line: Option<u64>) -> String {
-    line.map(|line| format!("{file}:{line}"))
-        .unwrap_or_else(|| file.to_string())
+    let file = super::display_path(file);
+    line.map(|line| format!("{file}:{line}")).unwrap_or(file)
 }
 
 fn run_revision_label(run_state: JsonFileState) -> String {

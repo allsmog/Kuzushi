@@ -1,5 +1,6 @@
 use super::*;
 use crate::app::{ScopeBranch, ScopeTreeRow};
+use crate::ui_view_models::display_path;
 use kuzushi_core::workspace::ScanScopeReview;
 
 pub(super) fn row_label(
@@ -23,7 +24,7 @@ fn file_row(state: &ScopeReviewState, branch: &ScopeBranch, path: &str) -> Strin
     let last = page.offset + page.files.len() == page.total
         && page.files.last().is_some_and(|last| last == path);
     let connector = if last { "└" } else { "├" };
-    format!("  {connector} {}", paths::display_path(path))
+    format!("  {connector} {}", display_path(path))
 }
 
 fn branch_glyph(state: &ScopeReviewState, branch: &ScopeBranch) -> &'static str {
@@ -91,7 +92,7 @@ fn page_label(state: &ScopeReviewState, branch: &ScopeBranch, offset: usize) -> 
 pub(super) fn selected_file_detail(state: &ScopeReviewState) -> Option<Vec<String>> {
     match state.selected_row()? {
         ScopeTreeRow::File { branch, path } => Some(vec![
-            format!("File: {}", paths::display_path(&path)),
+            format!("File: {}", display_path(&path)),
             format!("Membership: {}", branch_label(state, state.review.as_ref()?, &branch)),
             file_action_hint(&branch).into(),
             "Space marks only boundary rows. Left returns to the parent. f reads this branch's full file list.".into(),

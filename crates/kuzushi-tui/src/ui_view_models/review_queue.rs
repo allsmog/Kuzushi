@@ -1,7 +1,7 @@
 use super::findings::{
-    finding_confidence_label, finding_identity_label, finding_proof_meter,
+    displayed_location, finding_confidence_label, finding_identity_label, finding_proof_meter,
     finding_unique_source_count, projected_findings_before_search, projected_visible_findings,
-    relativize_location, target_base, visible_findings_cache_key,
+    target_base, visible_findings_cache_key,
 };
 use super::review_conflicts::effective_review_decision_conflict_label;
 use super::review_state::{
@@ -722,7 +722,7 @@ impl ReviewQueueRow {
             decision_complete: effective_review_decision_complete(finding, decision),
             decision_author: effective_review_author_label(finding, decision),
             title: projection.title,
-            location: relativize_location(projection.location, base),
+            location: displayed_location(projection.location, base),
             rule: projection.rule,
             tool: projection.tool,
             proof_label: projection.proof_state,

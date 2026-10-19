@@ -336,9 +336,10 @@ fn dedupe_citations(citations: impl Iterator<Item = (char, f64, String)>) -> Vec
 }
 
 fn location_label(path: &str, line: Option<u32>) -> String {
+    let path = crate::ui_view_models::display_path(path);
     match line {
         Some(line) => format!("{path}:{line}"),
-        None => path.to_string(),
+        None => path,
     }
 }
 

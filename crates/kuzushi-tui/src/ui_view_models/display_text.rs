@@ -183,3 +183,78 @@ mod runtime_cost_tests {
         );
     }
 }
+
+/// Quoting distinguishes literal edge spaces without changing the stored path.
+/// `src/a.py` and ` src/a.py` are different files, and the space is invisible
+/// on screen, so an unquoted path lets an operator read one as the other.
+pub(crate) fn display_path(path: &str) -> String {
+    if path.trim() == path {
+        return path.to_string();
+    }
+    serde_json::to_string(path).expect("a path string is serializable")
+}
+
+/// Display form of a recorded finding location (`path:line`, `path:start-end`).
+/// The path is quoted when its edge whitespace would otherwise be invisible;
+/// the recorded line stays outside the quotes so the location still reads as
+/// one.
+pub(crate) fn display_location(location: &str) -> String {
+    let (path, line) = split_recorded_line(location);
+    if path.trim() == path {
+        return location.to_string();
+    }
+    format!("{}{line}", display_path(path))
+}
+
+/// Split the trailing `:line` or `:start-end` that `finding_location` records
+/// from the path before it. A location carrying neither is all path.
+fn split_recorded_line(location: &str) -> (&str, &str) {
+    let Some(colon) = location.rfind(':') else {
+        return (location, "");
+    };
+    let (path, line) = location.split_at(colon);
+    if recorded_line(&line[1..]) {
+        return (path, line);
+    }
+    (location, "")
+}
+
+fn recorded_line(line: &str) -> bool {
+    match line.split_once('-') {
+        Some((start, end)) => line_number(start) && line_number(end),
+        None => line_number(line),
+    }
+}
+
+fn line_number(value: &str) -> bool {
+    !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+#[cfg(test)]
+mod literal_path_tests {
+    use super::*;
+
+    #[test]
+    fn literal_path_display_distinguishes_edge_spaces_from_other_members() {
+        assert_eq!(display_path("app"), "app");
+        assert_eq!(display_path(" app "), "\" app \"");
+        assert_eq!(display_path(" app /lib.py"), "\" app /lib.py\"");
+        assert_eq!(display_path("app/a b.py"), "app/a b.py");
+        assert_eq!(display_path(" app\" "), "\" app\\\" \"");
+    }
+
+    #[test]
+    fn location_display_quotes_the_path_and_keeps_the_recorded_line_outside() {
+        assert_eq!(display_location("src/a.py:12"), "src/a.py:12");
+        assert_eq!(display_location(" src/a.py:12"), "\" src/a.py\":12");
+        assert_eq!(display_location(" src/a.py:12-18"), "\" src/a.py\":12-18");
+        assert_eq!(display_location(" src/a:b.py:12"), "\" src/a:b.py\":12");
+    }
+
+    #[test]
+    fn a_location_without_a_recorded_line_is_quoted_as_a_whole_path() {
+        assert_eq!(display_location(" src/a.py "), "\" src/a.py \"");
+        assert_eq!(display_location(" src/log:latest"), "\" src/log:latest\"");
+        assert_eq!(display_location(" src/a.py:12-"), "\" src/a.py:12-\"");
+    }
+}

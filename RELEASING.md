@@ -1102,6 +1102,12 @@ an earlier cursor is refused rather than reused for a changed query.
 
 ## Export compatibility notes
 
+- Finding locations in Review rows, finding detail, the home cockpit, the
+  worklist projection and run comparisons quote a path carrying leading or
+  trailing whitespace, as the scope browser already did. The recorded line stays
+  outside the quotes. Ordinary paths render unchanged, and no stored path,
+  export, artifact or dispatch input is affected.
+
 - `taint-iris-next:dataflow-plan` is Labs and auxiliary Scan preparation.
   `taint-iris-next:source-sink-trace` is a Compatibility alias of that same
   planner, with its existing name, options and payload retained. Neither can

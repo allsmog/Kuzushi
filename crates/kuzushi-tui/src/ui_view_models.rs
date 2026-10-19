@@ -202,8 +202,9 @@ pub(crate) use context_snapshot::{
 pub(crate) use context_strip::{context_strip_model, ContextStripModel, ContextStripSegment};
 pub(crate) use cost::{cost_model, CostBudgetRow, CostBudgetStatus, CostModel, CostTone};
 pub(crate) use display_text::{
-    active_project_scope_label, compact_target_path, format_runtime_cost, format_session_cost,
-    recorded_timestamp_label, scoped_target_path_label, workspace_artifact_path_label,
+    active_project_scope_label, compact_target_path, display_location, display_path,
+    format_runtime_cost, format_session_cost, recorded_timestamp_label, scoped_target_path_label,
+    workspace_artifact_path_label,
 };
 pub(crate) use failure_handoff::{failure_handoff_model, FailureHandoffModel};
 pub(crate) use finding_search::{finding_facet_values, FindingSearch};

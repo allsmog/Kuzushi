@@ -1112,3 +1112,24 @@ fn review_guidance_does_not_turn_proof_into_a_patch_recommendation() {
     let decided = human_confirmed(observed, 0.9);
     assert_eq!(review_next_action_label(&decided, None), "review complete");
 }
+
+#[test]
+fn a_review_row_quotes_a_finding_path_whose_edge_space_would_be_invisible() {
+    let spaced = Finding::new_tool(
+        "semgrep",
+        "spaced-path",
+        " src/lib.rs",
+        12,
+        None,
+        Severity::High,
+        "spaced-path",
+    );
+    let mut app = ShellApp::new(V2Config::default(), None);
+    *app.findings_mut() = vec![spaced, finding("plain-path", Severity::High, 12)];
+
+    let model = review_queue_model(&app, ReviewQueueMode::All);
+
+    let locations: Vec<&str> = model.rows.iter().map(|row| row.location.as_str()).collect();
+    assert!(locations.contains(&"\" src/lib.rs\":12"), "{locations:?}");
+    assert!(locations.contains(&"src/lib.rs:12"), "{locations:?}");
+}
