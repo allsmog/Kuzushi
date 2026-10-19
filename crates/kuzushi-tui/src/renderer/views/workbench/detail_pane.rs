@@ -28,7 +28,6 @@ fn push_source_section(lines: &mut Vec<Line<'static>>, detail: &FindingDetailMod
         return;
     };
     push_section_header(lines, source_section_label(budget));
-    push_wrapped(lines, &detail.location, budget, "  ", theme::muted());
     if let Some(note) = snippet.note.as_deref() {
         push_wrapped(lines, note, budget, "  ", theme::warn());
     }
@@ -299,7 +298,7 @@ fn push_evidence_row(
         "  ",
         theme::muted(),
     );
-    push_wrapped(lines, &evidence.header, budget, "  ", theme::label());
+    push_literal_line(lines, &evidence.header, budget, "  ", theme::label());
     push_optional_summary_line(lines, &evidence.snippet, budget, "    ", theme::primary());
     push_optional_summary_line(lines, &evidence.rationale, budget, "    ", theme::muted());
     if let Some(capture) = &evidence.capture {
@@ -314,21 +313,15 @@ fn push_provenance_section(
 ) {
     push_section_header(lines, "PROVENANCE");
     push_detail_kv(lines, "rule", &detail.rule, budget);
-    push_detail_kv(lines, "location", &detail.location, budget);
-    push_detail_kv(lines, "producing tool", &detail.tool, budget);
-    push_detail_kv(lines, "run", &detail.run_label, budget);
-    push_detail_kv(lines, "run status", &detail.run_status, budget);
-    push_detail_kv(lines, "run tool", &detail.run_tool, budget);
-    push_detail_kv(lines, "run model", &detail.run_model, budget);
-    push_detail_kv(lines, "run runtime", &detail.run_runtime, budget);
-    push_detail_kv(
+    push_literal_line(
         lines,
-        "kuzushi version",
-        &detail.run_kuzushi_version,
+        &detail.location,
         budget,
+        "location: ",
+        theme::muted(),
     );
-    push_detail_kv(lines, "revision", &detail.revision_label, budget);
-    push_detail_kv(lines, "branch", &detail.branch_label, budget);
+    push_detail_kv(lines, "producing tool", &detail.tool, budget);
+    push_run_provenance(lines, detail, budget);
     push_detail_kv(lines, "vuln source", &detail.vuln_source_label, budget);
     push_detail_kv(lines, "source signature", &detail.source_signature, budget);
     push_detail_kv(lines, "corroboration", &detail.corroboration, budget);
@@ -345,6 +338,22 @@ fn push_provenance_section(
     if detail.alias.is_none() {
         push_alias_note(lines, budget);
     }
+}
+
+fn push_run_provenance(lines: &mut Vec<Line<'static>>, detail: &FindingDetailModel, budget: usize) {
+    push_detail_kv(lines, "run", &detail.run_label, budget);
+    push_detail_kv(lines, "run status", &detail.run_status, budget);
+    push_detail_kv(lines, "run tool", &detail.run_tool, budget);
+    push_detail_kv(lines, "run model", &detail.run_model, budget);
+    push_detail_kv(lines, "run runtime", &detail.run_runtime, budget);
+    push_detail_kv(
+        lines,
+        "kuzushi version",
+        &detail.run_kuzushi_version,
+        budget,
+    );
+    push_detail_kv(lines, "revision", &detail.revision_label, budget);
+    push_detail_kv(lines, "branch", &detail.branch_label, budget);
 }
 
 /// A full `fp3_<64 hex>` value wraps into unreadable hex soup. The first 20
@@ -445,6 +454,44 @@ fn push_wrapped(
             Span::raw(prefix.to_string()),
             Span::styled(chunk, style),
         ]));
+    }
+}
+
+fn push_literal_line(
+    lines: &mut Vec<Line<'static>>,
+    location: &str,
+    width: usize,
+    prefix: &'static str,
+    style: Style,
+) {
+    let content = Line::from(vec![
+        Span::raw(prefix),
+        Span::styled(location.to_owned(), style),
+    ]);
+    lines.extend(crate::renderer::shared::text::wrap_document_lines(
+        vec![content],
+        width.min(u16::MAX as usize) as u16,
+    ));
+}
+
+#[cfg(test)]
+mod literal_location_tests {
+    use super::*;
+
+    #[test]
+    fn wrapped_source_locations_keep_every_quoted_space_at_all_viewport_widths() {
+        let location = r#"" very  long directory /日本/file  name.rs ":12-14"#;
+        for width in [4, 36, 56, 76, 92, 116, 156] {
+            let mut lines = Vec::new();
+            push_literal_line(&mut lines, location, width, "  ", theme::muted());
+            let text = lines.iter().map(ToString::to_string).collect::<String>();
+            assert_eq!(text, format!("  {location}"), "width {width}");
+            assert!(lines
+                .iter()
+                .all(
+                    |line| crate::renderer::shared::text::display_width(&line.to_string()) <= width
+                ));
+        }
     }
 }
 

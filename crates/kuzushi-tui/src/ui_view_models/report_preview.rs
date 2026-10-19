@@ -268,7 +268,12 @@ impl ReportPreviewRow {
             provenance: export_provenance_label(record),
             tool: record.tool.clone(),
             title: record.title.clone(),
-            location: format!("{}:{}", record.location.file, record.location.start_line),
+            location: super::source_location::source_location_label(
+                &record.location.file,
+                Some(u64::from(record.location.start_line)),
+                None,
+                None,
+            ),
         }
     }
 }

@@ -1,0 +1,99 @@
+name: Literal finding locations remain distinct across source revisions and triage
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR SEMGREP_APP_TOKEN SEMGREP_AGENT_TOKEN
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0
+require-shell: python3 -B @REPO/scripts/devex/fixtures/literal_review.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET/owned
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/open-spaced.txt
+keys: Enter
+require-live-snap: 25 " app /lib.py":2 | literal-source
+expect: print("OWNER_POLICY_REVIEW")
+expect-not: live source missing or changed
+resize: 160x48
+require-live-snap: 20 " app /lib.py":2 | queue-160x48
+resize: 96x89
+require-live-snap: 20 " app /lib.py":2 | queue-96x89
+resize: 80x24
+require-live-snap: 20 " app /lib.py":2 | queue-80x24
+resize: 60x20
+require-live-snap: 20 " app /lib.py":2 | queue-60x20
+resize: 40x12
+require-live-snap: 20 " app /lib.py":2 | queue-40x12
+ask: Can the operator distinguish the quoted spaced directory from app/lib.py at all six sizes, without changing the selected finding or its source evidence?
+resize: 120x36
+submit: decision fp Owned policy marker is intentional source text
+paste-file: @ART/open-spaced.txt
+keys: Enter
+require-live-snap: 25 recorded: rejected_false_positive | baseline-fp
+nav-mode:
+keys: Escape
+type: operator draft keep
+require-live-snap: 20 operator draft keep | draft-before-revision
+require-shell: python3 -B @REPO/scripts/devex/fixtures/literal_review.py @TMP_TARGET @ART later
+live-snap: draft-after-revision
+expect: operator draft keep
+keys: C-u
+submit: findings
+paste-file: @ART/open-spaced.txt
+keys: Enter
+require-live-snap: 25 different commit | retained-verdict
+expect: Reassess this verdict
+expect: " app /lib.py":2
+ask: Does a later observation keep the human FP decision and literal path while clearly requiring source reassessment across the two real fixture SHAs?
+submit: runs diff literal-base literal-later
+require-live-snap: 25 SEEN AGAIN | source-comparison
+expect: " app /lib.py":2
+expect: Absence does not establish a fix.
+keys: Tab
+require-live-snap: 20 content: | revision-identities
+expect: 7cac9e253984
+expect: c557cdbf94b9
+expect: dirty
+keys: Escape
+paste-file: @ART/filter-spaced.txt
+keys: Enter
+require-live-snap: 25 1 of 1 | exact-file-filter
+expect: " app /lib.py":2
+paste-file: @ART/open-spaced.txt
+keys: Enter
+submit: decision needs_review Reopen the owned observation on the later source
+require-live-snap: 25 recorded: needs_review | reopened-decision
+require-shell: python3 -B @REPO/scripts/devex/fixtures/literal_review.py @TMP_TARGET @ART reopened
+submit: decision fp Owned policy marker rechecked on the later source
+require-live-snap: 25 recorded: rejected_false_positive | reassessed-fp
+paste-file: @ART/open-plain.txt
+keys: Enter
+require-live-snap: 25 app/lib.py:2 | plain-source
+expect: Owned later observation
+submit: decision deferred Owner will assess the ordinary directory separately
+require-live-snap: 25 recorded: deferred | deferred-decision
+submit: findings filter clear
+submit: report
+require-live-snap: 25 2 findings | report
+keys: j j j
+require-live-snap: 20 format json (4/6) | json-format
+keys: Enter
+require-live-snap: 25 EXPORTED | exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/literal_review.py @TMP_TARGET @ART final
+ask: Do reopening, renewed FP and deferral stay attached to the correct literal paths, with original paths preserved in JSON and no inferred fix from the SHA change?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0 NO_COLOR=1
+launch: --target @TMP_TARGET/owned
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/open-spaced.txt
+keys: Enter
+require-live-snap: 25 " app /lib.py":2 | recovered-literal-path
+expect: false_positive
+resize: 40x12
+require-live-snap: 20 " app /lib.py":2 | recovered-40x12
+resize: 120x36
+submit: report
+require-live-snap: 25 2 findings | recovered-report
+require-shell: python3 -B @REPO/scripts/devex/fixtures/literal_review.py @TMP_TARGET @ART restarted
+ask: Does no-color restart retain four observations, four human decision events and two distinct literal finding identities without another scan or model request?
+keys: C-c
+require-exit: 10

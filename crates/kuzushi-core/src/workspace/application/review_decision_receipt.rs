@@ -1,5 +1,6 @@
 //! A committed decision remains saved when its source receipt is unavailable.
 use super::export_decision_basis::WorkspaceReviewDecisionBasis;
+use super::record_review_decision::CommittedReviewDecision;
 use crate::findings::{finding_stable_fp, Finding, FindingStore, ReviewDecision};
 use crate::WorkspaceTarget;
 use anyhow::{Context, Result};
@@ -11,6 +12,9 @@ mod presentation;
 pub struct WorkspaceReviewDecisionReceipt {
     pub schema_version: u32,
     pub decision_id: i64,
+    /// Exact successful write, never a later projection watermark.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub committed_seq: Option<u64>,
     pub source_basis: Option<WorkspaceReviewDecisionBasis>,
     pub source_read_error: Option<String>,
 }
@@ -22,20 +26,19 @@ pub fn record_user_review_decision_with_receipt(
     read_watermark: Option<u64>,
     review_session_id: Option<String>,
 ) -> Result<WorkspaceReviewDecisionReceipt> {
-    let decision_id =
-        super::record_review_decision::record_user_review_decision_for_finding_with_session(
-            workspace,
-            finding,
-            decision,
-            read_watermark,
-            review_session_id,
-        )?;
-    let source = read_review_decision_receipt(workspace, finding, decision_id);
-    Ok(receipt_after_commit(decision_id, source))
+    let committed = super::record_review_decision::commit_user_review_decision(
+        workspace,
+        finding,
+        decision,
+        read_watermark,
+        review_session_id,
+    )?;
+    let source = read_review_decision_receipt(workspace, finding, committed.decision_id);
+    Ok(receipt_after_commit(committed, source))
 }
 
 fn receipt_after_commit(
-    decision_id: i64,
+    committed: CommittedReviewDecision,
     source: Result<Option<WorkspaceReviewDecisionBasis>>,
 ) -> WorkspaceReviewDecisionReceipt {
     let (source_basis, source_read_error) = match source {
@@ -44,7 +47,8 @@ fn receipt_after_commit(
     };
     WorkspaceReviewDecisionReceipt {
         schema_version: 1,
-        decision_id,
+        decision_id: committed.decision_id,
+        committed_seq: Some(committed.committed_seq),
         source_basis,
         source_read_error,
     }
@@ -83,8 +87,15 @@ mod tests {
 
     #[test]
     fn source_read_failure_preserves_the_committed_decision_id() {
-        let receipt = receipt_after_commit(42, Err(anyhow::anyhow!("source receipt unavailable")));
+        let receipt = receipt_after_commit(
+            CommittedReviewDecision {
+                decision_id: 42,
+                committed_seq: 64,
+            },
+            Err(anyhow::anyhow!("source receipt unavailable")),
+        );
         assert_eq!(receipt.decision_id, 42);
+        assert_eq!(receipt.committed_seq, Some(64));
         assert!(receipt.source_basis.is_none());
         assert_eq!(
             receipt.source_read_error.as_deref(),
@@ -94,8 +105,15 @@ mod tests {
 
     #[test]
     fn legacy_source_is_unavailable_without_a_fabricated_error_or_basis() {
-        let receipt = receipt_after_commit(7, Ok(None));
+        let receipt = receipt_after_commit(
+            CommittedReviewDecision {
+                decision_id: 7,
+                committed_seq: 12,
+            },
+            Ok(None),
+        );
         assert_eq!(receipt.decision_id, 7);
+        assert_eq!(receipt.committed_seq, Some(12));
         assert!(receipt.source_basis.is_none());
         assert!(receipt.source_read_error.is_none());
     }
@@ -151,6 +169,15 @@ mod tests {
             None,
         )
         .unwrap();
+        assert_eq!(
+            first.committed_seq,
+            store
+                .review_decision_by_id(first.decision_id)
+                .unwrap()
+                .unwrap()
+                .provenance
+                .map(|provenance| provenance.event_seq)
+        );
         assert_eq!(first.source_basis.as_ref().unwrap().run_id, "observed-a");
         observe(&store, workspace.root(), "observed-b", &finding);
         let later = record_user_review_decision_with_receipt(

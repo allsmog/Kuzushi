@@ -1,4 +1,4 @@
-use super::findings::{cached_sorted_finding_alias_indices, relativize_location, target_base};
+use super::findings::{cached_sorted_finding_alias_indices, target_base};
 use super::review_state::{indexed_review_decision_complete, EffectiveReviewStateIndex};
 use super::{
     attack_surface_risk_model, context_snapshot_state, journey_model, ui_run_dir,
@@ -256,7 +256,7 @@ fn home_top_risk_row(alias: String, finding: &Finding, base: Option<&str>) -> Ho
         severity_label: projection.severity_label,
         alias,
         rule: finding.rule_id.clone(),
-        location: relativize_location(projection.location, base),
+        location: super::source_location::finding_location_label(finding, base),
     }
 }
 

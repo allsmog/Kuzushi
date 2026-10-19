@@ -336,10 +336,12 @@ fn dedupe_citations(citations: impl Iterator<Item = (char, f64, String)>) -> Vec
 }
 
 fn location_label(path: &str, line: Option<u32>) -> String {
-    match line {
-        Some(line) => format!("{path}:{line}"),
-        None => path.to_string(),
-    }
+    crate::ui_view_models::source_location::source_location_label(
+        path,
+        line.map(u64::from),
+        None,
+        None,
+    )
 }
 
 fn summary_label(display: &[DisplayCitation]) -> String {

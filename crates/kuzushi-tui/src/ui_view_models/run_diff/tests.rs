@@ -9,6 +9,37 @@ fn hydrate_diff(app: &mut ShellApp, left: &str, right: &str) {
 }
 
 #[test]
+fn comparison_preserves_literal_paths_in_labels_fallback_keys_and_possible_matches() {
+    let paths = [
+        " app /lib.py",
+        "app /lib.py",
+        "app/lib.py ",
+        "app/lib.py",
+        "app/a  b.py",
+        "app/a b.py",
+        "app/a\\b.py",
+        "app/a/b.py",
+    ];
+    let mut keys = std::collections::BTreeSet::new();
+    let mut matches = std::collections::BTreeSet::new();
+    for path in paths {
+        let value = json!({"file_path":path,"ruleId":"owned.policy", "tool":"semgrep",
+            "title":"Owned policy note", "startLine":2});
+        let row = run_diff_finding_row(&value).unwrap();
+        assert_eq!(row.file_path, path);
+        assert_eq!(
+            row.location,
+            super::super::source_location::source_location_label(path, Some(2), None, None)
+        );
+        assert!(keys.insert(row.key), "fallback key collapsed {path:?}");
+        assert!(
+            matches.insert(row.match_key.unwrap()),
+            "possible match collapsed {path:?}"
+        );
+    }
+}
+
+#[test]
 fn run_diff_hydrates_recorded_context_and_distinguishes_missing_from_omitted() {
     let temp = tempfile::tempdir().unwrap();
     write_run(temp.path(), "context-left", "a", json!([]));

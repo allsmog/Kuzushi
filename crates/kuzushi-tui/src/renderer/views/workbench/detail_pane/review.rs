@@ -7,7 +7,9 @@ pub(in crate::renderer::views::workbench) fn review_detail_lines(
     width: usize,
 ) -> Vec<Line<'static>> {
     let budget = width.saturating_sub(2).max(16);
-    let mut lines = detail_title_lines(detail, budget);
+    let mut lines = Vec::new();
+    push_review_location(&mut lines, detail, budget);
+    lines.extend(detail_title_lines(detail, budget));
     push_observation_gap(&mut lines, detail, budget);
     push_review_decision(&mut lines, detail, budget);
     push_decision_source(&mut lines, detail, budget);
@@ -31,6 +33,58 @@ pub(in crate::renderer::views::workbench) fn review_detail_lines(
     push_provenance_section(&mut lines, detail, budget);
     push_decision_source_provenance(&mut lines, detail, budget);
     lines
+}
+
+fn push_review_location(lines: &mut Vec<Line<'static>>, detail: &FindingDetailModel, width: usize) {
+    if !detail.location.is_empty() {
+        push_literal_line(lines, &detail.location, width, "", theme::muted());
+    }
+}
+
+#[cfg(test)]
+mod literal_header_tests {
+    use super::*;
+
+    #[test]
+    fn selected_location_precedes_claims_and_mutating_actions_at_every_width() {
+        let detail = FindingDetailModel {
+            location: "\" app /lib.py\":2".into(),
+            title: "The same policy title on two different files".into(),
+            ..Default::default()
+        };
+        for width in [36, 56, 76, 92, 116, 156] {
+            let lines = review_detail_lines(&detail, width);
+            assert_eq!(lines[0].to_string(), detail.location);
+            let text = lines
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.find(&detail.location).unwrap() < text.find("REVIEW ACTIONS").unwrap());
+        }
+    }
+
+    #[test]
+    fn moving_the_location_keeps_source_reading_free_of_a_duplicate_path_row() {
+        let detail = FindingDetailModel {
+            location: "\" app /lib.py\":2".into(),
+            source_snippet: Some(crate::ui_view_models::SourceSnippetModel {
+                start_line: 1,
+                focus_line: 2,
+                lines: vec!["// owned source".into(), "// selected source line".into()],
+                note: None,
+            }),
+            ..Default::default()
+        };
+        let text = review_detail_lines(&detail, 76)
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        let before_actions = text.split("REVIEW ACTIONS").next().unwrap();
+        assert_eq!(before_actions.matches(&detail.location).count(), 1);
+        assert!(before_actions.contains("selected source line"));
+    }
 }
 
 fn push_review_decision(lines: &mut Vec<Line<'static>>, detail: &FindingDetailModel, width: usize) {

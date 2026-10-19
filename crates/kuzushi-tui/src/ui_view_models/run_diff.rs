@@ -422,7 +422,7 @@ fn findings_array(value: &serde_json::Value) -> Option<&Vec<serde_json::Value>> 
 
 fn run_diff_finding_row(value: &serde_json::Value) -> Option<RunDiffFindingRow> {
     let key = finding_key(value)?;
-    let file = string_field(value, &["filePath", "file_path", "path"]).unwrap_or("-");
+    let file = finding_path(value).unwrap_or("-");
     let line = integer_field(value, &["startLine", "start_line", "line"]);
     Some(RunDiffFindingRow {
         key,
@@ -466,7 +466,7 @@ fn finding_key(value: &serde_json::Value) -> Option<String> {
     .map(ToString::to_string)
     .or_else(|| {
         let rule = string_field(value, &["ruleId", "rule_id", "rule"]).unwrap_or("-");
-        let file = string_field(value, &["filePath", "file_path", "path"]).unwrap_or("-");
+        let file = finding_path(value).unwrap_or("-");
         let line = integer_field(value, &["startLine", "start_line", "line"]).unwrap_or(0);
         (rule != "-" || file != "-").then(|| format!("{rule}:{file}:{line}"))
     })
@@ -488,7 +488,7 @@ fn finding_title(value: &serde_json::Value) -> String {
 fn finding_uncertain_match_key(value: &serde_json::Value) -> Option<String> {
     let tool = normalized_optional_field(value, &["tool", "source"]);
     let rule = normalized_optional_field(value, &["ruleId", "rule_id", "rule"])?;
-    let file = normalized_path_field(value, &["filePath", "file_path", "path"])?;
+    let file = finding_path(value)?;
     let title = normalize_match_token(&finding_title(value));
     (!title.is_empty()).then(|| {
         format!(
@@ -504,10 +504,11 @@ fn normalized_optional_field(value: &serde_json::Value, keys: &[&str]) -> Option
         .filter(|value| !value.is_empty())
 }
 
-fn normalized_path_field(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
-    string_field(value, keys)
-        .map(|value| normalize_match_token(&value.replace('\\', "/")))
-        .filter(|value| !value.is_empty())
+fn finding_path(value: &serde_json::Value) -> Option<&str> {
+    ["filePath", "file_path", "path"]
+        .iter()
+        .filter_map(|key| value.get(*key).and_then(serde_json::Value::as_str))
+        .find(|path| !path.is_empty())
 }
 
 fn normalize_match_token(value: &str) -> String {
@@ -563,8 +564,7 @@ fn integer_field(value: &serde_json::Value, keys: &[&str]) -> Option<u64> {
 }
 
 fn location_label(file: &str, line: Option<u64>) -> String {
-    line.map(|line| format!("{file}:{line}"))
-        .unwrap_or_else(|| file.to_string())
+    super::source_location::source_location_label(file, line, None, None)
 }
 
 fn run_revision_label(run_state: JsonFileState) -> String {

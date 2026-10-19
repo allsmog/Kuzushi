@@ -11,15 +11,15 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37
 │▸ FINDINGS · 6               │F-0001 · FINDING · Y · review current source · t
 │6 of 6 · [completeness:all]  │F-0001 · needs_review · critical
 │[order: proof > severity]    │Evidence: verified L4 · sources:1
-│▸F-0001 C runtime verified   │claim · runtime-verified
-│  SQL injection reaches      │SQL injection reaches query
-│  query                      │
-│  sources:1 · @– · open      │── DECISION ──
-│  src/auth/login.rs:17       │verdict: needs_review
-│ F-0002 H unverified         │source: none
-│  Template input reaches     │
-│  renderer                   │── SOURCE · observation (on-disk excerpt) ──
-│  sources:1 · @– · open      │  src/auth/login.rs:17
+│▸F-0001 C runtime verified   │src/auth/login.rs:17
+│  SQL injection reaches      │claim · runtime-verified
+│  query                      │SQL injection reaches query
+│  sources:1 · @– · open      │
+│  src/auth/login.rs:17       │── DECISION ──
+│ F-0002 H unverified         │verdict: needs_review
+│  Template input reaches     │source: none
+│  renderer                   │
+│  sources:1 · @– · open      │── SOURCE · observation (on-disk excerpt) ──
 │  src/web/template.rs:8      │    14 │ }
 │                             │    15 │
 │                             │    16 │ pub fn login(attempt: &LoginAttemp...

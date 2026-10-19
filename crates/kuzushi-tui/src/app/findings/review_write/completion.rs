@@ -44,12 +44,7 @@ impl ShellApp {
         receipt: kuzushi_core::workspace::WorkspaceReviewDecisionReceipt,
         unchanged: bool,
     ) -> Vec<ShellEffect> {
-        if self.open_review_session_id(&apply.finding) == apply.review_session_id {
-            self.close_review_session(&apply.finding);
-        }
-        if unchanged {
-            self.clear_review_decision_conflict();
-        }
+        self.acknowledge_saved_review_selection(apply, receipt.committed_seq, unchanged);
         let label = review_decision_finding_label(apply.alias.as_deref(), &apply.finding);
         self.log_saved_review_decision(receipt.decision_id, apply.decision.verdict, &label);
         self.log_review_decision_source(&receipt);
@@ -65,6 +60,25 @@ impl ShellApp {
             return self.review_decision_refresh_effects(&apply.finding);
         }
         self.passive_review_write_refresh(&apply.finding)
+    }
+
+    fn acknowledge_saved_review_selection(
+        &mut self,
+        apply: &ReviewDecisionApply,
+        committed_seq: Option<u64>,
+        unchanged: bool,
+    ) {
+        self.router.findings_mut().acknowledge_selected_decision(
+            &apply.finding,
+            apply.read_watermark,
+            committed_seq,
+        );
+        if self.open_review_session_id(&apply.finding) == apply.review_session_id {
+            self.close_review_session(&apply.finding);
+        }
+        if unchanged {
+            self.clear_review_decision_conflict();
+        }
     }
 
     fn finish_failed_review_decision(

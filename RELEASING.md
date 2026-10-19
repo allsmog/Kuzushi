@@ -1,5 +1,29 @@
 # Releasing Kuzushi
 
+## Review decision write receipts
+
+`WorkspaceReviewDecisionReceipt` adds optional `committedSeq`, the exact event
+sequence of the successful decision write. The receipt retains this value even
+when reading its source details fails. Its schema version remains 1; JSON
+consumers must allow the additive field. Rust callers constructing the receipt
+must initialize `committed_seq`, using `None` when an exact sequence is unavailable.
+The existing decision-recording helpers still return the same decision IDs.
+
+The TUI acknowledges only that saved write for the same selected generation and
+submitted read version. It does not adopt a later projection version. Consecutive
+manual decisions can proceed after the operator's own save, while intervening
+external decisions and observations still require a fresh read. Historical
+observations and prior decisions remain unchanged.
+
+## Literal finding locations
+
+Finding labels quote paths containing whitespace, control characters, colons,
+backslashes or quotes. Line numbers remain outside the quotes. Raw finding
+paths, identities and exported location fields keep their existing bytes.
+Run comparison preserves literal paths in its labels, fallback keys and
+possible-match comparisons rather than trimming or collapsing them. Tool
+names, options and stored finding schemas are unchanged.
+
 ## Scope context provenance in reports
 
 Scope-study investigation receipts add `scopeProposalRef`,

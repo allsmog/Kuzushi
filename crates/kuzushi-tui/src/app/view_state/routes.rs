@@ -1617,6 +1617,28 @@ impl FindingsRouteState {
             .flatten()
     }
 
+    pub(crate) fn acknowledge_selected_decision(
+        &mut self,
+        finding: &kuzushi_core::Finding,
+        read_watermark: Option<u64>,
+        committed_seq: Option<u64>,
+    ) {
+        let Some(seq) = committed_seq.filter(|seq| read_watermark.is_some_and(|read| read <= *seq))
+        else {
+            return;
+        };
+        let anchor = kuzushi_core::findings::finding_page_anchor(finding);
+        let Some(reference) = self
+            .selected_reference
+            .as_mut()
+            .filter(|reference| reference.anchor == anchor)
+            .filter(|reference| reference.watermark == read_watermark)
+        else {
+            return;
+        };
+        reference.watermark = Some(seq);
+    }
+
     pub(crate) fn clear_selection(&mut self) {
         self.selected_finding = None;
         self.selected_reference = None;
@@ -2273,6 +2295,35 @@ mod tests {
         route.set_selected_finding(Some(finding.clone()));
 
         assert_eq!(route.selected_finding(), &Some(finding));
+    }
+
+    #[test]
+    fn decision_acknowledgement_keeps_other_selections_and_unknown_receipts_unchanged() {
+        let finding = kuzushi_core::Finding::new_tool(
+            "fixture",
+            "owned",
+            "lib.rs",
+            1,
+            None,
+            kuzushi_core::Severity::Info,
+            "Owned note",
+        );
+        let mut other = finding.clone();
+        other.id = Some(99);
+        let mut route = FindingsRouteState::default();
+        route.set_selected_finding(Some(finding.clone()));
+        route.bind_selected_reference("owned".into(), Some(10), Default::default());
+        for (selected, expected, receipt) in [
+            (&other, Some(10), Some(12)),
+            (&finding, Some(9), Some(12)),
+            (&finding, Some(10), None),
+            (&finding, Some(10), Some(9)),
+        ] {
+            route.acknowledge_selected_decision(selected, expected, receipt);
+            assert_eq!(route.selected_read_watermark(&finding), Some(10));
+        }
+        route.acknowledge_selected_decision(&finding, Some(10), Some(12));
+        assert_eq!(route.selected_read_watermark(&finding), Some(12));
     }
 
     #[test]

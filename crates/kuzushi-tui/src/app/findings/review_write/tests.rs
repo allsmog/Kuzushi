@@ -189,6 +189,93 @@ fn pending_save_refuses_duplicate_submission_and_shell_exit() {
 }
 
 #[test]
+fn consecutive_decisions_on_a_pinned_filtered_finding_acknowledge_the_saved_write() {
+    let (root, mut app, writer) = fixture();
+    app.refresh_findings_filtered("files:[\"lib.rs\"]");
+    app.open_finding_at_cursor();
+    let first = request(&app);
+    let first_watermark = first.read_watermark.unwrap();
+    app.record_review_decision_effect(first);
+    settle(&mut app, &writer);
+    let second = request(&app);
+    assert!(second.read_watermark.unwrap() > first_watermark);
+    app.record_review_decision_effect(second);
+    wait_for_result(&mut app);
+    assert_eq!(decisions(root.path()).len(), 2);
+    assert_eq!(
+        app.active_findings_filter().as_deref(),
+        Some("files:[\"lib.rs\"]")
+    );
+}
+
+#[derive(Debug, Clone, Copy)]
+enum InterveningChange {
+    Decision,
+    Observation,
+}
+
+impl ReviewDecisionWriter for InterveningChange {
+    fn write(&self, apply: &ReviewDecisionApply) -> ReviewWriteResult {
+        let receipt = LedgerReviewDecisionWriter.write(apply)?;
+        let workspace = workspace_for_target(apply.target.as_ref()).unwrap();
+        match self {
+            Self::Decision => {
+                let mut other = apply.decision.clone();
+                other.rationale = "Other operator's newer decision".into();
+                kuzushi_core::workspace::record_user_review_decision_for_finding(
+                    &workspace,
+                    &apply.finding,
+                    &other,
+                )
+                .unwrap();
+            }
+            Self::Observation => {
+                let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+                store
+                    .record_run_started("after-save", workspace.root(), "completed")
+                    .unwrap();
+                let mut newer = apply.finding.clone();
+                newer.title = "New observation after the saved decision".into();
+                store.insert_finding("after-save", &newer).unwrap();
+            }
+        }
+        Ok(receipt)
+    }
+}
+
+#[test]
+fn acknowledging_our_write_never_acknowledges_a_later_external_change() {
+    for change in [InterveningChange::Decision, InterveningChange::Observation] {
+        let (root, mut app, _writer) = fixture();
+        app.open_finding_at_cursor();
+        app.runtime_state.review_write.writer = Arc::new(change);
+        app.record_review_decision_effect(request(&app));
+        wait_for_result(&mut app);
+        let saved = decisions(root.path());
+        let own = saved
+            .iter()
+            .find(|row| row.decision.rationale == "Synthetic operator decision")
+            .unwrap();
+        let second = request(&app);
+        assert_eq!(
+            second.read_watermark,
+            own.provenance.as_ref().map(|row| row.event_seq)
+        );
+        app.runtime_state.review_write.writer = Arc::new(LedgerReviewDecisionWriter);
+        app.record_review_decision_effect(second);
+        wait_for_result(&mut app);
+        assert_eq!(decisions(root.path()).len(), saved.len());
+        assert!(app
+            .advisory()
+            .notice
+            .as_ref()
+            .unwrap()
+            .message
+            .contains("changed after read watermark"));
+    }
+}
+
+#[test]
 fn target_switch_does_not_redirect_the_captured_decision_or_its_result() {
     let (root, mut app, writer) = fixture();
     app.record_review_decision_effect(request(&app));

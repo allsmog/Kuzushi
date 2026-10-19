@@ -39,6 +39,28 @@ pub fn record_user_review_decision_for_finding_with_session(
     read_watermark: Option<u64>,
     review_session_id: Option<String>,
 ) -> Result<i64> {
+    commit_user_review_decision(
+        workspace,
+        finding,
+        decision,
+        read_watermark,
+        review_session_id,
+    )
+    .map(|receipt| receipt.decision_id)
+}
+
+pub(super) struct CommittedReviewDecision {
+    pub(super) decision_id: i64,
+    pub(super) committed_seq: u64,
+}
+
+pub(super) fn commit_user_review_decision(
+    workspace: &WorkspaceTarget,
+    finding: &Finding,
+    decision: &ReviewDecision,
+    read_watermark: Option<u64>,
+    review_session_id: Option<String>,
+) -> Result<CommittedReviewDecision> {
     let finding_id = finding
         .id
         .context("review decision target has no persisted finding id")?;
@@ -55,9 +77,12 @@ pub fn record_user_review_decision_for_finding_with_session(
         workspace.findings_db_path(),
         WriterCommand::Decision(DecisionCommand::ReviewDecision(write)),
     )?;
-    Ok(receipt
-        .projected_review_decision_id
-        .unwrap_or(receipt.committed_seq as i64))
+    Ok(CommittedReviewDecision {
+        decision_id: receipt
+            .projected_review_decision_id
+            .unwrap_or(receipt.committed_seq as i64),
+        committed_seq: receipt.committed_seq,
+    })
 }
 
 fn resolve_read_watermark(workspace: &WorkspaceTarget, read_watermark: Option<u64>) -> Result<u64> {

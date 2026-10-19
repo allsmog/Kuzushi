@@ -3877,6 +3877,20 @@ captured source binding. Source changes cannot silently assign a newer watermark
 to an older displayed generation. Open the current row explicitly to inspect
 its source before recording a current-source decision.
 
+After a successful manual decision, the same selected observation acknowledges
+only that write's exact committed sequence. It can then receive another manual
+decision without reopening the finding. A changed selection or submitted read
+version is preserved. A later external decision or observation remains a conflict;
+the acknowledgement never adopts the current aggregate projection watermark.
+The shared `WorkspaceReviewDecisionReceipt` carries optional `committedSeq` for
+this purpose, including when its source-detail read fails. Missing values do not
+authorize advancing a reader.
+
+Review, run comparison and Report previews quote literal paths when needed and
+keep line numbers outside the quotes. The selected Review location precedes the
+claim text and preserves meaningful spaces while wrapping. This presentation does
+not rewrite raw finding paths, identity fields, filters or exported location data.
+
 ## Reviewed reusable lessons
 
 The `lessons` shell reader and the prepared `findings:lessons`,

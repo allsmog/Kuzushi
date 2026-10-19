@@ -6,6 +6,7 @@ use super::review_state::{
     review_decision_history_for, EffectiveReviewDecision, EffectiveReviewStateIndex,
 };
 use super::review_yield::{review_yield_detail_for, ReviewYieldDetailModel};
+use super::source_location::{finding_location_label, relative_source_path};
 use super::workspace::findings_db_relative_path;
 use super::FindingSearch;
 use super::{context_snapshot_state, SeverityCounts, SeverityTone};
@@ -1233,13 +1234,7 @@ pub(crate) fn target_base(app: &ShellApp) -> Option<String> {
 /// Strip the target prefix from a `path:line` location when present, leaving a
 /// repo-relative path; otherwise return it unchanged.
 pub(crate) fn relativize_location(location: String, base: Option<&str>) -> String {
-    let Some(base) = base else {
-        return location;
-    };
-    match location.strip_prefix(base) {
-        Some(rest) => rest.trim_start_matches('/').to_string(),
-        None => location,
-    }
+    relative_source_path(&location, base)
 }
 
 type ProjectedFinding = VisibleFindingProjection;
@@ -1683,7 +1678,7 @@ impl FindingListRow {
             severity_tone: SeverityTone::from_severity(projection.severity),
             severity_label: projection.severity_label,
             title: projection.title,
-            location: relativize_location(projection.location, base),
+            location: finding_location_label(finding, base),
             run_label: provenance.run_label,
             revision_label: provenance.revision_label,
             verdict: projection.verdict_label,
@@ -1989,7 +1984,7 @@ impl FindingDetailModel {
             severity_tone: SeverityTone::from_severity(projection.severity),
             severity_label: finding.severity.as_str().to_string(),
             title: projection.title,
-            location: relativize_location(projection.location, base),
+            location: finding_location_label(finding, base),
             rule: projection.rule,
             tool: projection.tool,
             vuln_source_label: vuln_source_label(finding),
@@ -2259,7 +2254,7 @@ fn evidence_row_header(evidence: &kuzushi_core::FindingEvidence) -> String {
     format!(
         "{} · {confidence} · {}:{}",
         evidence_kind_label(evidence),
-        evidence.file_path,
+        super::source_location::source_path_label(&evidence.file_path, None),
         evidence.line
     )
 }
