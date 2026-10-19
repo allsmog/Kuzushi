@@ -65,32 +65,36 @@ fn rust_sources(dir: &Path, out: &mut Vec<PathBuf>) {
 /// The file's production region: everything outside its top-level
 /// `#[cfg(test)]` items. The attribute guards one item, not the rest of the
 /// file, so a module that declares a test submodule beside its other `mod`
-/// lines, or that keeps a `#[cfg(test)]` helper above its production body,
-/// still has that body scanned. Files whose production region itself contains
-/// `#[test]` are dedicated test files pulled in via a `#[cfg(test)] mod`
-/// in their parent and are skipped entirely.
+/// lines (including the `#[path = "..."]` form), or that keeps a one-line
+/// declaration or column-0-closed braced `#[cfg(test)]` helper above its
+/// production body, still has that body scanned. A guarded item whose end
+/// cannot be confirmed ends the region at its attribute, as the scan always
+/// did. Files whose region above the first guarded item contains `#[test]`
+/// are dedicated test files pulled in via a `#[cfg(test)] mod` in their parent
+/// and are skipped entirely.
 fn production_region(body: &str) -> Option<String> {
-    if body.starts_with("#[cfg(test)]") {
-        return Some(String::new());
-    }
     let region = scanned_region(body);
     (!region.contains("#[test]")).then_some(region)
 }
 
-/// A column-0 `#[cfg(test)]` on its own line — the only form that guards a
-/// whole top-level item.
-const TEST_ATTRIBUTE_LINE: &str = "\n#[cfg(test)]\n";
+/// A column-0 `#[cfg(test)]` — the only form that guards a whole top-level
+/// item. The item may share its line or follow on a later one.
+const TEST_ATTRIBUTE: &str = "#[cfg(test)]";
+const TEST_ATTRIBUTE_AFTER_NEWLINE: &str = "\n#[cfg(test)]";
 
+/// Everything the old rule scanned — the text above the first guarded
+/// attribute below the top line — plus the text after each guarded item whose
+/// end is certain. An uncertain skip ends the region at its attribute, or at
+/// that old boundary when the file opens with the item, so coverage never
+/// drops below the old rule and test code is never resumed as production.
 fn scanned_region(body: &str) -> String {
     let mut region = String::with_capacity(body.len());
     let mut cursor = 0;
-    while let Some(offset) = body[cursor..].find(TEST_ATTRIBUTE_LINE) {
-        // Keep the newline the needle anchored on: dropping it would join the
-        // line above the attribute to the line below the item, and a comment
-        // line joined to a code line hides that code from the line scan.
-        let attribute = cursor + offset;
-        region.push_str(&body[cursor..=attribute]);
-        let Some(end) = end_of_test_item(body, attribute + TEST_ATTRIBUTE_LINE.len()) else {
+    while let Some(attribute) = next_test_attribute(body, cursor) {
+        region.push_str(&body[cursor..attribute]);
+        let Some(end) = end_of_test_item(body, attribute + TEST_ATTRIBUTE.len()) else {
+            let floor = end_of_old_region(body).max(attribute);
+            region.push_str(&body[attribute..floor]);
             return region;
         };
         cursor = end;
@@ -99,22 +103,134 @@ fn scanned_region(body: &str) -> String {
     region
 }
 
-/// Where one guarded top-level item ends: a declaration at the end of its own
-/// line, a braced item after the column-0 `}` that closes it. Deliberately not
-/// brace counting, because a `{` inside a string, a char literal or a comment
-/// would unbalance the count and swallow the production body below the item.
-/// Any other shape returns `None`, and the region ends there as it did before
-/// this rule could skip an item at all.
-fn end_of_test_item(body: &str, item: usize) -> Option<usize> {
-    let line = body[item..].lines().next()?.trim_end();
-    if line.ends_with(';') && !line.contains('{') {
-        return Some(end_of_line(body, item));
+/// Where the old rule ended the region: the first guarded attribute below the
+/// top line. Only an item at the very top of the file can sit above it.
+fn end_of_old_region(body: &str) -> usize {
+    body.find(TEST_ATTRIBUTE_AFTER_NEWLINE)
+        .map_or(0, |newline| newline + 1)
+}
+
+/// The next guarded attribute at or after `cursor`, which always sits at the
+/// start of a line. Checking `cursor` itself catches an attribute directly
+/// after a skipped item or at the top of the file, where no newline precedes
+/// it inside the searched slice.
+fn next_test_attribute(body: &str, cursor: usize) -> Option<usize> {
+    let rest = &body[cursor..];
+    if rest.starts_with(TEST_ATTRIBUTE) {
+        return Some(cursor);
     }
-    if !line.ends_with('{') {
+    let newline = rest.find(TEST_ATTRIBUTE_AFTER_NEWLINE)?;
+    Some(cursor + newline + 1)
+}
+
+/// Where one guarded top-level item ends: a declaration at the end of its own
+/// line, a braced item after the column-0 `}` or `};` line that closes it.
+/// Deliberately not brace counting, because a `{` inside a string, a char
+/// literal or a comment would unbalance the count and swallow the production
+/// body below the item. Any other shape — a multi-line signature, a one-line
+/// braced item, a multi-line attribute, a block comment — returns `None`, as
+/// does an end the text after it does not confirm.
+fn end_of_test_item(body: &str, from: usize) -> Option<usize> {
+    let item = start_of_item(body, from)?;
+    let line = body[item..].lines().next()?.trim_end();
+    // `"{"`, not `'{'`: the repo's CRAP gate counts a brace char literal.
+    if line.ends_with(';') && !line.contains("{") {
+        let end = end_of_line(body, item);
+        return (resumption(body, end) == Resumption::Production).then_some(end);
+    }
+    if !line.ends_with("{") {
         return None;
     }
-    let closing_brace = item + body[item..].find("\n}")? + 1;
-    Some(end_of_line(body, closing_brace))
+    end_of_braced_item(body, item)
+}
+
+/// The item's first line, past the rest of the attribute's own line and any
+/// further one-line attributes, comments, doc comments or blank lines.
+fn start_of_item(body: &str, from: usize) -> Option<usize> {
+    let mut start = from;
+    while body[start..].lines().next().is_some_and(is_item_preamble) {
+        start = end_of_line(body, start);
+    }
+    (start < body.len()).then_some(start)
+}
+
+fn is_item_preamble(line: &str) -> bool {
+    let line = line.trim();
+    let attribute = line.starts_with("#[") && line.ends_with(']');
+    line.is_empty() || line.starts_with("//") || attribute
+}
+
+/// A column-0 `}` inside a multi-line string can pass for the item's close,
+/// so each candidate close is confirmed by the text after it: one that
+/// resumes inside the item moves on to the next candidate, and one that
+/// cannot be told apart from production gives up.
+fn end_of_braced_item(body: &str, item: usize) -> Option<usize> {
+    let mut search = item;
+    while let Some(close) = next_closing_line(body, search) {
+        let end = end_of_line(body, close);
+        match resumption(body, end) {
+            Resumption::Production => return Some(end),
+            Resumption::InsideItem => search = end,
+            Resumption::Ambiguous => return None,
+        }
+    }
+    None
+}
+
+/// The next column-0 line that closes a braced item, skipping column-0 text
+/// such as `});` that only a string literal can hold.
+fn next_closing_line(body: &str, from: usize) -> Option<usize> {
+    let mut search = from;
+    loop {
+        let close = search + body[search..].find("\n}")? + 1;
+        if matches!(body[close..].lines().next(), Some("}" | "};")) {
+            return Some(close);
+        }
+        search = close;
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum Resumption {
+    Production,
+    InsideItem,
+    Ambiguous,
+}
+
+/// What the text from `end` to the next guarded attribute reads as. A test
+/// attribute, or a first line indented like an item body, means the scan
+/// resumed inside a test item. A column-0 line no rustfmt-formatted top level
+/// begins with, such as the rest of a string literal, is ambiguous: a
+/// production string can hold one too.
+fn resumption(body: &str, end: usize) -> Resumption {
+    let next = next_test_attribute(body, end).unwrap_or(body.len());
+    let text = &body[end..next];
+    if text.lines().any(is_test_attribute_line) || starts_indented(text) {
+        return Resumption::InsideItem;
+    }
+    if text.lines().any(is_foreign_top_level) {
+        return Resumption::Ambiguous;
+    }
+    Resumption::Production
+}
+
+fn is_test_attribute_line(line: &str) -> bool {
+    line.contains("#[test]") || line.contains("::test]")
+}
+
+fn starts_indented(text: &str) -> bool {
+    text.lines()
+        .find(|line| !line.trim().is_empty())
+        .is_some_and(|line| line.starts_with(char::is_whitespace))
+}
+
+fn is_foreign_top_level(line: &str) -> bool {
+    let Some(first) = line.chars().next() else {
+        return false;
+    };
+    let opens = first.is_whitespace() || first.is_alphanumeric();
+    let delimiter = matches!(line.trim_end(), "{" | "}" | "};" | "];");
+    !(opens || delimiter || matches!(first, '_' | '#' | '/' | ')'))
 }
 
 fn end_of_line(body: &str, from: usize) -> usize {
@@ -247,6 +363,89 @@ mod tests {
         assert_eq!(
             production_region("use x;\n#[cfg(test)]\nuse a::{b};\nfn a() {}").as_deref(),
             Some("use x;\n")
+        );
+    }
+
+    /// A column-0 `}` inside a test fixture string once passed for the close
+    /// of `mod tests`: the scan resumed mid-module, met its `#[test]`, and
+    /// dropped the whole file from the ratchet.
+    #[test]
+    fn a_column_0_brace_inside_a_test_string_cannot_resume_the_scan() {
+        let body = concat!(
+            "use x;\n",
+            "#[cfg(test)]\n",
+            "mod tests {\n",
+            "    const FIXTURE: &str = r#\"resource {\n",
+            "}\n",
+            "\"#;\n",
+            "    #[test]\n",
+            "    fn t() {}\n",
+            "}\n",
+            "fn a() {}\n"
+        );
+        assert_eq!(
+            production_region(body).as_deref(),
+            Some("use x;\nfn a() {}\n")
+        );
+    }
+
+    /// When the text after a candidate close could be either a string's tail
+    /// or production code, the region ends at the attribute, as it always did.
+    #[test]
+    fn an_unconfirmed_close_ends_the_region_at_its_attribute() {
+        let body = concat!(
+            "use x;\n",
+            "#[cfg(test)]\n",
+            "fn fixture() -> &'static str {\n",
+            "    r#\"\n",
+            "}\n",
+            "\"#\n",
+            "}\n",
+            "fn a() {}\n"
+        );
+        assert_eq!(production_region(body).as_deref(), Some("use x;\n"));
+    }
+
+    /// After a skip the scan sits at the start of a line, where the next
+    /// attribute has no newline before it inside the searched text.
+    #[test]
+    fn back_to_back_guarded_declarations_are_all_skipped() {
+        let body = concat!(
+            "use x;\n",
+            "#[cfg(test)]\n",
+            "mod a;\n",
+            "#[cfg(test)]\n",
+            "mod b;\n",
+            "#[cfg(test)] mod c;\n",
+            "fn a() {}\n"
+        );
+        assert_eq!(
+            production_region(body).as_deref(),
+            Some("use x;\nfn a() {}\n")
+        );
+    }
+
+    #[test]
+    fn a_guarded_item_at_the_top_of_the_file_hides_only_itself() {
+        assert_eq!(
+            production_region("#[cfg(test)]\nuse super::helper;\nfn a() {}").as_deref(),
+            Some("fn a() {}")
+        );
+    }
+
+    #[test]
+    fn attributes_and_doc_comments_between_the_guard_and_its_item_are_skipped() {
+        let body = concat!(
+            "use x;\n",
+            "#[cfg(test)]\n",
+            "#[path = \"x_tests.rs\"]\n",
+            "/// Unit tests.\n",
+            "mod tests;\n",
+            "fn a() {}\n"
+        );
+        assert_eq!(
+            production_region(body).as_deref(),
+            Some("use x;\nfn a() {}\n")
         );
     }
 }
