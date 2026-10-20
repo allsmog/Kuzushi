@@ -43,6 +43,21 @@ Notable changes to Kuzushi. Release procedure lives in
   In the shell, `threats diff <from> <to>` runs the same tool; bare `threats
   diff` still inspects compatibility-mirror edits.
 
+**Security:**
+
+- The locked dependency graph carries the published fixes for 24 RustSec
+  advisories it was still exposed to. `wasmtime` 49.0.2 -> 49.0.4 closes
+  fourteen advisories in the engine that executes third-party WASM plugins
+  (RUSTSEC-2026-0353 through -0364, -0378 and -0379, the last a Cranelift
+  aarch64 miscompile that can jump to the wrong target). `rustls` 0.23.45 ->
+  0.23.46 closes four, including TLS secrets reachable through a client
+  session value's `Debug` output (RUSTSEC-2026-0346) and an unauthenticated
+  `ServerHello` that could downgrade later connections (-0349). `quinn-proto`
+  0.11.14 -> 0.11.19 closes five remote panic and memory-exhaustion
+  advisories, and `lru` 0.18.1 -> 0.18.5 closes the unsound
+  `LruCache::pop()` use-after-free (RUSTSEC-2026-0253). Only the lockfile
+  and the `wasmtime` floor move; no Kuzushi code changes.
+
 **Fixed:**
 
 - A findings export folds by the policy the operator's ledger resolved. The
