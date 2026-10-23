@@ -30,7 +30,7 @@ clamped to 0, and the old assertion described the unclamped offset that
 preceded the row model. The clamp is the behavior worth keeping: an operator
 cannot scroll past the end of a short page.
 
-The fixture now gives the page a two-stage flow to draw and an 80x14 canvas
+The fixture now gives the page a two-stage flow to draw and an 80x10 viewport
 shorter than those rows, so `j`, `G` and `g` move real distances again and the
 test still proves what its name claims — the keys reach the page instead of the
 composer.
