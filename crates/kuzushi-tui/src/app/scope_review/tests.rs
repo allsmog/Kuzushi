@@ -15,6 +15,66 @@ mod tree;
 mod workload;
 
 #[test]
+fn new_scope_proposal_resets_detail_scroll_and_refresh_preserves_it() {
+    let (root, app) = fixture();
+    let review = app
+        .scope_review()
+        .unwrap()
+        .review
+        .as_deref()
+        .unwrap()
+        .clone();
+    let mut state = ScopeReviewState::new(root.path().into());
+    state.scroll = 8;
+    state.install(review.clone());
+    assert_eq!(state.scroll, 0, "new inventory must open at its first line");
+    state.scroll = 8;
+    state.install(review.clone());
+    assert_eq!(
+        state.scroll, 8,
+        "refresh must preserve the reading position"
+    );
+    let mut different = review;
+    different.reference.proposal_id.push_str("-different");
+    state.install(different);
+    assert_eq!(state.scroll, 0, "a different proposal has a new document");
+}
+
+#[test]
+fn empty_history_read_discloses_completion_and_keeps_an_inspected_revision() {
+    let (_root, mut app) = fixture();
+    let before = app.scope_review().unwrap().review.clone();
+    app.dispatch_scope_request(json!({"operation":"latest"}));
+    app.cache_scope_review_result("pack:scopes", &json!({"review":null}));
+    let state = app.scope_review().unwrap();
+    assert!(state.pending.is_none());
+    assert_eq!(state.review, before);
+    assert!(state
+        .notice
+        .as_ref()
+        .unwrap()
+        .contains("previously inspected"));
+}
+
+#[test]
+fn initial_empty_history_read_is_ready_for_explicit_inventory_building() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(root.path().into()));
+    app.open_scope_review();
+    app.cache_scope_review_result("pack:scopes", &json!({"review":null}));
+    let state = app.scope_review().unwrap();
+    assert!(state.pending.is_none());
+    assert!(state.review.is_none());
+    assert!(state
+        .notice
+        .as_ref()
+        .unwrap()
+        .starts_with("No saved scope inventory"));
+    assert!(!app.has_running_work());
+}
+
+#[test]
 fn explicit_shared_context_copy_and_removal_use_prepared_dispatch_without_work() {
     let (root, mut app) = fixture();
     split(&mut app, root.path());

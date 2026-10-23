@@ -97,6 +97,7 @@ impl ScopeReviewState {
             .is_some_and(|old| old.reference.proposal_id == review.reference.proposal_id);
         if !same_proposal {
             self.tree = Default::default();
+            self.scroll = 0;
             return;
         }
         if self.review.as_ref().is_some_and(|old| {

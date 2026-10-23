@@ -119,17 +119,22 @@ fn linked_evidence_lines(model: &DfdModel, selection: usize) -> Vec<String> {
         format!("LINKED CONTEXT · {} recorded items", items.len()),
     ];
     for item in items {
+        let evidence = if item.evidence_paths.contains(&item.evidence) {
+            serde_json::json!(item.evidence).to_string()
+        } else {
+            item.evidence.clone()
+        };
         lines.extend([
             String::new(),
             item.label.clone(),
             item.detail.clone(),
-            format!("Evidence: {}", item.evidence),
+            format!("Evidence: {evidence}"),
         ]);
         lines.extend(
             item.evidence_paths
                 .iter()
                 .filter(|path| **path != item.evidence)
-                .map(|path| format!("Source: {path}")),
+                .map(|path| format!("Source: {}", serde_json::json!(path))),
         );
     }
     lines
@@ -171,3 +176,6 @@ pub(crate) fn diagram_plain_lines(app: &ShellApp, width: usize) -> Vec<String> {
     }
     wrap_diagram_lines(lines, width)
 }
+
+#[cfg(test)]
+mod tests;

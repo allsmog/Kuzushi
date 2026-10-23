@@ -18,7 +18,9 @@ use std::time::UNIX_EPOCH;
 
 mod change_coalescing;
 mod language;
+mod snapshot;
 mod source_walk;
+pub(crate) use snapshot::{index_workspace_snapshot_cancellable, SourceIndexProgress};
 mod watcher;
 
 pub use change_coalescing::coalesce_changes;
@@ -133,23 +135,7 @@ struct SnapshotMetadata {
 }
 
 pub fn index_workspace_snapshot(workspace: &WorkspaceTarget) -> Result<IndexedWorkspaceSnapshot> {
-    workspace.ensure_state_dir()?;
-    let store = ContentStore::open(workspace.objects_dir())?;
-    let files = collect_indexed_files(workspace.root(), &store)?;
-    let tree = store.put_tree(tree_entries(&files))?;
-    let metadata = snapshot_metadata(workspace.root(), &files);
-    let snapshot = store.put_snapshot(&TargetSnapshot {
-        tree_hash: tree.hash.clone(),
-        workspace_root_fingerprint: metadata.workspace_root_fingerprint.clone(),
-        git_commit: metadata.git_commit.clone(),
-        git_branch: metadata.git_branch.clone(),
-        dirty_hash: metadata.dirty_hash.clone(),
-        index_hash: None,
-        config_hash: None,
-        rule_set_hashes: Vec::new(),
-        created_at: "snapshot-content-addressed".to_string(),
-    })?;
-    commit_index_projection(workspace, &snapshot, &tree, &metadata, &files)
+    index_workspace_snapshot_cancellable(workspace, &mut |_| {}, &|| false)
 }
 
 pub fn current_workspace_tree_hash(root: impl AsRef<Path>) -> Result<String> {
@@ -187,10 +173,21 @@ pub(crate) fn current_workspace_tree_hash_cancellable(
 pub fn current_workspace_resume_identity(root: impl AsRef<Path>) -> Result<String> {
     let root = root.as_ref();
     let tree_hash = current_workspace_tree_hash(root)?;
-    Ok(match target_git_metadata(root) {
-        Some(metadata) => format!("git:{};tree:{tree_hash}", metadata.sha),
+    let git = target_git_metadata(root);
+    Ok(workspace_resume_identity_for_tree(
+        &tree_hash,
+        git.as_ref().map(|metadata| metadata.sha.as_str()),
+    ))
+}
+
+pub(crate) fn workspace_resume_identity_for_tree(
+    tree_hash: &str,
+    git_revision: Option<&str>,
+) -> String {
+    match git_revision {
+        Some(revision) => format!("git:{revision};tree:{tree_hash}"),
         None => format!("tree:{tree_hash}"),
-    })
+    }
 }
 
 /// Register a hash-only workspace tree identity: tree and snapshot objects
@@ -502,28 +499,13 @@ fn is_route_or_controller(path: &Path) -> bool {
     })
 }
 
-fn collect_indexed_files(root: &Path, store: &ContentStore) -> Result<Vec<IndexedFile>> {
-    let root = root.canonicalize()?;
-    let mut files = Vec::new();
-    let mut budget = IndexBudget::default();
-    source_walk::walk_source_files(&root, &|| false, &mut |event| {
-        if let source_walk::SourceWalkEvent::File(path) = event {
-            let (metadata, bytes) = read_budgeted_source_file(&path, &mut budget, &|| false)?;
-            files.push(store_indexed_file(&root, &path, store, &metadata, &bytes)?);
-        }
-        Ok(())
-    })?;
-    files.sort_by(|left, right| left.path.cmp(&right.path));
-    Ok(files)
-}
-
 fn latest_projected_snapshot(workspace: &WorkspaceTarget) -> Result<Vec<IndexedFile>> {
     let conn = crate::sqlite_connection::open_file(&workspace.findings_db_path())?;
-    let snapshot_hash = conn
+    let (snapshot_hash, tree_hash) = conn
         .query_row(
-            "select snapshot_hash from target_snapshots order by created_at desc, rowid desc limit 1",
+            "select snapshot_hash, tree_hash from target_snapshots order by created_at desc, rowid desc limit 1",
             [],
-            |row| row.get::<_, String>(0),
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
         )
         .optional()?
         .context("workspace has no indexed snapshot yet")?;
@@ -538,7 +520,20 @@ fn latest_projected_snapshot(workspace: &WorkspaceTarget) -> Result<Vec<IndexedF
         "#,
     )?;
     let rows = statement.query_map(params![snapshot_hash], projected_indexed_file)?;
-    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    let files = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+    require_complete_projected_tree(&tree_hash, &files)?;
+    Ok(files)
+}
+
+fn require_complete_projected_tree(tree_hash: &str, files: &[IndexedFile]) -> Result<()> {
+    let bytes = serde_json::to_vec(&TreeObject {
+        entries: tree_entries(files),
+    })?;
+    anyhow::ensure!(
+        object_hash(ObjectKind::Tree, &bytes).as_str() == tree_hash,
+        "Source index projection is incomplete; capture the full source before incremental updates"
+    );
+    Ok(())
 }
 
 fn projected_indexed_file(row: &rusqlite::Row<'_>) -> rusqlite::Result<IndexedFile> {
@@ -803,10 +798,12 @@ fn commit_incremental_projection(
             .iter()
             .filter_map(|change| deleted_file_write(snapshot, change)),
     );
-    let receipts = StorageWriterActor::commit_blocking_many(
+    let receipts = StorageWriterActor::commit_source_index(
         workspace.event_log_dir(),
         workspace.findings_db_path(),
         commands,
+        &mut |_| {},
+        &|| false,
     )?;
     Ok(IndexedWorkspaceSnapshot {
         snapshot_hash: snapshot.hash.as_str().to_string(),
@@ -824,6 +821,23 @@ fn commit_index_projection(
     metadata: &SnapshotMetadata,
     files: &[IndexedFile],
 ) -> Result<IndexedWorkspaceSnapshot> {
+    snapshot::commit_projection(
+        workspace,
+        snapshot,
+        tree,
+        metadata,
+        files,
+        &mut |_| {},
+        &|| false,
+    )
+}
+
+fn index_projection_commands(
+    snapshot: &ObjectRef,
+    tree: &ObjectRef,
+    metadata: &SnapshotMetadata,
+    files: &[IndexedFile],
+) -> Vec<WriterCommand> {
     let mut commands = Vec::with_capacity(files.len() + 1);
     commands.push(WriterCommand::Watcher(WatcherCommand::SnapshotIndexed(
         snapshot_write(snapshot, tree, metadata),
@@ -831,18 +845,7 @@ fn commit_index_projection(
     commands.extend(files.iter().map(|file| {
         WriterCommand::Watcher(WatcherCommand::FileIndexed(file_write(snapshot, file)))
     }));
-    let receipts = StorageWriterActor::commit_blocking_many(
-        workspace.event_log_dir(),
-        workspace.findings_db_path(),
-        commands,
-    )?;
-    Ok(IndexedWorkspaceSnapshot {
-        snapshot_hash: snapshot.hash.as_str().to_string(),
-        tree_hash: tree.hash.as_str().to_string(),
-        file_count: files.len(),
-        applied_seq: receipts.last().map_or(0, |receipt| receipt.committed_seq),
-        files: files.iter().map(indexed_snapshot_file).collect(),
-    })
+    commands
 }
 
 fn indexed_snapshot_file(file: &IndexedFile) -> IndexedSnapshotFile {

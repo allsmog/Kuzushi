@@ -1,6 +1,6 @@
 //! Read-only context catalog and document projection. No active-model mutation.
 use crate::app::{ShellApp, ThreatModelStoreState};
-use crate::renderer::shared::text::wrap_text;
+use crate::renderer::shared::text::{wrap_document_lines, wrap_text};
 use crate::ViewDataState;
 use kuzushi_core::{ThreatModelManifest, ThreatModelRef};
 use ratatui::layout::Rect;
@@ -8,6 +8,7 @@ use serde_json::Value;
 use std::time::{Duration, SystemTime};
 
 pub(crate) mod diagram;
+mod evidence;
 mod scanner;
 
 pub(crate) fn context_header_title(app: &ShellApp) -> &'static str {
@@ -443,10 +444,13 @@ pub(super) fn context_wrap(line: &str, width: usize) -> Vec<String> {
         .count()
         .min(width / 2);
     let prefix = " ".repeat(indent);
-    wrap_text(line.trim_start(), width.saturating_sub(indent).max(1))
-        .into_iter()
-        .map(|line| format!("{prefix}{line}"))
-        .collect()
+    wrap_document_lines(
+        vec![ratatui::text::Line::raw(line[indent..].to_owned())],
+        width.saturating_sub(indent).max(1).min(u16::MAX as usize) as u16,
+    )
+    .into_iter()
+    .map(|line| format!("{prefix}{line}"))
+    .collect()
 }
 
 fn preview_lines(picker: &crate::app::StudyContextPicker) -> Vec<String> {
@@ -490,6 +494,7 @@ pub(crate) fn context_summary(document: &Value) -> Vec<String> {
     ] {
         lines.extend(context_section(label, document.pointer(pointer)));
     }
+    lines.extend(evidence::receipt_lines(document));
     lines
 }
 

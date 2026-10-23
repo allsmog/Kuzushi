@@ -114,24 +114,42 @@ fn context_summary(receipt: &ContextStudyReceipt) -> FrozenWorkSummary<'_> {
         return workflow_proposal_summary(receipt);
     }
     let jobs = receipt.preparation_jobs.len() + 1;
+    let mut lines = context_action_lines(receipt, jobs);
+    lines.extend(context_source_lines(receipt));
     FrozenWorkSummary {
         campaign: &receipt.campaign_id,
         digest: &receipt.plan_sha256,
         jobs,
         workers: 1,
         models: vec![Some(receipt.model.as_str())],
-        lines: vec![
-            format!("Context: {jobs} fixed jobs · 1 worker"),
-            format!("Action: {}", receipt.generation_tool),
-            format!("Preparation jobs: {}", receipt.preparation_jobs.len()),
-            execution_model_line(Some(&receipt.model)),
-            receipt.input["question"]
-                .as_str()
-                .map(|question| format!("Frozen question: {question}"))
-                .unwrap_or_default(),
-            context_line(&receipt.input),
-        ],
+        lines,
     }
+}
+
+fn context_action_lines(receipt: &ContextStudyReceipt, jobs: usize) -> Vec<String> {
+    vec![
+        format!("Context: {jobs} fixed jobs · 1 worker"),
+        format!("Action: {}", receipt.generation_tool),
+        format!("Preparation jobs: {}", receipt.preparation_jobs.len()),
+        execution_model_line(Some(&receipt.model)),
+        receipt.input["question"]
+            .as_str()
+            .map(|question| format!("Frozen question: {question}"))
+            .unwrap_or_default(),
+        context_line(&receipt.input),
+    ]
+}
+
+fn context_source_lines(receipt: &ContextStudyReceipt) -> Vec<String> {
+    let Some(paths) = receipt.input["sourcePaths"].as_array() else {
+        return Vec::new();
+    };
+    let mut lines = vec![format!("Evidence: {} exact files (quoted)", paths.len())];
+    lines.extend(paths.iter().map(|path| format!("  {path}")));
+    lines.extend(crate::ui_view_models::evidence_inventory::receipt_lines(
+        receipt.source_inventory.as_ref(),
+    ));
+    lines
 }
 
 fn workflow_proposal_summary(receipt: &ContextStudyReceipt) -> FrozenWorkSummary<'_> {

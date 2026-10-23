@@ -18,11 +18,11 @@ pub(super) fn request(
 ) -> Result<GeneratedText> {
     let roots =
         exact_verification::recorded_roots(ctx.workspace.unwrap().root(), &base.commit.scope)?;
-    let (source, partial) = selected_source(input, base, roots, ctx)?;
+    let (source, partial, inventory) = selected_source(input, base, roots, ctx)?;
     let evidence: Value = serde_json::from_str(&source)?;
-    let prompt = prompt(input, base, &evidence)?;
+    let prompt = prompt(input, base, &evidence, inventory.as_ref())?;
     let request = query_request(input, base, ctx, prompt)?;
-    let receipt = json!({"schemaVersion":1,"model":request.model,"runId":ctx.run_id(),"promptSha256":crate::options::prompt_content_sha256(&serde_json::to_string(&request)?),"selectedFields":base.fields.iter().map(|field|&field.pointer).collect::<Vec<_>>(),"sourcePartial":partial,"sourceEvidence":evidence,"inputBytes":request.prompt.len(),"synthesisRequests":1});
+    let receipt = json!({"schemaVersion":1,"model":request.model,"runId":ctx.run_id(),"promptSha256":crate::options::prompt_content_sha256(&serde_json::to_string(&request)?),"selectedFields":base.fields.iter().map(|field|&field.pointer).collect::<Vec<_>>(),"sourcePartial":partial,"sourceEvidence":evidence,"sourceInventory":inventory,"inputBytes":request.prompt.len(),"synthesisRequests":1});
     let response = runtime.query_blocking_controlled(
         request,
         AgentQueryControl::new(ctx.cancellation.cloned(), None),
@@ -38,33 +38,48 @@ fn selected_source(
     base: &RegenerationBase,
     roots: ThreatModelBuildRoots,
     ctx: &ToolExecutionContext<'_>,
-) -> Result<(String, bool)> {
+) -> Result<(String, bool, Option<Value>)> {
     let max_source_bytes = input["maxSourceBytes"]
         .as_u64()
         .context("maxSourceBytes is required")? as usize;
     let context_limit = input["contextLimit"]
         .as_u64()
         .context("contextLimit is required")? as usize;
-    let Some(reference) = base
-        .document
-        .pointer("/provenance/scopeContext/receipt/scopeRef")
-    else {
-        return collect_regeneration_source(roots, max_source_bytes, context_limit, ctx);
-    };
-    let reference = serde_json::from_value(reference.clone())
-        .context("Recorded group reference is malformed")?;
-    let scope = crate::workspace::resolve_accepted_scan_scope_selection(ctx, &reference)?;
     let build = BuildInput {
         roots,
         max_source_bytes,
         context_limit,
         ..Default::default()
     };
+    if let Some(paths) = base
+        .document
+        .pointer("/provenance/fileContext/receipt/sourcePaths")
+    {
+        let (source, inventory) =
+            super::super::scoped_context::collect_recorded_evidence_source(&build, paths, ctx)?;
+        return Ok((source.content, source.partial, Some(inventory)));
+    }
+    let Some(reference) = base
+        .document
+        .pointer("/provenance/scopeContext/receipt/scopeRef")
+    else {
+        let (source, partial) =
+            collect_regeneration_source(build.roots, max_source_bytes, context_limit, ctx)?;
+        return Ok((source, partial, None));
+    };
+    let reference = serde_json::from_value(reference.clone())
+        .context("Recorded group reference is malformed")?;
+    let scope = crate::workspace::resolve_accepted_scan_scope_selection(ctx, &reference)?;
     let source = collect_scoped_source(&build, &scope, ctx)?;
-    Ok((source.content, source.partial))
+    Ok((source.content, source.partial, None))
 }
 
-fn prompt(input: &Value, base: &RegenerationBase, source: &Value) -> Result<String> {
+fn prompt(
+    input: &Value,
+    base: &RegenerationBase,
+    source: &Value,
+    inventory: Option<&Value>,
+) -> Result<String> {
     let context = json!({"systemContext":base.document["systemContext"],"dfd":base.document["dfd"],"openQuestions":base.document["openQuestions"]});
     anyhow::ensure!(
         serde_json::to_vec(&context)?.len() <= 128 * 1024,
@@ -76,7 +91,7 @@ fn prompt(input: &Value, base: &RegenerationBase, source: &Value) -> Result<Stri
         .map(|field| json!({"pointer":field.pointer,"label":field.label,"text":field.text}))
         .collect::<Vec<_>>();
     let text = serde_json::to_string(
-        &json!({"schemaVersion":1,"baseRef":base.reference,"context":context,"selectedFields":fields,"guidance":input["guidance"],"source":source,"omittedContext":["threats","assets","finding decisions","unselected document metadata"]}),
+        &json!({"schemaVersion":1,"baseRef":base.reference,"context":context,"selectedFields":fields,"guidance":input["guidance"],"source":source,"sourceInventory":inventory,"omittedContext":["threats","assets","finding decisions","unselected document metadata"]}),
     )?;
     anyhow::ensure!(
         text.len() <= 512 * 1024,

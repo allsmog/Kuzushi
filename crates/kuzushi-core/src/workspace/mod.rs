@@ -1,11 +1,11 @@
 mod application;
 pub(crate) use application::read_workspace_finding_export_records;
-pub(crate) use application::recorded_scan_scope_name;
 pub(crate) use application::{
     capture_cited_file_from_tree, capture_source_file_from_tree, read_captured_file,
     ReviewSourceTree,
 };
 pub use application::{execute_goal_review, execute_lesson_action, load_finding_lessons};
+pub(crate) use application::{load_or_build_scan_scope_inventory, recorded_scan_scope_name};
 pub mod artifact_kb;
 pub mod artifacts;
 pub mod attack_surface;

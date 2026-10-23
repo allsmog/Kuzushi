@@ -8,12 +8,12 @@ use serde_json::{json, Value};
 use std::path::Path;
 
 mod expansion;
+#[cfg(test)]
 mod regeneration;
 mod scope_policy;
 mod scope_selection;
 
-pub(crate) use regeneration::scoped_regeneration_input;
-pub(crate) use scope_policy::{eligible_leaf_scopes, owning_leaf_scope};
+pub(crate) use scope_policy::eligible_leaf_scopes;
 use scope_policy::{
     scope_label, scope_selection_error, selected_scope_count, validate_all_scope_count,
 };

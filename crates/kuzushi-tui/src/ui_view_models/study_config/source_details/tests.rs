@@ -267,3 +267,27 @@ fn threat_model_reference_distinguishes_legacy_omission_and_malformed_values() {
     let summary = context_reference_summary(&malformed);
     assert!(summary.contains("malformed") && !summary.contains('\u{1b}'));
 }
+
+#[test]
+fn inherited_context_keeps_its_exact_identity_and_honest_failure_states() {
+    let reference = kuzushi_core::ThreatModelRef {
+        model_id: kuzushi_core::ThreatModelId::new(),
+        revision_id: kuzushi_core::ThreatModelRevisionId::new(),
+        sha256: "b".repeat(64),
+    };
+    let input = json!({"inheritedContextRef":reference});
+    let text = context_reference_summary(&input);
+    assert!(text.starts_with("inherited "));
+    assert!(text.contains(reference.model_id.as_str()));
+    assert!(text.contains(reference.revision_id.as_str()));
+    assert!(!text.contains("legacy selection"));
+    assert_eq!(
+        context_reference_summary(&json!({"inheritedContextRef":null})),
+        "inherited explicitly omitted"
+    );
+    let mut malformed = input;
+    malformed["inheritedContextRef"]["revisionId"] = json!("tmr_\u{1b}[31m");
+    let text = context_reference_summary(&malformed);
+    assert!(text.contains("inherited recorded reference is malformed"));
+    assert!(!text.contains('\u{1b}'));
+}

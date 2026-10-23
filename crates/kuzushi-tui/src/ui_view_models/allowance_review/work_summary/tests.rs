@@ -285,3 +285,46 @@ fn review_preview_uses_the_frozen_strategy_and_workload() {
     assert!(text.contains("Threat context: explicitly omitted"));
     assert!(!text.contains("Scan: 3 passes"));
 }
+
+#[test]
+fn context_approval_keeps_frozen_inheritance_membership_and_inventory_extent() {
+    let (_root, mut config, _) = fixture();
+    let reference = kuzushi_core::ThreatModelRef {
+        model_id: kuzushi_core::ThreatModelId::new(),
+        revision_id: kuzushi_core::ThreatModelRevisionId::new(),
+        sha256: "c".repeat(64),
+    };
+    let model = config
+        .study
+        .receipt
+        .as_ref()
+        .unwrap()
+        .equivalence
+        .components
+        .model
+        .clone()
+        .unwrap();
+    let receipt: ContextStudyReceipt = serde_json::from_value(json!({
+        "campaignId":"evidence-context","investigationId":"owned",
+        "planSha256":"sha256:frozen","sourceIdentity":"owned-source",
+        "configSha256":"owned-config","model":model,"preparationJobs":[],
+        "input":{"sourcePaths":[" app /lib.py","app/lib.py"],"inheritedContextRef":reference},
+        "sourceInventory":{"enumerationComplete":false,"selectedMembershipKnown":true,
+            "truncation":{"reason":"entry cap reached"}}
+    }))
+    .unwrap();
+    config.context_generation = Some(crate::app::StudyContextGeneration {
+        receipt: Some(receipt),
+        context_input: json!({"inheritedContextRef":null,"sourcePaths":["unfrozen.py"]}),
+        ..Default::default()
+    });
+    let approval = json!({"campaignId":"evidence-context","campaignPlanSha256":"sha256:frozen","campaignJobs":1});
+    let text = summary(&config, &approval).unwrap().details.join("\n");
+    assert!(text.contains("Threat context: inherited"));
+    assert!(text.contains(reference.revision_id.as_str()));
+    assert!(text.contains("Evidence: 2 exact files (quoted)"));
+    assert!(text.contains("\" app /lib.py\"") && text.contains("\"app/lib.py\""));
+    assert!(text.contains("Repository enumeration: partial; all selected files are recorded"));
+    assert!(text.contains("entry cap reached"));
+    assert!(!text.contains("legacy selection") && !text.contains("unfrozen.py"));
+}

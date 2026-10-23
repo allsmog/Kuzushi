@@ -47,6 +47,9 @@ impl ShellApp {
             .batch_scan_config
             .as_mut()
             .unwrap();
+        if config.dfd_origin.is_some() {
+            return false;
+        }
         let Some(generation) = &config.context_generation else {
             return false;
         };

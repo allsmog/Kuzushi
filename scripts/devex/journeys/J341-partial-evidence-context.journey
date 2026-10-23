@@ -1,0 +1,106 @@
+name: Exact file context remains bounded within partial repository enumeration
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NODE_OPTIONS NO_COLOR KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/partial_evidence_context.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 60 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: map
+require-live-snap: 60 SYSTEM SUMMARY | alpha-map
+nav-mode:
+keys: u
+require-live-snap: 30 Map ✓ | accepted-alpha
+keys: Tab z Down
+require-live-snap: 30 selected 2/6 · ctx 2 | selected-component
+expect: Alpha receiver
+expect: g plan context
+keys: g
+require-live-snap: 30 PLAN EVIDENCE CONTEXT | exact-context-plan
+expect: 2 exact evidence files
+keys: t
+type: 3
+keys: Enter r
+type: 2
+keys: Enter
+keys: Enter
+require-live-snap: 180 Draft ready | partial-inventory-draft
+require-shell: python3 -B @REPO/scripts/devex/fixtures/partial_evidence_context.py @TMP_TARGET @ART draft
+require-live-snap: 30 Repository enumeration: partial | inventory-extent
+expect: all selected files are recorded
+resize: 160x48
+wait: 0.5
+live-snap: extent-160x48
+resize: 96x89
+wait: 0.5
+live-snap: extent-96x89
+resize: 80x24
+wait: 0.5
+live-snap: extent-80x24
+resize: 60x20
+wait: 0.5
+live-snap: extent-60x20
+resize: 40x12
+wait: 0.5
+live-snap: extent-40x12
+expect: 2 files · 1 job · 1 attempt
+expect: Calls: 3 max · 2 for Review
+expect: Dollar estimate unavailable
+expect: openai-oauth:gpt-5.5
+expect: M model
+expect: s retention
+keys: NPage
+live-snap: extent-read-40x12
+keys: NPage
+live-snap: extent-limits-40x12
+keys: NPage
+live-snap: extent-omissions-40x12
+keys: NPage
+live-snap: extent-spending-40x12
+keys: NPage NPage NPage
+live-snap: extent-final-40x12
+ask: Can the operator distinguish known selected membership, partial repository enumeration, source excerpt limits and separate spending approval across all six sizes?
+resize: 120x36
+wait: 0.5
+keys: Enter End
+require-live-snap: 30 y approve | approve-one-job
+expect: Threat context: inherited
+expect: Evidence: 2 exact files
+keys: y
+require-live-snap: 30 Open approved context job | approved
+keys: Enter
+require-live-snap: 30 L starts the approved jobs | fixed-job
+keys: L
+require-live-snap: 60 dispatcher pid | launched
+require-shell: python3 -B @REPO/scripts/devex/fixtures/partial_evidence_context.py @TMP_TARGET @ART completed
+keys: r
+require-live-snap: 60 Jobs: 1 · 1 completed | completed
+keys: a
+require-live-snap: 30 EVIDENCE CONTEXT DRAFT | result
+keys: Enter
+require-live-snap: 30 CONTEXT SUMMARY | generated-context
+keys: NPage NPage
+require-live-snap: 30 Repository enumeration: partial | result-extent
+expect: Selected source partial: false
+ask: Does the inactive result distinguish complete selected excerpts from partial repository inventory without claiming complete coverage or changing the active context?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+launch: --target @TMP_TARGET
+require-live-snap: 60 KUZUSHI | restarted
+paste-file: @ART/resume.txt
+keys: Enter
+nav-mode:
+keys: a
+require-live-snap: 30 EVIDENCE CONTEXT DRAFT | recovered-result
+keys: Enter
+require-live-snap: 30 CONTEXT SUMMARY | recovered-context
+keys: NPage NPage
+require-live-snap: 30 Repository enumeration: partial | recovered-extent
+require-shell: python3 -B @REPO/scripts/devex/fixtures/partial_evidence_context.py @TMP_TARGET @ART recovered
+ask: Does no-color restart retain the same context, exact file membership, inventory limitations and single intercepted request without approving follow-up work?
+keys: C-c
+require-exit: 10

@@ -38,8 +38,8 @@ pub use initial_view::{
 };
 pub use kuzushi_core::WorkflowPhase;
 pub(crate) use map_run_config::{
-    eligible_leaf_scopes, owning_leaf_scope, scoped_regeneration_input, MapRunConfigSummary,
-    ALL_LEAF_SCOPES, ALL_SCOPES_HARD_CAP, ALL_SCOPES_REVIEW_THRESHOLD,
+    eligible_leaf_scopes, MapRunConfigSummary, ALL_LEAF_SCOPES, ALL_SCOPES_HARD_CAP,
+    ALL_SCOPES_REVIEW_THRESHOLD,
 };
 pub(crate) use planning_options::{planning_task_explicit_input, planning_task_preset_input};
 pub use planning_options::{PickerFocus, PlanningOptionEdit, PlanningOptionOverrides};

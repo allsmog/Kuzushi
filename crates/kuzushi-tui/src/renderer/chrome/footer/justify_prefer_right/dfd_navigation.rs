@@ -92,7 +92,7 @@ mod tests {
             ("j/k/↑/↓", if focused { "context" } else { "select" }),
             ("f", "findings at paths"),
             ("s", "plan scan"),
-            ("g", "regenerate scope"),
+            ("g", "plan context"),
             ("Enter", if focused { "topology" } else { "context" }),
             ("PgUp/PgDn", "detail"),
             ("Tab", "next page"),

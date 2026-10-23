@@ -227,7 +227,7 @@ impl ShellApp {
             KeyCode::Char('k') | KeyCode::Up if is_dfd => self.cycle_active_dfd_selection(-1),
             KeyCode::PageDown if is_dfd => self.scroll_dfd_detail(1),
             KeyCode::PageUp if is_dfd => self.scroll_dfd_detail(-1),
-            KeyCode::Char('g') if is_dfd => return self.regenerate_selected_dfd_scope(),
+            KeyCode::Char('g') if is_dfd => return self.open_selected_dfd_context_study(),
             KeyCode::Enter if is_dfd => return self.activate_dfd_selection(),
             _ => return InputUpdate::ignored(),
         }
@@ -352,7 +352,7 @@ impl ShellApp {
             KeyCode::Char('k') | KeyCode::Up => self.cycle_active_dfd_selection(-1),
             KeyCode::PageDown => self.scroll_dfd_detail(1),
             KeyCode::PageUp => self.scroll_dfd_detail(-1),
-            KeyCode::Char('g') => return self.regenerate_selected_dfd_scope(),
+            KeyCode::Char('g') => return self.open_selected_dfd_context_study(),
             KeyCode::Enter => return self.activate_dfd_selection(),
             KeyCode::Esc if self.router.scene_mut().collapse_dfd_focus() => {}
             _ => return InputUpdate::ignored(),
@@ -440,69 +440,6 @@ impl ShellApp {
             tool: Some("threat-model:build".to_string()),
             input: None,
         })
-    }
-
-    fn regenerate_selected_dfd_scope(&mut self) -> InputUpdate {
-        let (target, scope) = match self.selected_scope_regeneration_context() {
-            Ok(context) => context,
-            Err(error) => return self.refuse_scoped_regeneration(&error),
-        };
-        self.dispatch_scoped_regeneration(&target, &scope)
-    }
-
-    fn selected_scope_regeneration_context(
-        &self,
-    ) -> Result<(PathBuf, kuzushi_core::NestedProjectScope), String> {
-        let evidence = self.selected_dfd_file_paths();
-        if evidence.is_empty() {
-            return Err("selected component has no repository evidence path".to_string());
-        }
-        let target = self
-            .target_owned()
-            .ok_or_else(|| "scoped regeneration requires a target".to_string())?;
-        let tree = kuzushi_core::load_nested_project_scopes(&target)
-            .map_err(|error| format!("could not read the scope tree: {error:#}"))?
-            .ok_or_else(|| "run Map decomposition first".to_string())?;
-        let scope = crate::app::owning_leaf_scope(&tree, &evidence)
-            .cloned()
-            .ok_or_else(|| "no eligible leaf scope owns the selected evidence".to_string())?;
-        Ok((target, scope))
-    }
-
-    pub(super) fn selected_dfd_file_paths(&self) -> Vec<String> {
-        let model = crate::ui_view_models::dfd_model(self);
-        model.file_paths_for_selection(
-            self.router.scene().dfd_selection(),
-            self.router
-                .scene()
-                .dfd_focused()
-                .then_some(self.router.scene().dfd_context_selection()),
-        )
-    }
-
-    fn dispatch_scoped_regeneration(
-        &mut self,
-        target: &std::path::Path,
-        scope: &kuzushi_core::NestedProjectScope,
-    ) -> InputUpdate {
-        let methodology = self.configured_map_methodology();
-        let input = match crate::app::scoped_regeneration_input(target, scope, &methodology) {
-            Ok(input) => input,
-            Err(error) => {
-                return self.refuse_scoped_regeneration(&format!(
-                    "could not bind scoped regeneration: {error:#}"
-                ));
-            }
-        };
-        self.reduce_hotkey_command(ShellCommand::RunTool {
-            tool: Some("threat-model:build".to_string()),
-            input: Some(input.to_string()),
-        })
-    }
-
-    fn refuse_scoped_regeneration(&mut self, detail: &str) -> InputUpdate {
-        self.set_warn_notice("Map regeneration", detail);
-        InputUpdate::handled()
     }
 
     fn cycle_summary_component_selection(&mut self, direction: i32) {
@@ -870,9 +807,14 @@ mod tests {
     }
 
     #[test]
-    fn dfd_g_prepares_regeneration_for_the_leaf_that_owns_structured_evidence() {
+    fn dfd_g_opens_a_bounded_context_plan_for_structured_evidence() {
         let target = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(target.path().join("services/api/src")).unwrap();
+        std::fs::write(
+            target.path().join("services/api/src/routes.rs"),
+            "// Owned inert route evidence.\n",
+        )
+        .unwrap();
         let tree = scope_tree();
         kuzushi_core::save_nested_project_scopes(target.path(), &tree).unwrap();
         let scope =
@@ -892,17 +834,28 @@ mod tests {
 
         let key = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty());
         let update = app.handle_frame_scene_key(key, false, true, false);
-        let [ShellEffect::PrepareRunTool(preparation)] = update.effects.as_slice() else {
-            panic!("DFD g must prepare one scoped build");
-        };
-        let input: serde_json::Value =
-            serde_json::from_str(preparation.input.as_deref().unwrap()).unwrap();
-
         assert!(update.handled);
-        assert_eq!(preparation.tool_name, "threat-model:build");
-        assert_eq!(input["scope"], json!("id:api"));
-        assert_eq!(input["modelId"], json!(committed.model_id.as_str()));
-        assert_eq!(input["mode"], json!("refine"));
+        assert!(
+            update.effects.is_empty(),
+            "Opening a plan cannot dispatch work"
+        );
+        let generation = app
+            .context_generation()
+            .expect("DFD g must open a context plan");
+        assert_eq!(
+            generation.generation_tool.as_deref(),
+            Some("threat-model:build")
+        );
+        assert_eq!(
+            generation.context_input["sourcePaths"],
+            json!(["services/api/src/routes.rs"])
+        );
+        assert_eq!(
+            generation.context_input["inheritedContextRef"],
+            json!(committed)
+        );
+        assert!(generation.receipt.is_none());
+        assert!(!target.path().join(".kuzushi/v3/campaigns").exists());
     }
 
     fn scope_tree() -> kuzushi_core::NestedProjectScopeTree {

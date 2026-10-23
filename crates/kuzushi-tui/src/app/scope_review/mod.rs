@@ -4,7 +4,9 @@ mod actions;
 pub(crate) use actions::{merge_destinations, selected_filter, selected_scope, SCOPE_ACTIONS};
 mod findings;
 mod forms;
+mod history_result;
 mod keys;
+use history_result::install_latest_review;
 mod new_scope;
 mod state;
 mod study;
@@ -182,23 +184,4 @@ fn install_tree_page(state: &mut ScopeReviewState, branch: ScopeBranch, page: Sc
     state.pending = None;
     state.scroll = 0;
     state.notice = None;
-}
-
-fn install_latest_review(state: &mut ScopeReviewState, data: &Value) {
-    let Some(value) = data.get("review") else {
-        state.pending = None;
-        state.notice = Some("Scope history reader returned no review field.".into());
-        return;
-    };
-    match serde_json::from_value::<Option<ScanScopeReview>>(value.clone()) {
-        Ok(Some(review)) => state.install(review),
-        Ok(None) => {
-            state.pending = None;
-            state.notice = None;
-        }
-        Err(error) => {
-            state.pending = None;
-            state.notice = Some(format!("Scope history unavailable: {error}"));
-        }
-    }
 }

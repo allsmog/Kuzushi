@@ -61,7 +61,12 @@ impl ShellApp {
                     .document
                     .pointer("/provenance/operatorEdit/sourceModelRef")
             })
-            .context("This context has no recorded edited/regenerated parent")?;
+            .or_else(|| {
+                preview
+                    .document
+                    .pointer("/provenance/fileContext/receipt/inheritedContextRef")
+            })
+            .context("This context has no recorded edited, regenerated or inherited parent")?;
         Ok(StudyContextComparison {
             target: self
                 .target_owned()

@@ -10,6 +10,7 @@ use anyhow::{Context, Result};
 
 mod identity_coverage;
 mod inventory;
+pub(crate) use self::inventory::load_or_build as load_or_build_scan_scope_inventory;
 mod membership;
 mod persistence;
 mod revision;

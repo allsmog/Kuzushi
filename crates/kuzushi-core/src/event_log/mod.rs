@@ -7,6 +7,8 @@ use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+mod batch;
+pub(crate) use batch::{EventAppend, MAX_APPEND_BATCH_EVENTS};
 
 const MAX_EVENT_LOG_SEGMENT_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_EVENT_LOG_LINE_BYTES: usize = 1024 * 1024;

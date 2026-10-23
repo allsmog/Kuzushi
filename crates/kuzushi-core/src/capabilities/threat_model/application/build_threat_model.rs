@@ -8,12 +8,12 @@ pub(crate) fn build_threat_model(
     flavor: BuildFlavor,
 ) -> Result<Value> {
     validate_operator_brief_execution(&input)?;
-    if input.get("scanScopeRef").is_some() {
+    if input.get("scanScopeRef").is_some() || input.get("sourcePaths").is_some() {
         return super::super::adapters::build_scoped_context(input, ctx, runtime, flavor);
     }
     anyhow::ensure!(
         input.get("inheritedContextRef").is_none(),
-        "inheritedContextRef requires scanScopeRef"
+        "inheritedContextRef requires scanScopeRef or sourcePaths"
     );
     super::rejected_output::validate_requested_mode(&input)?;
     if deterministic_pipeline_requested(&input) {

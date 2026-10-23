@@ -6,6 +6,7 @@ use crate::ui_view_models::DfdModel;
 use kuzushi_core::ThreatModelRef;
 use serde_json::Value;
 mod accounting;
+mod context;
 mod navigation;
 mod selection;
 pub(super) use navigation::DfdStudyOrigin;
@@ -50,6 +51,24 @@ impl ShellApp {
         context_row: Option<usize>,
         reference: Result<ThreatModelRef, String>,
     ) -> anyhow::Result<BatchScanConfig> {
+        let (mut config, source, reference) =
+            self.prepare_dfd_config(model, selection, context_row, reference)?;
+        config.study.scan_input = Some(self.dfd_study_input(&reference, &source)?);
+        config.cursor = BatchScanConfigRow::ALL
+            .iter()
+            .position(|row| *row == BatchScanConfigRow::Context)
+            .unwrap();
+        config.notice = Some(dfd_study_notice(&source, &reference));
+        Ok(config)
+    }
+
+    fn prepare_dfd_config(
+        &self,
+        model: &DfdModel,
+        selection: usize,
+        context_row: Option<usize>,
+        reference: Result<ThreatModelRef, String>,
+    ) -> anyhow::Result<(BatchScanConfig, DfdScanSelection, ThreatModelRef)> {
         anyhow::ensure!(
             !self.has_running_work(),
             "Wait for active work. The diagram selection is retained."
@@ -63,13 +82,7 @@ impl ShellApp {
         let mut config = BatchScanConfig::load(&target, None);
         self.inherit_dfd_study_accounting(&mut config)?;
         config.study.ensure_accounting_ready()?;
-        config.study.scan_input = Some(self.dfd_study_input(&reference, &source)?);
-        config.cursor = BatchScanConfigRow::ALL
-            .iter()
-            .position(|row| *row == BatchScanConfigRow::Context)
-            .unwrap();
-        config.notice = Some(dfd_study_notice(&source, &reference));
-        Ok(config)
+        Ok((config, source, reference))
     }
 
     fn dfd_study_input(

@@ -65,6 +65,7 @@ impl StudyContextGeneration {
     }
     pub(crate) fn is_scope_context(&self) -> bool {
         self.context_input.get("scanScopeRef").is_some()
+            || self.context_input.get("sourcePaths").is_some()
     }
     pub(super) fn has_unsaved_guidance(&self) -> bool {
         self.guidance_editor.as_ref().is_some_and(|editor| {
@@ -418,6 +419,16 @@ impl ShellApp {
             return;
         }
         if self
+            .router
+            .campaign()
+            .batch_scan_config
+            .as_ref()
+            .is_some_and(|config| config.dfd_origin.is_some())
+        {
+            self.close_batch_config();
+            return;
+        }
+        if self
             .context_generation()
             .is_some_and(|g| g.is_workflow_proposal())
         {
@@ -614,6 +625,9 @@ impl ShellApp {
         };
         self.retain_setup_context_study();
         self.retain_lesson_study();
+        if let Some(config) = self.router.campaign().batch_scan_config.clone() {
+            self.retain_dfd_study_return(&config);
+        }
         self.router.campaign_mut().batch_scan_config = None;
         self.open_batch_results(&receipt.campaign_id);
         self.router.answers_mut().focus = crate::app::AnswerFocus::Workspace;

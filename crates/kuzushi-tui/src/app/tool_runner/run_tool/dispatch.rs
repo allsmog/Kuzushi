@@ -1,3 +1,4 @@
+use super::failure_feedback::tool_preparation_error_detail;
 use super::*;
 use anyhow::Context;
 
@@ -24,8 +25,18 @@ impl ShellApp {
         if self.tool_launch_blocked(&prepare.tool_name) {
             return Vec::new();
         }
-        let Some(request) = self.prepare_run_tool_request(prepare) else {
-            return Vec::new();
+        let target = prepare.target.clone();
+        let tool = prepare.tool_name.clone();
+        let request = match self.prepare_run_tool_request(prepare) {
+            Ok(request) => request,
+            Err(error) => {
+                self.report_tool_preparation_refusal(
+                    &tool,
+                    target.as_deref(),
+                    tool_preparation_error_detail(&error),
+                );
+                return Vec::new();
+            }
         };
         if self.run_launch_deferred(&request) {
             return Vec::new();
@@ -33,11 +44,14 @@ impl ShellApp {
         vec![ShellEffect::DispatchRunTool(request.into_launch())]
     }
 
-    fn prepare_run_tool_request(&mut self, prepare: RunToolPreparation) -> Option<RunToolRequest> {
-        let workspace = self.run_tool_workspace(prepare.target.as_ref())?;
+    fn prepare_run_tool_request(
+        &mut self,
+        prepare: RunToolPreparation,
+    ) -> anyhow::Result<RunToolRequest> {
+        let workspace = initialized_run_workspace(prepare.target.as_ref())?;
         let input =
             self.parse_and_prepare_run_input(&prepare.tool_name, prepare.input, &workspace)?;
-        Some(RunToolRequest {
+        Ok(RunToolRequest {
             thinking_level: thinking_level_from_input(input.value())
                 .or_else(|| self.session_thinking_level_owned()),
             tool_name: prepare.tool_name,
@@ -149,20 +163,16 @@ impl ShellApp {
         tool_name: &str,
         input: Option<String>,
         workspace: &WorkspaceTarget,
-    ) -> Option<PreparedToolInput> {
+    ) -> anyhow::Result<PreparedToolInput> {
         let input = self.parse_run_input_for_tool(tool_name, input, workspace)?;
         let input = force_shell_discovery_only_sast_input(tool_name, input);
-        match self.prepare_background_tool_input(tool_name, input, workspace) {
-            Ok(input) => Some(input),
-            Err(error) => {
-                self.context_history_failed(tool_name, &error.to_string());
-                self.log(
-                    "error",
-                    with_next_step(error.to_string(), "tools, options <tool>, or run <tool> {}"),
-                );
-                None
-            }
-        }
+        self.prepare_background_tool_input(tool_name, input, workspace)
+            .map_err(|error| {
+                anyhow::anyhow!(with_next_step(
+                    tool_preparation_error_detail(&error),
+                    "tools, options <tool>, or run <tool> {}"
+                ))
+            })
     }
 
     fn parse_run_input_for_tool(
@@ -170,10 +180,10 @@ impl ShellApp {
         tool_name: &str,
         input: Option<String>,
         workspace: &WorkspaceTarget,
-    ) -> Option<serde_json::Value> {
+    ) -> anyhow::Result<serde_json::Value> {
         match input {
             Some(raw) if !raw.trim().is_empty() => self.parse_run_input(tool_name, workspace, &raw),
-            _ => Some(self.default_run_input_for_tool(tool_name)),
+            _ => Ok(self.default_run_input_for_tool(tool_name)),
         }
     }
 
@@ -182,25 +192,20 @@ impl ShellApp {
         tool_name: &str,
         workspace: &WorkspaceTarget,
         raw: &str,
-    ) -> Option<serde_json::Value> {
-        match parse_run_input_value(self.registry(), tool_name, raw) {
-            Ok(input) => Some(input),
-            Err(error) => {
+    ) -> anyhow::Result<serde_json::Value> {
+        parse_run_input_value(self.registry(), tool_name, raw).map_err(|error| {
                 let error = self.background_tool_preparation_error(
                     workspace,
                     tool_name,
                     &serde_json::json!({"inputState": "invalid_options"}),
                     error,
                 );
-                self.log(
-                    "error",
-                    format!(
-                        "{error}. Next: run {tool_name} with defaults, or use options {tool_name} and key=value inputs"
+                anyhow::anyhow!(
+                format!(
+                    "{}. Next: run {tool_name} with defaults, or use options {tool_name} and key=value inputs", tool_preparation_error_detail(&error)
                     ),
-                );
-                None
-            }
-        }
+                )
+        })
     }
 
     fn default_run_input_for_tool(&self, tool_name: &str) -> serde_json::Value {
@@ -286,22 +291,6 @@ impl ShellApp {
                 confirm.tool, confirm.target
             ),
         );
-    }
-
-    fn run_tool_workspace(&mut self, target: Option<&PathBuf>) -> Option<WorkspaceTarget> {
-        match initialized_run_workspace(target) {
-            Ok(workspace) => Some(workspace),
-            Err(error) => {
-                self.log(
-                    "error",
-                    with_next_step(
-                        error.to_string(),
-                        "full <target> or start kuzushi shell --target .",
-                    ),
-                );
-                None
-            }
-        }
     }
 }
 
@@ -626,3 +615,6 @@ mod remembered_confirmation_tests {
         assert!(app.engagement.confirm_allowlist().is_empty());
     }
 }
+
+#[cfg(test)]
+mod preparation_failure_tests;

@@ -211,20 +211,10 @@ fn render_goal_generation_controls(
     area: Rect,
     generation: &crate::app::StudyContextGeneration,
 ) {
-    let navigation = if generation.receipt.is_none() {
-        "g guide · b goal · Tab · PgUp/Dn"
-    } else {
-        "b goal · Tab options · PgUp/Dn"
-    };
-    let primary = if generation.has_result() && !generation.is_scope_context() {
-        "m Map · b goal · Tab · PgUp/Dn"
-    } else {
-        "t calls · r review · s retention"
-    };
     frame.render_widget(
         Paragraph::new(vec![
-            Line::styled(primary, theme::muted()),
-            Line::styled(navigation, theme::muted()),
+            Line::styled(goal_generation_primary(generation), theme::muted()),
+            Line::styled(goal_generation_navigation(generation), theme::muted()),
             Line::styled(
                 if generation.has_result() {
                     "Enter inspect · n new · Esc back"
@@ -238,9 +228,38 @@ fn render_goal_generation_controls(
     );
 }
 
+fn goal_generation_primary(generation: &crate::app::StudyContextGeneration) -> &'static str {
+    if generation.has_result() && !generation.is_scope_context() {
+        return "m Map · b goal · Tab · PgUp/Dn";
+    }
+    if generation.context_input.get("sourcePaths").is_some() {
+        return "t calls · r review · M model";
+    }
+    "t calls · r review · s retention"
+}
+
+fn goal_generation_navigation(generation: &crate::app::StudyContextGeneration) -> &'static str {
+    match (
+        generation.context_input.get("sourcePaths").is_some(),
+        generation.receipt.is_none(),
+    ) {
+        (true, true) => "g guide · b goal · s retention · Tab",
+        (true, false) => "s retention · b goal · Tab · PgUp/Dn",
+        (false, true) => "g guide · b goal · Tab · PgUp/Dn",
+        (false, false) => "b goal · Tab options · PgUp/Dn",
+    }
+}
+
 fn generation_title_override(
     generation: &crate::app::StudyContextGeneration,
 ) -> Option<&'static str> {
+    if generation.context_input.get("sourcePaths").is_some() {
+        return Some(if generation.has_result() {
+            " EVIDENCE CONTEXT DRAFT "
+        } else {
+            " PLAN EVIDENCE CONTEXT "
+        });
+    }
     if generation.is_workflow_proposal() {
         return Some(" WORKFLOW PROPOSAL PLAN ");
     }

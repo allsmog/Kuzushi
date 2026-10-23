@@ -188,6 +188,9 @@ pub(super) fn validate_generated_origin(
     run: &str,
     document: &Value,
 ) -> Result<()> {
+    if receipt.input.get("sourcePaths").is_some() {
+        return validate_file_origin(receipt, run, document);
+    }
     if receipt.input.get("scanScopeRef").is_some() {
         return validate_group_origin(receipt, run, document);
     }
@@ -208,6 +211,25 @@ pub(super) fn validate_generated_origin(
     anyhow::ensure!(
         origin["receipt"]["selectedFields"] == receipt.input["fields"],
         "regenerated context has a different field selection"
+    );
+    Ok(())
+}
+
+fn validate_file_origin(receipt: &ContextStudyReceipt, run: &str, document: &Value) -> Result<()> {
+    let origin = document
+        .pointer("/provenance/fileContext/receipt")
+        .context("Evidence context has no generation receipt")?;
+    anyhow::ensure!(
+        origin["sourcePaths"] == receipt.input["sourcePaths"],
+        "Generated context has a different evidence file selection"
+    );
+    anyhow::ensure!(
+        origin["inheritedContextRef"] == receipt.input["inheritedContextRef"],
+        "Generated context has a different inherited revision"
+    );
+    anyhow::ensure!(
+        origin["runId"] == run && origin["model"] == receipt.model,
+        "Generated context has a different model or run"
     );
     Ok(())
 }

@@ -6,6 +6,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 mod projection_audit;
+mod projection_batch;
 mod projection_event_store;
 mod projection_finding_lifecycle;
 mod projection_fts;

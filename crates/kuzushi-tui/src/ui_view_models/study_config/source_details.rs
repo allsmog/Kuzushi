@@ -22,9 +22,16 @@ fn overview_lines(config: &BatchScanConfig) -> Vec<String> {
 }
 
 pub(crate) fn context_reference_summary(input: &Value) -> String {
-    let Some(reference) = input.get("threatModelRef") else {
-        return "legacy selection; no explicit reference recorded".into();
-    };
+    if let Some(reference) = input.get("threatModelRef") {
+        return reference_summary(reference);
+    }
+    input.get("inheritedContextRef").map_or_else(
+        || "legacy selection; no explicit reference recorded".into(),
+        |reference| format!("inherited {}", reference_summary(reference)),
+    )
+}
+
+fn reference_summary(reference: &Value) -> String {
     if reference.is_null() {
         return "explicitly omitted".into();
     }

@@ -114,7 +114,7 @@ pub(super) fn validate_preparation(
     jobs: &[ContextPreparationJob],
 ) -> Result<()> {
     anyhow::ensure!(
-        (tool == TOOL && input.get("scanScopeRef").is_none()) || jobs.is_empty(),
+        (tool == TOOL && input.get("scanScopeRef").is_none() && input.get("sourcePaths").is_none()) || jobs.is_empty(),
         "Scope suggestions, file-group context, selected-text regeneration and lesson drafts permit no additional preparation jobs"
     );
     Ok(())

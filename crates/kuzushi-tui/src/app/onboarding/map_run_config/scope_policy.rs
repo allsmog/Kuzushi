@@ -13,6 +13,7 @@ pub(crate) fn eligible_leaf_scopes(tree: &NestedProjectScopeTree) -> Vec<&Nested
     scopes
 }
 
+#[cfg(test)]
 pub(crate) fn owning_leaf_scope<'a>(
     tree: &'a NestedProjectScopeTree,
     evidence_paths: &[String],
@@ -112,6 +113,7 @@ fn generated_or_dependency_path(path: &str) -> bool {
     })
 }
 
+#[cfg(test)]
 fn owner_match_score(scope: &NestedProjectScope, evidence_paths: &[String]) -> Option<usize> {
     let scope_path = normalized_repo_path(&scope.rel_path)?;
     evidence_paths
@@ -122,6 +124,7 @@ fn owner_match_score(scope: &NestedProjectScope, evidence_paths: &[String]) -> O
         .max()
 }
 
+#[cfg(test)]
 fn normalized_evidence_path(value: &str) -> Option<String> {
     let first = value
         .split_whitespace()
@@ -131,6 +134,7 @@ fn normalized_evidence_path(value: &str) -> Option<String> {
     normalized_repo_path(strip_numeric_line_suffix(without_fragment))
 }
 
+#[cfg(test)]
 fn strip_numeric_line_suffix(value: &str) -> &str {
     let Some((head, tail)) = value.rsplit_once(':') else {
         return value;
@@ -142,12 +146,14 @@ fn strip_numeric_line_suffix(value: &str) -> &str {
     }
 }
 
+#[cfg(test)]
 fn normalized_repo_path(value: &str) -> Option<String> {
     let normalized = value.trim().replace('\\', "/");
     let normalized = normalized.trim_start_matches("./").trim_matches('/');
     (!normalized.is_empty()).then(|| normalized.to_string())
 }
 
+#[cfg(test)]
 fn path_is_within(path: &str, scope: &str) -> bool {
     path == scope
         || path

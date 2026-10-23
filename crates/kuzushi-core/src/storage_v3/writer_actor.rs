@@ -10,7 +10,9 @@ mod dispatch;
 mod goal_relevance;
 mod lessons;
 mod lifecycle;
+mod open;
 mod relationships;
+mod source_index;
 mod source_review;
 mod staleness;
 #[cfg(test)]
@@ -49,24 +51,7 @@ struct StorageWriter {
 
 impl StorageWriter {
     fn open(log_dir: impl AsRef<Path>, projection_path: impl AsRef<Path>) -> Result<Self> {
-        let (log_dir, projection_path) =
-            normalize_storage_paths(log_dir.as_ref(), projection_path.as_ref())?;
-        initialize_workspace_storage(&log_dir, &projection_path)?;
-        let ownership =
-            crate::file_lock::ExclusiveFileLock::acquire(&log_dir.join(".storage-writer.lock"))?;
-        let log = EventLog::open(&log_dir)?;
-        log.verify_chain()?;
-        let projection = ProjectionDb::open(&projection_path)?;
-        let mut lifecycle = WriterLifecycle::recovering();
-        lifecycle.recover(log.head_seq()?, projection.meta()?.applied_seq)?;
-        let mut writer = Self {
-            _ownership: ownership,
-            log,
-            projection,
-            lifecycle,
-        };
-        writer.replay_projection()?;
-        Ok(writer)
+        Self::open_cancellable(log_dir.as_ref(), projection_path.as_ref(), &|| false)
     }
 
     fn record_review_decision(&mut self, mut decision: DecisionWrite) -> Result<WriteReceipt> {

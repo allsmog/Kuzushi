@@ -1,0 +1,147 @@
+name: Diagram context is evidence-bound, budgeted and inactive through restart
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NODE_OPTIONS NO_COLOR KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dfd_context.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: run threat-model:import {"path":".kuzushi/manual-context.json","label":"Beta","activate":true}
+require-live-snap: 30 threat-model:import saved | active-beta
+submit: map
+require-live-snap: 25 SYSTEM SUMMARY | beta-map
+nav-mode:
+keys: u
+require-live-snap: 25 Map ✓ | accepted-beta
+keys: Tab z
+require-live-snap: 20 g plan context | diagram-action
+keys: g
+require-live-snap: 20 repository file evidence | missing-evidence
+keys: Escape
+nav-mode:
+keys: Down g
+require-live-snap: 20 PLAN EVIDENCE CONTEXT | beta-plan-only
+expect: One full architecture draft
+keys: Escape
+require-live-snap: 20 LEAVE UNSAVED STUDY | explicit-leave
+keys: d
+require-live-snap: 20 g plan context | returned-beta-diagram
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dfd_context.py @TMP_TARGET @ART navigation
+submit: scan batch
+require-live-snap: 20 PLAN A STUDY | parent-study
+keys: Enter
+type: 5
+keys: Enter
+require-live-snap: 20 5 passes · 1 worker(s) | parent-five-passes
+keys: Down Down Down Enter Up Enter
+require-live-snap: 25 CONTEXT SUMMARY | inspected-inactive-alpha
+expect: Alpha
+keys: v Down Enter
+require-live-snap: 20 COMPONENT · Alpha receiver | selected-alpha-context
+keys: g
+require-live-snap: 20 PLAN EVIDENCE CONTEXT | alpha-context-plan
+expect: 2 exact evidence files
+expect: " app /lib.py"
+expect: Dollar estimate unavailable
+keys: t
+type: 9
+keys: Enter r
+type: 2
+keys: Enter
+resize: 160x48
+wait: 0.5
+live-snap: plan-160x48
+resize: 96x89
+wait: 0.5
+live-snap: plan-96x89
+resize: 80x24
+wait: 0.5
+live-snap: plan-80x24
+resize: 60x20
+wait: 0.5
+live-snap: plan-60x20
+resize: 40x12
+wait: 0.5
+live-snap: plan-40x12
+expect: 2 files · 1 job · 1 attempt
+expect: Calls: 9 max · 2 for Review
+expect: Dollar estimate unavailable
+expect: openai-oauth:gpt-5.5 · medium
+expect: M model
+expect: s retention
+keys: NPage
+live-snap: plan-reader-40x12-middle
+keys: NPage
+live-snap: plan-paths-40x12
+keys: NPage
+live-snap: plan-omissions-40x12
+keys: NPage
+live-snap: plan-budget-40x12
+keys: NPage NPage NPage
+live-snap: plan-reader-40x12-last
+ask: Can an operator distinguish selected source excerpts, inherited architecture, one full context job, shared limits, unknown dollars and separate approval at all six sizes?
+resize: 120x36
+wait: 0.5
+keys: Escape
+require-live-snap: 20 LEAVE UNSAVED STUDY | keep-unsaved-choice
+keys: Enter
+require-live-snap: 20 PLAN EVIDENCE CONTEXT | kept-plan
+keys: Enter
+require-live-snap: 30 Draft ready | frozen-context-job
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dfd_context.py @TMP_TARGET @ART draft
+keys: Enter End
+require-live-snap: 30 y approve | approve-one-context-job
+expect: 1 fixed jobs
+expect: Threat context: inherited
+expect: Evidence: 2 exact files
+keys: y
+require-live-snap: 30 Open approved context job | approved
+keys: Enter
+require-live-snap: 30 L starts the approved jobs | fixed-job
+keys: L
+require-live-snap: 30 dispatcher pid | launched
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dfd_context.py @TMP_TARGET @ART completed
+keys: r
+require-live-snap: 30 Jobs: 1 · 1 completed | completed
+keys: a
+require-live-snap: 30 EVIDENCE CONTEXT DRAFT | reviewed-result
+expect: 1 committed / 9
+keys: Enter
+require-live-snap: 30 CONTEXT SUMMARY | inspected-inactive-result
+expect: Draft evidence reader
+keys: d
+require-live-snap: 25 Before: | inherited-text-comparison
+expect: After:
+keys: Escape
+require-live-snap: 25 CONTEXT SUMMARY | comparison-return
+keys: NPage NPage
+live-snap: frozen-evidence-receipt
+keys: Escape Escape
+require-live-snap: 25 COMPONENT · Alpha receiver | original-diagram-restored
+ask: Does Back restore the original selected inactive context and parent draft after generation, while the generated context remains a separate inactive choice?
+keys: Escape Escape
+require-live-snap: 25 PLAN A STUDY | original-parent-draft
+expect: 5 passes · 1 worker(s)
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/dfd-context-resume.txt
+keys: Enter
+nav-mode:
+keys: a
+require-live-snap: 30 EVIDENCE CONTEXT DRAFT | recovered-result
+expect: 1 committed / 9
+keys: Enter
+require-live-snap: 30 CONTEXT SUMMARY | recovered-exact-context
+expect: Draft evidence reader
+keys: NPage NPage
+live-snap: recovered-evidence-receipt
+ask: Does restart preserve the exact generated revision, frozen evidence and inheritance receipt, one spent call and inactive status without claiming live inference or complete repository coverage?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dfd_context.py @TMP_TARGET @ART recovered
+keys: C-c
+require-exit: 10

@@ -1,7 +1,7 @@
 use super::*;
 use crate::workspace::source_snapshot::SourceSnapshot;
 
-pub(super) fn load_or_build(
+pub(crate) fn load_or_build(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<(ScanScopeSource, RepositoryInventory, String)> {
     let workspace = ctx

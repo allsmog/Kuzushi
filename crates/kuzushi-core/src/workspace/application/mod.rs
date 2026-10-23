@@ -48,7 +48,9 @@ mod project_model;
 mod record_review_decision;
 mod record_review_session;
 mod scan_scope_proposal;
-pub(crate) use scan_scope_proposal::recorded_scan_scope_name;
+pub(crate) use scan_scope_proposal::{
+    load_or_build_scan_scope_inventory, recorded_scan_scope_name,
+};
 mod since_filter;
 mod status;
 

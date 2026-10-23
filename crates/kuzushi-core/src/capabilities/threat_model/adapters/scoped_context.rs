@@ -4,14 +4,40 @@ use crate::workspace::{source_snapshot::SourceSnapshot, AcceptedScanScopeSelecti
 
 mod contract;
 mod publication;
+mod selection;
 mod synthesis;
+use selection::ContextSource;
 #[cfg(test)]
 mod tests;
+
+pub(super) fn collect_recorded_evidence_source(
+    build: &BuildInput,
+    paths: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<(CodeSource, Value)> {
+    let paths = selection::files::checked_paths(paths)?;
+    let inventory = selection::files::require_inventory_membership(&paths, ctx)?;
+    let source = collect_context_files(
+        build,
+        &paths,
+        "selected-evidence",
+        "selected-evidence-source-code-v1",
+        ctx,
+    )?;
+    Ok((source, inventory))
+}
 
 pub(crate) fn validate_scoped_context_input(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
-) -> Result<()> {
+) -> Result<Option<Value>> {
+    Ok(resolve_validated_context_source(input, ctx)?.inventory)
+}
+
+fn resolve_validated_context_source(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<ContextSource> {
     contract::validate(input)?;
     context_edit::require_selected_context_target(
         ctx.workspace
@@ -20,11 +46,9 @@ pub(crate) fn validate_scoped_context_input(
         input,
         ctx,
     )?;
-    let reference: ScanScopeRef = serde_json::from_value(input["scanScopeRef"].clone())
-        .context("File-group context requires an exact scanScopeRef")?;
-    crate::workspace::resolve_accepted_scan_scope_selection(ctx, &reference)?;
+    let scope = ContextSource::resolve(input, ctx)?;
     inherited_document(input, ctx)?;
-    Ok(())
+    Ok(scope)
 }
 
 pub(crate) fn build_scoped_context(
@@ -37,15 +61,13 @@ pub(crate) fn build_scoped_context(
         flavor.tool_name() == "threat-model:build",
         "Accepted file-group context is supported by threat-model:build only"
     );
-    validate_scoped_context_input(&input, ctx)?;
+    let scope = resolve_validated_context_source(&input, ctx)?;
     let runtime =
         runtime.context("File-group context requires the explicitly selected model runtime")?;
     let build = parse_build_input(&input, ctx, flavor)?;
-    let reference = serde_json::from_value(input["scanScopeRef"].clone())?;
-    let scope = crate::workspace::resolve_accepted_scan_scope_selection(ctx, &reference)?;
     let snapshot = SourceSnapshot::capture(ctx, "threat-model:build", build.workspace_root())?;
     anyhow::ensure!(
-        scope.source.tree_hash == snapshot.hashes().1,
+        scope.source["treeHash"] == snapshot.hashes().1,
         "Accepted group source changed before context collection"
     );
     let output = snapshot.bind_result(generate_bound(
@@ -57,12 +79,12 @@ pub(crate) fn build_scoped_context(
 fn generate_bound(
     input: &Value,
     build: &BuildInput,
-    scope: &AcceptedScanScopeSelection,
+    scope: &ContextSource,
     snapshot: &SourceSnapshot,
     ctx: &ToolExecutionContext<'_>,
     runtime: &dyn AgentRuntime,
 ) -> Result<Value> {
-    let source = collect_scoped_source(build, scope, ctx)?;
+    let source = scope.collect(build, ctx)?;
     let inherited = inherited_document(input, ctx)?;
     snapshot.ensure_current(ctx, "threat-model:build", build.workspace_root())?;
     let generated = synthesis::request(

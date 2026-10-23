@@ -3201,6 +3201,45 @@ Inspecting and selecting the generated revision changes only its intended
 boundary; scanning still needs a newly prepared and approved finite plan.
 Selective text regeneration of these revisions also honors their recorded
 accepted file group. The Common row explicitly plans repository context.
+
+Diagram `g` opens a bounded architecture-context plan from the selected node,
+flow, boundary or focused evidence row. It binds the displayed immutable
+context as `inheritedContextRef` and lists exact `sourcePaths` as a literal JSON
+array. `threat-model:build` accepts 1 to 256 inventoried files within that
+context's recorded scope. Directories, traversal, ignored or missing files,
+duplicates, symlinks and stale source identity are refused. This input excludes
+`scanScopeRef`; it does not create an accepted discovery boundary or scan job.
+
+Exact-file selection reuses the source-bound scope inventory cache. Partial
+enumeration is allowed only when every selected file is explicitly recorded.
+The prepared plan's `sourceInventory` and the saved context's
+`provenance.fileContext.receipt.inventory` disclose enumeration extent, limits,
+omissions, source identity and the inventory hash. Selected excerpt completeness
+is reported separately. Legacy plans remain readable with unrecorded extent.
+The [actual-cap context qualification](assessments/source-index-context-acceptance-2026-10-23.md)
+now covers import, finite approval, generation and restart after source-index
+persistence batching. Approval revalidates recorded optional inventory metadata.
+Broader UX qualification remains open. No complete-repository coverage claim
+is made.
+
+The shell keeps scope and spending choices above evidence details, including at
+40 columns. Draft model labels respect explicit input; prepared evidence and
+model labels read the frozen receipt. Exact identities and options remain
+available through the same reader.
+
+The existing context study prepares one full architecture synthesis with tools
+disabled, a single model turn and no output repair request. Approval and launch
+remain separate under the same investigation allowance. The inactive draft's
+`provenance.fileContext.receipt` retains requested files, supplied excerpts,
+omissions, inherited revision, model and run. The context summary names these
+limitations; the complete document reader includes the actual excerpts.
+The context browser's `d` compares explanatory text with the exact inherited
+revision. It does not claim a complete structural diagram comparison.
+Selected-text regeneration preserves this file membership instead of expanding
+to the repository. Full replacement generation preserves the original revision.
+Back and job navigation retain the original diagram and parent study in the
+session; restart reads the durable job/result through campaign history.
+
 Complete resource estimates and broader recovery acceptance remain incomplete.
 Standard agentic sessions consume inherited source context, while native
 adapters do not. AI division is a separate, explicitly approved one-job proposal

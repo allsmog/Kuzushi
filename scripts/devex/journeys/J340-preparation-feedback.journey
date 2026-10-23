@@ -1,0 +1,68 @@
+name: Workspace preparation refusal is visible, idle and explicitly recoverable
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/preparation_feedback.py seed @TMP_TARGET @ART @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+keys: C-g
+require-live-snap: 20 COMMAND PALETTE | palette
+type: scopes
+keys: Enter
+require-live-snap: 20 scope.toml | workspace-refused
+expect: preserved.
+expect: Enter / c build inventory
+require-shell: python3 -B @REPO/scripts/devex/fixtures/preparation_feedback.py refused @TMP_TARGET @ART
+resize: 160x48
+live-snap: refusal-160x48
+resize: 96x89
+live-snap: refusal-96x89
+resize: 80x24
+live-snap: refusal-80x24
+resize: 60x20
+live-snap: refusal-60x20
+resize: 40x12
+live-snap: refusal-40x12
+keys: NPage
+live-snap: refusal-read-40x12
+keys: End
+live-snap: refusal-last-40x12
+ask: Can the operator read the actual workspace refusal, see that no work is running, and find retry or Back across all six sizes and the narrow reader?
+resize: 120x36
+keys: Escape
+require-live-snap: 20 KUZUSHI | back-after-refusal
+keys: C-g
+require-live-snap: 20 COMMAND PALETTE | reopen-palette
+type: scopes
+keys: Enter
+require-live-snap: 20 ┌ SCAN SCOPES | refusal-kept-on-return
+expect: scope.toml
+expect-not: COMMAND PALETTE
+require-shell: python3 -B @REPO/scripts/devex/fixtures/preparation_feedback.py fix @TMP_TARGET @ART
+keys: r
+require-live-snap: 25 No saved scope inventory | explicit-read-retry
+expect-not: Action stopped
+expect-not: Working · Ctrl+C cancel
+keys: c
+require-live-snap: 30 DRAFT SCOPES | inventory-recovered
+expect: Inventory limited: true
+expect: Boundary: .
+expect: Scan context:
+require-shell: python3 -B @REPO/scripts/devex/fixtures/preparation_feedback.py recovered @TMP_TARGET @ART
+ask: Does an explicit retry after correcting the owned fixture's ignore policy recover inventory without approving a scan, changing source or making a model request?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+keys: C-g
+require-live-snap: 20 COMMAND PALETTE | restart-palette
+type: scopes
+keys: Enter
+require-live-snap: 25 DRAFT SCOPES | recovered-draft-after-restart
+require-shell: python3 -B @REPO/scripts/devex/fixtures/preparation_feedback.py restarted @TMP_TARGET @ART
+ask: Does no-color restart read the recovered unaccepted draft while retaining zero discovery work and zero provider usage?
+keys: C-c
+require-exit: 10

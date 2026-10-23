@@ -88,7 +88,8 @@ impl ShellApp {
 
     pub(crate) fn restore_context_generation(&mut self, target: &std::path::Path, id: &str) {
         match restore_context_form(target, id) {
-            Ok(config) => {
+            Ok(mut config) => {
+                self.recover_dfd_context_origin(&mut config, id);
                 self.show_study_form(config);
                 if self.context_generation().is_none_or(|generation| {
                     !generation.is_scope_proposal()

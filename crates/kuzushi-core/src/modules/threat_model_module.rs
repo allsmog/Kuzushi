@@ -328,14 +328,9 @@ fn threat_model_source_options() -> Vec<OptionSpec> {
         threat_model_scope_option(),
         threat_model_methodology_option("stride"),
         opt("scanScopeRef", OptionType::Json, "Exact accepted file-group reference for one bounded, tool-free inactive context build. Requires a separately approved context study; does not change discovery scope or start scans.").aliases(&["scan_scope_ref"]),
-        opt("inheritedContextRef", OptionType::Json, "Exact immutable context inherited by an accepted file-group build. Explicit null omits it; no global context is selected implicitly.").aliases(&["inherited_context_ref"]),
-        opt(
-            "sources",
-            OptionType::StringList,
-            "Evidence for the model: context, source-code, threat-model, x-ray, entry-points, or opt-in threat-model attachments. source-code attaches file/line excerpts within maxSourceBytes and contextLimit, prioritizing grounded surfaces and disclosing omissions. All source text is workspace-confined and untrusted. The \"threat-model\" value embeds the persisted model and is governed by seedMode: fresh drops it from the default list, and rejects it when both are explicit.",
-        )
-            .aliases(&["sourceArtifacts", "source_artifacts"])
-            .default(json!(crate::capabilities::threat_model::DEFAULT_THREAT_MODEL_SOURCES)),
+        opt("sourcePaths", OptionType::StringList, "Exact repository-relative evidence files for one inactive architecture draft. Requires inheritedContextRef, excludes scanScopeRef, and never expands directories or discovery work.").aliases(&["source_paths"]),
+        opt("inheritedContextRef", OptionType::Json, "Exact immutable architecture inherited by a file-group build. Required with sourcePaths; explicit null omits it only with scanScopeRef. No global context is selected implicitly.").aliases(&["inherited_context_ref"]),
+        threat_model_sources_option(),
         opt("seed", OptionType::StringList, "Inline or workspace-file seed context.")
             .inline_or_workspace_files(),
         opt("designDocs", OptionType::StringList, "Architecture document sources.")
@@ -360,6 +355,16 @@ fn threat_model_source_options() -> Vec<OptionSpec> {
             .state_write()
             .advanced(),
     ]
+}
+
+fn threat_model_sources_option() -> OptionSpec {
+    opt(
+            "sources",
+            OptionType::StringList,
+            "Evidence for the model: context, source-code, threat-model, x-ray, entry-points, or opt-in threat-model attachments. source-code attaches file/line excerpts within maxSourceBytes and contextLimit, prioritizing grounded surfaces and disclosing omissions. All source text is workspace-confined and untrusted. The \"threat-model\" value embeds the persisted model and is governed by seedMode: fresh drops it from the default list, and rejects it when both are explicit.",
+        )
+            .aliases(&["sourceArtifacts", "source_artifacts"])
+            .default(json!(crate::capabilities::threat_model::DEFAULT_THREAT_MODEL_SOURCES))
 }
 
 fn threat_model_generation_options() -> Vec<OptionSpec> {

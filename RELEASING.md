@@ -1,5 +1,51 @@
 # Releasing Kuzushi
 
+## Evidence-bound architecture context
+
+`threat-model:build` adds `sourcePaths` (`source_paths` alias) for 1 to 256
+literal repository-relative files and an exact, non-null `inheritedContextRef`.
+This is an inactive, source-only single-synthesis context build through
+`campaign:context-study`. It excludes `scanScopeRef` and legacy scope/build
+selectors. It neither accepts discovery boundaries nor starts scans. Context
+and source must still match their recorded SHA, contents and dirty state.
+
+The additive `provenance.fileContext.receipt` records selected files, actual
+excerpts, omissions, inheritance, source identity, model and run. Existing
+accepted-group `scopeContext` receipts retain their format. Later selected-text
+regeneration of a file context keeps its recorded membership. No artifact
+migration is required. Reprepare unstarted jobs if the added descriptor option
+changes their recorded descriptor digest; earlier results remain readable.
+
+The diagram `g` action now opens this plan for the displayed immutable context.
+Approval and launch remain separate. Unsaved choices require an explicit Stay
+or Discard decision before leaving. Job navigation and Back preserve the parent
+study and diagram within the session; restart recovers the durable job and
+result through campaign history, without restoring spending authorization for
+different work.
+
+Exact-file context now reuses the source-bound scope inventory cache. Known
+selected members remain usable when enumeration is partial; absent members,
+unknown legacy extent and cancellation are still refused. Plans add optional
+`sourceInventory`, and file-context results retain `receipt.inventory`.
+These additive fields preserve JSON schema version 1 and legacy readers.
+Rust callers constructing `ContextStudyReceipt` must initialize
+`source_inventory`, using `None` when no extent was recorded. Selected-text
+regeneration adds optional inventory evidence without changing its file group.
+Source-index persistence now groups at most 128 individual journal events per
+sync and projection transaction. Partial projected membership must match its
+recorded tree before incremental updates; otherwise full bounded capture is
+used. No event or database schema changes are required. The
+[actual-cap context follow-up](docs/assessments/source-index-context-acceptance-2026-10-23.md)
+records successful import, approval, generation and restart, with broader UX
+qualification still open. Approval also authenticates recorded inventory
+metadata against the current receipt.
+
+Evidence-context planning now puts scope, call limits, protected Review capacity,
+model and unknown dollar cost on the first narrow-terminal screen. Frozen
+evidence and model labels remain tied to the prepared receipt. Draft model
+labels respect explicit input precedence. Literal DFD paths are quoted and
+inventory byte limits use exact readable units.
+
 ## Review decision write receipts
 
 `WorkspaceReviewDecisionReceipt` adds optional `committedSeq`, the exact event

@@ -56,6 +56,7 @@ impl ShellApp {
         match code {
             KeyCode::Char('f') => Some(self.open_context_diagram_findings()),
             KeyCode::Char('s') => Some(self.open_context_diagram_study()),
+            KeyCode::Char('g') => Some(self.open_context_diagram_context_study()),
             _ => None,
         }
     }
@@ -80,6 +81,14 @@ impl ShellApp {
     }
 
     fn open_context_diagram_study(&mut self) -> InputUpdate {
+        self.plan_context_diagram_selection(false)
+    }
+
+    fn open_context_diagram_context_study(&mut self) -> InputUpdate {
+        self.plan_context_diagram_selection(true)
+    }
+
+    fn plan_context_diagram_selection(&mut self, context: bool) -> InputUpdate {
         let Some(picker) = self.study_context_picker() else {
             return InputUpdate::handled();
         };
@@ -91,7 +100,11 @@ impl ShellApp {
             .selected
             .clone()
             .ok_or_else(|| "Inspect a saved context revision first.".into());
-        self.open_dfd_scan_study(&preview.dfd, selection, None, reference)
+        if context {
+            self.open_dfd_context_study(&preview.dfd, selection, None, reference)
+        } else {
+            self.open_dfd_scan_study(&preview.dfd, selection, None, reference)
+        }
     }
 
     fn edit_context_diagram(&mut self, edit: impl FnOnce(&mut StudyContextDiagram)) {

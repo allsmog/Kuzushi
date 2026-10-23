@@ -11,7 +11,7 @@ mod excerpts;
 mod model;
 mod scoped;
 mod selection;
-pub(crate) use scoped::collect_scoped_source;
+pub(crate) use scoped::{collect_context_files, collect_scoped_source};
 #[cfg(test)]
 mod tests;
 

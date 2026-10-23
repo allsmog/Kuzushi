@@ -3,6 +3,7 @@ use crate::app::{BatchScanConfig, ShellApp, StudyContextGeneration};
 use crate::renderer::shared::text::wrap_text;
 use ratatui::layout::Rect;
 mod diagnosis;
+mod evidence;
 mod proposal;
 mod question;
 mod result;
@@ -29,6 +30,18 @@ pub(crate) fn generation_lines(app: &ShellApp, width: usize) -> Vec<String> {
     if let Some(lines) = generation_subview_lines(generation, width) {
         return lines;
     }
+    generation_content_lines(app, config, generation, width)
+}
+
+fn generation_content_lines(
+    app: &ShellApp,
+    config: &BatchScanConfig,
+    generation: &StudyContextGeneration,
+    width: usize,
+) -> Vec<String> {
+    if uses_evidence_summary(generation) {
+        return evidence::summary(app, config, generation, width);
+    }
     let mut lines = generation_summary(config, generation, width);
     if generation.allows_model_choice() && generation.receipt.is_none() {
         let model = format!(
@@ -46,6 +59,14 @@ pub(crate) fn generation_lines(app: &ShellApp, width: usize) -> Vec<String> {
         return header;
     }
     lines
+}
+
+fn uses_evidence_summary(generation: &StudyContextGeneration) -> bool {
+    generation.context_input.get("sourcePaths").is_some()
+        && matches!(
+            generation.generation_tool.as_deref(),
+            None | Some("threat-model:build")
+        )
 }
 
 fn generation_subview_lines(

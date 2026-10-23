@@ -4,6 +4,30 @@ use crate::capabilities::threat_model::{
 };
 
 #[test]
+fn evidence_context_recovery_authenticates_paths_parent_model_and_run() {
+    let receipt:ContextStudyReceipt=serde_json::from_value(json!({"generationTool":"threat-model:build","campaignId":"draft",
+        "investigationId":"investigation","planSha256":"digest","sourceIdentity":"source","configSha256":"config","model":MODEL,
+        "input":{"sourcePaths":[" app /one.rs"],"inheritedContextRef":{"exact":"parent"}}})).unwrap();
+    let document = json!({"provenance":{"fileContext":{"receipt":{"sourcePaths":[" app /one.rs"],
+        "inheritedContextRef":{"exact":"parent"},"model":MODEL,"runId":"context-run"}}}});
+    super::super::recovery::validate_generated_origin(&receipt, "context-run", &document).unwrap();
+    for (key, value) in [
+        ("sourcePaths", json!(["app/one.rs"])),
+        ("inheritedContextRef", json!({"exact":"other"})),
+        ("model", json!("another-model")),
+        ("runId", json!("another-run")),
+    ] {
+        let mut changed = document.clone();
+        changed["provenance"]["fileContext"]["receipt"][key] = value;
+        assert!(
+            super::super::recovery::validate_generated_origin(&receipt, "context-run", &changed)
+                .is_err(),
+            "{key}"
+        );
+    }
+}
+
+#[test]
 fn regenerated_origin_must_match_frozen_parent_model_run_and_field_set() {
     let receipt = ContextStudyReceipt {
         brief_guidance: None,
@@ -13,6 +37,7 @@ fn regenerated_origin_must_match_frozen_parent_model_run_and_field_set() {
         investigation_id: "investigation".into(),
         plan_sha256: "digest".into(),
         source_identity: "source".into(),
+        source_inventory: None,
         config_sha256: "config".into(),
         model: MODEL.into(),
         input: json!({"threatModelRef":{"exact":"parent"},"fields":["/systemContext"]}),

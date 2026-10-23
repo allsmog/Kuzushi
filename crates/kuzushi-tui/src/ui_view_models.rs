@@ -15,6 +15,7 @@ mod allowance_review;
 pub(crate) mod context_generation;
 pub(crate) mod context_goal;
 mod context_matrix;
+mod evidence_inventory;
 pub(crate) mod review_study;
 pub(crate) mod scope_review;
 pub(crate) mod study_config;

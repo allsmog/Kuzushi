@@ -25,7 +25,6 @@ pub(super) fn prepare(
     let prepared = registry.prepare_dispatch_input(TOOL, input, ctx, None)?;
     let mut input = prepared.value().clone();
     validate(&input)?;
-    validate_group(&input, ctx)?;
     let root = ctx
         .workspace
         .context("context study requires a workspace")?
@@ -70,13 +69,16 @@ pub(super) fn validate(input: &Value) -> Result<()> {
     Ok(())
 }
 
-fn validate_group(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<()> {
-    if input.get("scanScopeRef").is_some() {
+pub(super) fn validate_source_group(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<Option<Value>> {
+    if input.get("scanScopeRef").is_some() || input.get("sourcePaths").is_some() {
         return crate::capabilities::threat_model::validate_scoped_context_input(input, ctx);
     }
     anyhow::ensure!(
         input.get("inheritedContextRef").is_none(),
-        "inheritedContextRef requires scanScopeRef"
+        "inheritedContextRef requires scanScopeRef or sourcePaths"
     );
-    Ok(())
+    Ok(None)
 }

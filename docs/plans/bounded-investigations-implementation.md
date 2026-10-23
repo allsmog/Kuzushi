@@ -1,5 +1,20 @@
 # Bounded investigations implementation
 
+The [context planning hierarchy](../assessments/context-form-hierarchy-2026-10-23.md)
+now puts scope, allowance, model and next action on the first 40-column screen.
+Final J339/J341 have 89 machine passes, zero failures and six pending operator
+judgments. The 63 focused Rust checks, build, TUI Clippy and ten gates pass;
+no new live request is added. The five broader delivery items below remain open.
+
+The [wide-context follow-up](../assessments/source-index-context-acceptance-2026-10-23.md)
+repairs source-index persistence, incomplete-index recovery and repeated approval
+validation. Sequential J339/J341 record 77 machine passes, zero failures and six
+pending operator judgments. The approved one-request architecture experiment is
+complete at 15 cumulative real requests; current TUI inspection adds none.
+Four delivery items remain locally verified and five remain open, including
+narrow-terminal hierarchy and broader module usefulness. This is a draft on
+main after `b891f86c84`.
+
 The [unfinished lesson form repair](../assessments/lesson-form-recovery-2026-10-18.md)
 preserves text and caret before another draft, edit or review action. Resume and
 back are safe defaults; explicit discard opens the requested form without a
@@ -865,6 +880,17 @@ Record focused tests and integration results here as work completes. Live model
 validation requires an explicitly approved test allowance and runs sequentially.
 
 ## Current implementation evidence
+
+October 19, 2026: [Diagram context planning](../assessments/diagram-context-2026-10-19.md)
+replaces the legacy regeneration hotkey with one evidence-bound architecture
+draft through the existing context study. Exact displayed inheritance, literal
+files, separate approval/launch and shared accounting survive result navigation
+and restart. J339 records 46 machine passes, zero failures and three pending
+operator judgments over 43 capture pairs. There are 163 distinct focused Rust
+passes, a workspace build and ten summary checks. No live provider request is
+added. Partial-inventory support, full structural comparison, live usefulness
+and broad UX acceptance remain open. Delivery remains four locally verified
+items and five open items.
 
 October 19, 2026: [Literal Review](../assessments/literal-review-2026-10-19.md)
 preserves exact displayed paths and repairs stale pinned reads after the

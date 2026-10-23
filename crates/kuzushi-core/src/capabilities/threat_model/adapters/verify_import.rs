@@ -218,10 +218,30 @@ pub(crate) fn import_threat_model_adapter(
     let mut document = normalize_document(raw, &methodology)?;
     require_complete_security_context_links(&document)?;
     stamp_provenance(&mut document, root, "import");
-    let snapshot = bind_import_to_current_tree(&mut document, root)?;
+    let snapshot = bind_import_to_current_tree(&mut document, root, ctx)?;
     let verification = verify_threat_model_document(&document, root)?;
     stamp_verification(&mut document, &verification);
+    anyhow::ensure!(
+        !ctx.is_cancelled(),
+        "Threat-model import was canceled before publication"
+    );
     let model_ref = persist_imported_document(root, &document, &methodology, &input, ctx.run_id())?;
+    Ok(import_result(
+        document,
+        &methodology,
+        verification,
+        model_ref,
+        &snapshot,
+    ))
+}
+
+fn import_result(
+    document: Value,
+    methodology: &str,
+    verification: ThreatModelVerification,
+    model_ref: ThreatModelRef,
+    snapshot: &crate::incremental_index::IndexedWorkspaceSnapshot,
+) -> Value {
     let output = format!(
         "threat-model:import saved ({}; {} threats, verification {})",
         methodology,
@@ -231,7 +251,7 @@ pub(crate) fn import_threat_model_adapter(
             .map_or(0, Vec::len),
         verification.verdict,
     );
-    Ok(crate::module_result::completed_output_result(
+    crate::module_result::completed_output_result(
         output.clone(),
         output,
         json!({
@@ -241,18 +261,28 @@ pub(crate) fn import_threat_model_adapter(
             "snapshot": {"snapshotHash": snapshot.snapshot_hash, "treeHash": snapshot.tree_hash},
             "document": document,
         }),
-    ))
+    )
 }
 
 fn bind_import_to_current_tree(
     document: &mut Value,
     root: &Path,
+    ctx: &ToolExecutionContext<'_>,
 ) -> Result<crate::incremental_index::IndexedWorkspaceSnapshot> {
     let workspace = crate::WorkspaceTarget::new(root)?;
     workspace.ensure_state_dir()?;
     crate::FindingStore::open(workspace.findings_db_path())?;
-    let snapshot = crate::incremental_index::index_workspace_snapshot(&workspace)
-        .context("Could not authenticate the imported threat model's target snapshot")?;
+    let mut heartbeat = crate::progress::HeartbeatGate::new(std::time::Duration::from_secs(1));
+    let snapshot = crate::incremental_index::index_workspace_snapshot_cancellable(
+        &workspace,
+        &mut |progress| {
+            if heartbeat.ready() {
+                emit_import_index_progress(ctx, progress);
+            }
+        },
+        &|| ctx.is_cancelled(),
+    )
+    .context("Could not authenticate the imported threat model's target snapshot")?;
     let object = document
         .as_object_mut()
         .context("normalized threat model must be an object")?;
@@ -263,6 +293,24 @@ fn bind_import_to_current_tree(
         .context("normalized threat-model provenance must be an object")?;
     provenance.insert("treeHash".to_string(), json!(snapshot.tree_hash));
     Ok(snapshot)
+}
+
+fn emit_import_index_progress(
+    ctx: &ToolExecutionContext<'_>,
+    progress: crate::incremental_index::SourceIndexProgress,
+) {
+    use crate::incremental_index::SourceIndexProgress;
+    let message = match progress {
+        SourceIndexProgress::ReadFiles(files) => format!("Capturing source · {files} files"),
+        SourceIndexProgress::PersistedUpdates { completed, total } => {
+            format!("Persisting source index · {completed}/{total} durable updates")
+        }
+    };
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step("tool-progress", "threat-model:import", message)
+            .emit();
+    }
 }
 
 fn persist_imported_document(
@@ -562,6 +610,38 @@ mod verify_import_tests {
     }
 
     #[test]
+    fn canceled_import_keeps_the_existing_context_and_ledger() {
+        let (_temp, workspace) = fixture();
+        let config = V2Config::default();
+        let context = ctx(&config, &workspace);
+        let first = import_threat_model_adapter(
+            json!({"document":hand_written_document(workspace.root())}),
+            &context,
+        )
+        .unwrap();
+        let cancellation = crate::scan::ScanCancellation::default();
+        cancellation.cancel();
+        let mut canceled = ctx(&config, &workspace);
+        canceled.cancellation = Some(&cancellation);
+        assert!(import_threat_model_adapter(
+            json!({"document":hand_written_document(workspace.root())}),
+            &canceled
+        )
+        .is_err());
+        let active = load_active_threat_model(workspace.root()).unwrap().unwrap();
+        assert_eq!(
+            serde_json::to_value(active.model_ref).unwrap(),
+            first["data"]["modelRef"]
+        );
+        assert_eq!(
+            list_threat_model_versions(workspace.root(), 10)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
     fn import_saves_verifies_and_ledgers_the_document() {
         let (_temp, workspace) = fixture();
         let config = V2Config::default();
@@ -679,7 +759,7 @@ mod verify_import_tests {
         let ctx = ctx(&config, &workspace);
         let mut edited = hand_written_document(workspace.root());
         edited["userEdited"] = json!(true);
-        bind_import_to_current_tree(&mut edited, workspace.root()).unwrap();
+        bind_import_to_current_tree(&mut edited, workspace.root(), &ctx).unwrap();
         save_persistent_threat_model(workspace.root(), &edited, true).unwrap();
 
         verify_threat_model_adapter(json!({}), &ctx).unwrap();

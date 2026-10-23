@@ -3,6 +3,7 @@ use crate::modules::ModuleRegistry;
 use crate::runtime::AgentQueryResponse;
 use crate::workspace::{ProposedScanScope, ScanScopeDraft, ScopeCoverageApproval};
 use std::sync::{Arc, Mutex};
+mod evidence;
 
 struct Fixture {
     root: tempfile::TempDir,

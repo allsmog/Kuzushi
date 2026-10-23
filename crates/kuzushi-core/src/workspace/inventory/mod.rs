@@ -57,3 +57,6 @@ pub use repository_inventory::RepositoryInventory;
 pub use target_kind::{
     classify_target_kind, target_has_compile_commands, TargetKind, TargetProfile,
 };
+
+#[cfg(test)]
+pub(crate) use build_repository_inventory::build_repository_inventory_with_limits;

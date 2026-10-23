@@ -565,12 +565,7 @@ impl ShellApp {
             &tool_name,
             &format!("Preparation stopped ({}): {error}", reason.label()),
         );
-        self.scope_review_failed(&tool_name, &error);
-        self.context_edit_save_failed(&tool_name, &error);
-        self.brief_save_failed(&tool_name, &error);
-        self.context_check_failed(&tool_name, &error);
-        self.context_comparison_failed(&tool_name, &error);
-        self.context_history_failed(&tool_name, &error);
+        self.notify_tool_reader_failure(&tool_name, &error);
         self.record_failed_tool_spent_cost(&state);
         self.abort_pending_chain(&tool_name);
         if reason.records_canceled() {
@@ -717,17 +712,9 @@ impl ShellApp {
     }
 
     fn log_tool_failure(&mut self, tool_name: &str, message: String, abort_requested: bool) {
-        self.scope_review_failed(tool_name, &message);
-        self.context_edit_save_failed(tool_name, &message);
-        self.brief_save_failed(tool_name, &message);
-        self.context_check_failed(tool_name, &message);
-        self.context_comparison_failed(tool_name, &message);
-        self.context_history_failed(tool_name, &message);
-        self.context_baseline_allowance_failed(tool_name, &message);
-        self.study_preparation_failed(tool_name, &message);
+        self.notify_tool_operation_failed(tool_name, &message);
         if abort_requested {
-            // The operator asked for the abort — record it, but don't pop an
-            // error banner for an outcome they initiated.
+            // Keep requested cancellation in history without opening an error banner.
             self.log(
                 "error",
                 format!("{tool_name} ended after abort request: {message}"),

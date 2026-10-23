@@ -358,6 +358,67 @@ fn parent_comparison_preserves_candidate_and_only_loaded_comparison_can_select_i
 }
 
 #[test]
+fn evidence_context_text_comparison_reads_its_exact_inherited_parent() {
+    let (root, mut app, parent) = fixture();
+    let mut document = dispatch(
+        &app,
+        root.path(),
+        "threat-model:read",
+        json!({"threatModelRef":parent}),
+    )["data"]["document"]
+        .clone();
+    document["systemContext"] = json!("Proposed evidence overview");
+    document["provenance"]["fileContext"] =
+        json!({"receipt":{"inheritedContextRef":parent,"sourcePaths":["main.rs"]}});
+    let imported = dispatch(
+        &app,
+        root.path(),
+        "threat-model:import",
+        json!({"document":document,"activate":false}),
+    );
+    let candidate: ThreatModelRef =
+        serde_json::from_value(imported["data"]["modelRef"].clone()).unwrap();
+    key(&mut app, KeyCode::Esc);
+    app.edit_context_picker(|config| {
+        let picker = config.context_picker.as_mut().unwrap();
+        picker.selected = Some(candidate.clone());
+        picker.preview = None;
+    });
+    let read = dispatch(
+        &app,
+        root.path(),
+        "threat-model:read",
+        json!({"threatModelRef":candidate}),
+    );
+    app.cache_study_context_preview(&read["data"]);
+    let update = app.compare_study_context();
+    assert!(matches!(
+        update.effects.as_slice(),
+        [ShellEffect::PrepareRunTool(_)]
+    ));
+    let read = dispatch(
+        &app,
+        root.path(),
+        "threat-model:read",
+        json!({"threatModelRef":parent}),
+    );
+    app.cache_study_context_preview(&read["data"]);
+    let comparison = app
+        .study_context_picker()
+        .unwrap()
+        .comparison
+        .as_ref()
+        .unwrap();
+    assert_eq!(comparison.parent, parent);
+    assert_eq!(comparison.candidate, candidate);
+    let differences = comparison.differences.as_ref().unwrap();
+    assert!(differences
+        .iter()
+        .any(|change| change.before == "Operator overview"
+            && change.after == "Proposed evidence overview"));
+}
+
+#[test]
 fn malformed_or_failed_parent_read_is_visible_and_retry_is_local() {
     let (root, mut app, parent) = fixture();
     edited_candidate(&mut app, root.path(), parent.clone());

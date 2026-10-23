@@ -38,6 +38,8 @@ pub struct ContextStudyReceipt {
     pub investigation_id: String,
     pub plan_sha256: String,
     pub source_identity: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_inventory: Option<Value>,
     pub config_sha256: String,
     pub model: String,
     pub input: Value,
@@ -93,14 +95,38 @@ fn plan_document(
     let model = input["model"]
         .as_str()
         .context("context study needs an explicit selected model")?;
-    Ok(json!({
+    let inventory = if tool == TOOL {
+        input::validate_source_group(&input, ctx)?
+    } else {
+        None
+    };
+    let mut plan = json!({
         "schemaVersion":1, "kind":KIND, "campaignId":id, "investigationId":investigation,
         "requiresWorkApproval":true, "tool":tool, "workers":1,
         "requestedWorkers":1, "effectiveWorkers":1,
-        "sourceIdentity":crate::incremental_index::current_workspace_resume_identity(root)?,
+        "sourceIdentity":plan_source_identity(root, inventory.as_ref())?,
         "configSha256":crate::config_hash(ctx.config)?, "model":model,
         "jobs":preparation::plan_jobs(input.clone(), preparation, tool),
-    }))
+    });
+    if let Some(inventory) = inventory {
+        plan["sourceInventory"] = inventory;
+    }
+    Ok(plan)
+}
+
+fn plan_source_identity(root: &Path, inventory: Option<&Value>) -> Result<String> {
+    let Some(inventory) = inventory else {
+        return crate::incremental_index::current_workspace_resume_identity(root);
+    };
+    let source: crate::workspace::ScanScopeSource =
+        serde_json::from_value(inventory["source"].clone())
+            .context("Context inventory has no authenticated source identity")?;
+    Ok(
+        crate::incremental_index::workspace_resume_identity_for_tree(
+            &source.tree_hash,
+            source.git_revision.as_deref(),
+        ),
+    )
 }
 
 pub fn load_context_study(root: &Path, id: &str) -> Result<ContextStudyReceipt> {
@@ -137,6 +163,7 @@ fn receipt_from_plan(id: &str, plan: &Value) -> Result<ContextStudyReceipt> {
         investigation_id: required_text(plan, "investigationId")?,
         plan_sha256: digest_serializable(plan)?,
         source_identity: required_text(plan, "sourceIdentity")?,
+        source_inventory: plan.get("sourceInventory").cloned(),
         config_sha256: required_text(plan, "configSha256")?,
         model: required_text(plan, "model")?,
         input: context_job["input"].clone(),
@@ -261,6 +288,12 @@ fn validate_current_inputs(
             && current["configSha256"] == receipt.config_sha256,
         "context study source or configuration changed; prepare a new draft"
     );
+    if let Some(expected) = receipt.source_inventory.as_ref() {
+        anyhow::ensure!(
+            current.get("sourceInventory") == Some(expected),
+            "context inventory changed; inspect and prepare a new draft"
+        );
+    }
     Ok(())
 }
 

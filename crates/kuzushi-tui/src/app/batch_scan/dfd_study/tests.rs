@@ -5,6 +5,7 @@ use kuzushi_core::{
     ScopeRef, ThreatModelCommit, ThreatModelRevisionSource, V2Config, WorkspaceTarget,
 };
 use serde_json::json;
+mod context;
 
 fn graph() -> Value {
     json!({"version":"1","methodology":"stride","summary":{},"threats":[],
