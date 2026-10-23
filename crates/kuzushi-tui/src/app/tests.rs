@@ -12349,16 +12349,46 @@ fn static_scene_pages_do_not_consume_3d_only_controls() {
 #[test]
 fn line_scene_pages_own_the_scroll_keys_while_the_prompt_is_empty() {
     let mut app = ShellApp::new(V2Config::default(), None);
+    // A line page's scroll is clamped to the rows it really draws, so the keys
+    // only move on a page that overflows its canvas. An empty attack path draws
+    // its guidance lines and nothing else, which no canvas overflows: give the
+    // page a real flow to draw, and a canvas shorter than the eight rows it
+    // draws for one.
+    app.domain_mut().set_taint_flows(vec![TaintFlowSnapshot {
+        finding_fingerprint: None,
+        finding_identity_id: None,
+        cwe: "CWE-89".to_string(),
+        severity: "high".to_string(),
+        stages: vec![
+            TaintStage {
+                message: "HTTP query parameter".to_string(),
+                file: "src/api.rs".to_string(),
+                line: 12,
+                snippet: None,
+            },
+            TaintStage {
+                message: "database query sink".to_string(),
+                file: "src/api.rs".to_string(),
+                line: 48,
+                snippet: None,
+            },
+        ],
+    }]);
     app.router
         .scene_mut()
         .set_page(crate::scene3d::VizPage::AttackPath);
     app.set_shell_view(ShellView::Scene);
+    app.set_viewport(crate::TerminalViewport::new(80, 10));
 
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()),
     );
-    assert_eq!(app.router.default_scroll().offset(), 1);
+    assert_eq!(
+        app.router.default_scroll().offset(),
+        1,
+        "the canvas must stay shorter than the drawn rows for a scroll to move"
+    );
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT),

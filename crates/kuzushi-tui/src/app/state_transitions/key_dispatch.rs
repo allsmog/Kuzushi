@@ -3691,7 +3691,10 @@ mod tests {
     #[test]
     fn selecting_model_proof_materializes_non_runtime_reality_without_opening_fix() {
         let mut fixture = proof_selection_fixture("tool-proof-selection-restart");
-        assert_eq!(journey_phase(&fixture.app), None);
+        // The fixture accepts no Map, so the guided journey rests at Map and
+        // Prove is not in its order. Selecting this proof records Prove reality
+        // without moving the journey, here and after a restart.
+        assert_eq!(journey_phase(&fixture.app), Some(WorkflowPhase::Map));
 
         assert!(
             fixture
@@ -3714,11 +3717,11 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join("\n")
         );
-        assert_eq!(journey_phase(&fixture.app), None);
+        assert_eq!(journey_phase(&fixture.app), Some(WorkflowPhase::Map));
 
         let mut restarted = ShellApp::new(V2Config::default(), Some(&fixture.workspace));
         restarted.refresh_findings(false);
-        assert_eq!(journey_phase(&restarted), None);
+        assert_eq!(journey_phase(&restarted), Some(WorkflowPhase::Map));
         assert_selected_proof_persisted(&fixture);
     }
 
