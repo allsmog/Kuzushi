@@ -1,0 +1,198 @@
+name: Generated boundary context through finite discovery, triage, report and restart
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NODE_OPTIONS NO_COLOR KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_scope_investigation.py @TMP_TARGET @ART seed @TMP_HOME
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+submit: run context:build {"enrichment":false}
+require-live-snap: 35 context:build indexed 4 files | source-context
+submit: use threat-model
+submit: options threat-model:import
+submit: set path .kuzushi/manual-generated-root.json
+submit: set activate false
+submit: set label Owned accepted root context
+submit: run threat-model:import
+require-live-snap: 35 threat-model:import saved | root-context
+submit: map
+require-live-snap: 25 SYSTEM SUMMARY | map-result
+nav-mode:
+keys: u
+require-live-snap: 25 Map ✓ | accepted-map
+submit: scopes
+require-live-snap: 30 ACCEPTED SCOPES | accepted-scopes
+keys: Space Down Space p Down Down Enter
+require-live-snap: 20 CHOOSE DISCOVERY ENGINES | engine-choice
+keys: m Down Down Down Down Down Down Down Down Down Space a Down Enter
+require-live-snap: 20 SCOPE CONTEXT | boundary-context
+keys: Down Down o Up Enter g
+require-live-snap: 20 GENERATE FILE-GROUP CONTEXT | generate-boundary-context
+expect: Boundary: app
+expect: One file-group context job
+keys: t
+type: 9
+keys: Enter r
+type: 2
+keys: Enter Enter
+require-live-snap: 30 Draft ready | one-context-job
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_scope_investigation.py @TMP_TARGET @ART context-draft
+keys: Enter End
+require-live-snap: 30 y approve | approve-context
+expect: 1 fixed jobs
+keys: y
+require-live-snap: 30 Open approved context job | context-approved
+keys: Enter
+require-live-snap: 30 L starts the approved jobs | fixed-context-job
+keys: L
+require-live-snap: 30 dispatcher pid | context-running
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_scope_investigation.py @TMP_TARGET @ART context-finished
+keys: r
+require-live-snap: 30 Jobs: 1 · 1 completed | context-complete
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | context-restarted
+paste-file: @ART/generated-context-resume.txt
+keys: Enter
+nav-mode:
+keys: a
+require-live-snap: 30 FILE-GROUP CONTEXT DRAFT | recovered-context
+expect: 1 committed / 9
+keys: Enter
+require-live-snap: 30 CONTEXT SUMMARY | inspect-generated-context
+expect: Owned group component
+expect: Source matched at inspection.
+keys: End
+require-live-snap: 20 FILE-GROUP CONTEXT RECEIPT | source-receipt
+expect: supplied excerpts: 3
+expect: 2 discovery · 1 shared-context files
+ask: Does the generated context disclose its exact source membership, inherited revision, source limits and omissions without implying complete repository coverage?
+keys: Home v
+require-live-snap: 20 CONTEXT DATA FLOW | generated-dfd
+keys: Escape
+require-live-snap: 20 CONTEXT SUMMARY | return-generated-context
+keys: a
+require-live-snap: 20 Context selected for app | local-context-selected
+expect: app · exact override
+expect: other · omitted
+keys: Escape
+require-live-snap: 20 PLAN A STUDY | recovered-scope-draft
+keys: L
+require-live-snap: 30 Scope draft ready | six-job-draft
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_scope_investigation.py @TMP_TARGET @ART scan-draft
+keys: L Home
+require-live-snap: 30 REVIEW PLAN & ALLOWANCE | shared-allowance
+expect: 6 fixed jobs
+expect: Total provider calls: 9
+expect: Protected review calls: 2
+keys: End
+require-live-snap: 30 y approve | approve-six-jobs
+ask: Does this separate approval disclose six discovery jobs and shared spending while keeping sibling omission and follow-up work outside approval?
+keys: y
+require-live-snap: 30 Approval saved | scans-approved
+keys: L
+require-live-snap: 30 L starts its fixed jobs | fixed-scan-jobs
+keys: L
+require-live-snap: 30 dispatcher pid | scans-running
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_scope_investigation.py @TMP_TARGET @ART completed
+keys: r
+require-live-snap: 30 6 completed | scans-completed
+keys: Escape
+submit: workbench
+require-live-snap: 30 Viewing Scan | scan-result
+nav-mode:
+keys: n
+require-live-snap: 30 Viewing Review | accepted-scan
+keys: Escape
+paste-file: @ART/open-app.txt
+keys: Enter
+require-live-snap: 30 Owned app policy observation | app-finding
+submit: dismiss false_positive Owned workflow fixture; no defect claimed
+require-live-snap: 30 rejected_false_positive | app-decision
+paste-file: @ART/open-other.txt
+keys: Enter
+require-live-snap: 30 Owned other policy observation | other-finding
+submit: dismiss false_positive Owned workflow fixture; no defect claimed
+require-live-snap: 30 rejected_false_positive | other-decision
+submit: report
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_scope_investigation.py @TMP_TARGET @ART report-frame
+require-live-snap: 30 Scope study: | investigation-report
+expect: Scope study: 2 boundaries · 1 unplanned
+expect: 7 committed / 9 calls
+expect: 2 protected review remaining
+keys: j j j Enter End
+require-live-snap: 30 json · 2 finding(s) | report-export
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_scope_investigation.py @TMP_TARGET @ART exported
+keys: p Home
+resize: 160x48
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_scope_investigation.py @TMP_TARGET @ART report-frame
+live-snap: report-160x48
+resize: 96x89
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_scope_investigation.py @TMP_TARGET @ART report-frame
+live-snap: report-96x89
+resize: 80x24
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_scope_investigation.py @TMP_TARGET @ART report-frame
+live-snap: report-80x24
+resize: 60x20
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_scope_investigation.py @TMP_TARGET @ART report-frame
+live-snap: report-60x20
+resize: 40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_scope_investigation.py @TMP_TARGET @ART report-frame
+live-snap: report-40x12
+keys: NPage
+live-snap: report-page-1-40x12
+keys: NPage
+live-snap: report-page-2-40x12
+keys: NPage
+live-snap: report-page-3-40x12
+keys: NPage
+live-snap: report-page-4-40x12
+keys: NPage
+live-snap: report-page-5-40x12
+keys: NPage
+live-snap: report-page-6-40x12
+keys: NPage
+live-snap: report-page-7-40x12
+keys: NPage
+live-snap: report-page-8-40x12
+keys: NPage
+live-snap: report-page-9-40x12
+keys: NPage
+live-snap: report-page-10-40x12
+keys: NPage
+live-snap: report-page-11-40x12
+keys: NPage
+live-snap: report-page-12-40x12
+keys: NPage
+live-snap: report-page-13-40x12
+keys: NPage
+live-snap: report-page-14-40x12
+keys: NPage
+live-snap: report-page-15-40x12
+keys: NPage
+live-snap: report-page-16-40x12
+keys: NPage
+live-snap: report-page-17-40x12
+keys: NPage
+live-snap: report-page-18-40x12
+keys: End
+live-snap: report-tail-40x12
+ask: Across terminal sizes, can the operator read both context choices, receipt limits, recurrence and shared spending without confusing report controls with context-reader shortcuts?
+keys: C-c
+require-exit: 10
+resize: 80x24
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | final-restart
+submit: report
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_scope_investigation.py @TMP_TARGET @ART report-frame
+require-live-snap: 30 Scope study: | recovered-report
+expect: 7 committed / 9 calls
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_scope_investigation.py @TMP_TARGET @ART restarted
+ask: Does restart preserve the fixed study, exact generated context, explicit omission, decisions, export and accounting without another request?
+keys: C-c
+require-exit: 10

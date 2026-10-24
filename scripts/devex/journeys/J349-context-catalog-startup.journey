@@ -1,0 +1,49 @@
+name: Context catalog receipts preserve Setup while recorded repository context resumes Map
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY GOOGLE_API_KEY GEMINI_API_KEY AZURE_OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=0 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_catalog_startup.py @TMP_TARGET @ART prepare
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 READY THE MAP RUN | fresh-setup
+expect: Start Map
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_catalog_startup.py @TMP_TARGET @ART fresh
+keys: C-c
+require-exit: 10
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_catalog_startup.py @TMP_TARGET @ART catalog
+launch: --target @TMP_TARGET
+require-live-snap: 30 READY THE MAP RUN | catalog-remains-setup
+expect: Start Map
+resize: 160x48
+wait: 0.3
+live-snap: catalog-setup-160x48
+resize: 96x89
+wait: 0.3
+live-snap: catalog-setup-96x89
+resize: 80x24
+wait: 0.3
+live-snap: catalog-setup-80x24
+resize: 60x20
+wait: 0.3
+live-snap: catalog-setup-60x20
+resize: 40x12
+wait: 0.3
+live-snap: catalog-setup-40x12
+ask: Does a completed empty context listing leave normal Setup visible across the viewport sizes, without claiming a completed Map or starting work?
+resize: 120x36
+keys: C-c
+require-exit: 10
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_catalog_startup.py @TMP_TARGET @ART index
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=0 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 Viewing Map | recorded-context-resumes-map
+expect-not: Map ✓
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_catalog_startup.py @TMP_TARGET @ART restarted
+submit: setup
+require-live-snap: 25 READY THE MAP RUN | explicit-setup-still-available
+ask: Does real runtime-free repository context resume its durable Map page on no-color restart while acceptance remains incomplete and explicit Setup remains available?
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | explicit-planning-exit
+keys: y
+require-exit: 10

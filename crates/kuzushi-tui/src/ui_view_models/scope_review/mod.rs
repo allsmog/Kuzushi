@@ -1,6 +1,7 @@
 //! Pure scope-review projections. No workspace reads or dispatch policy.
 mod action_search;
 mod detail;
+mod generation;
 mod paths;
 pub(crate) use action_search::scope_search_label;
 mod context;
@@ -185,6 +186,16 @@ fn scope_navigation_controls(state: &ScopeReviewState) -> [&'static str; 2] {
         return [
             "PgUp/Dn read · [ ] file pages",
             "Home/End first/last · Esc back",
+        ];
+    }
+    boundary_controls(state.review.as_ref().unwrap())
+}
+
+fn boundary_controls(review: &kuzushi_core::workspace::ScanScopeReview) -> [&'static str; 2] {
+    if review.record.acceptance.is_none() {
+        return [
+            "↑↓↔  Space mark · a accept · f files",
+            "p plan · Enter menu · Esc back",
         ];
     }
     [

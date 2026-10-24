@@ -90,6 +90,9 @@ fn auxiliary_review_writes_never_replace_the_review_phase_result() {
 fn context_management_never_replaces_the_mapping_phase_result() {
     let registry = ModuleRegistry::with_v2_builtins();
     for name in [
+        "threat-model:models",
+        "threat-model:revisions",
+        "threat-model:diff",
         "threat-model:activate",
         "threat-model:restore",
         "threat-model:adopt",

@@ -87,6 +87,7 @@ pub(crate) struct DfdModel {
     pub flows: Vec<DfdFlowModel>,
     pub boundaries: Vec<DfdBoundaryModel>,
     pub security_context: Vec<DfdSecurityItem>,
+    pub element_file_paths: std::collections::BTreeMap<String, Vec<String>>,
     pub link_state: DfdLinkState,
     pub review_only: bool,
     pub empty_hint: Option<String>,
@@ -150,6 +151,7 @@ pub(crate) fn dfd_model_from_doc(
         flows: project_dfd_flows(&flows),
         boundaries: project_boundaries(doc),
         security_context: project_security_context(doc, link_state),
+        element_file_paths: evidence::element_file_paths(doc),
         link_state,
         review_only: deterministic_review_only(doc),
         empty_hint: None,
@@ -183,7 +185,23 @@ impl DfdModel {
         }
         rows.into_iter()
             .flat_map(|row| row.file_paths.clone())
+            .chain(self.direct_files_for_selection(selection).iter().cloned())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
             .collect()
+    }
+
+    fn direct_files_for_selection(&self, selection: usize) -> &[String] {
+        let key = match dfd_selected_item(self, selection) {
+            Some(DfdSelected::Node(node)) => &node.key,
+            Some(DfdSelected::Flow(flow)) => &flow.key,
+            Some(DfdSelected::Boundary(boundary)) => &boundary.key,
+            None => return &[],
+        };
+        self.element_file_paths
+            .get(key)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
     }
 
     pub(crate) fn topology_notice(&self) -> Option<&'static str> {

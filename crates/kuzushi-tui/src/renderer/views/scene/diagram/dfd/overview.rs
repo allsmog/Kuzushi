@@ -223,11 +223,13 @@ fn executive_summary_lines(model: &DfdModel, overview: &DfdOverview) -> Vec<Line
     if let Some(notice) = model.evidence_notice() {
         lines.push(Line::styled(notice, theme::label()));
     }
+    lines.extend(
+        overview
+            .executive_summary
+            .lines()
+            .map(|text| Line::styled(text.to_owned(), diagram_style(diagram_primary()))),
+    );
     lines.extend(vec![
-        Line::styled(
-            overview.executive_summary.clone(),
-            diagram_style(diagram_primary()),
-        ),
         Line::default(),
         Line::styled(component_shape(model), diagram_style(diagram_muted())),
         Line::styled(security_shape(model), diagram_style(diagram_muted())),
@@ -355,6 +357,45 @@ fn section_line(title: &'static str) -> Line<'static> {
 mod tests {
     use super::*;
     use crate::ui_view_models::{DfdKind, DfdNodeModel};
+
+    #[test]
+    fn multiline_system_overview_keeps_words_on_separate_rows_at_every_size() {
+        let mut model = component_model(1);
+        model.system_context = Some("First line.\r\nSecond line.".into());
+        for (width, height) in [(160, 48), (120, 36), (96, 89), (80, 24), (60, 20), (40, 12)] {
+            let area = Rect::new(0, 0, width, height);
+            let mut buf = Buffer::empty(area);
+            render(&mut buf, area, &model, 0, 0);
+            let text = buffer_text(&buf, width, height);
+            let rows = text.lines().collect::<Vec<_>>();
+            let first = rows.iter().position(|line| line.contains("First line."));
+            let second = rows.iter().position(|line| line.contains("Second line."));
+            assert!(
+                first.is_some() && second.is_some(),
+                "{width}x{height}: {text}"
+            );
+            assert_ne!(first, second, "{width}x{height}: {text}");
+            assert!(!text.contains("First line.Second line."), "{text}");
+        }
+    }
+
+    #[test]
+    fn system_overview_preserves_empty_paragraphs_between_summary_lines() {
+        let mut model = component_model(1);
+        model.system_context = Some("First line.\n\nThird line.".into());
+        let overview = dfd_overview(&model);
+        let rows = executive_summary_lines(&model, &overview)
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>();
+        let first = rows.iter().position(|line| line == "First line.").unwrap();
+        assert_eq!(&rows[first..first + 3], ["First line.", "", "Third line."]);
+    }
 
     #[test]
     fn scroll_anchors_to_wrapped_selected_component_and_accepts_relative_paging() {

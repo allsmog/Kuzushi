@@ -22,14 +22,14 @@ def selected_input(root, evidence):
     return path
 
 
-def wait_frame(root, evidence, kind, expected):
+def wait_frame(root, evidence, kind, expected, footer_rows=2):
     pane = owned_pane(root)
     deadline = time.monotonic() + 15
     previous = None
     while time.monotonic() < deadline:
         screen = subprocess.check_output(["tmux", "capture-pane", "-p", "-t", pane], text=True)
         rows = screen.splitlines()
-        footer = any("/keys all" in row for row in rows[-2:]) if kind == "report" else "REVIEW" in rows[-1]
+        footer = any("/keys all" in row for row in rows[-footer_rows:]) if kind == "report" else "REVIEW" in rows[-1]
         if footer and expected in screen and screen == previous:
             dimensions = subprocess.check_output(["tmux", "display-message", "-p", "-t", pane,
                 "#{pane_width}x#{pane_height}"], text=True).strip()

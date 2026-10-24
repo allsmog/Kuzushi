@@ -71,13 +71,32 @@ impl InventoryRoot {
 
     #[cfg(unix)]
     pub(crate) fn open_file(&self, path: &Path) -> io::Result<File> {
-        let parent = path
-            .parent()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "file parent is missing"))?;
-        let name = path
-            .file_name()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "file name is missing"))?;
+        let (parent, name) = file_coordinates(path)?;
         crate::bounded_file::open_regular_at(&self.open_directory(parent)?, name)
+    }
+
+    /// Classify only an authenticated leaf. Unknown or unsafe paths still go
+    /// through regular-file opening and retain its honest partial-result path.
+    #[cfg(unix)]
+    pub(crate) fn is_known_non_regular(&self, path: &Path) -> bool {
+        self.leaf_kind(path)
+            .is_ok_and(|kind| kind == InventoryEntryKind::Other)
+    }
+
+    #[cfg(unix)]
+    fn leaf_kind(&self, path: &Path) -> io::Result<InventoryEntryKind> {
+        use rustix::fs::{AtFlags, FileType};
+        let (parent, name) = file_coordinates(path)?;
+        let directory = self.open_directory(parent)?;
+        let metadata = rustix::fs::statat(&directory, name, AtFlags::SYMLINK_NOFOLLOW)?;
+        Ok(unix_kind(FileType::from_raw_mode(metadata.st_mode)))
+    }
+
+    // Other platforms retain strict partial results until leaf classification
+    // can use the same pinned-ancestor guarantee as the Unix adapter.
+    #[cfg(not(unix))]
+    pub(crate) fn is_known_non_regular(&self, _path: &Path) -> bool {
+        false
     }
 
     #[cfg(not(unix))]
@@ -106,6 +125,17 @@ impl InventoryRoot {
             })
         })))
     }
+}
+
+#[cfg(unix)]
+fn file_coordinates(path: &Path) -> io::Result<(&Path, &std::ffi::OsStr)> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "file parent is missing"))?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "file name is missing"))?;
+    Ok((parent, name))
 }
 
 #[cfg(not(unix))]
@@ -158,11 +188,17 @@ fn unix_entry_kind(
         let metadata = rustix::fs::statat(directory, entry.file_name(), AtFlags::SYMLINK_NOFOLLOW)?;
         kind = FileType::from_raw_mode(metadata.st_mode);
     }
-    Ok(match kind {
+    Ok(unix_kind(kind))
+}
+
+#[cfg(unix)]
+fn unix_kind(kind: rustix::fs::FileType) -> InventoryEntryKind {
+    use rustix::fs::FileType;
+    match kind {
         FileType::Directory => InventoryEntryKind::Directory,
         FileType::RegularFile => InventoryEntryKind::File,
         _ => InventoryEntryKind::Other,
-    })
+    }
 }
 
 #[cfg(test)]

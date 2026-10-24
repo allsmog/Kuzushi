@@ -9,7 +9,9 @@
 //! additionally require a matching content-tree identity. The verdict is
 //! stamped on the document; consumers warn, they never drop.
 //!
-//! Grounding itself is tri-state, and staleness never costs the operator a
+//! Catalog observations may be partial. Such a check never establishes absence
+//! beyond the recorded rows and is graded at best `partial`. Complete-catalog
+//! receipts still require complete grounding. Staleness never costs the operator a
 //! verdict. When the target has moved past the context snapshot the
 //! entry-point catalog was derived from, verification does not fail: it
 //! falls back to the same current surface scan an uncatalogued target uses,
@@ -26,6 +28,9 @@ use std::path::Path;
 
 const CATALOG_GROUNDING: &str = "catalog";
 const NONCATALOG_GROUNDING: &str = "noncatalog";
+const PARTIAL_CATALOG_GROUNDING: &str = "partial-catalog";
+
+mod partial_catalog;
 
 const MAX_CHECKED_PATH_REFS: usize = 500;
 const MAX_LISTED_MISSING: usize = 12;
@@ -35,7 +40,7 @@ const VERIFY_COVERAGE_MAX_ELEMENTS: usize = 40;
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreatModelVerification {
-    /// `verified` | `stale` (revision drift or degraded grounding) |
+    /// `verified` | `partial` (observed catalog rows only) | `stale` |
     /// `failed` (evidence, links, or coverage).
     pub verdict: String,
     pub checked_paths: usize,
@@ -55,6 +60,12 @@ pub struct ThreatModelVerification {
     /// degraded run always carries its reason; it is never silently absent.
     pub grounding_degraded: Option<String>,
     pub verified_at_ms: u64,
+}
+
+impl ThreatModelVerification {
+    pub(crate) fn has_partial_catalog(&self) -> bool {
+        self.grounding_source == PARTIAL_CATALOG_GROUNDING
+    }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -115,13 +126,21 @@ fn verdict_for(
     revision: &RevisionCheck,
     grounding: &VerificationGrounding,
 ) -> &'static str {
-    if !missing.is_empty() || !links.is_complete() || !coverage.invariant_satisfied() {
+    if evidence_failed(missing, links, coverage) {
         return "failed";
     }
-    if revision.matches == Some(false) || grounding.degraded.is_some() {
+    if revision.matches == Some(false) {
         return "stale";
     }
-    "verified"
+    grounding.verdict()
+}
+
+fn evidence_failed(
+    missing: &[String],
+    links: &SecurityContextLinkReport,
+    coverage: &CoverageReport,
+) -> bool {
+    !missing.is_empty() || !links.is_complete() || !coverage.invariant_satisfied()
 }
 
 /// Merge the verification block into the document (replacing any prior one).
@@ -139,8 +158,20 @@ pub fn stamp_verification(document: &mut Value, verification: &ThreatModelVerifi
 /// consumers prepend it and proceed.
 pub fn verification_warning(document: &Value, target: &Path) -> Option<String> {
     revision_drift_warning(document, target)
+        .or_else(|| failed_verification_warning(document))
         .or_else(|| degraded_grounding_warning(document))
         .or_else(|| stamped_verdict_warning(document))
+}
+
+fn failed_verification_warning(document: &Value) -> Option<String> {
+    if document
+        .pointer("/verification/verdict")
+        .and_then(Value::as_str)
+        == Some("failed")
+    {
+        return stamped_verdict_warning(document);
+    }
+    None
 }
 
 fn revision_drift_warning(document: &Value, target: &Path) -> Option<String> {
@@ -159,6 +190,15 @@ fn degraded_grounding_warning(document: &Value) -> Option<String> {
     let disclosure = document
         .pointer("/verification/groundingDegraded")
         .and_then(Value::as_str)?;
+    if document
+        .pointer("/verification/groundingSource")
+        .and_then(Value::as_str)
+        == Some(PARTIAL_CATALOG_GROUNDING)
+    {
+        return Some(format!(
+            "threat-model warning: entry-point coverage is partial; {disclosure}"
+        ));
+    }
     Some(format!(
         "threat-model warning: the last verification could not use the entry-point catalog; {disclosure}"
     ))
@@ -166,6 +206,9 @@ fn degraded_grounding_warning(document: &Value) -> Option<String> {
 
 fn stamped_verdict_warning(document: &Value) -> Option<String> {
     match document.pointer("/verification/verdict").and_then(Value::as_str) {
+        Some("partial") => Some(
+            "threat-model warning: the last verification checked observed entry points only; unseen entry points remain unknown".to_string(),
+        ),
         Some("failed") => Some(
             "threat-model warning: the last verification failed evidence, security-context-link, or entry-point coverage checks; treat this model as incomplete or unreliable".to_string(),
         ),
@@ -332,6 +375,14 @@ struct VerificationGrounding {
 }
 
 impl VerificationGrounding {
+    fn verdict(&self) -> &'static str {
+        match (self.source, &self.degraded) {
+            (PARTIAL_CATALOG_GROUNDING, _) => "partial",
+            (_, Some(_)) => "stale",
+            _ => "verified",
+        }
+    }
+
     fn catalog(surfaces: Vec<crate::attack_surface::AttackSurface>) -> Self {
         Self {
             surfaces,
@@ -430,6 +481,10 @@ fn authenticated_catalog_grounding(
     catalog: &crate::capabilities::entry_points::EntryPointCatalog,
     receipt: Option<&CatalogCoverageReceipt>,
 ) -> Result<VerificationGrounding> {
+    if catalog.snapshot_coverage.is_partial() {
+        return partial_catalog::grounding(catalog, receipt);
+    }
+    partial_catalog::require_complete_receipt(receipt)?;
     if let Some(receipt) = receipt.filter(|receipt| !receipt.is_unavailable()) {
         authenticate_receipt_catalog(receipt, catalog)?;
     }
@@ -476,7 +531,7 @@ fn catalog_coverage_receipt(document: &Value) -> Result<Option<CatalogCoverageRe
         validate_unavailable_receipt(receipt)?;
     }
     anyhow::ensure!(
-        unavailable || matches!(status, "current" | "refreshed" | "explicit"),
+        unavailable || matches!(status, "current" | "refreshed" | "explicit" | "partial"),
         "unsupported entry-point catalog receipt status {status:?}"
     );
     let selection_policy = required_receipt_text(receipt, "selectionPolicy")?;

@@ -1,0 +1,177 @@
+name: Generate partial context with approval, explicit Map review, local scans and restart
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NODE_OPTIONS NO_COLOR KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE SEMGREP_APP_TOKEN SEMGREP_AGENT_TOKEN
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_partial_context.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: scan batch
+require-live-snap: 25 PLAN A STUDY | study
+keys: Home Down Down Down Enter
+require-live-snap: 25 CHOOSE STUDY CONTEXT | choose-context
+keys: g
+require-live-snap: 25 GENERATE STUDY CONTEXT | generate-context
+keys: t
+type: 1
+keys: Enter r
+type: 0
+keys: Enter Enter
+require-live-snap: 35 Draft ready | fixed-context-job
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_partial_context.py @TMP_TARGET @ART draft
+keys: Enter End
+require-live-snap: 25 y approve | exact-generation-terms
+keys: y
+require-live-snap: 25 Open approved context job | approved-context
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_partial_context.py @TMP_TARGET @ART approved
+keys: Enter
+require-live-snap: 25 L starts the approved jobs | explicit-launch
+keys: L
+require-live-snap: 25 dispatcher pid | generation-started
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_partial_context.py @TMP_TARGET @ART generated
+keys: r
+require-live-snap: 25 failed | partial-job-recorded
+keys: a
+require-live-snap: 25 CONTEXT JOB RESULT | partial-generated-result
+expect: Labeled generated partial source context
+expect: Inspect partial context
+expect: Recorded grounding: partial.
+resize: 160x48
+wait: 0.3
+live-snap: result-160x48
+resize: 96x89
+wait: 0.3
+live-snap: result-96x89
+resize: 80x24
+wait: 0.3
+live-snap: result-80x24
+resize: 60x20
+wait: 0.3
+live-snap: result-60x20
+resize: 40x12
+wait: 0.3
+live-snap: result-40x12
+expect: Inspect partial context
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_partial_context.py @TMP_TARGET @ART result-limit-page
+live-snap: result-limit-40x12
+resize: 120x36
+wait: 0.3
+keys: Home
+keys: Enter
+require-live-snap: 25 CONTEXT SUMMARY | exact-partial-revision
+expect: Recorded grounding: partial.
+resize: 160x48
+wait: 0.3
+live-snap: context-160x48
+resize: 96x89
+wait: 0.3
+live-snap: context-96x89
+resize: 80x24
+wait: 0.3
+live-snap: context-80x24
+resize: 60x20
+wait: 0.3
+live-snap: context-60x20
+resize: 40x12
+wait: 0.3
+live-snap: context-40x12
+keys: NPage NPage
+wait: 0.3
+live-snap: context-detail-40x12
+ask: Does generated context make its partial grounding, exact saved revision, inspection limit and separate Map acceptance understandable across all six sizes?
+resize: 120x36
+wait: 0.3
+keys: Escape
+require-live-snap: 25 CONTEXT JOB RESULT | result-return
+keys: m
+require-live-snap: 30 Recorded Map is ready for review | recorded-partial-map
+keys: m
+require-live-snap: 30 RESULT partial | map-needs-acknowledgment
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_partial_context.py @TMP_TARGET @ART mapped
+nav-mode:
+require-live-snap: 25 Acknowledge & use partial | partial-action
+resize: 40x12
+wait: 0.3
+require-live-snap: 15 Use partial | partial-map-40x12
+keys: o
+require-live-snap: 25 REPLAY | result-reader
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_partial_context.py @TMP_TARGET @ART limit-page
+live-snap: partial-limit-40x12
+keys: Escape
+require-live-snap: 25 RESULT partial | unresolved-map-return
+resize: 120x36
+wait: 0.3
+nav-mode:
+keys: u
+require-live-snap: 25 Map ✓ | accepted-partial-context
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_partial_context.py @TMP_TARGET @ART accepted
+submit: use sast
+submit: options sast:scan
+submit: set taskMode manual
+submit: set tasks semgrep
+paste-file: @ART/rule-setting.txt
+keys: Enter
+submit: set semgrepTimeoutMs 60000
+submit: map
+require-live-snap: 25 SYSTEM SUMMARY | source-map
+nav-mode:
+keys: Tab z
+require-live-snap: 25 s plan scan | scoped-diagram
+expect: files
+expect: "app.py"
+keys: s
+require-live-snap: 25 PLAN A STUDY | exact-source-study
+expect: 1 exact source path
+keys: Home Down Down Down Down Down Enter
+type: 1
+keys: Enter Down Enter
+type: 0
+keys: Enter L
+require-live-snap: 35 Draft ready | fixed-local-jobs
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_partial_context.py @TMP_TARGET @ART scan-draft
+keys: L End
+require-live-snap: 25 y approve | local-work-terms
+keys: y
+require-live-snap: 25 Approval saved | approved-local-work
+keys: L
+require-live-snap: 25 L starts its fixed jobs | scan-launch-separate
+keys: L
+require-live-snap: 25 dispatcher pid | local-scans-started
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_partial_context.py @TMP_TARGET @ART scanned
+keys: r
+require-live-snap: 25 3 completed | fixed-local-work-finished
+keys: q
+require-live-snap: 25 s plan scan | source-origin
+submit: workbench
+require-live-snap: 25 Viewing Scan | scan-result
+nav-mode:
+keys: n
+require-live-snap: 25 Viewing Review | observations
+submit: open F-0001
+require-live-snap: 25 Owned policy marker needs an owner decision | policy-finding
+submit: decision deferred Owned static policy needs an owner decision
+submit: report
+require-live-snap: 25 Context grounding: partial. | partial-context-report
+expect: 1 committed / 1 calls
+expect: Evidence: 3 producer observations
+keys: j j j
+require-live-snap: 25 format json (4/6) | json-export
+keys: Enter
+require-live-snap: 25 EXPORTED | faithful-export
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_partial_context.py @TMP_TARGET @ART exported
+ask: Does Report preserve the generated partial context, one consumed context request, three approved source-only observations and an independent human deferral without claiming complete coverage?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: report
+require-live-snap: 25 Context grounding: partial. | recovered-report
+expect: 1 committed / 1 calls
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_partial_context.py @TMP_TARGET @ART restarted
+ask: Does no-color restart retain the exact accepted context, shared spending, observations and owner decision without another request or scan?
+keys: C-c
+require-exit: 10

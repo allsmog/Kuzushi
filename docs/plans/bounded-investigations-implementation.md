@@ -1,5 +1,45 @@
 # Bounded investigations implementation
 
+The [boundary-context reading correction](../assessments/boundary-context-reading-2026-10-24.md)
+puts inheritance or omission and preparation state ahead of long names and
+instructions while retaining exact receipts. All 90 focused checks, build and
+lint pass. Final J128 has 44 machine passes, zero failures, 50 captures and four
+pending operator judgments through inactive editing, exact overrides, revised
+preparation and no-color restart. Two six-job plans remain unstarted; only the
+first is approved. No model request or broad delivery closure is added.
+
+The [generated partial-context workflow](../assessments/generated-partial-context-workflow-2026-10-24.md)
+authenticates retained drafts without changing failed queue state, preserves
+partial Map acknowledgment and connects direct DFD source files to visible
+scoped actions. Stronger generation fixtures correct the earlier persistence
+qualification. All 223 distinct focused checks, build and lint pass. Final J351
+records 52 machine passes, zero failures, 51 captures and three pending operator
+judgments through generation, three fixed local scans, triage, export and
+restart. No live request, module promotion or broad milestone closure is added.
+
+The [partial generation correction](../assessments/partial-context-generation-2026-10-24.md)
+supplies recorded catalog coverage to the model and supports inactive,
+authenticated partial generation. All 693 context tests, 35 entry-point tests,
+three registry checks, build, lint and risk pass. Rebuilt J350 retains 38
+machine passes, zero failures and three pending operator judgments. Live
+generation quality and full generation UX remain open; no broad milestone or
+model allowance is added.
+
+The [partial context path](../assessments/partial-context-map-2026-10-24.md)
+adds inactive observed-row imports, explicit partial Map acknowledgment and
+exact-context coverage in Report. Final J350 has 38 machine passes, zero
+failures, 39 capture pairs and three pending operator judgments through three
+fixed local scans, human deferral, export and no-color restart. All 213 distinct
+focused checks, build, lint and risk pass. Full-set guards remain strict, and
+model synthesis qualification remains open. No live request or broad milestone
+closes.
+
+The [scope context handoff](../assessments/scope-context-overview-2026-10-24.md)
+corrects the missing canonical overview, preserves multiline Map summaries and
+prioritizes recorded proposal input before long source receipts. Final J88
+has 49 machine passes, zero failures and eight pending operator judgments;
+175 distinct focused checks pass. No live request or broad milestone is added.
+
 The [Report and source comparison correction](../assessments/report-source-recap-2026-10-24.md)
 closes the previous recap and hash-hint defects. Final J348 records 65 machine
 passes, zero failures, 72 captures and nine pending operator judgments through
@@ -956,7 +996,7 @@ and three pending human judgments. This closes that concrete implementation gap
 without qualifying the complete operator experience or closing a broad milestone.
 
 - [x] Bounded iterative inventory and inventory-derived scope suggestions. See [acceptance evidence](../assessments/bounded-inventory-acceptance-2026-10-17.md).
-- [ ] Registry-derived per-tool functional matrix and curated phase readiness. [Coverage cancellation and current catalog evidence](../assessments/coverage-cancellation-2026-10-18.md) repair a supported path and refresh 118 visible descriptor rows; broader qualification remains open.
+- [ ] Registry-derived per-tool functional matrix and curated phase readiness. [Coverage cancellation and current catalog evidence](../assessments/coverage-cancellation-2026-10-18.md) repair a supported path and refresh 118 visible descriptor rows. [Context catalog phase evidence](../assessments/context-catalog-phase-2026-10-24.md) corrects three supporting readers and their startup/history consumers; broader qualification remains open.
 - [x] Explicit allowance, durable reservations, and honest unknown-cost states. See [acceptance evidence](../assessments/spending-control-acceptance-2026-10-17.md).
 - [x] Accepted context references independent of the global active model. See [acceptance evidence](../assessments/immutable-context-acceptance-2026-10-17.md).
 - [x] Finite study plans with three-pass defaults and restart recovery. See [acceptance evidence](../assessments/finite-study-acceptance-2026-10-17.md).
@@ -5763,3 +5803,14 @@ failures and two pending operator judgments, including six sizes and explicit
 five-pass draft recovery. The module functional matrix and broad context,
 review, report and end-to-end UX qualification remain open. No maturity tier,
 follow-up allowance or finding-fix verdict is advanced by this checkpoint.
+
+
+The [generated scope workflow](../assessments/generated-scope-investigation-2026-10-24.md)
+connects accepted root context, one budgeted boundary generation, six separately
+approved discovery jobs, consolidation, human triage, Report and restart on an
+owned offline fixture. Historical Report now preserves metadata-only source
+receipts, and the shared reader distinguishes actual excerpts, membership, limits
+and unknown facts. Sixty focused Rust checks and final sequential J129/J352
+provide 89 machine passes with no failures; eight operator judgments remain open.
+No new live call, module promotion or broad milestone completion follows. The
+original five open delivery items retain their scope.

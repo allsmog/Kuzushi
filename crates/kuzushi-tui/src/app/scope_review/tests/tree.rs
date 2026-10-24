@@ -244,7 +244,7 @@ fn scope_tree_context_uses_only_the_exact_target_and_proposal() {
         .unwrap()
         .proposal_ref
         .revision += 1;
-    assert!(details(&app).contains("no draft for this exact scope revision"));
+    assert!(details(&app).contains("Scan context: no matching study."));
     assert!(!details(&app).contains("local-digest"));
 }
 

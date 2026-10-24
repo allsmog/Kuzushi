@@ -95,6 +95,7 @@ pub(crate) fn load_prompt_grounding(
     } else {
         load_entry_point_catalog(input)?
     };
+    super::partial_catalog_build::require_inactive(catalog.catalog.as_ref(), input.activate)?;
     let catalog_rows = (!scoped).then_some(catalog.catalog.as_ref()).flatten();
     let selected =
         prompt_grounding_surfaces(input.analysis_root(), input.max_elements, catalog_rows)?;
@@ -167,7 +168,7 @@ fn has_catalog_source(input: &BuildInput, expected: &str) -> bool {
 fn load_current_or_explicit_catalog(
     input: &BuildInput,
 ) -> Result<crate::capabilities::entry_points::EntryPointCatalogResolution> {
-    let resolution = crate::capabilities::entry_points::ensure_current_entry_point_catalog(
+    let resolution = crate::capabilities::entry_points::ensure_observed_entry_point_catalog(
         input.workspace_root(),
     )?;
     if resolution.catalog.is_none() && has_catalog_source(input, "entry-points") {
@@ -337,7 +338,7 @@ fn catalog_receipt(
 ) -> crate::capabilities::entry_points::EntryPointCatalogReceipt {
     let provenance = &catalog.provenance;
     crate::capabilities::entry_points::EntryPointCatalogReceipt {
-        status: status.to_string(),
+        status: super::partial_catalog_build::receipt_status(catalog, status).to_string(),
         sha256: Some(provenance.sha256.clone()),
         records: catalog.total,
         records_selected,

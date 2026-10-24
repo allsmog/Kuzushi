@@ -8,6 +8,7 @@ const PREVIEW_CHAR_LIMIT: usize = 8192;
 pub(crate) struct GeneratedContextPreview {
     reference: kuzushi_core::ThreatModelRef,
     title: String,
+    attention_action: Option<&'static str>,
     lines: Arc<Vec<String>>,
 }
 
@@ -38,7 +39,20 @@ pub(crate) fn context_preview(output: GeneratedStudyContext) -> GeneratedContext
     GeneratedContextPreview {
         reference: output.reference,
         title: preview_title(title),
+        attention_action: attention_action(&output.document),
         lines: Arc::new(lines),
+    }
+}
+
+fn attention_action(document: &serde_json::Value) -> Option<&'static str> {
+    match document
+        .pointer("/verification/verdict")
+        .and_then(serde_json::Value::as_str)
+    {
+        Some("partial") => Some("Inspect partial context"),
+        Some("failed") => Some("Inspect context with failed checks"),
+        Some("stale") => Some("Inspect stale context"),
+        _ => None,
     }
 }
 
@@ -56,7 +70,10 @@ pub(super) fn overview(
     generation: &StudyContextGeneration,
     width: usize,
 ) -> Vec<String> {
-    let mut lines = vec![generation.action(config).into()];
+    let action = selected_preview(generation)
+        .and_then(|preview| preview.attention_action)
+        .unwrap_or_else(|| generation.action(config));
+    let mut lines = vec![action.into()];
     append_outcome(&mut lines, config, generation);
     append_diagnostic_notice(&mut lines, generation);
     lines.extend(config.notice.iter().cloned());
@@ -66,6 +83,13 @@ pub(super) fn overview(
         .into_iter()
         .flat_map(|line| wrap_text(&line, width.max(1)))
         .collect()
+}
+
+fn selected_preview(generation: &StudyContextGeneration) -> Option<&GeneratedContextPreview> {
+    generation
+        .generated_preview
+        .as_ref()
+        .filter(|preview| Some(&preview.reference) == generation.generated.as_ref())
 }
 
 fn append_diagnostic_notice(lines: &mut Vec<String>, generation: &StudyContextGeneration) {
@@ -86,11 +110,7 @@ fn append_outcome(
         lines.push("Enter opens the recorded job outcome. A replacement draft needs separate approval; existing spending remains recorded.".into());
         return;
     }
-    if let Some(preview) = generation
-        .generated_preview
-        .as_ref()
-        .filter(|p| Some(&p.reference) == generation.generated.as_ref())
-    {
+    if let Some(preview) = selected_preview(generation) {
         lines.push(preview.title.clone());
         lines.extend(usage_lines(config));
         lines.push("Enter inspects the exact revision. m opens its recorded Map for review and explicit acceptance before scanning.".into());

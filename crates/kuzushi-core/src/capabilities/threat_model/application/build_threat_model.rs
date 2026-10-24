@@ -459,11 +459,17 @@ fn finished_build_response(
     artifacts: ThreatModelArtifacts,
     findings: Vec<Value>,
     has_concrete_content: bool,
-    warnings: Vec<String>,
+    mut warnings: Vec<String>,
     cost: crate::runtime::RuntimeCostReport,
-    lines: Vec<String>,
+    mut lines: Vec<String>,
     source_bundle: ThreatModelSourceBundle,
 ) -> Result<Value> {
+    if let Some(warning) =
+        super::partial_catalog_build::warning(&generated.document, input.workspace_root())
+    {
+        lines.push(warning.clone());
+        warnings.push(warning);
+    }
     let honesty = ResultHonesty {
         has_concrete_content,
         warnings,
@@ -535,7 +541,8 @@ fn seal_build_document(
     stamp_source_tree_hash(document, input.captured_source_tree_hash.as_deref());
     source_bundle.stamp_inventory(document)?;
     finalize_document_identity(document, input)?;
-    require_complete_security_context_links(document)
+    require_complete_security_context_links(document)?;
+    super::partial_catalog_build::stamp_verification(document, input)
 }
 
 /// Seed lineage runs before persistence, while the live model on disk is

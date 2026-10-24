@@ -220,6 +220,7 @@ pub(crate) fn import_threat_model_adapter(
     stamp_provenance(&mut document, root, "import");
     let snapshot = bind_import_to_current_tree(&mut document, root, ctx)?;
     let verification = verify_threat_model_document(&document, root)?;
+    partial_coverage::validate_activation(&input, &verification)?;
     stamp_verification(&mut document, &verification);
     anyhow::ensure!(
         !ctx.is_cancelled(),
@@ -251,7 +252,8 @@ fn import_result(
             .map_or(0, Vec::len),
         verification.verdict,
     );
-    crate::module_result::completed_output_result(
+    let warning = partial_coverage::warning(&verification);
+    partial_coverage::result(
         output.clone(),
         output,
         json!({
@@ -261,6 +263,7 @@ fn import_result(
             "snapshot": {"snapshotHash": snapshot.snapshot_hash, "treeHash": snapshot.tree_hash},
             "document": document,
         }),
+        warning,
     )
 }
 
@@ -878,3 +881,8 @@ mod verify_import_tests {
         .unwrap();
     }
 }
+
+#[cfg(test)]
+mod partial_catalog_tests;
+
+mod partial_coverage;

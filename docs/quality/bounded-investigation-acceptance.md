@@ -1,5 +1,54 @@
 # Bounded investigation acceptance ledger
 
+The [boundary-context reading correction](../assessments/boundary-context-reading-2026-10-24.md)
+makes association and preparation state visible before instructions at 40
+columns, retaining exact source and context provenance. Final J128 records 44
+machine passes, zero failures, 50 captures and four pending operator judgments;
+90 focused checks, build and lint pass. Revised context needs a separate plan
+approval; both six-job plans stay unstarted and spending is unchanged. Full
+monorepo execution and reference UX qualification remain separate open work.
+
+The [generated partial-context workflow](../assessments/generated-partial-context-workflow-2026-10-24.md)
+retains authenticated partial drafts, requires explicit partial Map acceptance
+and shows the direct DFD file scope before planning. Eight stronger generation
+checks now require real saved references in positive generation cases. The
+current increment has 223 distinct focused passes; final J351 has 52 machine
+passes, zero failures, 51 captures and three pending operator judgments through
+local scans, triage, export and restart. It uses one intercepted offline request
+and no live provider. The broader delivery and UX acceptance remain open.
+
+The [partial generation correction](../assessments/partial-context-generation-2026-10-24.md)
+retains `snapshotCoverage` in model input, requires inactive partial generation
+before a query and authenticates partial receipts without promoting them.
+All 693 context tests, 35 entry-point tests, three registry checks, build, lint
+and risk pass. Rebuilt J350 has 38 machine passes, zero failures and three
+pending operator judgments through the existing local import journey. Useful
+live generation and full generation UX remain open; no provider request or
+delivery checkbox is added.
+
+The [partial context path](../assessments/partial-context-map-2026-10-24.md)
+supports inactive observed-row imports, explicit partial Map acknowledgment and
+exact-context limitations in Report. Final J350 has 38 machine passes, zero
+failures, 39 capture pairs and three pending operator judgments. Three fixed
+local scans retain three observations and one human deferral through export
+and no-color restart. All 213 distinct focused checks, build, lint and risk pass.
+No provider request is added. Global model synthesis and broad acceptance remain
+open; no delivery checkbox changes.
+
+The [scope context handoff](../assessments/scope-context-overview-2026-10-24.md)
+supplies the selected canonical overview and makes input omissions readable.
+Final J88 has 49 machine passes, zero failures and eight pending operator
+judgments. The 40-column receipt takes two PageDown presses instead of 35;
+175 distinct focused checks pass. This closes the reproduced handoff and
+reading defects without qualifying general model grouping usefulness.
+
+The [context catalog phase correction](../assessments/context-catalog-phase-2026-10-24.md)
+keeps three supporting readers outside Map result ownership and preserves fresh
+Setup. J349 has 12 machine passes, zero failures and two pending operator
+judgments; 66 focused checks, workspace build and Core/TUI Clippy pass. Genuine
+repository context still resumes Map. This closes a reproduced phase-role defect;
+the broader per-tool qualification remains open.
+
 The [Report and source comparison correction](../assessments/report-source-recap-2026-10-24.md)
 disambiguates recap locations and derives hash notes from recorded artifacts.
 Final J348 has 65 machine passes, zero failures, 72 captures and nine pending
@@ -869,3 +918,26 @@ dispatch and the study reader. Final J342 has 39 machine passes, no failures and
 two pending operator judgments. Reading the saved live-model draft adds no model
 requests, activation, jobs or finding decisions. This leaves the broader workflow
 and revision-specific fix adjudication open.
+
+The [tracked-symlink correction](../assessments/tracked-symlink-inventory-2026-10-24.md)
+records an actual published-repository preparation failure and a Unix adapter
+repair. Known exclusions stay visible without forging incomplete enumeration;
+unsafe ancestors, missing files and content limits retain their existing
+disclosures. This does not qualify complete source understanding or Windows behavior.
+
+The [partial context path](../assessments/partial-context-map-2026-10-24.md)
+separates authenticated observations from complete-set grounding. Partial
+imports remain inactive, require explicit Map acknowledgment and retain their
+exact verification and coverage reason in Report. This does not establish
+complete source inspection or model synthesis quality.
+
+
+The [generated scope workflow checkpoint](../assessments/generated-scope-investigation-2026-10-24.md)
+adds exact historical source-receipt export and a complete owned offline scope
+journey. Final J129/J352 have 89 machine passes, zero failures and 89 capture pairs
+on one frozen binary, with eight operator judgments pending. Independent checks
+retain seven fixed work attempts, six observations, two decisions, two protected
+Review calls, unknown dollar cost and unchanged export bytes after restart. Sixty
+focused Rust checks pass. Scopes and root Map are manually supplied, transport is
+intercepted, and source is inert under a dirty borrowed HEAD. This does not close
+real-model scope quality, cross-SHA fix adjudication or reference-level UX.

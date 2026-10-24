@@ -112,6 +112,7 @@ fn threat_model_models_tool() -> ToolDescriptor {
         vec![target_option()],
     )
     .with_policy(read_policy(ToolPhase::Map, WorkspaceRequirement::Required))
+    .without_phase_result()
 }
 
 fn threat_model_activate_tool() -> ToolDescriptor {
@@ -152,6 +153,7 @@ fn threat_model_revisions_tool() -> ToolDescriptor {
         ],
     )
     .with_policy(read_policy(ToolPhase::Map, WorkspaceRequirement::Required))
+    .without_phase_result()
 }
 
 fn threat_model_diff_tool() -> ToolDescriptor {
@@ -180,6 +182,7 @@ fn threat_model_diff_tool() -> ToolDescriptor {
         ],
     )
     .with_policy(read_policy(ToolPhase::Map, WorkspaceRequirement::Required))
+    .without_phase_result()
 }
 
 fn threat_model_restore_tool() -> ToolDescriptor {
@@ -282,7 +285,7 @@ fn threat_model_import_options() -> Vec<OptionSpec> {
         opt(
             "activate",
             OptionType::Bool,
-            "Activate the imported revision.",
+            "Activate the imported revision. Partial catalog coverage requires false and explicit Map review.",
         )
         .default(json!(true)),
         opt(

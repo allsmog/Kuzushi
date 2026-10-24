@@ -179,11 +179,17 @@ fn context_study_executes_real_generator_with_mock_provider_and_retains_spending
         ..Default::default()
     };
     let registry = ModuleRegistry::with_v2_builtins();
+    let ctx = context(&workspace, &config);
+    draft(&registry, &ctx, json!({})).unwrap();
+    let receipt = load_context_study(root.path(), "context-draft").unwrap();
+    approve(&registry, &ctx, approval(&receipt)).unwrap();
+    let allowance = receipt.load_allowance(root.path()).unwrap().unwrap();
+    let input = receipt.bound_input(&allowance).unwrap();
     let run_record =
         crate::run_artifacts::ToolRunRecord::new(root.path(), "context-run", "tool", TOOL);
     crate::run_artifacts::try_record_tool_run_started_with_reproducibility(
         run_record,
-        &json!({}),
+        &input,
         None,
         None,
         Vec::new(),
@@ -192,11 +198,6 @@ fn context_study_executes_real_generator_with_mock_provider_and_retains_spending
     let trace = crate::run_artifacts::TraceHandle::jsonl(root.path(), "context-run");
     let mut ctx = context(&workspace, &config);
     ctx.trace = Some(&trace);
-    draft(&registry, &ctx, json!({})).unwrap();
-    let receipt = load_context_study(root.path(), "context-draft").unwrap();
-    approve(&registry, &ctx, approval(&receipt)).unwrap();
-    let allowance = receipt.load_allowance(root.path()).unwrap().unwrap();
-    let input = receipt.bound_input(&allowance).unwrap();
     let runtime = OfflineContextRuntime::default();
     let prepared = registry
         .prepare_dispatch_input(TOOL, input.clone(), &ctx, None)

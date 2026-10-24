@@ -62,3 +62,35 @@ fn missing_result_reason_precedes_allowance_and_plan_metadata() {
         .join(" ")
         .contains("replacement draft needs separate approval"));
 }
+
+#[test]
+fn recorded_partial_grounding_survives_a_long_model_overview() {
+    let preview = context_preview(GeneratedStudyContext {
+        reference: reference(),
+        document: json!({"title":"Owned context fixture","systemContext":"Labeled model text. ".repeat(900),
+            "verification":{"verdict":"partial","groundingSource":"partial-catalog",
+            "groundingDegraded":"Per-file inspection cap of 262144 bytes; unseen entry points remain unknown."}}),
+    });
+    assert_eq!(preview.lines[0], "Recorded grounding: partial.");
+    assert!(preview.lines[1].contains("262144") && preview.lines[1].contains("unknown"));
+    assert!(preview.lines.join("\n").contains("Preview limited"));
+}
+
+#[test]
+fn partial_action_uses_recorded_checks_with_a_neutral_model_title() {
+    let root = tempfile::tempdir().unwrap();
+    let config = BatchScanConfig::load(root.path(), None);
+    let reference = reference();
+    let generation = StudyContextGeneration {
+        generated: Some(reference.clone()),
+        generated_preview: Some(context_preview(GeneratedStudyContext {
+            reference,
+            document: json!({"title":"Owned architecture","verification":{"verdict":"partial"}}),
+        })),
+        ..Default::default()
+    };
+    assert_eq!(
+        overview(&config, &generation, 40)[0],
+        "Inspect partial context"
+    );
+}

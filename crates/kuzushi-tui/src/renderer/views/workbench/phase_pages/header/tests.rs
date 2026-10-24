@@ -456,3 +456,30 @@ fn result_detail_newlines_render_as_rows_not_escapes() {
     assert!(text.iter().all(|line| !line.contains("\\n")), "{text:?}");
     assert!(text[1].contains("second line"), "{text:?}");
 }
+
+#[test]
+fn narrow_result_heading_preserves_space_for_evidence_and_explicit_controls() {
+    let card = keyed_result_card();
+    let rows = fixed_result_rows(&card, 40);
+    assert_eq!(rows.heading.len(), 1);
+    let heading = rows.heading[0].line.to_string();
+    assert!(heading.contains("partial") && heading.contains("attempt"));
+    assert!(!heading.contains(&card.attempt_id));
+    let controls = rows
+        .trailing
+        .iter()
+        .map(|row| row.line.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(controls.contains("Open"));
+    assert!(!controls.contains("next:"));
+    let wide = fixed_result_rows(&card, 120);
+    assert!(wide
+        .heading
+        .iter()
+        .any(|row| row.line.to_string().contains(&card.attempt_id)));
+    assert!(wide
+        .trailing
+        .iter()
+        .any(|row| row.line.to_string().contains("next:")));
+}

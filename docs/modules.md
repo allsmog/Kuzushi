@@ -864,6 +864,23 @@ Review labels a rule-suppressed observation as `suppressed`, keeping its human
 decision and author separate. Suppression alone does not establish a human
 false-positive verdict.
 
+`threat-model:models`, `threat-model:revisions` and `threat-model:diff` are
+supporting Map inspections with `phase_result: false`. Catalog-only receipts
+leave a fresh target in Setup. They cannot replace a genuine Map result or be
+selected as one through either ledger writer. Recovery preserves raw receipts
+while excluding those attempts from the phase projection. Actual repository
+context and threat-model artifacts still support resume independently. See the
+[context catalog phase evidence](assessments/context-catalog-phase-2026-10-24.md).
+
+`pack:suggest-scopes` projects the exact selected immutable context's
+`systemContext`, legacy `contextSummary`, DFD nodes/flows/boundaries and entry
+points. Other stored context fields are not supplied by this projection. Its
+8 KiB bound omits whole selected sections and records their counts; the complete
+request remains bounded to 64 KiB. Saved limitations report explicit omission
+separately from a selected context whose sections exceeded the bound. The scope
+reader prioritizes those recorded facts without reconstructing missing details
+from today's context. See the [scope context handoff evidence](assessments/scope-context-overview-2026-10-24.md).
+
 Windows MCP file capabilities bind an opening content digest and verify the
 returned bytes against it before accepting reads or copies. Verification uses
 bounded streaming passes and restores the retained file cursor. Timestamp and
@@ -4283,3 +4300,51 @@ remain reachable by paging. Catalog loading falls back to the inspected revision
 ID; it does not substitute the active context. Choosing another row restores the
 catalog. Scanner preview, diagram, comparison and the action menu preserve their
 existing controls. Reading does not accept context or authorize model work.
+
+Partial source context can be imported as an inactive draft with
+`threat-model:import activate=false`. Observed-row verification preserves
+partial catalog coverage and never establishes absence beyond those rows.
+Map selection requires acknowledgment, and Report retains the exact context's
+recorded limitations. Complete-set catalog consumers keep their strict guard.
+See the [partial context contract](assessments/partial-context-map-2026-10-24.md).
+
+Model generation also supports authenticated partial observations when
+`activate=false`. Catalog sources include recorded `snapshotCoverage` within
+the existing byte bound. Generated receipts use `status=partial`, retain their
+authentication fields, and stamp verification before persistence. Missing,
+changed or complete replacement catalogs cannot turn those receipts into
+verified coverage. The explicit deterministic fold retains its complete-set
+requirement. See the [generation evidence](assessments/partial-context-generation-2026-10-24.md).
+
+An authenticated partial generation remains readable even when its campaign
+queue entry is failed. Recovery checks the finished typed run, matching tool,
+frozen recorded input and exact producing revision without changing that queue
+entry or spending. `campaign:context-map` retains partial outcomes in
+`data.mapOutcome`; selecting them requires explicit acknowledgment. Missing or
+changed evidence remains unavailable. Context readers lead with recorded
+grounding rather than relying on the model's title.
+
+DFD scope actions include direct node, flow and boundary `sourceRefs` and
+structured evidence anchors. Direct file paths appear quoted in element details.
+The canonical final numeric line suffix is separated from the literal filename;
+planning still validates containment and inventory membership before approval.
+These references neither establish source truth nor authorize work. See the
+[partial generation workflow evidence](assessments/generated-partial-context-workflow-2026-10-24.md).
+
+Boundary-context readers show inheritance, an exact override or explicit omission
+and the preparation state before long names, instructions and full receipts.
+`Plan: prepared context recorded` means a retained prepared receipt is readable;
+it is not approval to start work. Changed associations invalidate the prepared
+plan while keeping the investigation allowance. Exact references and source
+identity remain reachable by paging. See the [current boundary-reader evidence](assessments/boundary-context-reading-2026-10-24.md).
+
+
+Generated boundary context receipts remain attached to the exact selected revision
+through the context reader and investigation Report. The additive version-one
+`contextEvidence.sourceContext` is a metadata-only projection of known
+`scopeContext` and `fileContext` receipt fields. It retains recorded membership,
+limits, omissions, hashes and line references without duplicating captured source
+text. Unsupported receipts remain unavailable; missing flags and counts remain
+unrecorded. Report details share the receipt presentation, while reader shortcuts
+stay local to the context reader. See the [generated scope workflow](assessments/generated-scope-investigation-2026-10-24.md)
+for sequential native evidence and qualification limits.

@@ -29,6 +29,7 @@ mod run_ledger;
 mod run_paths;
 mod run_reproducibility_metadata;
 mod run_request_context;
+pub(crate) use run_request_context::authenticated_input as load_authenticated_run_input;
 pub use run_request_context::{
     load_investigation_allowance_for_runs, load_run_request_context, load_run_request_scope,
     RecordedAllowanceOrigin, RecordedRequestScope, RunRequestContext,

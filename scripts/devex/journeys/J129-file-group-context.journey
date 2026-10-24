@@ -46,7 +46,7 @@ keys: L
 require-live-snap: 30 dispatcher pid | running
 require-shell: python3 -B @REPO/scripts/devex/fixtures/group_context.py @TMP_TARGET @ART finished
 keys: r
-require-live-snap: 30 1 job(s) · 1 completed | completed
+require-live-snap: 30 Jobs: 1 · 1 completed | completed
 keys: C-c
 require-exit: 10
 env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
@@ -62,7 +62,7 @@ ask: Does restart retain the inactive result, one committed call, protected revi
 keys: Enter
 require-live-snap: 30 CONTEXT SUMMARY | inspected-context
 expect: Owned group component
-expect: Source identity matched
+expect: Source matched at inspection.
 keys: v
 require-live-snap: 20 CONTEXT DATA FLOW | inspected-dfd
 live-snap: group-dfd

@@ -40,11 +40,7 @@ pub(crate) fn binding_label(case: &ScopeStudyCaseInput) -> &'static str {
 }
 
 pub(crate) fn detail(config: &BatchScanConfig, width: usize) -> Vec<String> {
-    let mut lines = selection_detail(config);
-    if let Some(notice) = &config.notice {
-        lines.insert(0, notice.clone());
-    }
-    lines
+    selection_detail(config)
         .into_iter()
         .flat_map(|line| super::study_context::context_wrap(&line, width.max(1)))
         .collect()
@@ -55,12 +51,21 @@ fn selection_detail(config: &BatchScanConfig) -> Vec<String> {
         return common_detail(config);
     };
     let mut lines = vec![
-        format!("Boundary: {} · {} passes", case_label(config, &case.scope_id), case.passes),
+        format!("Context association: {}", binding_label(case)),
+        plan_status(config).into(),
+        format!(
+            "Boundary: {} · {} passes",
+            case_label(config, &case.scope_id),
+            case.passes
+        ),
+    ];
+    lines.extend(config.notice.iter().cloned());
+    lines.extend(association_receipts(config, case));
+    lines.push(format!("Boundary id: {}", case.scope_id));
+    lines.extend([
         "Enter inspects or chooses an exact revision for this boundary. i inherits common; o explicitly omits context.".into(),
         "Selection does not activate a global context or change sibling overrides. Changes require a new plan approval; spending remains.".into(),
-    ];
-    lines.push(format!("Boundary id: {}", case.scope_id));
-    lines.extend(association_detail(config, case));
+    ]);
     lines
 }
 
@@ -68,7 +73,16 @@ pub(crate) fn association_detail(
     config: &BatchScanConfig,
     case: &ScopeStudyCaseInput,
 ) -> Vec<String> {
-    let mut lines = vec![format!("Context association: {}", binding_label(case))];
+    let mut lines = vec![
+        format!("Context association: {}", binding_label(case)),
+        plan_status(config).into(),
+    ];
+    lines.extend(association_receipts(config, case));
+    lines
+}
+
+fn association_receipts(config: &BatchScanConfig, case: &ScopeStudyCaseInput) -> Vec<String> {
+    let mut lines = Vec::new();
     append_reference(
         &mut lines,
         "Draft effective context",
@@ -81,9 +95,9 @@ pub(crate) fn association_detail(
 fn common_detail(config: &BatchScanConfig) -> Vec<String> {
     let mut lines = vec![
         "Common context for inheriting boundaries".into(),
-        "Enter opens the exact revision picker. Common changes affect inheriting boundaries; exact overrides and explicit omissions remain.".into(),
-        "An unset draft selection is frozen during preparation. Inspect the prepared plan before approval.".into(),
+        plan_status(config).into(),
     ];
+    lines.extend(config.notice.iter().cloned());
     append_reference(
         &mut lines,
         "Common draft context",
@@ -101,7 +115,19 @@ fn common_detail(config: &BatchScanConfig) -> Vec<String> {
         );
         lines.push(format!("Frozen plan: {}", receipt.plan_sha256));
     }
+    lines.extend([
+        "Enter opens the exact revision picker. Common changes affect inheriting boundaries; exact overrides and explicit omissions remain.".into(),
+        "An unset draft selection is frozen during preparation. Inspect the prepared plan before approval.".into(),
+    ]);
     lines
+}
+
+fn plan_status(config: &BatchScanConfig) -> &'static str {
+    if config.study.scope_receipt.is_some() {
+        "Plan: prepared context recorded."
+    } else {
+        "Plan: draft only."
+    }
 }
 
 fn effective_context<'a>(
@@ -204,3 +230,6 @@ pub(crate) fn controls(width: u16) -> [&'static str; 2] {
         ]
     }
 }
+
+#[cfg(test)]
+mod tests;

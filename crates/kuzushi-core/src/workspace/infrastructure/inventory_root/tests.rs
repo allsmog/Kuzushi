@@ -143,3 +143,30 @@ fn growing_file_keeps_the_approved_prefix_bound() {
     .unwrap();
     assert_eq!(text, "// owned");
 }
+
+#[cfg(unix)]
+#[test]
+fn leaf_classification_excludes_known_links_without_following_unsafe_ancestors() {
+    let owned = canonical_tempdir();
+    let external = canonical_tempdir();
+    std::fs::write(owned.path().join("owned.rs"), "// owned source\n").unwrap();
+    std::fs::write(external.path().join("source.rs"), "// excluded source\n").unwrap();
+    std::os::unix::fs::symlink(external.path(), owned.path().join("boundary")).unwrap();
+    std::os::unix::fs::symlink("missing.rs", owned.path().join("broken.rs")).unwrap();
+    let reader = InventoryRoot::new(owned.path()).unwrap();
+    assert!(reader.is_known_non_regular(&owned.path().join("boundary")));
+    assert!(reader.is_known_non_regular(&owned.path().join("broken.rs")));
+    for path in [
+        owned.path().join("owned.rs"),
+        owned.path().join("missing.rs"),
+        owned.path().join("boundary/source.rs"),
+        owned.path().join("../source.rs"),
+        external.path().join("source.rs"),
+    ] {
+        assert!(!reader.is_known_non_regular(&path));
+    }
+    assert!(reader.open_file(&owned.path().join("broken.rs")).is_err());
+    assert!(reader
+        .open_file(&owned.path().join("boundary/source.rs"))
+        .is_err());
+}

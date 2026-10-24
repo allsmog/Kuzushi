@@ -62,6 +62,19 @@ pub(crate) enum EntryPointSnapshotCoverage {
 }
 
 impl EntryPointSnapshotCoverage {
+    /// Positive observations can be used only with an explicit coverage record.
+    /// They never establish absence outside that recorded snapshot.
+    pub(crate) fn require_recorded(&self) -> anyhow::Result<()> {
+        if matches!(self, Self::Unrecorded) {
+            return self.require_complete();
+        }
+        Ok(())
+    }
+
+    pub(crate) fn is_partial(&self) -> bool {
+        matches!(self, Self::Partial { .. })
+    }
+
     /// One operator-facing line naming what this catalog cannot account for,
     /// or `None` when it records that the snapshot covered the whole target.
     pub(crate) fn disclosure(&self) -> Option<String> {
@@ -105,7 +118,10 @@ impl EntryPointSnapshotCoverage {
 fn partial_disclosure(reason: &str, array_cap: Option<u64>, omitted: Option<u64>) -> String {
     let mut text = format!("the context snapshot is truncated ({reason})");
     if let Some(omitted) = omitted {
-        text.push_str(&format!("; {omitted} snapshot entr{} omitted", plural(omitted)));
+        text.push_str(&format!(
+            "; {omitted} snapshot entr{} omitted",
+            plural(omitted)
+        ));
     }
     if let Some(cap) = array_cap {
         text.push_str(&format!(" at the {cap}-entry array cap"));

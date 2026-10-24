@@ -1,6 +1,6 @@
 //! Explicit handoff from completed campaign jobs to durable Map review.
 use super::*;
-use crate::run_lifecycle::{CallKind, RunAttemptId, RunItemStatus};
+use crate::run_lifecycle::RunAttemptId;
 use crate::workflow_attempts::{
     append_phase_attempt_completed_with_v2, load_map_run_context, load_phase_attempt_events,
     load_phase_attempt_ledger_v2, PhaseAttemptCompleted, PhaseAttemptDisposition,
@@ -28,21 +28,21 @@ pub fn execute_context_map(input: &Value, ctx: &ToolExecutionContext<'_>) -> Res
         input["expectedPlanSha256"] == receipt.plan_sha256,
         "context plan changed; inspect the current plan before reviewing Map"
     );
-    let runs = completed_map_runs(root, &receipt)?;
+    let finished = finished_map_runs(root, &receipt)?;
+    let runs = finished
+        .iter()
+        .map(|run| run.run_id.clone())
+        .collect::<Vec<_>>();
+    let outcome = map_outcome(&finished);
     let reference = authenticated_generated_context(root, &receipt, &runs)?;
-    let attempt = persist_map_result(
-        root,
-        &runs,
-        PhaseAttemptOutcome::Completed,
-        ctx.cancellation,
-    )?;
-    let summary = "Recorded Map is ready for inspection. Accept it explicitly before scanning. No jobs or model requests started.";
+    let attempt = persist_map_result(root, &runs, outcome, ctx.cancellation)?;
+    let summary = "Recorded Map is ready for inspection. Accept it explicitly before scanning; partial evidence requires acknowledgment. No jobs or model requests started.";
     Ok(crate::module_result::completed_output_result(
         summary,
         summary,
         json!({"campaignId":id,"investigationId":receipt.investigation_id,
             "planSha256":receipt.plan_sha256,"attemptId":attempt,
-            "runRefs":runs,"modelRef":reference}),
+            "runRefs":runs,"modelRef":reference,"mapOutcome":outcome}),
     ))
 }
 
@@ -62,7 +62,10 @@ fn ensure_map_generation(tool: &str) -> Result<()> {
     Ok(())
 }
 
-fn completed_map_runs(root: &Path, receipt: &ContextStudyReceipt) -> Result<Vec<String>> {
+fn finished_map_runs(
+    root: &Path,
+    receipt: &ContextStudyReceipt,
+) -> Result<Vec<super::run_result::ContextRunResult>> {
     anyhow::ensure!(
         crate::incremental_index::current_workspace_resume_identity(root)? == receipt.source_identity,
         "context study belongs to earlier source content; inspect that context or prepare a new Map draft"
@@ -72,44 +75,32 @@ fn completed_map_runs(root: &Path, receipt: &ContextStudyReceipt) -> Result<Vec<
         snapshot.jobs.len() == receipt.job_count(),
         "context study job count changed"
     );
+    let planned = preparation::plan_jobs(
+        receipt.input.clone(),
+        &receipt.preparation_jobs,
+        &receipt.generation_tool,
+    );
     snapshot
         .jobs
         .iter()
-        .map(|job| completed_job_run(job, root))
+        .map(|job| {
+            let expected = planned
+                .iter()
+                .find(|row| row["jobId"].as_str() == Some(&job.job_id))
+                .context("Map job is absent from its frozen plan")?;
+            super::run_result::load(root, job, &expected["input"])
+        })
         .collect()
 }
 
-fn completed_job_run(job: &snapshot::CampaignJobSnapshot, root: &Path) -> Result<String> {
-    anyhow::ensure!(
-        job.state == "completed",
-        "Map job {} is {}; inspect its outcome before reviewing Map",
-        job.job_id,
-        job.state
-    );
-    let run = job
-        .run_id
-        .as_deref()
-        .context("completed Map job has no run identity")?;
-    let projection = crate::run_lifecycle::load_run_projection_unhydrated(root, run)?;
-    anyhow::ensure!(
-        projection
-            .terminal
-            .as_ref()
-            .is_some_and(|terminal| terminal.status == RunItemStatus::Completed),
-        "Map job {} has no completed run outcome",
-        job.job_id
-    );
-    anyhow::ensure!(
-        projection
-            .calls
-            .values()
-            .any(|call| call.kind == CallKind::Tool
-                && Some(call.label.as_str()) == job.tool.as_deref()
-                && call.status == RunItemStatus::Completed),
-        "Map job {} has no matching completed tool call",
-        job.job_id
-    );
-    Ok(run.into())
+fn map_outcome(runs: &[super::run_result::ContextRunResult]) -> PhaseAttemptOutcome {
+    if runs
+        .iter()
+        .any(|run| run.outcome == PhaseAttemptOutcome::Partial)
+    {
+        return PhaseAttemptOutcome::Partial;
+    }
+    PhaseAttemptOutcome::Completed
 }
 
 fn authenticated_generated_context(

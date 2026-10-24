@@ -82,11 +82,7 @@ pub(crate) fn validate_scan_scope_suggestion_input(
     let reference: ScanScopeProposalRef = serde_json::from_value(input["proposalRef"].clone())?;
     current_inventory(ctx, &reference)?;
     selected_context(ctx, input)?;
-    anyhow::ensure!(
-        input["priorities"].as_str().unwrap_or("").len() <= 2048,
-        "scope priorities exceed 2048 bytes"
-    );
-    Ok(())
+    input::validate_priorities(input["priorities"].as_str().unwrap_or(""))
 }
 
 fn selected_context(

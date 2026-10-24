@@ -1,6 +1,6 @@
 // Offline OAuth transport. Every fetch is intercepted; there is no network fallback.
 import assert from "node:assert/strict";
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -26,6 +26,28 @@ globalThis.fetch = async (url, init) => {
   assert.match(body.instructions, /ScanScopeDraft/);
   assert.equal(callCount(), 0, "Exactly one intercepted proposal request is authorized");
   const input = JSON.stringify(body.input);
+  writeFileSync(join(evidence, "scope-request-input.json"), JSON.stringify(body.input));
+  const texts = body.input
+    .flatMap((message) => message.content ?? [])
+    .map((part) => (typeof part === "string" ? part : (part.text ?? "")));
+  const outlines = texts.flatMap((text) => {
+    try {
+      const value = JSON.parse(text);
+      return value.schemaVersion === 1 && value.context ? [value] : [];
+    } catch {
+      return [];
+    }
+  });
+  assert.equal(outlines.length, 1, "One exact bounded scope input must reach transport");
+  const architectureContext = outlines[0].context;
+  const overview = JSON.parse(readFileSync(join(evidence, "selected-overview.json"), "utf8"));
+  assert.ok(
+    architectureContext.items.some(
+      (row) => row.field === "/systemContext" && row.value === overview,
+    ),
+    "The selected canonical overview must reach the actual provider request unchanged",
+  );
+  assert.equal(architectureContext.omitted, 0);
   assert.ok(
     input.includes("Alpha") && !input.includes("Beta"),
     "Use accepted context, not the global active context",
@@ -38,6 +60,7 @@ globalThis.fetch = async (url, init) => {
       call: 1,
       tools: 0,
       hasAcceptedContext: true,
+      architectureContext,
       liveProviderCalls: 0,
       fixtureKind: "intercepted OAuth; labeled scope suggestion",
     })}\n`,

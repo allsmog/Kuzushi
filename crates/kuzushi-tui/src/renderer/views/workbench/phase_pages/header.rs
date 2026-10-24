@@ -283,7 +283,7 @@ fn fixed_result_rows(
 ) -> FixedPhaseResultRows {
     let heading = wrapped_result_row(
         " RESULT ",
-        &format!("{} · attempt {}", card.outcome, card.attempt_id),
+        &result_heading(card, width),
         width,
         PhaseResultRenderStyle {
             prefix: theme::warn(),
@@ -301,6 +301,28 @@ fn fixed_result_rows(
         },
         PhaseResultRenderSource::default(),
     );
+    FixedPhaseResultRows {
+        heading,
+        trailing: result_trailing_rows(card, width, control),
+    }
+}
+
+fn result_heading(card: &crate::ui_view_models::PhaseResultCardModel, width: usize) -> String {
+    if width <= 60 {
+        let identity = card.attempt_id.chars().take(8).collect::<String>();
+        return format!("{} · attempt {identity}…", card.outcome);
+    }
+    format!("{} · attempt {}", card.outcome, card.attempt_id)
+}
+
+fn result_trailing_rows(
+    card: &crate::ui_view_models::PhaseResultCardModel,
+    width: usize,
+    control: Vec<PhaseResultRenderRow>,
+) -> Vec<PhaseResultRenderRow> {
+    if width <= 60 {
+        return control;
+    }
     let next = wrapped_result_row(
         "  next: ",
         &card.recommended,
@@ -311,10 +333,7 @@ fn fixed_result_rows(
         },
         PhaseResultRenderSource::default(),
     );
-    FixedPhaseResultRows {
-        heading,
-        trailing: control.into_iter().chain(next).collect(),
-    }
+    control.into_iter().chain(next).collect()
 }
 
 fn bounded_result_detail_rows(

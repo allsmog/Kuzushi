@@ -338,6 +338,10 @@ fn walk_tracked_file(
     if dir_disposition(relative, builder, dispositions) != DirDisposition::Walk {
         return Ok(());
     }
+    if reader.is_known_non_regular(path) {
+        builder.omit_path(relative, "symlinks and non-regular files are not followed");
+        return Ok(());
+    }
     let name = relative.rsplit('/').next().unwrap_or(relative);
     walk_repository_file(reader, path, relative, name, builder, budget)
 }
@@ -916,6 +920,17 @@ mod coverage_limit_tests {
                 .any(|file| file.path == "alias.rs"),
             "tracked symlinks are skipped, matching the fs walk's dirent gate"
         );
+        assert!(
+            inventory.truncation.is_none(),
+            "Known symlink exclusion is not incomplete enumeration"
+        );
+        let inspection = inventory.inspection.unwrap();
+        assert_eq!(inspection.enumeration_complete, Some(true));
+        assert_eq!(inspection.files, vec!["real.rs"]);
+        assert!(inspection
+            .omitted_paths
+            .iter()
+            .any(|entry| entry.path == "alias.rs"));
     }
 
     #[test]

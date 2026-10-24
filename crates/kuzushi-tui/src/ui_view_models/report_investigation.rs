@@ -3,6 +3,7 @@ use crate::app::{ShellApp, ViewDataState};
 use kuzushi_core::workspace::InvestigationReportDocument;
 use kuzushi_core::workspace::InvestigationReportReceipt;
 
+mod context_evidence;
 mod context_guidance;
 mod matrix;
 mod models;
@@ -90,7 +91,29 @@ fn selected_document_lines(app: &ShellApp, document: &InvestigationReportDocumen
             .report_scan_attempt()
             .is_none_or(|attempt| attempt.current);
     let details = app.router.report().provenance_details();
-    let mut lines = match document {
+    let mut lines = document_scope_lines(document, details, current);
+    lines.splice(
+        0..0,
+        reassessment_lines(document.summary().reassessment_required_count),
+    );
+    let context_position = 1.min(lines.len());
+    lines.splice(
+        context_position..context_position,
+        context_evidence::lines(document, details),
+    );
+    lines.extend(operator_brief_lines(document));
+    lines.extend(context_guidance::lines(document));
+    append_recorded_source_notice(&mut lines, explicit);
+    append_document_engine_details(&mut lines, document, details);
+    lines
+}
+
+fn document_scope_lines(
+    document: &InvestigationReportDocument,
+    details: bool,
+    current: bool,
+) -> Vec<String> {
+    match document {
         InvestigationReportDocument::Study(receipt) => study_lines(receipt, details, current),
         InvestigationReportDocument::ContextMatrix(receipt) => {
             matrix::lines(receipt, details, current)
@@ -98,16 +121,20 @@ fn selected_document_lines(app: &ShellApp, document: &InvestigationReportDocumen
         InvestigationReportDocument::ScopeStudy(receipt) => {
             scopes::lines(receipt, details, current)
         }
-    };
-    lines.splice(
-        0..0,
-        reassessment_lines(document.summary().reassessment_required_count),
-    );
-    lines.extend(operator_brief_lines(document));
-    lines.extend(context_guidance::lines(document));
+    }
+}
+
+fn append_recorded_source_notice(lines: &mut Vec<String>, explicit: bool) {
     if explicit {
         lines.insert(1, "This report describes recorded source. Current-source applicability has not been checked here.".into());
     }
+}
+
+fn append_document_engine_details(
+    lines: &mut Vec<String>,
+    document: &InvestigationReportDocument,
+    details: bool,
+) {
     let attempts = document.summary().attempts;
     let recorded = attempts
         .iter()
@@ -117,8 +144,7 @@ fn selected_document_lines(app: &ShellApp, document: &InvestigationReportDocumen
     if details {
         engine_details.extend(engine_detail_lines(document));
     }
-    insert_engine_details(&mut lines, engine_details);
-    lines
+    insert_engine_details(lines, engine_details);
 }
 
 fn operator_brief_lines(document: &InvestigationReportDocument) -> Vec<String> {

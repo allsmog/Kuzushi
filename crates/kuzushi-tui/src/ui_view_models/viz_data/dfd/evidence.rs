@@ -1,5 +1,5 @@
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) struct SecurityEvidence {
     pub references: Vec<String>,
@@ -18,13 +18,43 @@ pub(super) fn security_evidence(value: &Value) -> SecurityEvidence {
     for row in array_rows(value.get("affectedFiles")) {
         collect_literal_row(row, &mut paths);
     }
-    for field in ["evidenceRefs", "evidence"] {
+    collect_source_refs(value, &mut paths);
+    for field in ["evidenceRefs", "evidence", "evidenceAnchors"] {
         collect_evidence_value(&value[field], &mut paths);
     }
     SecurityEvidence {
         references: paths.references.into_iter().collect(),
         files: paths.files.into_iter().collect(),
     }
+}
+
+pub(super) fn element_file_paths(document: &Value) -> BTreeMap<String, Vec<String>> {
+    ["nodes", "flows", "trustBoundaries"]
+        .into_iter()
+        .flat_map(|field| array_rows(document.get("dfd").and_then(|dfd| dfd.get(field))))
+        .filter_map(element_paths)
+        .collect()
+}
+
+fn element_paths(value: &Value) -> Option<(String, Vec<String>)> {
+    let id = value.get("id")?.as_str()?;
+    let files = security_evidence(value).files;
+    (!files.is_empty()).then_some((id.into(), files))
+}
+
+fn collect_source_refs(value: &Value, paths: &mut EvidencePaths) {
+    for reference in array_rows(value.get("sourceRefs")).filter_map(Value::as_str) {
+        if let Some(path) = literal_source_ref_path(reference) {
+            paths.references.insert(reference.into());
+            paths.files.insert(path.into());
+        }
+    }
+}
+
+fn literal_source_ref_path(reference: &str) -> Option<&str> {
+    let (path, line) = reference.rsplit_once(':')?;
+    let line = line.parse::<u32>().ok()?;
+    (line > 0 && !path.trim().is_empty()).then_some(path)
 }
 
 fn array_rows(value: Option<&Value>) -> impl Iterator<Item = &Value> {

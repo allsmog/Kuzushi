@@ -58,7 +58,7 @@ impl ShellApp {
         let state = self.router.scope_review_mut().as_mut().unwrap();
         state.install(review);
         state.open = true;
-        state.notice = Some("Review the suggested boundaries, uncovered files, overlap and input limitations. Acceptance remains separate from scan planning and spending.".into());
+        state.notice = Some("Draft: review before accepting.".into());
     }
 }
 

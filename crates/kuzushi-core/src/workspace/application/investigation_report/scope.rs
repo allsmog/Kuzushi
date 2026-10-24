@@ -2,12 +2,14 @@
 use crate::workspace::{load_scan_scope_proposal, ScanScopeRef, ScanScopeReview, WorkspaceTarget};
 use anyhow::{Context, Result};
 use serde_json::Value;
-mod context_guidance;
-pub(super) use context_guidance::recorded_context_guidance;
+mod context;
+pub(super) use context::recorded_context_report;
 
 pub(super) fn report_scope(workspace: &WorkspaceTarget, input: &Value) -> Result<Value> {
     let mut scope = scope_input(input);
-    scope["contextGuidance"] = recorded_context_guidance(workspace, input);
+    let context = recorded_context_report(workspace, input);
+    scope["contextGuidance"] = context.guidance;
+    scope["contextEvidence"] = context.evidence;
     if let Some(value) = input.get("scanScopeRef") {
         let reference: ScanScopeRef = serde_json::from_value(value.clone())
             .context("study report has an invalid scanScopeRef")?;

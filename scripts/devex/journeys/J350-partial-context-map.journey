@@ -1,0 +1,137 @@
+name: Partial source context stays explicit through local discovery, report and restart
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR SEMGREP_APP_TOKEN SEMGREP_AGENT_TOKEN
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0
+require-shell: python3 -B @REPO/scripts/devex/fixtures/partial_context_map.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/import-command.txt
+keys: Enter
+require-live-snap: 30 RESULT partial | partial-map-receipt
+nav-mode:
+require-live-snap: 15 Acknowledge & use partial | partial-map-result
+expect-not: u Accept result
+require-shell: python3 -B @REPO/scripts/devex/fixtures/partial_context_map.py @TMP_TARGET @ART pending
+resize: 160x48
+wait: 0.3
+require-live-snap: 15 partial | partial-map-160x48
+resize: 96x89
+wait: 0.3
+require-live-snap: 15 partial | partial-map-96x89
+resize: 80x24
+wait: 0.3
+require-live-snap: 15 partial | partial-map-80x24
+resize: 60x20
+wait: 0.3
+require-live-snap: 15 partial | partial-map-60x20
+resize: 40x12
+wait: 0.3
+require-live-snap: 15 partial | partial-map-40x12
+expect: Use partial
+keys: o
+require-live-snap: 25 REPLAY | canonical-result-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/partial_context_map.py @TMP_TARGET @ART limit-page
+live-snap: partial-limit-40x12
+keys: NPage
+require-live-snap: 15 unknown | partial-limit-tail-40x12
+keys: Escape
+require-live-snap: 25 RESULT partial | unresolved-result-return-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/partial_context_map.py @TMP_TARGET @ART pending
+ask: Does partial context retain a readable inspection limit and unknown coverage at every size, with explicit acknowledgment rather than an ordinary success action?
+resize: 120x36
+wait: 0.3
+nav-mode:
+keys: u
+require-live-snap: 25 Map ✓ | acknowledged-partial-map
+require-shell: python3 -B @REPO/scripts/devex/fixtures/partial_context_map.py @TMP_TARGET @ART accepted
+submit: map
+require-live-snap: 25 SYSTEM SUMMARY | partial-architecture
+expect: grounding partial
+submit: use sast
+submit: options sast:scan
+submit: set taskMode manual
+submit: set tasks semgrep
+paste-file: @ART/rule-setting.txt
+keys: Enter
+submit: set semgrepTimeoutMs 60000
+submit: scan batch
+require-live-snap: 25 PLAN A STUDY | finite-study
+keys: L
+require-live-snap: 35 Draft ready | three-fixed-jobs
+keys: Home Down Down Down Down Down Enter
+require-live-snap: 20 Total calls | total-calls
+type: 1
+keys: Enter Down Enter
+require-live-snap: 20 Protected review | protected-review
+type: 1
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/partial_context_map.py @TMP_TARGET @ART draft
+keys: L End
+require-live-snap: 25 y approve | reviewed-local-work
+expect: Execution model: none
+keys: y
+require-live-snap: 30 APPROVED STUDY | approved-study
+keys: L
+require-live-snap: 25 L starts its fixed jobs | separate-launch
+keys: L
+require-live-snap: 30 dispatcher pid | local-scan-started
+require-shell: python3 -B @REPO/scripts/devex/fixtures/partial_context_map.py @TMP_TARGET @ART scanned
+keys: r
+require-live-snap: 30 completed 3 / planned 3 | completed-study
+submit: workbench
+require-live-snap: 30 Viewing Scan | scan-result
+nav-mode:
+keys: n
+require-live-snap: 25 Viewing Review | accepted-scan
+submit: open F-0001
+require-live-snap: 25 Owned policy marker needs an owner decision | policy-finding
+submit: decision deferred Owned static policy needs an owner decision
+submit: report
+require-live-snap: 25 Enter export | partial-context-report
+resize: 160x48
+wait: 0.3
+live-snap: report-160x48
+resize: 96x89
+wait: 0.3
+live-snap: report-96x89
+resize: 80x24
+wait: 0.3
+live-snap: report-80x24
+resize: 60x20
+wait: 0.3
+live-snap: report-60x20
+resize: 40x12
+wait: 0.3
+live-snap: report-40x12
+keys: NPage NPage NPage
+live-snap: report-limits-40x12
+resize: 120x36
+wait: 0.3
+keys: Home p
+require-live-snap: 20 Context limitation: | report-context-details
+resize: 40x12
+wait: 0.3
+require-shell: python3 -B @REPO/scripts/devex/fixtures/partial_context_map.py @TMP_TARGET @ART report-limit-page
+live-snap: report-context-limit-40x12
+keys: p
+ask: Does Report distinguish completed approved scans from partial context coverage, preserve three observations and a human deferral, and disclose no provider spending?
+resize: 120x36
+wait: 0.3
+keys: j j j
+require-live-snap: 20 format json (4/6) | json-format
+keys: Enter
+require-live-snap: 25 EXPORTED | exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/partial_context_map.py @TMP_TARGET @ART exported
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: report
+require-live-snap: 25 Enter export | recovered-report
+require-shell: python3 -B @REPO/scripts/devex/fixtures/partial_context_map.py @TMP_TARGET @ART restarted
+ask: Does no-color restart retain partial context, its explicit acknowledgment, exact scan provenance and the owner decision without new scans, model requests or source execution?
+keys: C-c
+require-exit: 10

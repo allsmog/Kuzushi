@@ -50,17 +50,15 @@ fn matrix_scope(
     baseline: &Value,
 ) -> Result<Value> {
     let mut scope = scope::report_scope(workspace, baseline)?;
-    scope["caseContextGuidance"] = Value::Object(
-        cases
-            .iter()
-            .map(|case| {
-                (
-                    case.id.clone(),
-                    scope::recorded_context_guidance(workspace, &case.base_input),
-                )
-            })
-            .collect(),
-    );
+    let mut guidance = serde_json::Map::new();
+    let mut evidence = serde_json::Map::new();
+    for case in cases {
+        let context = scope::recorded_context_report(workspace, &case.base_input);
+        guidance.insert(case.id.clone(), context.guidance);
+        evidence.insert(case.id.clone(), context.evidence);
+    }
+    scope["caseContextGuidance"] = Value::Object(guidance);
+    scope["caseContextEvidence"] = Value::Object(evidence);
     Ok(scope)
 }
 

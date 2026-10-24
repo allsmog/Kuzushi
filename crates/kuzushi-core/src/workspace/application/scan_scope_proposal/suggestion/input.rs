@@ -4,6 +4,7 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 
 pub(super) const MAX_PROMPT_BYTES: usize = 65_536;
+const MAX_CONTEXT_OUTLINE_BYTES: usize = 8192;
 
 pub(super) struct ScopeModelInput {
     pub document: Value,
@@ -18,17 +19,15 @@ pub(super) fn build(
     context: Option<&Value>,
     priorities: &str,
 ) -> Result<ScopeModelInput> {
-    anyhow::ensure!(
-        priorities.len() <= 2048,
-        "scope priorities exceed 2048 bytes"
-    );
+    validate_priorities(priorities)?;
     let inspection = inventory
         .inspection
         .as_ref()
         .context("scope inventory membership is missing")?;
     let files = sample(&inspection.files, 512, 16_384)?;
     let supplied_files = files["items"].as_array().unwrap().len();
-    let limitations = limitations(inventory, inspection.files.len(), supplied_files);
+    let context = context_outline(context)?;
+    let limitations = limitations(inventory, inspection.files.len(), supplied_files, &context);
     let document = json!({
         "schemaVersion":1, "source":review.record.source,
         "inventoryHash":review.record.inventory_hash,
@@ -40,7 +39,7 @@ pub(super) fn build(
         "entryPoints":sample(&inventory.entrypoints,32,4096)?,
         "currentScopes":sample(&review.record.draft.scopes,8,4096)?,
         "operatorExclusions":sample(&review.record.draft.exclusions,128,4096)?,
-        "context":context_outline(context)?, "operatorPriorities":priorities,
+        "context":context, "operatorPriorities":priorities,
         "limitations":limitations,
     });
     ensure_bounded_document(&document)?;
@@ -50,6 +49,14 @@ pub(super) fn build(
         inventoried_files: inspection.files.len(),
         limitations,
     })
+}
+
+pub(super) fn validate_priorities(priorities: &str) -> Result<()> {
+    anyhow::ensure!(
+        priorities.len() <= 2048,
+        "scope priorities exceed 2048 bytes"
+    );
+    Ok(())
 }
 
 fn sample<T: Serialize>(values: &[T], maximum: usize, byte_limit: usize) -> Result<Value> {
@@ -96,6 +103,7 @@ fn context_outline(context: Option<&Value>) -> Result<Value> {
         return Ok(Value::Null);
     };
     let pointers = [
+        "/systemContext",
         "/contextSummary",
         "/dfd/nodes",
         "/dfd/flows",
@@ -110,11 +118,29 @@ fn context_outline(context: Option<&Value>) -> Result<Value> {
                 .map(|value| json!({"field":pointer,"value":value}))
         })
         .collect();
-    sample(&fields, 5, 8192)
+    sample(&fields, pointers.len(), MAX_CONTEXT_OUTLINE_BYTES)
 }
 
-fn limitations(inventory: &RepositoryInventory, total: usize, supplied: usize) -> Vec<String> {
-    let mut lines = vec!["Each inventory, architecture and current-scope section reports its own omitted rows. Uninspected content is not source understanding.".into()];
+fn context_input_summary(context: &Value) -> String {
+    if context.is_null() {
+        return "Architecture context: omitted.".into();
+    }
+    let total = context["total"].as_u64().unwrap();
+    let omitted = context["omitted"].as_u64().unwrap();
+    format!(
+        "Context sections: {}/{total}; omitted {omitted}. Architecture outline bound: {} KiB.",
+        total - omitted,
+        MAX_CONTEXT_OUTLINE_BYTES / 1024
+    )
+}
+
+fn limitations(
+    inventory: &RepositoryInventory,
+    total: usize,
+    supplied: usize,
+    context: &Value,
+) -> Vec<String> {
+    let mut lines = vec![context_input_summary(context), "Each inventory, architecture and current-scope section reports its own omitted rows. Uninspected content is not source understanding.".into()];
     lines.push(format!("The proposal receives {supplied} of {total} enumerated file names; remaining files still require coverage review."));
     if let Some(truncated) = &inventory.truncation {
         lines.push(format!("Inventory is partial: {}", truncated.reason));

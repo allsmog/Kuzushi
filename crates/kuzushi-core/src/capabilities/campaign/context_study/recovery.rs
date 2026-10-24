@@ -8,7 +8,7 @@ mod scope_failure;
 pub use proposal::WorkflowProposalResult;
 pub use question::ContextQuestionAnswer;
 
-/// The authenticated output of one completed context job, without activation.
+/// The authenticated output of one finished context job, without activation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GeneratedStudyContext {
     pub reference: ThreatModelRef,
@@ -33,7 +33,7 @@ impl ContextStudyReceipt {
         super::super::study_receipt::load_investigation_allowance(root, &self.investigation_id)
     }
 
-    /// Only an exact revision committed by this completed campaign job is a result.
+    /// Only an exact revision committed by this finished campaign job is a result.
     pub fn generated_context(&self, root: &Path) -> Result<Option<ThreatModelRef>> {
         Ok(self
             .generated_context_document(root)?
@@ -48,27 +48,14 @@ impl ContextStudyReceipt {
             ),
             "scope proposal jobs do not create accepted Map context"
         );
-        let Some(run) = completed_context_run(root, self)? else {
+        let job = context_generation_job(root, self)?;
+        if super::partial_output::eligible(self, &job) {
+            return super::partial_output::read(root, self, &job).map(Some);
+        }
+        let Some(run) = completed_job_run_id(&job)? else {
             return Ok(None);
         };
-        let manifest = load_threat_model_manifest(root)?
-            .context("completed context job has no immutable context manifest")?;
-        let mut matches = revisions_for_run(manifest, &run);
-        anyhow::ensure!(
-            !matches.is_empty(),
-            "completed context job has no immutable revision for run {run}"
-        );
-        anyhow::ensure!(
-            matches.len() == 1,
-            "completed context job has ambiguous immutable revisions"
-        );
-        let reference = matches.remove(0);
-        let document = load_exact_threat_model(root, &reference)?;
-        validate_generated_origin(self, &run, &document)?;
-        Ok(Some(GeneratedStudyContext {
-            reference,
-            document,
-        }))
+        context_revision_for_run(root, self, &run).map(Some)
     }
 
     pub fn generated_scopes(
@@ -163,16 +150,29 @@ fn load_saved_scope_result(
 }
 
 fn completed_context_run(root: &Path, receipt: &ContextStudyReceipt) -> Result<Option<String>> {
+    completed_job_run_id(&context_generation_job(root, receipt)?)
+}
+
+fn context_generation_job(
+    root: &Path,
+    receipt: &ContextStudyReceipt,
+) -> Result<super::super::snapshot::CampaignJobSnapshot> {
     let snapshot = super::super::snapshot::load_campaign_snapshot(root, &receipt.campaign_id)?;
     let job = snapshot
         .jobs
-        .iter()
+        .into_iter()
         .find(|job| job.job_id == JOB)
         .context("context study has no generation job")?;
     anyhow::ensure!(
         job.tool.as_deref() == Some(receipt.generation_tool.as_str()),
         "context generation job tool changed"
     );
+    Ok(job)
+}
+
+fn completed_job_run_id(
+    job: &super::super::snapshot::CampaignJobSnapshot,
+) -> Result<Option<String>> {
     if !context_job_completed(job)? {
         return Ok(None);
     }
@@ -181,6 +181,31 @@ fn completed_context_run(root: &Path, receipt: &ContextStudyReceipt) -> Result<O
             .clone()
             .context("completed context job has no run identity")?,
     ))
+}
+
+pub(super) fn context_revision_for_run(
+    root: &Path,
+    receipt: &ContextStudyReceipt,
+    run: &str,
+) -> Result<GeneratedStudyContext> {
+    let manifest = load_threat_model_manifest(root)?
+        .context("completed context job has no immutable context manifest")?;
+    let mut matches = revisions_for_run(manifest, run);
+    anyhow::ensure!(
+        !matches.is_empty(),
+        "completed context job has no immutable revision for run {run}"
+    );
+    anyhow::ensure!(
+        matches.len() == 1,
+        "completed context job has ambiguous immutable revisions"
+    );
+    let reference = matches.remove(0);
+    let document = load_exact_threat_model(root, &reference)?;
+    validate_generated_origin(receipt, run, &document)?;
+    Ok(GeneratedStudyContext {
+        reference,
+        document,
+    })
 }
 
 pub(super) fn validate_generated_origin(

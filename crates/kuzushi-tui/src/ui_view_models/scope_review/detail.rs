@@ -1,3 +1,4 @@
+use super::generation::generation_detail;
 use super::*;
 use crate::app::{selected_scope, ScopeReviewState};
 
@@ -74,30 +75,6 @@ fn file_detail(files: &crate::app::ScopeFiles) -> Vec<String> {
     lines
 }
 
-fn generation_detail(review: &kuzushi_core::workspace::ScanScopeReview) -> Vec<String> {
-    let Some(generation) = &review.record.generation else {
-        return Vec::new();
-    };
-    let edited = serde_json::to_string(&review.record.draft)
-        .map(|text| kuzushi_core::options::prompt_content_sha256(&text) != generation.draft_sha256)
-        .unwrap_or(true);
-    let mut lines = vec![
-        format!(
-            "Suggested with {}. Subsequent operator edits: {edited}.",
-            crate::app::display_model_selector(&generation.model)
-        ),
-        format!(
-            "Model input: {} bytes; {} of {} file names supplied. Run: {}.",
-            generation.input_bytes,
-            generation.supplied_files,
-            generation.inventoried_files,
-            generation.run_id
-        ),
-    ];
-    lines.extend(generation.limitations.clone());
-    lines
-}
-
 fn selected_detail(state: &ScopeReviewState) -> Vec<String> {
     let Some(review) = state.review.as_ref() else {
         return Vec::new();
@@ -127,18 +104,22 @@ fn selected_heading(
     state: &ScopeReviewState,
     scope: &kuzushi_core::workspace::ProposedScanScope,
 ) -> Vec<String> {
-    let mut lines = vec![
-        scope.name.clone(),
-        format!(
-            "Boundary: {}",
-            scope
-                .paths
-                .iter()
-                .map(|path| super::paths::display_path(path))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-    ];
+    let mut lines = vec![scope.name.clone()];
+    lines.extend(super::generation::generation_summary(
+        state
+            .review
+            .as_ref()
+            .and_then(|review| review.record.generation.as_ref()),
+    ));
+    lines.push(format!(
+        "Boundary: {}",
+        scope
+            .paths
+            .iter()
+            .map(|path| super::paths::display_path(path))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ));
     lines.extend(super::workload::summary(state));
     lines.extend([
         format!("Why: {}", scope.rationale),

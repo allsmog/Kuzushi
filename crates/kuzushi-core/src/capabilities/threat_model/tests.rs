@@ -1,5 +1,7 @@
 #[path = "tests/accounting.rs"]
 mod accounting;
+#[path = "tests/partial_catalog_generation.rs"]
+mod partial_catalog_generation;
 #[path = "tests/randori_contracts.rs"]
 mod randori_contracts;
 

@@ -582,6 +582,8 @@ fn scope_review_viewports_keep_controls_and_plain_output_keeps_recorded_source()
         assert!(text.contains("Esc back"), "{width}x{height}");
         assert!(text.contains("Enter menu"), "{width}x{height}");
         assert!(text.contains("p plan"), "{width}x{height}");
+        assert!(text.contains("a accept"), "{width}x{height}");
+        assert!(text.contains("f files"), "{width}x{height}");
         press(&mut app, KeyCode::Char('a'));
         terminal
             .draw(|frame| crate::render_app(frame, &app))

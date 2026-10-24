@@ -123,7 +123,7 @@ pub(crate) fn threat_model_freshness(app: &ShellApp) -> ThreatModelFreshnessMode
     ThreatModelFreshnessModel {
         requires_attention: matches!(
             verdict.as_str(),
-            "failed" | "stale" | "verification stale" | "manual edit"
+            "failed" | "stale" | "partial" | "verification stale" | "manual edit"
         ),
         verdict,
         document_sha256: row.active_sha256.clone(),
@@ -313,7 +313,7 @@ fn legacy_threat_model_freshness(app: &ShellApp) -> ThreatModelFreshnessModel {
         })
         .unwrap_or_else(|| "unverified".to_string());
     ThreatModelFreshnessModel {
-        requires_attention: matches!(verdict.as_str(), "failed" | "stale"),
+        requires_attention: matches!(verdict.as_str(), "failed" | "stale" | "partial"),
         verdict,
         document_sha256: active_mirror_sha256(app),
         current_sha256: active_mirror_sha256(app),
@@ -1058,6 +1058,15 @@ mod tests {
         assert_eq!(freshness.verdict, "manual edit");
         assert!(freshness.requires_attention);
         assert_ne!(freshness.document_sha256, freshness.current_sha256);
+    }
+
+    #[test]
+    fn legacy_partial_verification_remains_visible_and_requires_attention() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = app_with_threat_model_json(&temp, r#"{"verification":{"verdict":"partial"}}"#);
+        let freshness = threat_model_freshness(&app);
+        assert_eq!(freshness.verdict, "partial");
+        assert!(freshness.requires_attention);
     }
 
     #[test]

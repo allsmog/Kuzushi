@@ -147,6 +147,7 @@ pub(crate) fn build_agent_prompt(
         manifest_section(&manifest_summary),
         project_overview_section(&project_overview),
         attack_surface_section(&grounding.surfaces),
+        partial_catalog_prompt_warning(grounding),
         confirmed_findings_section(&grounding.confirmed_findings),
         operator_vulns_section(&input.vulns),
         previous_model_section(previous_model),

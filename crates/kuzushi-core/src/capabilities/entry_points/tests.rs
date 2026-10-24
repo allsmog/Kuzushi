@@ -40,7 +40,10 @@ fn legacy_rust_snapshot_cannot_recreate_the_same_test_surface_catalog() {
     old["attackSurfaceMap"]["surfaces"][0]["metadata"] = json!({});
     write_snapshot(target.path(), &old);
     let freshness = crate::context::context_snapshot_freshness(target.path(), &old);
-    assert!(freshness.disclosure().unwrap().contains("test-scope filtering"));
+    assert!(freshness
+        .disclosure()
+        .unwrap()
+        .contains("test-scope filtering"));
     let error = ensure_current_entry_point_catalog(target.path()).unwrap_err();
     assert!(error.to_string().contains("context:build"), "{error:#}");
     assert!(!target.path().join(".kuzushi/entry-points.json").exists());
@@ -51,12 +54,20 @@ fn explicit_legacy_rust_catalog_refuses_new_grounding_without_rewriting_history(
     let target = tempfile::tempdir().unwrap();
     write_snapshot(target.path(), &snapshot(target.path()));
     let (mut catalog, path) = refresh_entry_point_catalog(target.path()).unwrap();
-    catalog.entry_points[0].surface.metadata.as_object_mut().unwrap().remove("sourcePolicy");
+    catalog.entry_points[0]
+        .surface
+        .metadata
+        .as_object_mut()
+        .unwrap()
+        .remove("sourcePolicy");
     catalog.provenance.sha256 = entry_points_sha256(&catalog.entry_points).unwrap();
     super::persistence::write_entry_point_catalog(target.path(), &catalog).unwrap();
     let before = std::fs::read(&path).unwrap();
     let error = load_explicit_entry_point_catalog(target.path()).unwrap_err();
-    assert!(error.to_string().contains("test-scope filtering"), "{error:#}");
+    assert!(
+        error.to_string().contains("test-scope filtering"),
+        "{error:#}"
+    );
     assert_eq!(std::fs::read(path).unwrap(), before);
 }
 
@@ -147,7 +158,10 @@ fn partial_legacy_risk_is_normalized_without_dropping_the_row() {
 fn missing_or_non_array_surface_catalog_is_not_stamped_complete() {
     let target = tempfile::tempdir().unwrap();
     let mut missing = snapshot(target.path());
-    missing["attackSurfaceMap"].as_object_mut().unwrap().remove("surfaces");
+    missing["attackSurfaceMap"]
+        .as_object_mut()
+        .unwrap()
+        .remove("surfaces");
     write_snapshot(target.path(), &missing);
     assert!(refresh_entry_point_catalog(target.path())
         .unwrap_err()
@@ -229,7 +243,10 @@ fn truncated_context_snapshot_extracts_a_declared_partial_catalog() {
     );
     let disclosure = catalog.snapshot_coverage.disclosure().unwrap();
     assert!(disclosure.contains("snapshot byte budget"), "{disclosure}");
-    assert!(disclosure.contains("1186 snapshot entries omitted"), "{disclosure}");
+    assert!(
+        disclosure.contains("1186 snapshot entries omitted"),
+        "{disclosure}"
+    );
     assert!(path.exists());
     let written: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
@@ -269,10 +286,15 @@ fn grounding_refuses_a_partial_catalog_extraction_still_wrote() {
 
     for error in [&ensured, &explicit] {
         assert!(
-            error.to_string().contains("requires a complete context snapshot"),
+            error
+                .to_string()
+                .contains("requires a complete context snapshot"),
             "{error:#}"
         );
-        assert!(error.to_string().contains("7 snapshot entries omitted"), "{error:#}");
+        assert!(
+            error.to_string().contains("7 snapshot entries omitted"),
+            "{error:#}"
+        );
     }
 }
 
@@ -336,7 +358,9 @@ fn a_pre_coverage_catalog_is_refused_for_its_silence_not_a_mismatch() {
     let error = validate_catalog(target.path(), &catalog, &context).unwrap_err();
 
     assert!(
-        error.to_string().contains("records no snapshot coverage of its own"),
+        error
+            .to_string()
+            .contains("records no snapshot coverage of its own"),
         "{error:#}"
     );
 }
@@ -358,7 +382,9 @@ fn a_catalog_cannot_claim_complete_coverage_of_a_truncated_snapshot() {
     let error = validate_catalog(target.path(), &catalog, &context).unwrap_err();
 
     assert!(
-        error.to_string().contains("coverage does not match its context snapshot"),
+        error
+            .to_string()
+            .contains("coverage does not match its context snapshot"),
         "{error:#}"
     );
 }
@@ -457,7 +483,10 @@ fn stale_non_git_snapshot_requires_context_rebuild() {
 
     let error = refresh_entry_point_catalog(target.path()).unwrap_err();
 
-    assert!(error.to_string().contains("tree identity is stale"), "{error:#}");
+    assert!(
+        error.to_string().contains("tree identity is stale"),
+        "{error:#}"
+    );
 }
 
 #[test]
@@ -469,7 +498,9 @@ fn explicit_catalog_rejects_current_target_byte_drift() {
 
     let error = load_explicit_entry_point_catalog(target.path()).unwrap_err();
 
-    assert!(error.to_string().contains("stale against the current target"));
+    assert!(error
+        .to_string()
+        .contains("stale against the current target"));
 }
 
 #[test]
@@ -523,16 +554,23 @@ fn verification_degrades_on_the_stale_snapshot_producers_still_refuse() {
 }
 
 #[test]
-fn verification_still_fails_on_an_incomplete_snapshot() {
+fn verification_retains_authenticated_observations_from_a_partial_snapshot() {
     let target = tempfile::tempdir().unwrap();
     let mut value = snapshot(target.path());
     value["repositoryInventory"] = json!({"truncation": {"reason": "snapshot byte budget"}});
     write_snapshot(target.path(), &value);
 
-    let error = resolve_entry_point_catalog_for_verification(target.path()).unwrap_err();
-
-    assert!(
-        error.to_string().contains("requires a complete context snapshot"),
-        "only stale source identity degrades: {error:#}"
-    );
+    let verification = resolve_entry_point_catalog_for_verification(target.path()).unwrap();
+    let VerificationCatalogGrounding::Catalog(catalog) = verification else {
+        panic!("Current partial observations require an authenticated catalog");
+    };
+    assert_eq!(catalog.total, 1);
+    assert!(catalog.snapshot_coverage.is_partial());
+    assert!(catalog
+        .snapshot_coverage
+        .disclosure()
+        .unwrap()
+        .contains("snapshot byte budget"));
+    assert!(ensure_current_entry_point_catalog(target.path()).is_err());
+    assert!(load_explicit_entry_point_catalog(target.path()).is_err());
 }

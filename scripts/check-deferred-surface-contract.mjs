@@ -134,7 +134,13 @@ const deferredDocNeedles = [
 ];
 
 const capabilityReadmeNeedles = [
-  "six operator capabilities",
+  "| Context | `context:build`, `threat-model:*` |",
+  "| Scope | `pack:scopes`, `pack:suggest-scopes` |",
+  "| Scan | `campaign:study`, `sast:scan` |",
+  "| Review | `findings:*` |",
+  "| Report | `report:build` |",
+  "Historical Prove/Fix artifacts remain",
+  "patching are excluded from this workflow.",
   "Capabilities** overlay",
   "are no longer activated merely because",
 ];

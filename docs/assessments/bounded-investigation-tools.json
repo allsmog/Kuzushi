@@ -300,7 +300,7 @@
         "threatModelRef",
         "allowanceRef"
       ],
-      "executionEvidence": "Existing completed-campaign regressions plus three real runtime-free producer/admission checks authenticate an exact revision and producing run, preserve partial outcome, reject corruption and source drift, retain idempotency and require explicit acknowledgement. J94 exercises CLI producers, shell review, exact context inheritance and no-color restart with zero provider calls. Live context quality remains unproven. Actual completed OAuth context now reaches authenticated pending Map and explicit selection through J96 without new provider requests; this does not establish scanner precision.",
+      "executionEvidence": "Existing completed-campaign regressions plus three real runtime-free producer/admission checks authenticate an exact revision and producing run, preserve partial outcome, reject corruption and source drift, retain idempotency and require explicit acknowledgement. J94 exercises CLI producers, shell review, exact context inheritance and no-color restart with zero provider calls. Live context quality remains unproven. Actual completed OAuth context now reaches authenticated pending Map and explicit selection through J96 without new provider requests; this does not establish scanner precision. October 24: J351 records and explicitly acknowledges authenticated partial generation without relabeling the failed queue or creating work. The exact context reaches three fixed local scans and historical Report after restart. See docs/assessments/generated-partial-context-workflow-2026-10-24.md.",
       "readinessVerdict": "narrow-existing-context-handoff-verified; full investigation and live quality remain open",
       "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
       "auditDimensions": {
@@ -1857,7 +1857,7 @@
       "module": "fuzz",
       "declaredMaturity": "labs",
       "declaredPhase": "scan",
-      "purpose": "Replay one engine target's corpus through N implementations (fork vs upstream, or one command as a metamorphic self-check) and rank the divergences: crash-split first, then validity- and output-splits — the silent-wrong-data oracle the crash lane never fires on.",
+      "purpose": "Replay one engine target's corpus through N implementations (fork vs upstream, or one command as a metamorphic self-check) and rank the divergences: crash-split first, then validity- and output-splits \u2014 the silent-wrong-data oracle the crash lane never fires on.",
       "scope": "excluded-work",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -2571,7 +2571,7 @@
     {
       "tool": "pack:suggest-scopes",
       "scope": "one budgeted architecture proposal over an authenticated existing inventory; no discovery",
-      "executionEvidence": "Two explicitly approved normal OAuth jobs on the same owned nine-file monorepo, GPT-6 Luna low: first rejected an undeclared dependency; corrected instructions then produced a valid unaccepted revision with three primary boundaries, shared context and two uncovered discovery members. Each job used one request and one attempt. Controlled tests cover scope-id dependencies and context-only membership.",
+      "executionEvidence": "Two explicitly approved normal OAuth jobs on the same owned nine-file monorepo, GPT-6 Luna low: first rejected an undeclared dependency; corrected instructions then produced a valid unaccepted revision with three primary boundaries, shared context and two uncovered discovery members. Each job used one request and one attempt. Controlled tests cover scope-id dependencies and context-only membership. October 24: canonical systemContext is supplied from the exact immutable selected revision under the existing 8 KiB projection. Final J88 has 49 machine passes, zero failures and eight pending operator judgments; one intercepted actual adapter request preserves overview quotes/newlines, one settled reservation, unchanged active context and a separately unstarted three-job scan. The 40-column input receipt takes two PageDown presses instead of 35. See docs/assessments/scope-context-overview-2026-10-24.md. This is handoff and workflow evidence, not live inference or useful large-monorepo grouping evidence.",
       "readinessVerdict": "bounded real-model proposal, failure and native recovery evidenced on nine files; large-monorepo usefulness and broad acceptance pending",
       "auditDimensions": {
         "purposeAndValue": "Small real proposal groups the two CLI packages and preserves all three loose root files. Shared greeting code remains uncovered and is disclosed. Larger architecture, source understanding and complete discovery planning remain unproven.",
@@ -3984,7 +3984,7 @@
         "model",
         "allowanceRef"
       ],
-      "executionEvidence": "J175 executes deterministic context and entry-point producers, one real GPT-6 Luna/low OAuth synthesis, explicit inactive context acceptance, three scoped discovery passes, scripted human fixture triage, selected-study export and no-color restart. Source remains inert at a real clean Git commit. This proves a small owned workflow, not production precision or completeness. October 23: one approved source-only request through the current frozen runtime, stored OAuth and GPT-6 Luna low produces an inactive seven-component, seven-flow draft from seven selected files. Its 76 citation occurrences resolve to selected paths and valid line bounds. Source bytes and active context remain unchanged. No source execution or findings are added. See docs/assessments/context-reader-live-2026-10-23.md. Fresh generated-role rejection, parse-only cost retention and final J343 are recorded in docs/assessments/generated-context-rejection-2026-10-23.md; the settled baseline J121 has 212 machine passes and no failures. Current Report reading and readiness checks are recorded in the same assessment.",
+      "executionEvidence": "J175 executes deterministic context and entry-point producers, one real GPT-6 Luna/low OAuth synthesis, explicit inactive context acceptance, three scoped discovery passes, scripted human fixture triage, selected-study export and no-color restart. Source remains inert at a real clean Git commit. This proves a small owned workflow, not production precision or completeness. October 23: one approved source-only request through the current frozen runtime, stored OAuth and GPT-6 Luna low produces an inactive seven-component, seven-flow draft from seven selected files. Its 76 citation occurrences resolve to selected paths and valid line bounds. Source bytes and active context remain unchanged. No source execution or findings are added. See docs/assessments/context-reader-live-2026-10-23.md. Fresh generated-role rejection, parse-only cost retention and final J343 are recorded in docs/assessments/generated-context-rejection-2026-10-23.md; the settled baseline J121 has 212 machine passes and no failures. Current Report reading and readiness checks are recorded in the same assessment. October 24: five shared-registry single-pipeline regressions use finite accounted scripted queries over authenticated partial catalog observations. They retain snapshotCoverage in model input, require activate=false before any query, preserve the active revision, stamp partial verification and reject changed digests, lost snapshots and promotion by a later complete catalog. All 693 context tests pass. Rebuilt J350 has 38 machine passes, zero failures and three pending operator judgments through the separate existing partial-import journey; no provider transport or live generation quality is established. See docs/assessments/partial-context-generation-2026-10-24.md. October 24 generated-partial workflow: the earlier five scripted checks did not establish immutable persistence. Eight strengthened checks require saved references in positive generation cases and cover actual study defaults, source-only staged generation and unchanged refine. J351 executes the real adapter with one intercepted offline response, authenticates partial recovery, requires Map acknowledgment and completes three fixed local scans, scripted human deferral, export and restart. Final native run has 52 machine passes, zero failures and three pending operator judgments. See docs/assessments/generated-partial-context-workflow-2026-10-24.md. No live quality or broad configuration claim follows.",
       "readinessVerdict": "Scoped live exact-file context draft and current reader verified; repeated node semantics, reliability, full configurations and complete operator workflow remain open",
       "resourceEvidence": [
         "Staged synthesis and conditional gap-fill use estimated stage deposits. Settlement now requires a complete cost receipt; transport failures and incomplete structured-output costs retain the reservation.",
@@ -3999,7 +3999,7 @@
         "requiredInputs": "Exact-file mode accepts 1 to 256 literal sourcePaths and an immutable inheritedContextRef under an approved context study. It excludes accepted-group and legacy build/scope selectors. Current live evidence supplies seven selected files (2221 raw bytes) from one owned 14-file fixture. Other modes retain separate qualification.",
         "sharedDispatchExecution": "The current frozen runtime completes one approved threat-model:build job through normal stored-OAuth transport with GPT-6 Luna low, no tools or output repair. Exact-file, source inventory and regeneration contracts use shared prepared dispatch. General model accuracy remains unqualified.",
         "artifactConsumption": "Inventory and entry-point catalog feed the persisted context and DFD. Exact revision readers and campaign:context-map consume authenticated producing results; source/citation limitations remain in the document and Map view.",
-        "failureAndRecovery": "Shared preparation refuses missing runtime, invalid inputs and stale context sources. Malformed output, cancellation and source drift retain failure/partial state. Existing source-bound generation/handoff tests and historical live rejection/recovery records distinguish these outcomes. Fresh unknown/missing DFD node roles reject before compatibility normalization. Final J343 retains one spent call and unchanged source/context through local diagnostic inspection and restart; no repair or extra job occurs.",
+        "failureAndRecovery": "Shared preparation refuses missing runtime, invalid inputs and stale context sources. Malformed output, cancellation and source drift retain failure/partial state. Existing source-bound generation/handoff tests and historical live rejection/recovery records distinguish these outcomes. Fresh unknown/missing DFD node roles reject before compatibility normalization. Final J343 retains one spent call and unchanged source/context through local diagnostic inspection and restart; no repair or extra job occurs. Partial recovery now authenticates the typed finished run, tool, frozen input and exact producing revision while preserving failed queue state; missing, changed and mismatched evidence is refused.",
         "approvedResources": "The current live case admits exactly one new provider request including retries, using the final available call in its two-call investigation allowance. Both reservations are settled; provider dollar evidence remains incomplete. Cumulative experiment usage is 16 with no allowance remaining. This is separate from the synthetic J339 allowance and does not prove a strict dollar ceiling.",
         "scopeEnforcement": "Exact-file mode validates literal membership against source-bound inventory and retains selected excerpts, file hashes, byte limits, omissions and inherited revision in its receipt. Known selected members work under partial inventory; unknown members, cancellation and invented extent are refused. No complete-repository, discovery-scope acceptance or follow-up permission is inferred.",
         "interfaceParity": "Descriptor options and prepared dispatch are shared by shell, headless tools and Map orchestration. Fresh producer tests and current full-journey validation cover the supported path; unsupported pipeline choices are not implied to work."
@@ -4041,7 +4041,7 @@
       "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
       "auditDimensions": {
         "purposeAndValue": "Real producer/consumer proof for context choice, comparison and reversible history. Preserves operator edits, exact references and source provenance; does not establish generated context quality or finding validity.",
-        "phaseAgreement": "The guided Map remains separate from auxiliary context management. A false partial Map receipt was reproduced and repaired in the shared descriptors; existing build/import producers remain unchanged.",
+        "phaseAgreement": "Core supporting Map inspection. Listing lineages, listing revisions and comparing saved contexts do not produce or replace a selectable Map result. They retain exact dispatch and their existing outputs.",
         "requiredInputs": "Selected workspace, typed lineage/revision identifiers and declared options use prepared dispatch. Missing/malformed selectors, unknown keys and a foreign inline target refuse; methods retain their existing workspace requirements. All combinations remain pending.",
         "sharedDispatchExecution": "Core lifecycle tests and actual native run/shell operations pass through shared prepared dispatch with existing explicit-command authorization. No new per-mode policy or parser was added.",
         "artifactConsumption": "Exact saved revisions feed the shared complete domain comparison. Legacy structural and contextText fields remain; additive contextStructure schema version 1 retains full values, before/after pointers, literal matching method, collection order and recognized saved source claims. The study reader and exhaustive plain output consume those same comparisons. Stored claims do not verify current source or finding verdicts.",
@@ -4054,14 +4054,14 @@
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
       "effect": "read",
-      "phaseResult": true,
-      "phaseEvidence": "Map context surface; read actions use the existing read-result policy. Activate/restore/adopt are auxiliary phase_result=false and cannot replace a Map attempt. Native completed receipts and the consumed TUI boundary are verified.",
+      "phaseResult": false,
+      "phaseEvidence": "Supporting Map inspection only. Catalog and comparison receipts do not establish an investigation or replace a selectable Map result. Historical raw receipts remain readable; phase projection excludes known catalog-only attempts without rewriting events. See docs/assessments/context-catalog-phase-2026-10-24.md.",
       "evidencePath": "docs/assessments/context-lifecycle-2026-10-09.md",
       "evidenceSourceCommit": "c25b38fd67d0f535631cbe66e5faf360ba48f3b7",
       "evidenceSourceState": "dirty main, source/binary/capture receipts retained",
       "contextHistoryTuiEvidence": "J141 provides exact revision selection, summary/full inspection, baseline comparison, explicit activation/restore and no-color restart. Browsing uses the hydrated immutable manifest; actions use shared dispatch. J140 retains headless/typed command and adoption compatibility. Large stores, all option paths and reference parity remain pending.",
-      "phaseResultDeclared": true,
-      "descriptorSha256": "sha256:78b79b32781a84467c194269963ee546318bea562f1f05d13d0807953ba6b7c0"
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:9a685d8d3f0caefd0dce1c74e668ce7678d60e50e91602ad63e342a904655b14"
     },
     {
       "tool": "threat-model:import",
@@ -4086,7 +4086,7 @@
         "force",
         "allowanceRef"
       ],
-      "executionEvidence": "Nine shared-dispatch import tests cover verification persistence and the accepted Map consumer. A new study inherits accepted Alpha while globally active Beta remains unchanged; changed source requires a current Map or explicit context selection. Imports return exact normalized documents and authenticated indexed snapshot receipts. Grounding can fail and is disclosed. Deep-tree limits, cancellation and real-project usefulness remain audit work. New immutable imports retain their producing run. J94 imports globally active Beta while accepting and planning with exact Alpha; historical artifacts remain unchanged.",
+      "executionEvidence": "Nine shared-dispatch import tests cover verification persistence and the accepted Map consumer. A new study inherits accepted Alpha while globally active Beta remains unchanged; changed source requires a current Map or explicit context selection. Imports return exact normalized documents and authenticated indexed snapshot receipts. Grounding can fail and is disclosed. Deep-tree limits, cancellation and real-project usefulness remain audit work. New immutable imports retain their producing run. J94 imports globally active Beta while accepting and planning with exact Alpha; historical artifacts remain unchanged. Current partial-catalog import regressions preserve active context, refuse implicit activation and complete-catalog claims, retain positive-row coverage checks, and reject missing citations and malformed snapshots. This is bounded local functional evidence; model usefulness and complete repository coverage are not established. Final J350 records 38 machine passes, zero failures and three pending operator judgments through inactive partial import, explicit Map acknowledgment, three fixed local Semgrep jobs, human deferral, exact-context Report and no-color restart. The source and active context remain unchanged; no provider request is made. See docs/assessments/partial-context-map-2026-10-24.md.",
       "readinessVerdict": "narrow-functional-proof",
       "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
       "auditDimensions": {
@@ -4103,7 +4103,7 @@
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
       "phaseResultDeclared": true,
-      "descriptorSha256": "sha256:b8197e85e4eeda7ab4e3ac3a847e7d140a7447f4b49a5aa0ca3954558a8b7d3b"
+      "descriptorSha256": "sha256:4fd955f5651c38b1ad2a7fa027a9842d469ac7577c5ba2b8b7c3f5d6c836dcb9"
     },
     {
       "tool": "threat-model:methodologies",
@@ -4158,7 +4158,7 @@
       "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
       "auditDimensions": {
         "purposeAndValue": "Real producer/consumer proof for context choice, comparison and reversible history. Preserves operator edits, exact references and source provenance; does not establish generated context quality or finding validity.",
-        "phaseAgreement": "The guided Map remains separate from auxiliary context management. A false partial Map receipt was reproduced and repaired in the shared descriptors; existing build/import producers remain unchanged.",
+        "phaseAgreement": "Core supporting Map inspection. Listing lineages, listing revisions and comparing saved contexts do not produce or replace a selectable Map result. They retain exact dispatch and their existing outputs.",
         "requiredInputs": "Selected workspace, typed lineage/revision identifiers and declared options use prepared dispatch. Missing/malformed selectors, unknown keys and a foreign inline target refuse; methods retain their existing workspace requirements. All combinations remain pending.",
         "sharedDispatchExecution": "Core lifecycle tests and actual native run/shell operations pass through shared prepared dispatch with existing explicit-command authorization. No new per-mode policy or parser was added.",
         "artifactConsumption": "Immutable objects and manifest metadata feed exact reads, comparison, active-pointer presentation, history and restart. Full text/hashes/changed sections are retained; activation and restoration do not alter original objects. Adoption invalidates old verification and protects later edits.",
@@ -4170,14 +4170,14 @@
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
       "effect": "read",
-      "phaseResult": true,
-      "phaseEvidence": "Map context surface; read actions use the existing read-result policy. Activate/restore/adopt are auxiliary phase_result=false and cannot replace a Map attempt. Native completed receipts and the consumed TUI boundary are verified.",
+      "phaseResult": false,
+      "phaseEvidence": "Supporting Map inspection only. Catalog and comparison receipts do not establish an investigation or replace a selectable Map result. Historical raw receipts remain readable; phase projection excludes known catalog-only attempts without rewriting events. See docs/assessments/context-catalog-phase-2026-10-24.md.",
       "evidencePath": "docs/assessments/context-lifecycle-2026-10-09.md",
       "evidenceSourceCommit": "c25b38fd67d0f535631cbe66e5faf360ba48f3b7",
       "evidenceSourceState": "dirty main, source/binary/capture receipts retained",
       "contextHistoryTuiEvidence": "J141 provides exact revision selection, summary/full inspection, baseline comparison, explicit activation/restore and no-color restart. Browsing uses the hydrated immutable manifest; actions use shared dispatch. J140 retains headless/typed command and adoption compatibility. Large stores, all option paths and reference parity remain pending.",
-      "phaseResultDeclared": true,
-      "descriptorSha256": "sha256:7402fd2457f1eb0b1514d434598267ad80184ddb0e6105984443c13a00aa51bc"
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:7a89c27fb44b2c62e3f788d4bc66dccdb48e6686892b1bb15d5892a2c5a4d2d3"
     },
     {
       "tool": "threat-model:read",
@@ -4438,7 +4438,7 @@
       "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
       "auditDimensions": {
         "purposeAndValue": "Real producer/consumer proof for context choice, comparison and reversible history. Preserves operator edits, exact references and source provenance; does not establish generated context quality or finding validity.",
-        "phaseAgreement": "The guided Map remains separate from auxiliary context management. A false partial Map receipt was reproduced and repaired in the shared descriptors; existing build/import producers remain unchanged.",
+        "phaseAgreement": "Core supporting Map inspection. Listing lineages, listing revisions and comparing saved contexts do not produce or replace a selectable Map result. They retain exact dispatch and their existing outputs.",
         "requiredInputs": "Selected workspace, typed lineage/revision identifiers and declared options use prepared dispatch. Missing/malformed selectors, unknown keys and a foreign inline target refuse; methods retain their existing workspace requirements. All combinations remain pending.",
         "sharedDispatchExecution": "Core lifecycle tests and actual native run/shell operations pass through shared prepared dispatch with existing explicit-command authorization. No new per-mode policy or parser was added.",
         "artifactConsumption": "Immutable objects and manifest metadata feed exact reads, comparison, active-pointer presentation, history and restart. Full text/hashes/changed sections are retained; activation and restoration do not alter original objects. Adoption invalidates old verification and protects later edits.",
@@ -4450,14 +4450,14 @@
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
       "effect": "read",
-      "phaseResult": true,
-      "phaseEvidence": "Map context surface; read actions use the existing read-result policy. Activate/restore/adopt are auxiliary phase_result=false and cannot replace a Map attempt. Native completed receipts and the consumed TUI boundary are verified.",
+      "phaseResult": false,
+      "phaseEvidence": "Supporting Map inspection only. Catalog and comparison receipts do not establish an investigation or replace a selectable Map result. Historical raw receipts remain readable; phase projection excludes known catalog-only attempts without rewriting events. See docs/assessments/context-catalog-phase-2026-10-24.md.",
       "evidencePath": "docs/assessments/context-lifecycle-2026-10-09.md",
       "evidenceSourceCommit": "c25b38fd67d0f535631cbe66e5faf360ba48f3b7",
       "evidenceSourceState": "dirty main, source/binary/capture receipts retained",
       "contextHistoryTuiEvidence": "J141 provides exact revision selection, summary/full inspection, baseline comparison, explicit activation/restore and no-color restart. Browsing uses the hydrated immutable manifest; actions use shared dispatch. J140 retains headless/typed command and adoption compatibility. Large stores, all option paths and reference parity remain pending.",
-      "phaseResultDeclared": true,
-      "descriptorSha256": "sha256:dcd507337d512a89d6f17710f876c71512f46207f60b5f97b3ed968a9a098950"
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:9693a176c5684eaec52d87b7ad8c91c8ea4e1c9b39cd0f72371ae8f6c5349f34"
     },
     {
       "tool": "threat-model:verify",
@@ -6383,12 +6383,12 @@
   },
   "internalToolAuditRef": "internal-investigation-tools.json",
   "currentRegistryCensus": {
-    "capturedAt": "2026-10-23T21:27:43.711159+00:00",
-    "publishedCommit": "5a35a06271cd95e4480a8e47d210e46dcb17943d",
-    "sourceState": "Main with the exact staged reader checkpoint preserved and separate local audit/comparison drafts. Current frozen catalog verified after complete stored-context comparison; metadata consistency does not qualify all functional paths.",
-    "binarySha256": "613d48f83384d57bb2fb862a34f9fb445a543b6b9d922d2bee383f3b5ece4f1c",
+    "capturedAt": "2026-10-24T08:02:38.628735+00:00",
+    "publishedCommit": "55e4fa7b52adcf6dbd3467d489e1c9da3dd037ec",
+    "sourceState": "Main plus three supporting-context phase-result corrections. J349 verifies normal startup and genuine repository-context resume. Full module usefulness remains limited to each named assessment.",
+    "binarySha256": "ef74a1c420a5a6f2e8b87e61ff42103ef467ef10305e029385c3696c48e7e903",
     "catalogCommand": "kuzushi tools --all --json",
-    "catalogSha256": "f2f4b37fb2f44b1a0ca0e74f8b7f69495c6682a3b04c0658882e009375bc1ef9",
+    "catalogSha256": "db3b97fc515ab2cc9bea707fc1829e37bf77efbfb3b204d9dd68b2ca44381ab0",
     "operatorVisibleTools": 118,
     "defaultCatalogTools": 81,
     "effectiveMaturityCounts": {
@@ -6413,7 +6413,7 @@
     ],
     "registeredPolicyTools": 189,
     "registeredPolicyFingerprint": "175b006df1cedbbd4ef1ac43d803f12cc32c36ab45f98e3e681243648c4bba3d",
-    "policyTest": "The 189-tuple policy fingerprint remains unchanged and its focused registry test passes. No action is promoted, retired or added.",
+    "policyTest": "The registered policy-tuple fingerprint excludes phase-result ownership. Complete descriptor hashes and focused phase admission/recovery tests verify that ownership separately. No action is promoted, retired or added.",
     "outsideOperatorCatalog": 71,
     "checkedDescriptorFields": [
       "allowance_category",
@@ -6437,48 +6437,28 @@
     ],
     "descriptorDifferences": [
       {
-        "tool": "android-apk:scan",
+        "tool": "threat-model:diff",
         "fields": [
-          "discoveryMaturityOverride"
+          "phase_result"
         ]
       },
       {
-        "tool": "ndiff:fetch-cve",
+        "tool": "threat-model:models",
         "fields": [
-          "discoveryMaturityOverride"
+          "phase_result"
         ]
       },
       {
-        "tool": "ndiff:extract-fix-pattern",
+        "tool": "threat-model:revisions",
         "fields": [
-          "discoveryMaturityOverride"
-        ]
-      },
-      {
-        "tool": "ndiff:hunt-variants",
-        "fields": [
-          "discoveryMaturityOverride"
-        ]
-      },
-      {
-        "tool": "threat-model:build",
-        "fields": [
-          "declaredOptions"
+          "phase_result"
         ]
       }
     ],
     "coreInScopeGenericOutcomePlaceholders": 0,
     "meaning": "Visible metadata is refreshed from the frozen native catalog, decoding omitted Never runtime and true phase-result defaults according to ToolDescriptor serde. Internal classifications retain their named evidence. Metadata does not establish model accuracy or full module qualification.",
     "inScopeOperatorTools": 110,
-    "additionalDescriptorChanges": [
-      {
-        "tool": "threat-model:diff",
-        "fields": [
-          "description"
-        ],
-        "policyOrMaturityChanged": false
-      }
-    ]
+    "comparisonBaseline": "scripts/devex/artifacts/phase-readiness-audit-20261024/attempt-3/catalog-all.json"
   },
   "catalogSnapshot": {
     "sha256": "51afdb1b3330bc8614fd74ab9889e136cb7f18a99c698341abe279be1f1b91a2",
@@ -6488,7 +6468,7 @@
     "count": 113
   },
   "currentOperatorToolCount": 118,
-  "catalogSource": "scripts/devex/artifacts/context-structure-diff-20261023/catalog-all.json",
+  "catalogSource": "scripts/devex/artifacts/phase-readiness-audit-20261024/catalog-all.json",
   "currentPolicyInventory": {
     "registeredToolCount": 189,
     "fingerprint": "175b006df1cedbbd4ef1ac43d803f12cc32c36ab45f98e3e681243648c4bba3d",
@@ -10977,5 +10957,90 @@
     "frozenExecutables": 13,
     "newLiveRequests": 0,
     "maturityChanged": false
+  },
+  "generatedPartialContextWorkflowCheckpoint": {
+    "assessment": "docs/assessments/generated-partial-context-workflow-2026-10-24.md",
+    "evidenceRoot": "scripts/devex/artifacts/partial-context-tui-20261024/",
+    "qualificationCorrection": "Earlier five partial-output checks did not prove immutable persistence; positive generation cases now require saved references.",
+    "focusedDistinctRustPasses": 223,
+    "nativeJourney": "J351",
+    "nativeAttempt": 5,
+    "machinePasses": 52,
+    "machineFailures": 0,
+    "capturePairs": 51,
+    "pendingOperatorJudgments": 3,
+    "nativeSha256": "64d34ad72e893538a712402ee91b14de937e31963d740017de4be33b82ea5290",
+    "interceptedOfflineRequests": 1,
+    "liveProviderRequests": 0,
+    "experimentRequestsCumulative": 16,
+    "scope": [
+      "app.py"
+    ],
+    "workAttempts": 4,
+    "partialQueueRetained": true,
+    "explicitPartialMapAcknowledgment": true,
+    "unknownCostRetained": true,
+    "maturityChange": false,
+    "broaderDeliveryComplete": false
+  },
+  "boundaryContextReadingCheckpoint": {
+    "assessment": "docs/assessments/boundary-context-reading-2026-10-24.md",
+    "distinctFocusedRustPasses": 90,
+    "nativeJourney": "J128",
+    "nativeAttempt": 3,
+    "nativeSha256": "6d922d3a6a7d6c61121db0e0208410c7c68c7d294360368de5174b6db72e0192",
+    "machinePasses": 44,
+    "machineFailures": 0,
+    "capturePairs": 50,
+    "pendingOperatorJudgments": 4,
+    "preparedPlans": 2,
+    "fixedJobsPerPlan": 6,
+    "plansStarted": 0,
+    "planApprovals": 1,
+    "revisedPlanApproved": false,
+    "providerRequests": 0,
+    "globalActiveContextUnchanged": true,
+    "maturityChange": false,
+    "broaderDeliveryComplete": false
+  },
+  "generatedScopeInvestigationCheckpoint": {
+    "assessment": "docs/assessments/generated-scope-investigation-2026-10-24.md",
+    "evidenceRoot": "scripts/devex/artifacts/generated-scope-investigation-20261024/",
+    "distinctFocusedRustPasses": 60,
+    "offlineFramingPasses": 4,
+    "nativeAttempt": 6,
+    "nativeSha256": "5c717f2e78c6e7ccebf3bd74f1c99fc8ca57bb23531f1b8867b104f98b3f783e",
+    "frozenRepositoryInputs": 6511,
+    "frozenPrograms": 13,
+    "J129": {
+      "machinePasses": 29,
+      "machineFailures": 0,
+      "capturePairs": 25,
+      "operatorJudgmentsPending": 4
+    },
+    "J352": {
+      "machinePasses": 60,
+      "machineFailures": 0,
+      "capturePairs": 64,
+      "operatorJudgmentsPending": 4
+    },
+    "contextJobs": 1,
+    "discoveryJobs": 6,
+    "scopes": 2,
+    "passesPerScope": 3,
+    "settledReservations": 7,
+    "protectedReviewCallsRemaining": 2,
+    "ledgerObservations": 6,
+    "scriptedHumanDecisions": 2,
+    "outsideDiscoveryObservationsRetained": 6,
+    "sourceAndActiveContextUnchanged": true,
+    "globalSettingsPersisted": true,
+    "unknownCostRetained": true,
+    "exportBytesUnchangedAfterRestart": true,
+    "newLiveProviderRequests": 0,
+    "liveExperimentRequestsCumulative": 16,
+    "maturityChanged": false,
+    "broaderDeliveryComplete": false,
+    "qualification": "Owned inert dirty fixture, accepted manual scopes and manual root Map, fully intercepted transport; real-model scope quality and operator UX acceptance remain open."
   }
 }

@@ -2,6 +2,8 @@
 use super::*;
 use crate::{ToolExecutionContext, V2Config};
 
+mod source_context;
+
 struct Fixture {
     root: tempfile::TempDir,
     workspace: WorkspaceTarget,
@@ -213,7 +215,8 @@ fn legacy_and_omitted_inputs_never_inspect_active_context() {
         (json!({"threatModelRef":null}), "omitted"),
         (json!({"threatModelRef":"active"}), "unavailable"),
     ] {
-        let state = super::super::scope::recorded_context_guidance(&fixture.workspace, &input);
+        let state =
+            super::super::scope::recorded_context_report(&fixture.workspace, &input).guidance;
         assert_eq!(state["status"], status);
         assert!(state.get("text").is_none());
     }

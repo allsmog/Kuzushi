@@ -12,15 +12,23 @@ keys: Enter
 require-live-snap: 30 RESULT READY | imported-map
 nav-mode:
 keys: u
-require-live-snap: 25 Viewing Scan | accepted-map
+require-live-snap: 25 Map ✓ | accepted-map
+expect: Viewing Map
+expect: next required Scan
 keys: Escape
+submit: map
+require-live-snap: 25 Selected Alpha architecture | accepted-map-overview
+expect-not: source.Loose
 submit: use sast
 submit: options sast:scan
 submit: set taskMode manual
 submit: set tasks secret-scan
 submit: scopes
 require-live-snap: 25 ACCEPTED SCOPES | inventory-first
-keys: Enter Down Down Down Down Down Down Down Down Down Down Down Enter
+keys: Enter /
+type: Suggest scan scopes with AI
+require-live-snap: 20 ▸ Suggest scan scopes with AI | find-proposal-action
+keys: Enter
 require-live-snap: 20 AI SCOPE PRIORITIES | optional-proposal
 paste-file: @ART/priorities.txt
 live-snap: multiline-priorities
@@ -74,15 +82,36 @@ keys: L
 require-live-snap: 25 dispatcher pid | proposal-started
 require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_model.py @TMP_TARGET @ART finished
 keys: r
-require-live-snap: 25 1 job(s) · 1 completed | proposal-completed
+require-live-snap: 25 1 completed | proposal-completed
+expect: Jobs: 1
 keys: a
 require-live-snap: 25 Review suggested scopes | saved-proposal-result
 keys: Enter
 require-live-snap: 25 DRAFT SCOPES | suggested-boundaries
 expect: Labeled code boundary
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_model.py @TMP_TARGET @ART input-view
+require-live-snap: 20 Context sections: 5/5; omitted 0. | architecture-input-120x36
+resize: 160x48
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_model.py @TMP_TARGET @ART input-view
+require-live-snap: 20 Context sections: 5/5; omitted 0. | architecture-input-160x48
+resize: 96x89
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_model.py @TMP_TARGET @ART input-view
+require-live-snap: 20 Context sections: 5/5; omitted 0. | architecture-input-96x89
+resize: 80x24
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_model.py @TMP_TARGET @ART input-view
+require-live-snap: 20 Context sections: 5/5; omitted 0. | architecture-input-80x24
+resize: 60x20
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_model.py @TMP_TARGET @ART input-view
+require-live-snap: 20 Context sections: 5/5; omitted 0. | architecture-input-60x20
+resize: 40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_model.py @TMP_TARGET @ART input-view
+require-live-snap: 20 Context sections: 5/5; omitted 0. | architecture-input-40x12
+expect: a accept
+ask: Is the architecture input receipt readable at every size, with five supplied sections, zero size omissions and preserved proposal ownership and spending?
+resize: 120x36
 ask: Does the actual scope executor produce unaccepted boundaries with coverage and model-input limitations, while retaining the operator's exclusion and globally active context?
 keys: a
-require-live-snap: 20 Accept boundaries | boundary-approval
+require-live-snap: 20 Accept exact boundaries | boundary-approval
 keys: Enter Down Down Enter Down Enter
 require-live-snap: 30 ACCEPTED SCOPES | accepted-boundaries
 keys: p
@@ -99,7 +128,8 @@ launch: --target @TMP_TARGET
 require-live-snap: 30 KUZUSHI | restarted
 paste-file: @ART/resume-command.txt
 keys: Enter
-require-live-snap: 25 1 job(s) · 1 completed | saved-proposal-campaign
+require-live-snap: 25 1 completed | saved-proposal-campaign
+expect: Jobs: 1
 nav-mode:
 keys: a
 require-live-snap: 25 Review suggested scopes | result-after-restart

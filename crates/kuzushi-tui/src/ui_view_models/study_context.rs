@@ -12,6 +12,11 @@ pub(crate) mod diagram;
 mod evidence;
 mod reader;
 mod scanner;
+mod verification;
+
+pub(super) fn context_source_receipt_lines(provenance: &Value) -> Vec<String> {
+    evidence::provenance_lines(provenance)
+}
 
 pub(crate) fn context_header_title(app: &ShellApp) -> &'static str {
     let picker = app.study_context_picker();
@@ -396,12 +401,12 @@ pub(super) fn context_wrap(line: &str, width: usize) -> Vec<String> {
 }
 
 pub(crate) fn context_summary(document: &Value) -> Vec<String> {
-    let mut lines = Vec::new();
-    for key in ["title", "systemContext", "description", "context"] {
-        if let Some(value) = document.get(key).and_then(Value::as_str) {
-            lines.push(value.into());
-        }
-    }
+    let mut lines = text_fields(document, &["title"]);
+    lines.extend(verification::lines(document));
+    lines.extend(text_fields(
+        document,
+        &["systemContext", "description", "context"],
+    ));
     for (label, pointer) in [
         ("Components", "/dfd/nodes"),
         ("Data flows", "/dfd/flows"),
@@ -416,6 +421,14 @@ pub(crate) fn context_summary(document: &Value) -> Vec<String> {
         document.pointer("/provenance/repositoryInventory"),
     ));
     lines
+}
+
+fn text_fields(document: &Value, fields: &[&str]) -> Vec<String> {
+    fields
+        .iter()
+        .filter_map(|key| document.get(*key).and_then(Value::as_str))
+        .map(str::to_owned)
+        .collect()
 }
 
 fn context_section(label: &str, value: Option<&Value>) -> Vec<String> {

@@ -38,6 +38,24 @@ fn empty_target_and_current_operational_history_still_require_setup() {
 }
 
 #[test]
+fn context_catalog_readers_do_not_establish_an_investigation() {
+    for tool in [
+        "threat-model:models",
+        "threat-model:revisions",
+        "threat-model:diff",
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        write_history(root.path(), &[tool]);
+        assert!(
+            !ModuleRegistry::with_v2_builtins()
+                .investigation_history_requires_resume(root.path())
+                .unwrap(),
+            "{tool} lists or compares context; it does not produce a Map"
+        );
+    }
+}
+
+#[test]
 fn genuine_or_unclassified_history_preserves_resume_without_granting_completion() {
     for tool in ["threat-model:build", "external:old-tool"] {
         let root = tempfile::tempdir().unwrap();

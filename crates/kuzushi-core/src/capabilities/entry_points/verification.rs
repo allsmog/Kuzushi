@@ -1,6 +1,4 @@
-use super::application::{
-    ensure_current_entry_point_catalog, load_explicit_entry_point_catalog,
-};
+use super::application::{ensure_observed_entry_point_catalog, load_explicit_entry_point_catalog};
 use super::domain::EntryPointCatalog;
 use super::source_identity::stale_source_disclosure;
 use anyhow::{Context, Result};
@@ -11,6 +9,7 @@ use std::path::Path;
 /// threat model stays verifiable after the target moves on.
 #[derive(Debug)]
 pub(crate) enum VerificationCatalogGrounding {
+    /// Current authenticated rows, including explicitly partial observations.
     Catalog(Box<EntryPointCatalog>),
     /// No context snapshot and no catalog artifact to ground against.
     Absent,
@@ -21,7 +20,7 @@ pub(crate) enum VerificationCatalogGrounding {
 pub(crate) fn resolve_entry_point_catalog_for_verification(
     target: &Path,
 ) -> Result<VerificationCatalogGrounding> {
-    let current = match ensure_current_entry_point_catalog(target) {
+    let current = match ensure_observed_entry_point_catalog(target) {
         Ok(current) => current,
         Err(error) => return degraded_or_propagated(error),
     };

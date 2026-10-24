@@ -6,6 +6,8 @@ use crate::capabilities::threat_model::{
 use crate::run_artifacts::*;
 use crate::workflow_attempts::*;
 
+mod partial;
+
 struct Fixture {
     config: V2Config,
     registry: ModuleRegistry,

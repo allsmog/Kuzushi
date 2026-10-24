@@ -728,7 +728,7 @@ fn entry_points_source_catalog(
     if input.context_mode == "off" {
         crate::capabilities::entry_points::load_explicit_entry_point_catalog(input.workspace_root())
     } else {
-        let resolution = crate::capabilities::entry_points::ensure_current_entry_point_catalog(
+        let resolution = crate::capabilities::entry_points::ensure_observed_entry_point_catalog(
             input.workspace_root(),
         )?;
         if resolution.catalog.is_none() {
@@ -794,6 +794,7 @@ fn entry_points_projection_prefix(
         "target": document.get("target"),
         "scopePath": document.get("scopePath"),
         "snapshotTimestamp": document.get("snapshotTimestamp"),
+        "snapshotCoverage": document.get("snapshotCoverage"),
         "total": document.get("total").and_then(Value::as_u64).map_or(total as u64, |value| value),
         "recordsSelected": selected,
         "provenance": document.get("provenance"),

@@ -136,6 +136,31 @@ fn evidence_only_trace_cannot_create_a_phase_attempt() {
 }
 
 #[test]
+fn context_catalog_receipts_cannot_be_completed_as_map() {
+    for tool in [
+        "threat-model:models",
+        "threat-model:revisions",
+        "threat-model:diff",
+    ] {
+        let target = tempfile::tempdir().unwrap();
+        let mut completed = completed_tool(target.path(), "context-catalog", tool);
+        completed.phase = WorkflowPhase::Map;
+        let error =
+            append_phase_attempt_completed_with_v2(target.path(), completed.clone()).unwrap_err();
+        assert!(
+            error.to_string().contains("phase result"),
+            "{tool}: {error}"
+        );
+        assert!(
+            crate::workflow_attempts::append_phase_attempt_completed(target.path(), completed)
+                .is_err()
+        );
+        assert!(!phase_attempt_ledger_path(target.path()).exists());
+        assert!(!phase_attempt_v2_ledger_path(target.path()).exists());
+    }
+}
+
+#[test]
 fn recovery_restores_pending_verification_without_rewriting_trace_history() {
     let target = tempfile::tempdir().unwrap();
     let verification = completed_tool(target.path(), "verify-prior", "verify:finding");
@@ -167,21 +192,24 @@ fn historical_trace_cannot_be_selected_through_either_writer() {
     let target = tempfile::tempdir().unwrap();
     let trace = completed_tool(target.path(), "trace-old", "trace:expand");
     save_historical_attempt(target.path(), trace.clone());
+    let before = std::fs::read(phase_attempt_v2_ledger_path(target.path())).unwrap();
+    assert_phase_selection_refused(target.path(), &trace.attempt_id);
+    assert_eq!(
+        std::fs::read(phase_attempt_v2_ledger_path(target.path())).unwrap(),
+        before
+    );
+}
+
+fn assert_phase_selection_refused(target: &Path, attempt_id: &str) {
     let disposition = PhaseAttemptDispositionRecorded::new(
-        trace.attempt_id,
+        attempt_id.to_owned(),
         PhaseAttemptDisposition::Selected {
             acknowledged_partial: false,
         },
     );
-    let before = std::fs::read(phase_attempt_v2_ledger_path(target.path())).unwrap();
-    assert!(append_phase_attempt_disposition_v2_if_present(target.path(), &disposition).is_err());
+    assert!(append_phase_attempt_disposition_v2_if_present(target, &disposition).is_err());
     assert!(
-        crate::workflow_attempts::append_phase_attempt_disposition(target.path(), disposition)
-            .is_err()
-    );
-    assert_eq!(
-        std::fs::read(phase_attempt_v2_ledger_path(target.path())).unwrap(),
-        before
+        crate::workflow_attempts::append_phase_attempt_disposition(target, disposition).is_err()
     );
 }
 
@@ -203,6 +231,7 @@ fn auxiliary_map_history_preserves_primary_attempt_and_all_recorded_events() {
     let preparation = record_preparation_history(target.path());
     let path = phase_attempt_v2_ledger_path(target.path());
     let before = std::fs::read(&path).unwrap();
+    let legacy_before = std::fs::read(phase_attempt_ledger_path(target.path())).unwrap();
     let recovered = load_phase_attempt_ledger_recovering(target.path()).unwrap();
     let pending = recovered
         .ledger
@@ -214,23 +243,19 @@ fn auxiliary_map_history_preserves_primary_attempt_and_all_recorded_events() {
     assert_eq!(pending.completed.attempt_id, mapping.attempt_id);
     for attempt in preparation {
         assert!(recovered.ledger.attempt(&attempt.attempt_id).is_none());
-        let disposition = PhaseAttemptDispositionRecorded::new(
-            attempt.attempt_id,
-            PhaseAttemptDisposition::Selected {
-                acknowledged_partial: false,
-            },
-        );
-        assert!(
-            append_phase_attempt_disposition_v2_if_present(target.path(), &disposition).is_err()
-        );
+        assert_phase_selection_refused(target.path(), &attempt.attempt_id);
     }
     assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert_eq!(
+        std::fs::read(phase_attempt_ledger_path(target.path())).unwrap(),
+        legacy_before
+    );
     assert_eq!(
         load_phase_attempt_ledger_v2(target.path())
             .unwrap()
             .attempts
             .len(),
-        4
+        7
     );
 }
 
@@ -240,6 +265,9 @@ fn record_preparation_history(target: &Path) -> Vec<PhaseAttemptCompleted> {
         "context:build",
         "context-lite:index",
         "entry-points:extract",
+        "threat-model:models",
+        "threat-model:revisions",
+        "threat-model:diff",
     ]
     .iter()
     .enumerate()

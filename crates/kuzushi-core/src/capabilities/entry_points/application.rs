@@ -41,6 +41,20 @@ pub(crate) fn refresh_entry_point_catalog_cancellable(
 pub(crate) fn ensure_current_entry_point_catalog(
     target: &Path,
 ) -> Result<EntryPointCatalogResolution> {
+    current_entry_point_catalog(target, true)
+}
+
+/// Authenticated observations retain partial coverage instead of proving absence.
+pub(crate) fn ensure_observed_entry_point_catalog(
+    target: &Path,
+) -> Result<EntryPointCatalogResolution> {
+    current_entry_point_catalog(target, false)
+}
+
+fn current_entry_point_catalog(
+    target: &Path,
+    require_complete: bool,
+) -> Result<EntryPointCatalogResolution> {
     let path = entry_points_path(target);
     let Some(snapshot) = read_context_snapshot(target)? else {
         return Ok(EntryPointCatalogResolution {
@@ -50,7 +64,7 @@ pub(crate) fn ensure_current_entry_point_catalog(
         });
     };
     validate_snapshot_for_current_target(target, &snapshot)?;
-    snapshot_coverage(&snapshot.value).require_complete()?;
+    require_catalog_coverage(&snapshot_coverage(&snapshot.value), require_complete)?;
     if let Ok(Some(catalog)) = read_entry_point_catalog(target) {
         if validate_catalog(target, &catalog, &snapshot).is_ok() {
             revalidate_snapshot_source(target, &snapshot.identity)?;
@@ -71,6 +85,16 @@ pub(crate) fn ensure_current_entry_point_catalog(
         status: "refreshed".to_string(),
         path,
     })
+}
+
+fn require_catalog_coverage(
+    coverage: &EntryPointSnapshotCoverage,
+    require_complete: bool,
+) -> Result<()> {
+    if require_complete {
+        return coverage.require_complete();
+    }
+    coverage.require_recorded()
 }
 
 pub(crate) fn load_explicit_entry_point_catalog(

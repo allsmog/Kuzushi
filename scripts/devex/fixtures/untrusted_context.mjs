@@ -2,6 +2,12 @@
 import assert from "node:assert/strict";
 
 export function decodedThreatContext(body) {
+  const content = optionalThreatContext(body);
+  assert.notEqual(content, null, "The actual request must contain one framed threat-model digest");
+  return content;
+}
+
+export function optionalThreatContext(body) {
   const text = body.input
     .flatMap((message) => message.content ?? [])
     .map((part) => (typeof part === "string" ? part : (part.text ?? "")))
@@ -11,7 +17,8 @@ export function decodedThreatContext(body) {
       /UNTRUSTED_DERIVED_BEGIN\nrecord_version=1\nkind=derived\nencoding=percent-v1\nlabel_bytes=(\d+)\ncontent_bytes=(\d+)\nlabel=([^\n]*)\ncontent=([^\n]*)\nUNTRUSTED_DERIVED_END/g,
     ),
   ].filter((match) => decodeURIComponent(match[3]) === "threat-model-digest");
-  assert.equal(records.length, 1, "The actual request must contain one framed threat-model digest");
+  assert.ok(records.length <= 1, "A request cannot carry duplicate threat-model digests");
+  if (records.length === 0) return null;
   const [record] = records;
   const label = decodeURIComponent(record[3]);
   const content = decodeURIComponent(record[4]);

@@ -2,15 +2,13 @@
 
 # Kuzushi
 
-Kuzushi is an evidence-backed repository security workbench.
+Kuzushi is a repository security workbench for bounded investigations:
 
-It does not try to be another generic coding assistant. It scans real
-codebases, preserves evidence, ranks likely vulnerabilities, and helps teams
-move from suspicion to verification to remediation.
+**Repository → context and scope → approved scan plan → consolidated findings →
+triage → report → optional further investigation.**
 
-Use Kuzushi when you need more than "AI says this looks wrong": you need a
-finding, the code path behind it, the current proof state, and a defensible
-next action.
+It preserves observations, source and context provenance, human decisions and
+spending history so an operator can assess the evidence and choose further work.
 
 The primary operator path is the native Rust CLI and Ratatui shell. The npm
 `kuzushi` binary, plus the shorter `kz` alias, invokes that native CLI through
@@ -18,29 +16,32 @@ The primary operator path is the native Rust CLI and Ratatui shell. The npm
 
 ## Product Focus
 
-Kuzushi's current product is deliberately narrower than its long-term research
-roadmap: local-first repository security investigation for serious AppSec and
-product-security operators. The core contract is evidence, not chat:
+The supported guided workflow is local repository investigation:
 
-1. build or refresh repository context;
-2. scan with deterministic and model-backed tools;
-3. persist findings, traces, proof state, and run artifacts;
-4. inspect one finding's evidence and current proof level;
-5. choose the next action: suppress, verify, patch, or report.
+1. inspect a bounded inventory, then review context, DFD and scope;
+2. approve a finite discovery plan, normally three passes with one worker;
+3. consolidate raw observations while retaining each pass and its evidence;
+4. record reversible review decisions against the relevant source revision;
+5. report results and coverage limits, then approve any further investigation
+   separately.
 
-Roadmap surfaces such as binary exploitation, broad pentest automation,
-governance packs, and defensive operations should reinforce that evidence
-workflow before they become primary product surfaces.
+Model-backed work requires an explicit allowance. Review the selected model,
+jobs, concurrency, protected Review capacity and cost uncertainty before launch.
+Scope suggestions, context work, scans and review share investigation accounting.
+The guided plan does not automatically subdivide, add passes or increase its
+allowance. A nondeterministic miss never establishes that a finding was fixed.
+
+Exploit development, reproducer generation or execution, and vulnerability
+patching are excluded from this workflow. Historical Prove/Fix artifacts remain
+readable for compatibility.
 
 ## Current Snapshot Highlights
 
-This snapshot makes the five-phase cockpit a direct projection of durable
-repository evidence:
+The cockpit projects durable repository evidence:
 
-- The Map, Scan, Review, Prove, and Fix rail always names the whole engagement
-  after `Start Map`. Every durable page remains browsable, while missing
-  evidence stays explicit and page visits never pretend to advance the current
-  reality.
+- Map, Scan and Review form the guided rail after `Start Map`; Report is a
+  separate exit. Missing evidence stays explicit. Visiting a page does not
+  accept context, approve work or advance the investigation.
 - A ready Map embeds the real-data security gallery. Its source-grounded system
   summary, DFD, complete deterministic entry-point inventory with explicit
   model-linkage provenance, and component inventory share selection and
@@ -49,11 +50,12 @@ repository evidence:
 - Review and default bulk triage operate on the accumulated open,
   non-suppressed vulnerability corpus, while an explicit scan id remains the
   opt-in run-scoped view. Durable human decisions remain attached to finding
-  identity across later observations and chain construction.
+  identity with their original source basis. A later SHA or dirty-content change
+  requires checking applicability before reusing a decision.
 
-- Findings have durable identities, source signatures, corroborating source
-  rows, static proof state, latest runtime verification, run provenance, and
-  safe HTTP capture markers through list/detail/export surfaces.
+- Findings retain durable identities, exact recorded locations, source
+  signatures, observations, confidence, severity, human decisions and run/context
+  provenance. Historical proof and verification fields remain readable.
 - Scanner-owned triage and human review decisions are intentionally separate.
   `decision` appends a human verdict and rationale that carries forward by
   durable identity; it does not rewrite detector output or claim that a scanner
@@ -193,6 +195,11 @@ registry's current `latest`, which may differ from this checkout.
 
 This is the golden path. It is the workflow new operators should try before
 touching advanced modules or deferred plugin-backed tools.
+
+For the interactive investigation, start `kuzushi --target /path/to/repository`.
+Setup leads to context review, a finite scan plan, allowance approval, triage and
+Report. The local CLI examples below use runtime-free tools; model-backed work
+needs its own approved investigation allowance.
 
 Kuzushi writes target-local state below `.kuzushi/`. On first initialization
 it creates `.kuzushi/.gitignore` when that file is absent. The generated policy
@@ -374,12 +381,14 @@ Kuzushi keeps scanner facts, model judgments, and human decisions distinct:
 - **Static proof state** is what the deterministic or static pipeline can
   support from artifacts such as SARIF, Semgrep, CodeQL, snapshots, and stored
   evidence.
-- **Runtime verification** is an explicit verification result with its own
-  proof level, verdict, cost, and run context.
+- **Historical runtime verification** retains its own proof level, verdict,
+  cost and run context. New execution is outside the guided investigation.
 - **Human review decision** is an append-only operator decision recorded by
-  `kuzushi decision` or suppression flows. It has a human author and rationale,
+  `kuzushi decision` or the Review decision controls. It has an author and rationale,
   carries forward through run diffs by durable identity when safe, and is
   exported alongside scanner data without overwriting scanner triage.
+- **Suppression** is a separate rule or disposition. It does not establish a
+  human false-positive verdict.
 
 Reports, exports, Workbench rows, and run diffs must preserve those meanings.
 Avoid replacing them with generic labels such as "fixed", "done", or "AI
@@ -424,87 +433,70 @@ pipeline. Select first with `target <path>` and then use `scan`, or use
 sessions direct automation to `kuzushi scan <target>` or
 `kuzushi --target <target> run sast:scan`.
 
-## Phase-Driven Workflow (Map → Scan → Review → Prove → Fix)
+## Guided investigation workflow
 
-Launching the shell against a target opens a guided five-phase engagement
-instead of a flat task list. All five pages remain named after the engagement
-starts; unavailable future pages carry an unavailable marker, and `Shift+Tab`
-cycles every durable page without changing the shared draft or the durable
-reality checkpoint. Empty future pages state which evidence is missing. Each
-phase announces what it is for and constrains planning to its own
-descriptor-backed tools:
+Selecting a repository opens Setup. The guided rail follows Map, Scan and Review,
+with Report as a separate exit. Durable evidence determines the next action;
+opening a page never completes a phase.
 
-| Phase | | Focus |
-| --- | --- | --- |
-| ◇ **MAP** | map | establish context, scope, entry points, threat models, indexes, CPGs, and CodeQL databases |
-| ▦ **SCAN** | scan | run secrets, Semgrep, CodeQL, taint, agentic SAST, and semantic hunts to create candidate observations |
-| ▣ **REVIEW** | review | triage, classify, dismiss, defer, and persist durable review decisions |
-| ◎ **PROVE** | prove | verify actionable findings and retain empirical evidence with run provenance |
-| ◆ **FIX** | fix | draft, approve, apply, detector-bound re-verify, and report remediation |
+| Surface | Focus |
+| --- | --- |
+| **Map** | Inspect inventory, choose context and scopes, review architecture, DFD and open questions, then accept an exact revision. |
+| **Scan** | Approve a finite pass/engine plan and its allowance, then inspect completed or partial attempts. |
+| **Review** | Read consolidated evidence, separate duplicate and related observations, and record reversible decisions with a source basis. |
+| **Report** | Review findings, decisions, coverage, provenance and consumption; export with format omissions disclosed. |
 
-- **Map is the evidence canvas.** After an accepted Map, the shell embeds the
-  source-grounded Summary, DFD, Entry points, and Components projections when
-  their artifacts exist. `Tab` changes the Map projection and `z` opens the
-  same selection in a Map-scoped full-frame zoom; missing or stale Map evidence
-  keeps one explicit action drawer instead of fabricated content.
-- **Findings outlive one scan view.** Scan details remain tied to the selected
-  attempt, while Review and default triage use every currently relevant
-  finding in the workspace. A nondeterministic miss does not silently erase a
-  prior observation or its human decision.
-- **Target-aware preselection.** The target is classified (source / JVM /
-  Android APK / native binary) and each phase pre-checks the relevant tasks —
-  e.g. reverse-engineering and `x-ray` are preselected for an APK, not a source
-  tree. When a model is configured, the **session model** ranks the tools and
-  refines the preselection (deterministic rule catalog otherwise; never a
-  silent model fallback).
-- **Reuse, don't rebuild.** Cached artifacts (CPG, CodeQL DB, context snapshot)
-  are detected and reused by default — press `g` on a row to force a rebuild.
-- **Dependency-aware failure.** If a task fails, only the tasks that depended on
-  it are skipped; the independent rest of the queue keeps running.
-- **Retry gate.** In Fix, a `y`/`n` gate offers to re-run failed tasks,
-  unblocking the dependents that were skipped.
+Map embeds Summary and DFD guidance. Entry points and Components appear when
+their artifacts exist. `Tab` changes the projection; `z` opens the same selection
+in a full-frame view. Missing or stale evidence stays explicit.
 
-`cpg:build` accepts a `heapMb` option (defaulting to ~75% of physical RAM) and
-classifies heap-exhaustion failures with an actionable message instead of an
-opaque crash. The Activity view's OUTPUT pane starts on findings and switches
-directly between generated security artifacts, including the threat model's
-data-flow diagram (boxes, trust zones, flows) once a threat model exists.
+Scope planning starts with structural inventory. Optional model suggestions are
+separately budgeted and remain a draft. Review membership, exclusions, shared
+context and uncovered files before accepting boundaries. Acceptance does not
+approve scanning: the study still needs a fixed job list and resource review.
+
+Three passes and one worker are the study defaults. Repetitions use fresh
+discovery sessions; context experiments need an explicit finite matrix and
+baseline. Findings retain raw observations, and recurrence stays separate from
+confidence. A later miss or a matching commit SHA alone establishes no fix.
+
+At a resource limit, finish and report, revise remaining work, or approve a
+specific new allowance. A completed plan grants no follow-up work. Prove and Fix
+remain compatibility readers outside the supported guided investigation.
 
 ## Capabilities and engines
 
-The interactive product is organized around six operator capabilities rather
-than a scanner catalog:
+The guided product uses these capability families:
 
 | Capability | Canonical boundary | What the operator does |
 | --- | --- | --- |
-| Recon | `recon:*` | import or collect target evidence |
-| Threat map | `threat-model:*` | map boundaries, flows, and attack surface |
-| Scan | `sast:scan` | run a target-aware composition of candidate-generating engines |
-| Review | `findings:*` | triage, suppress, defer, or record a terminal review decision |
-| Verify | `verify:finding` | corroborate a selected claim with proof |
-| Fix | `patch:finding` | review remediation and export the result |
+| Context | `context:build`, `threat-model:*` | inspect source, review and accept immutable context |
+| Scope | `pack:scopes`, `pack:suggest-scopes` | review bounded repository membership and optional model suggestions |
+| Scan | `campaign:study`, `sast:scan` | approve finite discovery work and retain observations |
+| Review | `findings:*` | triage evidence and preserve independent human decisions |
+| Report | `report:build` | export findings and investigation receipts |
 
-The shell opens on the phase Workbench. `modules` opens a small contextual
+Fresh targets open Setup; existing investigations resume from their evidence.
+`modules` opens a contextual
 **Capabilities** overlay; press `e` in Navigate mode to reveal direct engines
 and installed integrations. `tools [query]` remains the exhaustive expert
 inventory, while `kuzushi modules --json` and `kuzushi tools --json` are the
 machine-readable registry views.
 
-Individual engines such as Semgrep, CodeQL, cargo-audit, secret scanning,
-Taint IRIS Next, and offense review remain real descriptor-backed tools. They
-are composed by `sast:scan` or selected deliberately from Expert mode rather
-than presented as competing products. Context, entry-point, CPG, CodeQL DB,
-triage, suppression, report, configuration, and workspace modules are support
-steps folded into their owning capability.
+Default discovery shows Core capabilities. Labs tools disclose experimental
+status, and Compatibility preserves integration paths with their replacements.
+Dependency and prerequisite readiness remain separate from maturity. A registered
+tool or successful result envelope does not establish useful detector coverage.
+See the [module maturity contract](docs/module-maturity.md) and
+[per-tool evidence](docs/assessments/bounded-investigation-tools.json).
 
-Compatibility facades remain exact-runnable for the migration window but do
-not appear in discovery. See [`docs/api-compatibility.md`](./docs/api-compatibility.md)
+Compatibility facades remain exact-runnable for the migration window. See [`docs/api-compatibility.md`](./docs/api-compatibility.md)
 for successor commands. Optional adapters (`prompt-armor`, `shinsa`, `tob`,
 and `vuln-scout`) are no longer activated merely because a development package
 exists in `node_modules`; an operator must configure the corresponding adapter
 explicitly.
 
-Run `kuzushi tools --json` for the current canonical tool inventory. Per-engine
+Run `kuzushi tools --json` for Core discovery or add `--all` for every visible tier. Per-engine
 guidance remains under `docs/`, including [`docs/x-ray.md`](./docs/x-ray.md).
 
 ## External Dependencies

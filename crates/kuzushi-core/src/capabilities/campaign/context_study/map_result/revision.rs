@@ -1,7 +1,7 @@
 //! Review an existing revision through its original authenticated Map run.
 use super::*;
 use crate::capabilities::threat_model::{load_exact_threat_model, load_threat_model_manifest};
-use crate::run_lifecycle::ProjectionHealth;
+use crate::run_lifecycle::{ProjectionHealth, RunItemStatus};
 
 pub(super) fn review_revision(
     root: &Path,

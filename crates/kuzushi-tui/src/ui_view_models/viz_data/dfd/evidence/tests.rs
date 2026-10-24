@@ -52,3 +52,31 @@ fn prose_is_not_a_file_and_invalid_fragments_are_not_line_numbers() {
     );
     assert_eq!(evidence.files, ["app/a.rs#Literal", "app/a.rs:not-a-line"]);
 }
+
+#[test]
+fn source_refs_preserve_literal_paths_and_remove_only_the_final_line_number() {
+    for (reference, path) in [
+        (" app /a.rs:7:2", " app /a.rs:7"),
+        ("app/a#L7.rs:3", "app/a#L7.rs"),
+        ("Dockerfile:1", "Dockerfile"),
+    ] {
+        let evidence = security_evidence(&json!({"sourceRefs":[reference]}));
+        assert_eq!(evidence.files, [path]);
+        assert_eq!(evidence.references, [reference]);
+    }
+    let invalid = security_evidence(
+        &json!({"sourceRefs":["app/a.rs:0","app/a.rs:not-a-line","app/a.rs",null]}),
+    );
+    assert!(invalid.files.is_empty());
+}
+
+#[test]
+fn direct_elements_keep_source_refs_and_structured_anchors() {
+    let paths = element_file_paths(&json!({"dfd":{
+        "nodes":[{"id":"app","sourceRefs":["app.py:1"]}],
+        "flows":[{"id":"flow","evidenceAnchors":[{"filePath":" app /flow.rs ","startLine":2}]}],
+        "trustBoundaries":[{"id":"boundary","filePath":"config.toml"}]}}));
+    assert_eq!(paths["app"], ["app.py"]);
+    assert_eq!(paths["flow"], [" app /flow.rs "]);
+    assert_eq!(paths["boundary"], ["config.toml"]);
+}

@@ -59,7 +59,7 @@ pub fn load_run_request_context(target: &Path, run_id: &str) -> Result<RunReques
     })
 }
 
-fn authenticated_input(target: &Path, run_id: &str) -> Result<Value> {
+pub(crate) fn authenticated_input(target: &Path, run_id: &str) -> Result<Value> {
     let (_, text) = read_run_artifact_text_bounded(target, run_id, "input.json", MAX_INPUT_BYTES)?;
     let reference = load_run_artifact_object_reference(target, run_id, "input.json")?;
     anyhow::ensure!(

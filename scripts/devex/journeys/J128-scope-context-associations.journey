@@ -20,7 +20,7 @@ keys: Down Enter Up Enter
 require-live-snap: 25 CONTEXT SUMMARY | exact-alpha
 expect: Alpha
 keys: e
-require-live-snap: 20 ↑↓ Enter edit | context-editor-ready
+require-live-snap: 20 Enter edit · r review | context-editor-ready
 keys: Enter C-u
 type: Owned boundary context
 keys: C-s
@@ -50,6 +50,8 @@ resize: 60x20
 live-snap: context-60x20
 resize: 40x12
 require-live-snap: 20 i inherit · o omit · Esc back | context-40x12
+expect: Context association: omitted
+expect: Plan: draft only.
 keys: NPage
 live-snap: context-page-40x12
 resize: 120x36
@@ -97,6 +99,8 @@ expect: other · omitted
 expect: Context actually frozen for scans
 resize: 40x12
 require-live-snap: 20 i inherit · o omit · Esc back | recovered-40x12
+expect: Context association: inherits common
+expect: Plan: prepared context recorded.
 keys: NPage
 live-snap: recovered-page-40x12
 keys: NPage

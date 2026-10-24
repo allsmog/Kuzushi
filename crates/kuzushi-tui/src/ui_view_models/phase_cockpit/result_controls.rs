@@ -84,7 +84,7 @@ fn result_action_binding(
 
 fn partial_acceptance_label(columns: u16) -> &'static str {
     if columns <= 40 {
-        return "Accept";
+        return "Use partial";
     }
     if columns <= 80 {
         return "Accept partial";
@@ -98,7 +98,7 @@ mod tests {
 
     #[test]
     fn partial_acceptance_stays_explicit_at_every_supported_width() {
-        assert_eq!(partial_acceptance_label(40), "Accept");
+        assert_eq!(partial_acceptance_label(40), "Use partial");
         for columns in [60, 80] {
             assert_eq!(partial_acceptance_label(columns), "Accept partial");
         }

@@ -10,7 +10,8 @@ pub(super) fn scope_context_detail(app: &ShellApp, state: &ScopeReviewState) -> 
         return Vec::new();
     };
     let Some(config) = matching_study(app, state) else {
-        return super::recorded_context::detail(app, state, &id).unwrap_or_else(|| vec!["Scan context: no draft for this exact scope revision or selected matching study. p plans a boundary; Source and context selects inheritance or an override.".into()]);
+        return super::recorded_context::detail(app, state, &id)
+            .unwrap_or_else(|| vec!["Scan context: no matching study.".into()]);
     };
     let Some(case) = config
         .study

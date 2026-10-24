@@ -1,5 +1,52 @@
 # Releasing Kuzushi
 
+## Boundary context reading order
+
+Boundary-context detail now leads with the association and preparation state,
+including at forty columns. Full names, notices, exact context/source receipts
+and guidance remain readable below. This is presentation only; public options,
+stored artifacts, approvals and accounting need no migration. See the
+[native evidence](docs/assessments/boundary-context-reading-2026-10-24.md).
+
+## Authenticated partial context recovery
+
+Generated partial context can be inspected and handed to Map when its finished
+typed run, tool call, recorded input and exact immutable revision authenticate.
+A failed queue entry remains failed; recovery grants no retry, call or job.
+`campaign:context-map` adds `data.mapOutcome` and preserves partial outcomes
+requiring explicit acknowledgment. Unauthenticated historical jobs remain
+unavailable rather than receiving guessed inputs or substitute context.
+
+Recorded grounding leads the context readers. Diagram details show quoted
+direct source files, and scoped actions consume those references through the
+existing validated planning boundary. Public options and stored schemas need
+no migration. See the [native workflow evidence](docs/assessments/generated-partial-context-workflow-2026-10-24.md).
+
+## Architecture input in scope proposals
+
+Scope proposals now include the selected context's canonical `systemContext`
+overview alongside the existing legacy overview, DFD and entry-point projection.
+The architecture projection remains bounded to 8 KiB and the complete proposal
+input to 64 KiB. Saved limitations distinguish omitted context from selected
+sections omitted by size. No global active-context substitution is introduced.
+
+Scope review puts recorded input facts before long membership and source
+receipts. Drafts advertise acceptance, and multiline Map summaries keep their
+paragraphs. Public options and persisted schemas are compatible; historical
+proposals retain their original limits and prompt hashes. See the
+[context handoff evidence](docs/assessments/scope-context-overview-2026-10-24.md).
+
+## Context catalog phase ownership
+
+`threat-model:models`, `threat-model:revisions` and `threat-model:diff` now declare
+`phase_result: false`. Their receipts cannot bypass fresh Setup or become a
+selectable Map result. Recovery excludes known catalog-only phase attempts from
+the phase projection and preserves raw history. Actual context artifacts still
+support investigation resume. Tool names, inputs, outputs and persisted schemas
+are compatible. Frozen work bound to an older descriptor digest must be prepared
+and approved again before execution; completed receipts and spending remain.
+See the [startup and history evidence](docs/assessments/context-catalog-phase-2026-10-24.md).
+
 ## Report recurrence and recorded source comparison
 
 The context matrix Report recap shares the case reader's literal location and
@@ -4473,3 +4520,46 @@ checks continue to apply when an action is selected.
   `artifactRead` metadata reports bounded file reads and unverified source
   identity. Bad optional files produce partial output; an unusable primary
   refuses fallback. The legacy model option is explicitly ignored.
+
+### Tracked inventory symlinks
+
+Unix inventory now records known tracked symlinks and non-regular leaves as
+visible exclusions, matching the filesystem enumeration policy. Missing or
+unsafe paths still produce partial results. Other platforms retain their
+strict partial-result behavior. No artifact schema or public tool changes.
+See [the inventory assessment](docs/assessments/tracked-symlink-inventory-2026-10-24.md).
+
+### Partial context import and reporting
+
+Current authenticated partial catalogs can support observed-row verification.
+The additive verification values `verdict=partial` and
+`groundingSource=partial-catalog` retain their reason in `groundingDegraded`.
+Complete-set consumers still reject partial catalogs. Partial imports require
+`activate=false` and explicit acknowledgment during Map selection.
+
+Investigation receipts add `scope.contextEvidence` with `schemaVersion=1`;
+context matrices also add `scope.caseContextEvidence`. Existing fields and
+historical receipts are retained. Readers should treat partial verification as
+requiring attention, and absent historical verification as unrecorded. No model,
+provider, runtime, scan work or allowance is substituted. See the
+[partial context assessment](docs/assessments/partial-context-map-2026-10-24.md).
+
+Model generation can now use authenticated partial catalog observations with
+`activate=false`. Its bounded source projection retains `snapshotCoverage`,
+and generated catalog receipts add `status=partial`. Counts describe recorded
+observations. Older receipt readers must recognize the new status while
+preserving authentication; unsupported readers should refuse it. Complete-set
+consumers retain their strict guard. Generated context remains inactive and
+requires explicit partial Map acknowledgment. See the
+[generation evidence](docs/assessments/partial-context-generation-2026-10-24.md).
+
+### Generated-context source receipts in Report
+
+Version-one investigation `contextEvidence` additively includes `sourceContext`
+with `schemaVersion=1`, `projection=metadata-only` and `sourceTextIncluded=false`.
+Its `scopeContext` and `fileContext` entries retain known source-input receipt
+metadata from the exact selected revision. Captured source lines retain their
+references but omit text. Missing entries are null; malformed or unsupported
+receipts are unavailable. Existing fields and public tool inputs are unchanged.
+Readers may ignore the additive field and must not infer complete coverage from
+it. See the [workflow evidence](docs/assessments/generated-scope-investigation-2026-10-24.md).

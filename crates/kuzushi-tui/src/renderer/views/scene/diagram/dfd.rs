@@ -1082,6 +1082,7 @@ fn boundary_detail_content(
 ) -> DetailContent {
     let mut lines = Vec::new();
     append_detail_lines(&mut lines, "name", &boundary.name, width);
+    append_source_files_detail(&mut lines, model, &boundary.key, width);
     append_linked_context_detail(&mut lines, model, &boundary.key, width);
     append_detail_lines(&mut lines, "outer zone", &boundary.outer_zone, width);
     append_detail_lines(&mut lines, "inner zone", &boundary.inner_zone, width);
@@ -1120,6 +1121,7 @@ fn nonempty_list(values: &[String]) -> String {
 fn node_detail_content(model: &DfdModel, node: &DfdNodeModel, width: usize) -> DetailContent {
     let mut lines = Vec::new();
     append_detail_lines(&mut lines, "name", &node.name, width);
+    append_source_files_detail(&mut lines, model, &node.key, width);
     append_detail_lines(
         &mut lines,
         "does",
@@ -1157,6 +1159,7 @@ fn append_component_topology_notice(
 fn flow_detail_content(model: &DfdModel, flow: &DfdFlowModel, width: usize) -> DetailContent {
     let mut lines = Vec::new();
     append_detail_lines(&mut lines, "from", &flow.from, width);
+    append_source_files_detail(&mut lines, model, &flow.key, width);
     append_linked_context_detail(&mut lines, model, &flow.key, width);
     append_detail_lines(&mut lines, "to", &flow.to, width);
     append_detail_lines(&mut lines, "description", nonempty(&flow.label), width);
@@ -1166,6 +1169,23 @@ fn flow_detail_content(model: &DfdModel, flow: &DfdFlowModel, width: usize) -> D
         kind: "flow",
         lines,
     }
+}
+
+fn append_source_files_detail(
+    lines: &mut Vec<Line<'static>>,
+    model: &DfdModel,
+    element_id: &str,
+    width: usize,
+) {
+    let Some(paths) = model.element_file_paths.get(element_id) else {
+        return;
+    };
+    let quoted = paths
+        .iter()
+        .map(|path| format!("{path:?}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    append_detail_lines(lines, "files", &quoted, width);
 }
 
 fn append_linked_context_detail(
@@ -1325,6 +1345,40 @@ mod tests {
     use crate::ui_view_models::{DfdSecurityItem, DfdSecurityKind};
 
     mod selected_neighborhood;
+
+    #[test]
+    fn direct_source_files_are_visible_before_security_context_for_every_element() {
+        let mut model = portrait_model();
+        let path = " app /source.rs:7";
+        for key in [
+            model.nodes[0].key.clone(),
+            model.flows[0].key.clone(),
+            model.boundaries[0].key.clone(),
+        ] {
+            model.element_file_paths.insert(key, vec![path.into()]);
+        }
+        let details = [
+            node_detail_content(&model, &model.nodes[0], 100),
+            flow_detail_content(&model, &model.flows[0], 100),
+            boundary_detail_content(&model, &model.boundaries[0], 100),
+        ];
+        for detail in details {
+            let text = detail
+                .lines
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                text.contains("files        \" app /source.rs:7\""),
+                "{text}"
+            );
+            assert!(
+                text.find("files").unwrap() < text.find("context").unwrap(),
+                "{text}"
+            );
+        }
+    }
 
     #[test]
     fn selected_position_is_one_based_and_clamped_to_the_available_items() {
@@ -1642,6 +1696,7 @@ mod tests {
                 file_paths: vec!["src/main.rs".into()],
                 target_element_ids: vec!["Local developer user".into()],
             }],
+            element_file_paths: Default::default(),
             link_state: DfdLinkState::Complete,
             empty_hint: None,
         }
