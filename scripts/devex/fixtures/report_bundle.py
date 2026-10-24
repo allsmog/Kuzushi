@@ -1,10 +1,41 @@
 """Inspect a real Report bundle without changing jobs, source or accounting."""
 import hashlib
 import json
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 import investigation_journey as investigation
+
+
+def report_pane(root):
+    output = subprocess.check_output(["tmux", "list-panes", "-a", "-F",
+        "#{session_name}\t#{pane_id}\t#{pane_current_path}"], text=True)
+    matches = [pane for line in output.splitlines()
+        for session, pane, cwd in [line.split("\t", 2)]
+        if session.startswith("kzx-devex-j121-") and Path(cwd).resolve() == root]
+    assert len(matches) == 1, "Expected exactly one owned Report journey pane"
+    return matches[0]
+
+
+def retry_export_if_ready(root, evidence):
+    pane = report_pane(root)
+    deadline = time.monotonic() + 25
+    presses = 0
+    while time.monotonic() < deadline:
+        text = subprocess.check_output(["tmux", "capture-pane", "-p", "-t", pane], text=True)
+        header = text.splitlines()[1]
+        if header.startswith("EXPORTED ·"):
+            (evidence / "bundle-retry-action.json").write_text(json.dumps({
+                "additionalEnterPresses": presses, "automaticExportQueued": False,
+                "modelRequestsAdded": 0, "sourceExecuted": False}) + "\n")
+            return
+        if header.startswith("RETRY EXPORT ·") and presses == 0:
+            subprocess.run(["tmux", "send-keys", "-t", pane, "Enter"], check=True)
+            presses += 1
+        time.sleep(0.05)
+    raise AssertionError("The explicit Report export did not complete; do not relaunch it")
 
 
 def verify(root, evidence, stage):
@@ -50,4 +81,8 @@ def verify(root, evidence, stage):
 
 if __name__ == "__main__":
     root, evidence = [Path(value).resolve() for value in sys.argv[1:3]]
-    verify(root, evidence, sys.argv[3])
+    stage = sys.argv[3]
+    if stage == "retry-export":
+        retry_export_if_ready(root, evidence)
+    else:
+        verify(root, evidence, stage)

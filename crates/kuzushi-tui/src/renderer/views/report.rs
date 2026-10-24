@@ -41,7 +41,28 @@ fn report_export_destination_line(app: &ShellApp, width: usize) -> Line<'static>
     if let Some(path) = app.report_export_destination() {
         return report_status_path_line("EXPORTING", &path.to_string_lossy(), width, theme::warn());
     }
+    if let Some(status) = refused_export_status(app) {
+        return report_status_path_line(
+            status,
+            app.router.report().path_draft(),
+            width,
+            theme::warn(),
+        );
+    }
     report_destination_line(app.router.report(), width)
+}
+
+fn refused_export_status(app: &ShellApp) -> Option<&'static str> {
+    if !app.router.report().export_read_error() {
+        return None;
+    }
+    Some(
+        if crate::ui_view_models::report_export_campaign(app).is_ok() {
+            "RETRY EXPORT"
+        } else {
+            "NOT EXPORTED"
+        },
+    )
 }
 
 fn report_status_path_line(status: &str, path: &str, width: usize, style: Style) -> Line<'static> {

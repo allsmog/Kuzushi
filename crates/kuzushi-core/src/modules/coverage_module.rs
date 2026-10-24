@@ -251,7 +251,7 @@ fn sweep_entry_output(entry: &crate::workspace::coverage_ledger::ScopeSweepEntry
 
 fn sweep_verdict_label(verdict: SweepVerdict) -> String {
     match verdict {
-        SweepVerdict::Changed { files } => format!("source changed: {files} file(s)"),
+        SweepVerdict::Changed { files } => format!("source changed: {files} path(s)"),
         SweepVerdict::Current => "tracked source unchanged".into(),
         SweepVerdict::BaselineUnreachable => "baseline unreachable".into(),
         SweepVerdict::SourceUnverified { reason } => {

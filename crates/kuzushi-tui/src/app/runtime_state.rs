@@ -47,6 +47,7 @@ pub(crate) struct RuntimeState {
     /// instead of a possibly recycled one.
     dispatcher_child: Option<std::process::Child>,
     dispatcher_origin: Option<(PathBuf, String)>,
+    dispatcher_stop_requested: bool,
     /// Idle-tick stat probe that notices findings written by other processes.
     findings_store_probe: FindingsStoreProbe,
     pub(crate) findings_refresh: super::FindingsRefreshState,

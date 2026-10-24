@@ -11,6 +11,7 @@ use kuzushi_core::capabilities::campaign::snapshot::{
     campaign_ids, load_campaign_snapshot, CampaignSnapshot,
 };
 use std::path::Path;
+mod dispatcher_control;
 mod dispatcher_results;
 mod observations;
 mod scan_progress;
@@ -319,18 +320,7 @@ impl ShellApp {
     /// Request Stop through the held child's original campaign. Keep its
     /// handle while the dispatcher settles children and saves partial work.
     fn campaign_kill(&mut self) {
-        match self.runtime_state.request_dispatcher_stop() {
-            Ok(pid) => {
-                let deck = self.router.campaign_mut();
-                deck.dispatcher_stop_requested = true;
-                deck.notice = Some(format!(
-                    "Stop requested for dispatcher {pid}; saving partial work"
-                ));
-            }
-            Err(error) => {
-                self.router.campaign_mut().notice = Some(format!("Stop unavailable: {error:#}"))
-            }
-        }
+        self.request_owned_dispatcher_stop();
     }
 
     pub(crate) fn poll_campaign_completion(&mut self) -> bool {

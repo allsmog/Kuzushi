@@ -24,6 +24,7 @@ def active_work(root, evidence):
     assert fixture.investigation.accounting(root, plan["investigationId"])["reservations"] == [3, 1, 0]
     screen = subprocess.check_output(["tmux", "capture-pane", "-p", "-t", owned_pane(root)], text=True)
     assert "Ledger refresh failed" not in screen, "An unfinished Scan must not fail the findings reader"
+    assert "LIVE" in screen and "○ idle" not in screen, "The authenticated owned dispatcher must not appear idle"
     assert "NEXT run discovery-only" in screen, "An engine result cannot complete the accepted study"
     for label in ["APPROVED STUDY", "1/3 complete", "1 running", "1 queued"]:
         assert label in screen, "Missing finite study progress: " + label

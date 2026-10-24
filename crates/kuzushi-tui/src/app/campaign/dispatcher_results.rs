@@ -5,6 +5,7 @@ impl ShellApp {
         let Some(exit) = self.runtime_state.reap_exited_dispatcher() else {
             return false;
         };
+        self.clear_owned_dispatcher_stop_notice();
         self.router.campaign_mut().dispatcher_pid = None;
         self.router.campaign_mut().dispatcher_stop_requested = false;
         if exit.status.success() {

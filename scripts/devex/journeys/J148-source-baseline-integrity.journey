@@ -57,7 +57,7 @@ submit: run coverage:sweep {}
 wait: 0.5
 submit: logs
 keys: End
-require-live-snap: 25 source changed: 1 file(s) | new-sha-changed
+require-live-snap: 25 source changed: 1 path(s) | new-sha-changed
 expect: baseline was captured dirty
 submit: setup
 require-live-snap: 25 SETUP · READY THE MAP RUN | setup-still-needed
@@ -73,7 +73,7 @@ submit: run coverage:sweep {}
 wait: 0.5
 submit: logs
 keys: End
-require-live-snap: 25 source changed: 1 file(s) | restarted-source-history
+require-live-snap: 25 source changed: 1 path(s) | restarted-source-history
 submit: setup
 require-live-snap: 25 SETUP · READY THE MAP RUN | restarted-setup
 expect-not: Map ✓

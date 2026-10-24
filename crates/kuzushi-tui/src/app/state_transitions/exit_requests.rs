@@ -51,12 +51,17 @@ impl ShellApp {
 
     fn request_domain_aborts(&mut self, reason: AbortReason) -> bool {
         let mut requested = false;
+        requested |= self.request_owned_dispatcher_abort();
         requested |= self.request_scan_abort_for(reason);
         requested |= self.request_tool_abort_for(reason);
         requested |= self.request_agent_abort();
         requested |= self.request_plan_abort();
         requested |= self.request_threat_abort();
         requested
+    }
+
+    fn request_owned_dispatcher_abort(&mut self) -> bool {
+        self.runtime_state.owned_dispatcher_needs_stop() && self.request_owned_dispatcher_stop()
     }
 
     /// Say what the stop request addresses. The per-domain lines above already
@@ -68,7 +73,7 @@ impl ShellApp {
     fn log_stop_request_subject(&mut self, projected: bool) {
         match self.stop_request_subject() {
             Some(subject) => self.log("system", format!("stop requested for {subject}")),
-            None if !projected => self.log(
+            None if !projected && !self.runtime_state.has_owned_dispatcher() => self.log(
                 "system",
                 "abort requested for active worker; waiting for cleanup",
             ),
@@ -251,7 +256,7 @@ impl ShellApp {
         if let Some(update) = self.idle_quit_update() {
             return update;
         }
-        if let Some(effect) = self.concurrent_run_ask_cancel_effect() {
+        if let Some(effect) = self.quit_cancel_effect() {
             return InputUpdate::handled_with_effects(vec![effect]);
         }
         if self.abort_request_pending() {
@@ -262,6 +267,13 @@ impl ShellApp {
             return InputUpdate::handled();
         }
         InputUpdate::handled_with_effects(vec![ShellEffect::CancelActiveJobs])
+    }
+
+    fn quit_cancel_effect(&self) -> Option<ShellEffect> {
+        if self.runtime_state.owned_dispatcher_needs_stop() {
+            return Some(ShellEffect::CancelActiveJobs);
+        }
+        self.concurrent_run_ask_cancel_effect()
     }
 
     #[cfg(test)]
@@ -303,7 +315,19 @@ impl ShellApp {
             || self.agent_chat().is_some_and(|agent| agent.abort_requested)
     }
 
-    fn abort_request_pending(&self) -> bool {
+    pub(crate) fn abort_request_pending(&self) -> bool {
+        if self.concurrent_run_ask_cancel_effect().is_some() {
+            return false;
+        }
+        let local_pending = self.local_abort_request_pending();
+        if !self.runtime_state.has_owned_dispatcher() {
+            return local_pending;
+        }
+        self.runtime_state.owned_dispatcher_stop_requested()
+            && (!self.has_local_running_work() || local_pending)
+    }
+
+    fn local_abort_request_pending(&self) -> bool {
         self.jobs().has_cancel_requested()
             || self.scan().is_some_and(|scan| scan.abort_requested)
             || self.tool_abort_requested()
@@ -365,3 +389,6 @@ fn cancel_token(cancel: Option<&ScanCancellation>) {
         cancel.cancel();
     }
 }
+
+#[cfg(all(test, unix))]
+mod dispatcher_tests;

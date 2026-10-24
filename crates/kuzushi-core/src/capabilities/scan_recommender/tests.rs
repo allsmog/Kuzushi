@@ -104,7 +104,7 @@ fn changed_sweep_entry_scores_with_file_volume_and_evidence() {
         .unwrap();
     assert!(changed
         .evidence
-        .contains("14 file(s) changed since aaaabbbb"));
+        .contains("14 path(s) changed since aaaabbbb"));
     assert!(changed.score > 0.5 && changed.score < 0.9);
 }
 

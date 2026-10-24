@@ -1,5 +1,15 @@
 # Bounded investigations implementation
 
+The [owned study control correction](../assessments/owned-study-control-2026-10-24.md)
+uses the actual owned child for activity, cancellation and exit disclosure.
+The [Report retry correction](../assessments/report-retry-visibility-2026-10-24.md)
+keeps a refused export visible until an explicit retry. Combined with the
+source-move correction, these changes have 216 distinct focused Rust passes.
+Current J121 records 227 machine passes, zero failures, 134 capture pairs and
+21 pending operator judgments through cancellation, triage, export and restart.
+No live request or broad delivery closure is added. Four delivery items below
+have local acceptance evidence and five remain open.
+
 The [boundary-context reading correction](../assessments/boundary-context-reading-2026-10-24.md)
 puts inheritance or omission and preparation state ahead of long names and
 instructions while retaining exact receipts. All 90 focused checks, build and
@@ -996,7 +1006,7 @@ and three pending human judgments. This closes that concrete implementation gap
 without qualifying the complete operator experience or closing a broad milestone.
 
 - [x] Bounded iterative inventory and inventory-derived scope suggestions. See [acceptance evidence](../assessments/bounded-inventory-acceptance-2026-10-17.md).
-- [ ] Registry-derived per-tool functional matrix and curated phase readiness. [Coverage cancellation and current catalog evidence](../assessments/coverage-cancellation-2026-10-18.md) repair a supported path and refresh 118 visible descriptor rows. [Context catalog phase evidence](../assessments/context-catalog-phase-2026-10-24.md) corrects three supporting readers and their startup/history consumers; broader qualification remains open.
+- [ ] Registry-derived per-tool functional matrix and curated phase readiness. [Coverage cancellation and current catalog evidence](../assessments/coverage-cancellation-2026-10-18.md) repair a supported path and refresh 118 visible descriptor rows. [Context catalog phase evidence](../assessments/context-catalog-phase-2026-10-24.md) corrects three supporting readers and their startup/history consumers. [Source-move evidence](../assessments/coverage-source-moves-2026-10-24.md) prevents incorrect unchanged-source baselines and qualifies the recommendation consumer; broader qualification remains open.
 - [x] Explicit allowance, durable reservations, and honest unknown-cost states. See [acceptance evidence](../assessments/spending-control-acceptance-2026-10-17.md).
 - [x] Accepted context references independent of the global active model. See [acceptance evidence](../assessments/immutable-context-acceptance-2026-10-17.md).
 - [x] Finite study plans with three-pass defaults and restart recovery. See [acceptance evidence](../assessments/finite-study-acceptance-2026-10-17.md).

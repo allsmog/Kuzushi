@@ -2,9 +2,19 @@ use super::{bind, push_view_keybindings, FooterKeybinding};
 use crate::ShellApp;
 
 pub(super) fn active_keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
-    active_scan_keybindings(app)
+    active_owned_study_keybindings(app)
+        .or_else(|| active_scan_keybindings(app))
         .or_else(|| active_agentic_keybindings(app))
         .or_else(|| active_tool_keybindings(app))
+}
+
+fn active_owned_study_keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
+    app.runtime_state.has_owned_dispatcher().then(|| {
+        let mut bindings = vec![abort_binding(app.abort_request_pending())];
+        push_view_keybindings(&mut bindings, app);
+        bindings.push(bind("history", "events"));
+        bindings
+    })
 }
 
 fn active_scan_keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {

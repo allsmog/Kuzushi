@@ -1,0 +1,84 @@
+name: Moving files changes both source boundaries across revisions
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/coverage_source_moves.py @TMP_TARGET @ART @TMP_HOME prepare
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: logs
+require-live-snap: 15 LOGS | settled-logs
+submit: run coverage:sweep {"writeSkips":true}
+require-live-snap: 25 3 changed | move-check
+require-live-snap: 15 1 skip row(s) | unchanged-only
+require-live-snap: 15 departed · scan · source changed: 1 path(s) | source-boundary
+require-live-snap: 15 arrived · scan · source changed: 1 path(s) | destination-boundary
+require-shell: python3 -B @REPO/scripts/devex/fixtures/coverage_source_moves.py @TMP_TARGET @ART @TMP_HOME checked
+nav-mode:
+keys: z
+require-live-snap: 20 READ TRANSCRIPT | reader
+keys: End
+live-snap: result-120x36
+resize: 160x48
+live-snap: result-160x48
+resize: 96x89
+live-snap: result-96x89
+resize: 80x24
+live-snap: result-80x24
+resize: 60x20
+live-snap: result-60x20
+resize: 40x12
+live-snap: result-40x12
+keys: Home
+live-snap: result-head-40x12
+keys: End
+live-snap: result-tail-40x12
+keys: PPage
+live-snap: result-page-01-40x12
+keys: PPage
+live-snap: result-page-02-40x12
+keys: PPage
+live-snap: result-page-03-40x12
+keys: PPage
+live-snap: result-page-04-40x12
+keys: PPage
+live-snap: result-page-05-40x12
+keys: PPage
+live-snap: result-page-06-40x12
+keys: PPage
+live-snap: result-page-07-40x12
+keys: PPage
+live-snap: result-page-08-40x12
+keys: PPage
+live-snap: result-page-09-40x12
+keys: PPage
+live-snap: result-page-10-40x12
+keys: PPage
+live-snap: result-page-11-40x12
+keys: PPage
+live-snap: result-page-12-40x12
+keys: PPage
+live-snap: result-page-13-40x12
+keys: PPage
+live-snap: result-page-14-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/coverage_source_moves.py @TMP_TARGET @ART @TMP_HOME compact
+ask: Do the source and destination both read as changed, while only the untouched scope receives a skip and finding fixes remain unverified?
+ask: Are the revision identities, result counts and historical meaning understandable across all six sizes, including paging at 40 columns?
+keys: q
+resize: 120x36
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: run coverage:sweep {}
+wait: 0.5
+submit: logs
+keys: End
+require-live-snap: 25 3 changed | recovered-move
+require-live-snap: 15 departed · scan · source changed: 1 path(s) | recovered-source-boundary
+require-shell: python3 -B @REPO/scripts/devex/fixtures/coverage_source_moves.py @TMP_TARGET @ART @TMP_HOME restarted
+ask: Does no-color restart preserve both changed boundaries, the original baselines and the one explicit skip without starting scan work?
+keys: C-c
+require-exit: 10

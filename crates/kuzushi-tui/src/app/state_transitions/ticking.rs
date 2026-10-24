@@ -121,6 +121,10 @@ impl ShellApp {
     }
 
     pub fn has_running_work(&self) -> bool {
+        self.runtime_state.has_owned_dispatcher() || self.has_local_running_work()
+    }
+
+    pub(super) fn has_local_running_work(&self) -> bool {
         if self.runtime_state.source_review_worker.is_some()
             || self
                 .runtime_state

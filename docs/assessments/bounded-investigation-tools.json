@@ -812,7 +812,7 @@
         "maxSourceComparisons",
         "maxDiffBytes"
       ],
-      "executionEvidence": "161 distinct focused passing tests (60 Core, 101 TUI), workspace build, risk proxy and J160 with 34 machine passes, 36 native captures and six separate assistant judgments. See docs/assessments/worklist-coverage-module-audit-2026-10-10.md. October 18 saved-scan-recommendations-2026-10-18.md qualifies saved-only recommendation inputs and shared cancellation. Explicit source comparisons and revalidation share finite diff-count and output-byte limits. Scoped functional and native evidence does not establish full product acceptance.",
+      "executionEvidence": "161 distinct focused passing tests (60 Core, 101 TUI), workspace build, risk proxy and J160 with 34 machine passes, 36 native captures and six separate assistant judgments. See docs/assessments/worklist-coverage-module-audit-2026-10-10.md. October 18 saved-scan-recommendations-2026-10-18.md qualifies saved-only recommendation inputs and shared cancellation. Explicit source comparisons and revalidation share finite diff-count and output-byte limits. Scoped functional and native evidence does not establish full product acceptance. October 24 coverage-source-moves-2026-10-24.md reproduces and repairs a false unchanged-source verdict after a committed cross-boundary move. Both paths feed scope filtering and explicit recommendations; only an untouched boundary receives a skip. There are 47 focused Rust passes and 45 native machine passes across J353/J334/J148, with eleven human judgments pending.",
       "readinessVerdict": "Saved-only advice and explicit bounded source comparison qualified; full history/lock costs and formal operator acceptance remain open",
       "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
       "auditDimensions": {
@@ -852,7 +852,7 @@
         "maxSourceComparisons",
         "maxDiffBytes"
       ],
-      "executionEvidence": "Real Rust CLI/TUI prepared dispatch in J148, two actual owned Git commits, same-SHA edit and synthetic historical metadata. See docs/assessments/source-baseline-integrity-2026-10-09.md. October 18 coverage-cancellation-2026-10-18.md: 38 focused checks, locked workspace build and Core/TUI Clippy pass; native cancellation and source-history evidence preserve historical rows, current-SHA meaning and explicit retry. No model request or maturity change. October 18 saved-scan-recommendations-2026-10-18.md qualifies saved-only recommendation inputs and shared cancellation. Explicit source comparisons and revalidation share finite diff-count and output-byte limits. Scoped functional and native evidence does not establish full product acceptance.",
+      "executionEvidence": "Real Rust CLI/TUI prepared dispatch in J148, two actual owned Git commits, same-SHA edit and synthetic historical metadata. See docs/assessments/source-baseline-integrity-2026-10-09.md. October 18 coverage-cancellation-2026-10-18.md: 38 focused checks, locked workspace build and Core/TUI Clippy pass; native cancellation and source-history evidence preserve historical rows, current-SHA meaning and explicit retry. No model request or maturity change. October 18 saved-scan-recommendations-2026-10-18.md qualifies saved-only recommendation inputs and shared cancellation. Explicit source comparisons and revalidation share finite diff-count and output-byte limits. Scoped functional and native evidence does not establish full product acceptance. October 24 coverage-source-moves-2026-10-24.md reproduces and repairs a false unchanged-source verdict after a committed cross-boundary move. Both paths feed scope filtering and explicit recommendations; only an untouched boundary receives a skip. There are 47 focused Rust passes and 45 native machine passes across J353/J334/J148, with eleven human judgments pending.",
       "readinessVerdict": "Scoped source inspection, shared finite diff allowance, cancellation and atomic skip recovery verified; total history/lock costs and full operator acceptance remain open",
       "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
       "auditDimensions": {
@@ -1857,7 +1857,7 @@
       "module": "fuzz",
       "declaredMaturity": "labs",
       "declaredPhase": "scan",
-      "purpose": "Replay one engine target's corpus through N implementations (fork vs upstream, or one command as a metamorphic self-check) and rank the divergences: crash-split first, then validity- and output-splits \u2014 the silent-wrong-data oracle the crash lane never fires on.",
+      "purpose": "Replay one engine target's corpus through N implementations (fork vs upstream, or one command as a metamorphic self-check) and rank the divergences: crash-split first, then validity- and output-splits — the silent-wrong-data oracle the crash lane never fires on.",
       "scope": "excluded-work",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -11042,5 +11042,27 @@
     "maturityChanged": false,
     "broaderDeliveryComplete": false,
     "qualification": "Owned inert dirty fixture, accepted manual scopes and manual root Map, fully intercepted transport; real-model scope quality and operator UX acceptance remain open."
+  },
+  "sourceMoveCoverageCheckpoint": {
+    "assessment": "docs/assessments/coverage-source-moves-2026-10-24.md",
+    "tools": [
+      "coverage:sweep",
+      "coverage:recommend"
+    ],
+    "focusedRustPasses": 47,
+    "nativeMachinePasses": 45,
+    "nativeFailures": 0,
+    "nativeCapturePairs": 68,
+    "humanJudgmentsPending": 11,
+    "inspectedFinalReplays": 11,
+    "compactTranscriptRowsReached": 84,
+    "compatibleCountField": "files",
+    "nativeSha256": "5d17abb2132d282f35094452d05d5ff1590229d8d94b1709ee492185c7c706d8",
+    "newLiveRequests": 0,
+    "cumulativeLiveRequests": 16,
+    "remainingApprovedLiveRequests": 0,
+    "maturityChanges": [],
+    "broadMilestonesClosed": 0,
+    "limits": "Historical source metadata only. No complete coverage, finding fix, detector usefulness, formal operator approval or reference UX parity claim."
   }
 }

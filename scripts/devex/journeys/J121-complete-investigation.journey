@@ -114,6 +114,8 @@ require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellatio
 submit: workbench
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 3/6 workbench
 require-live-snap: 20 calls 3/6 | admitted-workbench
+expect: LIVE
+expect-not: ○ idle
 expect-not: Ledger refresh failed
 expect: 1/3 complete
 expect: 1 running
@@ -144,17 +146,35 @@ expect-not: Ledger refresh failed
 resize: 40x12
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 3/6 workbench
 require-live-snap: 20 Held scan draft λ | admitted-workbench-40x12
+expect: LIVE
+expect-not: ○ idle
+expect: Ctrl+C
+expect: request abort
 expect: calls 3/6
 expect-not: Ledger refresh failed
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART active
 ask: While the request waits, are one completed, one running and one queued job clear, does c inspect the same study and return to Scan, and do the counter, typed draft, palette return and compact controls stay usable without extra work?
 resize: 120x36
 keys: C-u
+submit: quit-confirm
+require-live-snap: 20 CONFIRM SESSION EXIT | owned-study-exit-disclosure
+expect: may continue
+expect: unknown (owned study)
+expect-not: no active work
+resize: 40x12
+live-snap: owned-study-exit-40x12
+keys: End
+live-snap: owned-study-exit-tail-40x12
+ask: Does the exit disclosure identify the owned study and target, keep its unmetered cost unknown and explain that cleanup may continue, with Stay as the default?
+keys: n
+resize: 120x36
+require-live-snap: 20 LIVE | owned-study-stay
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART active
 nav-mode:
 keys: c
 require-live-snap: 20 Jobs: 3 | admitted-campaign-return
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART study
-keys: K
+keys: C-c
 require-live-snap: 20 Stop requested || Stopped by operator | cancellation-requested
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART canceled
 keys: r
@@ -381,6 +401,7 @@ require-live-snap: 20 format markdown-bundle (2/6) · all | bundle-recovery-path
 expect: study-bundle
 expect-not: EXPORT DESTINATION
 keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/report_bundle.py @TMP_TARGET @ART retry-export
 require-live-snap: 25 EXPORTED | bundle-exported-40x12
 expect-not: Saved choices unavailable
 expect: e path

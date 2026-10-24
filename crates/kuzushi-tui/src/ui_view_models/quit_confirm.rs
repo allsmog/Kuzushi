@@ -1,7 +1,8 @@
-use super::{cost_model, format_session_cost};
+use super::cost_model;
 use crate::{
     QuitConfirmFooter, QuitConfirmSection, QuitConfirmSnapshot, QuitConfirmStatus, ShellApp,
 };
+mod owned_study;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct QuitConfirmModel {
@@ -42,8 +43,13 @@ fn default_quit_confirm_model(app: &ShellApp) -> QuitConfirmModel {
         status: default_status(app),
         timestamp: "--:--:--".to_string(),
         warning_title: "CONFIRM SESSION EXIT".to_string(),
-        warning_body: default_warning(active_count, !volatile_rows.is_empty()),
-        sections: context_draft_sections(app, default_sections(active_count, volatile_rows)),
+        warning_body: owned_study::warning(app)
+            .map(str::to_owned)
+            .unwrap_or_else(|| default_warning(active_count, !volatile_rows.is_empty())),
+        sections: context_draft_sections(
+            app,
+            owned_study::sections(app, default_sections(active_count, volatile_rows)),
+        ),
         default_line: "default · n/N/Esc · stay".to_string(),
         footer: default_footer(app, active_count),
     }
@@ -77,10 +83,13 @@ fn default_status(app: &ShellApp) -> QuitConfirmStatus {
 }
 
 fn default_cost(app: &ShellApp) -> String {
-    cost_model(app)
-        .budget_status
+    if app.runtime_state.has_owned_dispatcher() {
+        return "unknown (owned study)".into();
+    }
+    let cost = cost_model(app);
+    cost.budget_status
         .map(|status| status.cells[1].clone())
-        .unwrap_or_else(|| format_session_cost(0.0))
+        .unwrap_or_else(|| cost.auth_spend_cells[0].clone())
 }
 
 fn default_sections(active_count: usize, volatile_rows: Vec<String>) -> Vec<QuitConfirmSection> {
