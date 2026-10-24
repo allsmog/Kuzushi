@@ -179,16 +179,16 @@ fn scope_navigation_controls(state: &ScopeReviewState) -> [&'static str; 2] {
     if let Some(controls) = action_search::choice_controls(state) {
         return controls;
     }
-    if state.review.is_none() {
+    let Some(review) = state.review.as_ref() else {
         return ["Enter / c build inventory", "Esc back · no model requests"];
-    }
+    };
     if state.files.is_some() {
         return [
             "PgUp/Dn read · [ ] file pages",
             "Home/End first/last · Esc back",
         ];
     }
-    boundary_controls(state.review.as_ref().unwrap())
+    boundary_controls(review)
 }
 
 fn boundary_controls(review: &kuzushi_core::workspace::ScanScopeReview) -> [&'static str; 2] {
