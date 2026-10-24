@@ -27,6 +27,7 @@ impl ShellApp {
             .context("Inspect context and select a text field first")?;
         anyhow::ensure!(!draft.entries.iter().any(|entry|entry.changed()),"Save or explicitly discard your edits before regenerating from this exact revision. Your draft is kept.");
         let entry = &draft.entries[draft.cursor];
+        anyhow::ensure!(entry.regeneratable, "This architecture field is edited locally. Select overview, description, purpose or an answer for text regeneration.");
         let pointer = entry
             .pointer
             .as_ref()

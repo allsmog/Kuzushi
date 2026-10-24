@@ -5,6 +5,8 @@ use crate::workspace::WorkspaceTarget;
 use serde_json::json;
 use tempfile::tempdir;
 
+mod plan_scope;
+
 fn run_plan(root: &std::path::Path, input: serde_json::Value) -> Result<Value> {
     let workspace = WorkspaceTarget::new(root).unwrap();
     let config = V2Config::default();
@@ -36,6 +38,9 @@ fn run_status(root: &std::path::Path, input: serde_json::Value) -> Result<Value>
 fn write_shard_manifest(root: &std::path::Path) {
     let dir = root.join(".kuzushi");
     std::fs::create_dir_all(&dir).unwrap();
+    for relative in ["src/codec", "src/formats", "src/api"] {
+        std::fs::create_dir_all(root.join(relative)).unwrap();
+    }
     std::fs::write(
         dir.join("shards.toml"),
         r#"
@@ -213,10 +218,10 @@ fn allow_unseasoned_plans_past_an_empty_threat_document_and_names_it() {
     )
     .unwrap();
 
-    let summary = result["summary"].as_str().unwrap();
-    assert!(summary.contains("unseasoned"));
-    assert!(summary.contains("threat-model.json"));
-    assert!(summary.contains("allowUnseasoned"));
+    let output = result["output"].as_str().unwrap();
+    assert!(output.contains("unseasoned"));
+    assert!(output.contains("threat-model.json"));
+    assert!(output.contains("allowUnseasoned"));
     let plan_path = campaign_plan_path(temp.path(), "camp-unseasoned");
     let plan: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(plan_path).unwrap()).unwrap();
@@ -456,7 +461,7 @@ fn models_dir_documents_compound_across_subsystem_files() {
 }
 
 #[test]
-fn plan_adapts_scope_file_input_for_agentic_sast_jobs() {
+fn plan_adapts_scope_file_input_for_explicit_chunked_compatibility_jobs() {
     let temp = tempdir().unwrap();
     write_shard_manifest(temp.path());
     write_threat_model(temp.path());
@@ -469,9 +474,9 @@ fn plan_adapts_scope_file_input_for_agentic_sast_jobs() {
     let result = run_plan(
         temp.path(),
         json!({
-            "campaignId": "camp-agentic",
-            "tool": "agentic-sast:scan",
-            "promptOption": "AGENTIC_SAST_PROMPT",
+            "campaignId": "camp-chunked",
+            "tool": "full-mode:hunt",
+            "seasonPrompts": false,
         }),
     )
     .unwrap();
@@ -481,20 +486,18 @@ fn plan_adapts_scope_file_input_for_agentic_sast_jobs() {
         .iter()
         .find(|job| job["shard"] == "parsers")
         .expect("parsers job planned");
-    // Scope-file tools reject `paths`/`shard`; the input must carry only
-    // the materialized scope file plus the prompt option.
+    // The explicit compatibility tool reads scopeFile, not paths/shard.
     let input = parsers["input"].as_object().unwrap();
     assert!(!input.contains_key("paths"));
     assert!(!input.contains_key("shard"));
     let scope_rel = input["scopeFile"].as_str().unwrap();
     let scope_body = std::fs::read_to_string(temp.path().join(scope_rel)).unwrap();
     assert_eq!(scope_body, "src/codec/lz.c\nsrc/formats/tar.c\n");
-    // Non-TRIAGE prompt options compose with the builtin prompt, so the
-    // seasoning must stay a focus-only fragment.
-    let prompt_rel = input["AGENTIC_SAST_PROMPT"].as_str().unwrap();
-    let prompt_body = std::fs::read_to_string(temp.path().join(prompt_rel)).unwrap();
-    assert!(!prompt_body.contains(crate::runtime::DEFAULT_TRIAGE_PROMPT));
-    assert!(prompt_body.starts_with("## Campaign focus"));
+    assert!(!input.contains_key("AGENTIC_SAST_PROMPT"));
+    assert_eq!(
+        result["data"]["plan"]["scopeInventory"]["enumerationComplete"],
+        true
+    );
 }
 
 #[test]

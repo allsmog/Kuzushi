@@ -6,6 +6,7 @@ pub use application::{FindingGoalPage, FindingGoalRow};
 mod domain;
 pub use domain::distinct_recorded_source_count;
 pub(crate) use domain::merge_ordered_source_histories;
+pub(crate) use domain::normalize_reported_source_path;
 pub(crate) use domain::FINDING_LESSON_SUBJECT;
 pub(crate) use domain::GOAL_RELEVANCE_SUBJECT;
 pub(crate) use domain::{validate_relationship_selection, FINDING_RELATIONSHIP_BATCH_SUBJECT};
@@ -49,9 +50,9 @@ pub use application::{
     finding_projection_key, finding_remediation_hint, finding_source_label, finding_verdict_label,
     project_finding, read_context_matrix_occurrence_report, review_decision_history_for,
     review_verdict_is_actionable, severity_badge, severity_icon, BatchOccurrenceReport,
-    BatchOccurrenceRow, BatchTrialReport, ComparedFinding, ContextCaseOccurrenceReport,
-    ContextMatrixOccurrenceReport, CrossToolCandidateCluster, CrossToolClusterBasis,
-    CrossToolClusterMember, CrossToolClusterReport, EffectiveReviewDecision,
+    BatchOccurrenceRow, BatchReceiptPending, BatchTrialReport, ComparedFinding,
+    ContextCaseOccurrenceReport, ContextMatrixOccurrenceReport, CrossToolCandidateCluster,
+    CrossToolClusterBasis, CrossToolClusterMember, CrossToolClusterReport, EffectiveReviewDecision,
     EffectiveReviewStateIndex, FindingIdentityAuditApprovalReceipt,
     FindingIdentityAuditApprovalRequest, FindingIdentityAuditDisposition,
     FindingIdentityAuditEvidence, FindingIdentityAuditGroup, FindingIdentityAuditGroupDisposition,

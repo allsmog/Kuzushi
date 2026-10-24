@@ -85,8 +85,7 @@ fn read_artifact_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydr
     }
     if let ViewHydrationKey::FindingsProjection(request) = key {
         return Some(ViewHydrationValue::FindingsProjection(
-            super::super::findings::read_findings_projection(target, request)
-                .map_err(|error| format!("{error:#}")),
+            super::super::findings::read_findings_projection(target, request).map_err(Into::into),
         ));
     }
     review_source::read_review_source(target, key)

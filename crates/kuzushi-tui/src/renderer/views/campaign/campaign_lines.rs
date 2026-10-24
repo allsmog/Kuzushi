@@ -33,6 +33,10 @@ pub(crate) fn campaign_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 }
 
 fn append_study_surfaces(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: Rect) -> bool {
+    if let Some(matrix) = crate::ui_view_models::matrix_plain_lines(app, area.width as usize) {
+        lines.extend(matrix.into_iter().map(Line::from));
+        return true;
+    }
     if app.context_generation().is_some() {
         lines.extend(
             crate::ui_view_models::context_generation::generation_lines(app, area.width as usize)
@@ -44,11 +48,15 @@ fn append_study_surfaces(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: R
     if append_study_picker(lines, app, area) {
         return true;
     }
-    if let Some(config) = crate::ui_view_models::study_config::study_projection(app) {
-        append_batch_scan_config(lines, &config, area);
-        return true;
-    }
-    false
+    append_study_form(lines, app, area)
+}
+
+fn append_study_form(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: Rect) -> bool {
+    let Some(config) = crate::ui_view_models::study_config::study_projection(app) else {
+        return false;
+    };
+    append_batch_scan_config(lines, &config, area);
+    true
 }
 
 fn append_study_picker(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: Rect) -> bool {
@@ -740,7 +748,7 @@ mod tests {
         assert!(text.contains("seen 2 / completed 3"), "{text}");
         assert!(text.contains("runs run-1, run-2"), "{text}");
         assert!(
-            text.contains("gate failed · operational complete · security failed · blocking 1"),
+            text.contains("Severity cutoff high: reached · 1 qualifying finding"),
             "{text}"
         );
         assert!(text.contains("work finished"), "{text}");

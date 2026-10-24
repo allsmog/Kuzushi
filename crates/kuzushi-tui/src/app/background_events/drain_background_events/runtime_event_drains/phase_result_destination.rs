@@ -25,6 +25,10 @@ impl ShellApp {
         if !self.context_map_handoff_completed(origin) {
             return false;
         }
+        self.open_reviewed_context_map()
+    }
+
+    pub(crate) fn open_reviewed_context_map(&mut self) -> bool {
         let Some(id) = self.reviewed_context_map_attempt() else {
             return false;
         };

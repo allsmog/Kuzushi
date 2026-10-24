@@ -92,7 +92,7 @@ fn tool_fingerprint(
         language: None,
         parser_version: None,
         normalizer_version: None,
-        symbol_path_or_rename_group: Some(&normalize_path(file_path)),
+        symbol_path_or_rename_group: Some(&recorded_source_path_identity(file_path)),
         ast_locus_hash: None,
         normalized_snippet: &identity_hint,
         local_context_hash: None,
@@ -123,8 +123,39 @@ pub(crate) fn normalize_finding_text(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+const LITERAL_SOURCE_PATH_TAG: &str = "kuzushi-literal-path-v1:";
+
+pub(crate) fn native_source_path(path: &str) -> String {
+    let native = std::path::Path::new(path)
+        .components()
+        .filter(|component| !matches!(component, std::path::Component::CurDir))
+        .collect::<std::path::PathBuf>()
+        .to_string_lossy()
+        .into_owned();
+    #[cfg(windows)]
+    let native = native.replace('\\', "/");
+    native
+}
+
+/// Keep ordinary v3 keys stable. Encode literal paths that legacy normalization
+/// changes, and escape the reserved tag so a real filename cannot alias it.
+pub(crate) fn recorded_source_path_identity(path: &str) -> String {
+    let native = native_source_path(path);
+    let legacy = normalize_path(path);
+    if legacy == native && !legacy.starts_with(LITERAL_SOURCE_PATH_TAG) {
+        return legacy;
+    }
+    format!(
+        "{LITERAL_SOURCE_PATH_TAG}{}",
+        serde_json::Value::String(native)
+    )
+}
+
 pub(crate) fn normalize_path(path: &str) -> String {
-    path.trim().replace('\\', "/").trim_start_matches("./").to_string()
+    path.trim()
+        .replace('\\', "/")
+        .trim_start_matches("./")
+        .to_string()
 }
 
 pub(crate) fn normalize_token(value: &str) -> String {
@@ -162,6 +193,7 @@ fn normalized_or(value: Option<&str>, fallback: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    mod literal_paths;
     use super::*;
 
     fn input(snippet: &str) -> StableFindingInput<'_> {
@@ -181,8 +213,10 @@ mod tests {
 
     #[test]
     fn stable_finding_id_ignores_line_numbers_by_construction() {
-        let first = stable_fingerprint_for_tool("semgrep", "CWE-89", "src/db.rs", "SQLi", "raw query");
-        let second = stable_fingerprint_for_tool("semgrep", "CWE-89", "src/db.rs", "SQLi", "raw query");
+        let first =
+            stable_fingerprint_for_tool("semgrep", "CWE-89", "src/db.rs", "SQLi", "raw query");
+        let second =
+            stable_fingerprint_for_tool("semgrep", "CWE-89", "src/db.rs", "SQLi", "raw query");
 
         assert_eq!(first, second);
         assert!(first.starts_with("fp3_"));
@@ -190,7 +224,13 @@ mod tests {
 
     #[test]
     fn discriminated_fingerprint_separates_issues_sharing_rule_and_file() {
-        let base = stable_fingerprint_for_tool("dep-hygiene", "dep-hygiene/package-json", "package.json", "", "");
+        let base = stable_fingerprint_for_tool(
+            "dep-hygiene",
+            "dep-hygiene/package-json",
+            "package.json",
+            "",
+            "",
+        );
         let first = discriminated_fingerprint_for_tool(
             "dep-hygiene",
             "dep-hygiene/package-json",

@@ -29,8 +29,14 @@ pub use application::{
 };
 pub use domain::validate_threat_model_import_source;
 pub use domain::{
-    apply_context_text_edits, context_text_differences, context_text_fields, ContextTextDifference,
-    ContextTextEdit, ContextTextField, MAX_CONTEXT_EDITS, MAX_CONTEXT_EDIT_BYTES,
+    apply_context_operator_edits, apply_context_text_edits, context_operator_fields,
+    context_text_differences, context_text_fields, ContextEditConstraint, ContextEditField,
+    ContextFieldChoice, ContextTextDifference, ContextTextEdit, ContextTextField,
+    MAX_CONTEXT_EDITS, MAX_CONTEXT_EDIT_BYTES,
+};
+pub use domain::{
+    context_document_differences, ContextCollectionOrderDifference, ContextDifferenceMatching,
+    ContextDifferenceSection, ContextDocumentDiff, ContextSourceClaims, ContextValueDifference,
 };
 pub use domain::{security_context_link_report, SecurityContextLinkReport, ThreatModelBuildRoots};
 #[cfg(test)]

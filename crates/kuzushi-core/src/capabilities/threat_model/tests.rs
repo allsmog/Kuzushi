@@ -66,6 +66,27 @@ pub fn accepts_scope(scope: &str) -> bool {
         assert!(requests[0].prompt.contains("starts_with"));
         assert!(requests[0].prompt.contains("lib.rs:2"));
         assert!(!requests[0].prompt.contains("UNIT_TEST_BODY_MARKER"));
+        let receipt = &result["data"]["repositoryInventory"];
+        assert_eq!(receipt["schemaVersion"], 1);
+        assert_eq!(receipt["enumerationComplete"], true);
+        assert_eq!(receipt["completeRepositoryCoverage"], false);
+        assert!(receipt["listedPaths"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|path| path == "lib.rs"));
+        assert_eq!(
+            &result["data"]["document"]["provenance"]["repositoryInventory"],
+            receipt
+        );
+        let framed = crate::runbooks::untrusted::render_untrusted_repo_block(
+            "repository-inventory",
+            serde_json::to_string(receipt).unwrap(),
+        );
+        assert!(
+            requests[0].prompt.contains(&framed),
+            "The persisted receipt must match the actual model input"
+        );
         assert!(result["data"]["sources"]
             .as_array()
             .unwrap()
@@ -13596,7 +13617,10 @@ pub fn accepts_scope(scope: &str) -> bool {
     fn zero_delta_refine_makes_no_llm_calls_and_stamps_refine_provenance() {
         let temp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
-        save_persistent_threat_model(workspace.root(), &sample_document(), true).unwrap();
+        let mut previous = sample_document();
+        let earlier_inventory = json!({"schemaVersion":1,"purpose":"base-synthesis-filename-list","listedPaths":["earlier.rs"]});
+        previous["provenance"]["repositoryInventory"] = earlier_inventory.clone();
+        save_persistent_threat_model(workspace.root(), &previous, true).unwrap();
         let registry = ModuleRegistry::with_v2_builtins();
         let mut config = V2Config::default();
         config.model = Some("openai:gpt-4.1".to_string());
@@ -13613,8 +13637,10 @@ pub fn accepts_scope(scope: &str) -> bool {
             .unwrap();
 
         assert!(runtime.requests().is_empty(), "zero delta must cost $0");
+        assert!(result["data"]["repositoryInventory"].is_null(), "Refine did not construct a filename synthesis prompt; it must not attest a newly supplied filename list");
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
         let provenance = result.pointer("/data/document/provenance").unwrap();
+        assert_eq!(provenance["repositoryInventory"], earlier_inventory);
         assert_eq!(provenance["mode"], json!("refine"));
         assert_eq!(provenance["pipeline"], json!("staged"));
         assert_eq!(provenance["refineDelta"]["newFindings"], json!(0));

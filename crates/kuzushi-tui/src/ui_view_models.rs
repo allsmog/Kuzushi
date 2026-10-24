@@ -16,13 +16,17 @@ pub(crate) mod context_generation;
 pub(crate) mod context_goal;
 mod context_matrix;
 mod evidence_inventory;
+mod occurrence_evidence;
 pub(crate) mod review_study;
 pub(crate) mod scope_review;
 pub(crate) mod study_config;
 pub(crate) use context_matrix::{
     case_name_notice, case_name_plain_lines, context_matrix_conditions, context_matrix_lines,
 };
-pub(crate) use context_matrix::{matrix_result_lines, matrix_result_state};
+pub(crate) use context_matrix::{
+    matrix_body, matrix_plain_lines, matrix_result_controls, matrix_result_lines,
+    matrix_result_read_limits, matrix_result_state, MatrixResultReadLimits,
+};
 pub(crate) mod scope_context;
 pub(crate) mod study_context;
 pub(crate) mod study_engines;

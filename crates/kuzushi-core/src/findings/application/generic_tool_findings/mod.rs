@@ -8,4 +8,4 @@ use crate::workspace::WorkspaceTarget;
 use anyhow::Result;
 use serde::Serialize;
 use serde_json::{Map, Value};
-use std::path::{Path, PathBuf};
+use std::path::Path;

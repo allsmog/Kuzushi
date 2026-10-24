@@ -304,3 +304,91 @@ fn oversized_repair_response_keeps_both_observed_costs() {
     assert!(failure.cost_report().is_complete());
     assert!(format!("{error:#}").contains(&digest));
 }
+
+#[test]
+fn parse_only_contract_keeps_validation_cause_and_exact_observed_spend() {
+    let response = AgentQueryResponse {
+        structured: Some(json!({"type":"data-type"})),
+        cost_usd: 0.11,
+        cost_usd_reported: true,
+        ..Default::default()
+    };
+    let error =
+        parse_required_structured_json_with_cost::<Value>(response, contract(Value::Null), |_| {
+            anyhow::bail!("unsupported role at /dfd/nodes/0/type")
+        })
+        .unwrap_err();
+    assert!(format!("{error:#}").contains("unsupported role at /dfd/nodes/0/type"));
+    assert!(error
+        .to_string()
+        .contains("model response could not be accepted"));
+    assert!(!error.to_string().contains("model call failed"));
+    let cost = error
+        .downcast_ref::<StructuredOutputError>()
+        .unwrap()
+        .cost_report();
+    assert_eq!(cost.observed_usd(), 0.11);
+    assert!(cost.is_complete());
+}
+
+#[test]
+fn parse_only_contract_accepts_one_valid_response_and_retains_unknown_cost() {
+    let response = AgentQueryResponse {
+        structured: Some(json!({"ok":true})),
+        ..Default::default()
+    };
+    let result = parse_required_structured_json_with_cost(
+        response,
+        contract(Value::Null),
+        Ok::<_, anyhow::Error>,
+    )
+    .unwrap();
+    assert_eq!(result.value, json!({"ok":true}));
+    assert!(!result.cost_report().unwrap().is_complete());
+}
+
+#[test]
+fn parse_only_contract_rejects_truncation_before_validation_without_more_spend() {
+    let called = Cell::new(false);
+    let response = AgentQueryResponse {
+        structured: Some(json!({"ok":true})),
+        truncated: true,
+        cost_usd: 0.2,
+        cost_usd_reported: true,
+        ..Default::default()
+    };
+    let error =
+        parse_required_structured_json_with_cost(response, contract(Value::Null), |value| {
+            called.set(true);
+            Ok(value)
+        })
+        .unwrap_err();
+    assert!(!called.get());
+    let cost = error
+        .downcast_ref::<StructuredOutputError>()
+        .unwrap()
+        .cost_report();
+    assert_eq!(cost.observed_usd(), 0.2);
+    assert!(cost.is_complete());
+}
+
+#[test]
+fn parse_only_contract_rejects_oversized_material_before_validation() {
+    let called = Cell::new(false);
+    let response = response_text("x".repeat(MAX_STRUCTURED_RESPONSE_BYTES + 1), 0.4);
+    let error =
+        parse_required_structured_json_with_cost(response, contract(Value::Null), |value| {
+            called.set(true);
+            Ok(value)
+        })
+        .unwrap_err();
+    assert!(!called.get());
+    assert_eq!(
+        error
+            .downcast_ref::<StructuredOutputError>()
+            .unwrap()
+            .cost_report()
+            .observed_usd(),
+        0.4
+    );
+}

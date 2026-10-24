@@ -167,6 +167,14 @@ fn failed_or_partial_checks_preserve_context_and_disclose_recovery() {
         app.study_context_picker().unwrap().selected,
         Some(reference.clone())
     );
+    assert!(app
+        .study_context_picker()
+        .unwrap()
+        .preview
+        .as_ref()
+        .unwrap()
+        .source_status
+        .is_none());
     assert!(app.study_context_picker().unwrap().preview.is_some());
     assert!(app
         .router

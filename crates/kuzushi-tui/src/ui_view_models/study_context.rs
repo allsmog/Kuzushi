@@ -7,14 +7,25 @@ use ratatui::layout::Rect;
 use serde_json::Value;
 use std::time::{Duration, SystemTime};
 
+pub(crate) mod comparison;
 pub(crate) mod diagram;
 mod evidence;
+mod reader;
 mod scanner;
 
 pub(crate) fn context_header_title(app: &ShellApp) -> &'static str {
     let picker = app.study_context_picker();
     if picker.is_some_and(|picker| picker.text_view == crate::app::StudyContextTextView::Scanner) {
         return " SCANNER CONTEXT PREVIEW ";
+    }
+    if picker.is_some_and(|picker| picker.preview.is_some()) {
+        return if picker
+            .is_some_and(|picker| picker.text_view == crate::app::StudyContextTextView::Document)
+        {
+            " CONTEXT DOCUMENT "
+        } else {
+            " CONTEXT SUMMARY "
+        };
     }
     if picker.is_some_and(|picker| picker.regeneration_entry) {
         return " CHOOSE CONTEXT TO REGENERATE ";
@@ -64,7 +75,7 @@ pub(crate) const CONTEXT_ACTIONS: [(crossterm::event::KeyCode, &str); 11] = [
     (crossterm::event::KeyCode::Tab, "Tab Read complete document"),
     (
         crossterm::event::KeyCode::Char('d'),
-        "d Compare edited/regenerated text",
+        "d Compare saved context revisions",
     ),
     (crossterm::event::KeyCode::Char('+'), "+ Add context case"),
     (
@@ -138,44 +149,7 @@ pub(crate) fn comparison_lines(
     comparison: &crate::app::StudyContextComparison,
     width: usize,
 ) -> Vec<String> {
-    let mut lines = vec!["Compare saved text. Selection changes this study only.".into()];
-    append_comparison_content(&mut lines, comparison);
-    lines.extend([
-        String::new(),
-        format!("Parent: {}", comparison.parent.revision_id),
-        format!("Candidate: {}", comparison.candidate.revision_id),
-    ]);
-    lines
-        .into_iter()
-        .flat_map(|line| context_wrap(&line, width.max(1)))
-        .collect()
-}
-
-fn append_comparison_content(
-    lines: &mut Vec<String>,
-    comparison: &crate::app::StudyContextComparison,
-) {
-    if let Some(error) = &comparison.error {
-        lines.extend([
-            format!("Parent unavailable: {error}"),
-            "Enter retries this local read · Esc returns to the candidate. No model request."
-                .into(),
-        ]);
-        return;
-    }
-    let Some(changes) = comparison.differences.as_ref() else {
-        lines.push("Reading the authenticated parent. No model request.".into());
-        return;
-    };
-    for change in changes {
-        lines.extend([String::new(), change.label.clone(), "Before:".into()]);
-        lines.extend(change.before.lines().map(|line| format!("- {line}")));
-        lines.push("After:".into());
-        lines.extend(change.after.lines().map(|line| format!("+ {line}")));
-    }
-    if changes.is_empty() {
-        lines.push("No editable text differs from the recorded parent.".into());
-    }
+    comparison::all_lines(comparison, width)
 }
 
 pub(crate) fn context_diagram_model(
@@ -189,8 +163,9 @@ pub(crate) fn context_reader_layout(
     area: Rect,
     row_count: usize,
     text_view: crate::app::StudyContextTextView,
+    inspected: bool,
 ) -> super::study_config::StudyConfigLayout {
-    if text_view == crate::app::StudyContextTextView::Scanner {
+    if inspected || text_view == crate::app::StudyContextTextView::Scanner {
         return super::study_config::study_reader_layout(area, true);
     }
     context_layout(area, row_count)
@@ -225,6 +200,16 @@ pub(crate) struct ContextRow {
     pub(crate) label: String,
     pub(crate) details: Vec<String>,
     pub(crate) copy_label: Option<String>,
+}
+
+pub(crate) fn context_identity(rows: &[ContextRow], reference: Option<&ThreatModelRef>) -> String {
+    if let Some(row) = rows.iter().find(|row| row.reference.as_ref() == reference) {
+        return format!("Context: {}", row.label);
+    }
+    match reference {
+        Some(reference) => format!("Context: {}", reference.revision_id),
+        None => "Context: no revision selected".into(),
+    }
 }
 
 pub(crate) fn context_catalog(app: &ShellApp) -> ContextCatalog {
@@ -342,30 +327,10 @@ pub(crate) fn context_detail_lines(app: &ShellApp, width: usize) -> Vec<String> 
     let Some(picker) = app.study_context_picker() else {
         return Vec::new();
     };
-    context_picker_lines(app, picker)
+    reader::picker_lines(app, picker)
         .into_iter()
         .flat_map(|line| context_wrap(&line, width.max(1)))
         .collect()
-}
-
-fn context_picker_lines(app: &ShellApp, picker: &crate::app::StudyContextPicker) -> Vec<String> {
-    if picker.text_view == crate::app::StudyContextTextView::Scanner {
-        return scanner::picker_lines(picker);
-    }
-    let catalog = context_catalog(app);
-    let mut text = vec![catalog.status, String::new()];
-    text.splice(0..0, context_binding_lines(app, picker));
-    if let Some(notice) =
-        super::study_config::study_projection(app).and_then(|config| config.notice)
-    {
-        text.extend([notice, String::new()]);
-    }
-    let selected = catalog
-        .rows
-        .iter()
-        .find(|row| row.reference == picker.selected);
-    append_selected_context(&mut text, selected, picker, catalog.membership_known);
-    text
 }
 
 fn context_binding_lines(app: &ShellApp, picker: &crate::app::StudyContextPicker) -> Vec<String> {
@@ -383,29 +348,6 @@ fn context_binding_lines(app: &ShellApp, picker: &crate::app::StudyContextPicker
         .and_then(|config| config.study.matrix.cases.iter().find(|case| case.id == id))
         .map_or(id, |case| case.label.as_str());
     vec![format!("Selection applies only to case {name}. a replaces its exact revision; Esc returns without changing the case.")]
-}
-
-fn append_selected_context(
-    text: &mut Vec<String>,
-    selected: Option<&ContextRow>,
-    picker: &crate::app::StudyContextPicker,
-    membership_known: bool,
-) {
-    match selected {
-        Some(row) => text.extend(row.details.iter().take(4).cloned()),
-        None => text.push(missing_catalog_membership(membership_known)),
-    }
-    text.extend(
-        picker
-            .preview
-            .as_ref()
-            .map(|preview| preview.source_state.clone()),
-    );
-    text.extend(preview_lines(picker));
-    if let Some(row) = selected {
-        text.extend(row.details.iter().skip(4).cloned());
-    }
-    append_inspected_context_actions(text, picker);
 }
 
 fn append_inspected_context_actions(
@@ -453,31 +395,6 @@ pub(super) fn context_wrap(line: &str, width: usize) -> Vec<String> {
     .collect()
 }
 
-fn preview_lines(picker: &crate::app::StudyContextPicker) -> Vec<String> {
-    if picker.selected.is_none() {
-        return Vec::new();
-    }
-    let Some(preview) = &picker.preview else {
-        return vec![String::new(), "Enter inspects this exact revision before it can be used. Reading makes no model requests.".into(), "Historical context may not cover the current source. Review its assumptions and boundaries.".into()];
-    };
-    if picker.text_view == crate::app::StudyContextTextView::Document {
-        let mut lines = super::context_goal::context_goal_lines(&preview.goal_state);
-        lines.push("Complete selected context document:".into());
-        lines.extend(preview.raw.clone());
-        return lines;
-    }
-    let mut lines = vec![
-        String::new(),
-        "CONTEXT SUMMARY · v diagram · Tab complete document · p scanner context".into(),
-    ];
-    if let Some(notice) = preview.dfd.evidence_notice() {
-        lines.push(notice.into());
-    }
-    lines.extend(super::context_goal::context_goal_lines(&preview.goal_state));
-    lines.extend(context_summary(&preview.document));
-    lines
-}
-
 pub(crate) fn context_summary(document: &Value) -> Vec<String> {
     let mut lines = Vec::new();
     for key in ["title", "systemContext", "description", "context"] {
@@ -495,6 +412,9 @@ pub(crate) fn context_summary(document: &Value) -> Vec<String> {
         lines.extend(context_section(label, document.pointer(pointer)));
     }
     lines.extend(evidence::receipt_lines(document));
+    lines.extend(super::evidence_inventory::filename_receipt_lines(
+        document.pointer("/provenance/repositoryInventory"),
+    ));
     lines
 }
 
@@ -548,8 +468,8 @@ mod tests {
         use crate::app::StudyContextTextView;
         for (width, height) in [(40, 11), (60, 19), (80, 23), (96, 88), (120, 35), (160, 47)] {
             let area = Rect::new(0, 0, width, height);
-            let scanner = context_reader_layout(area, 20, StudyContextTextView::Scanner);
-            let summary = context_reader_layout(area, 20, StudyContextTextView::Summary);
+            let scanner = context_reader_layout(area, 20, StudyContextTextView::Scanner, true);
+            let summary = context_reader_layout(area, 20, StudyContextTextView::Summary, false);
             assert_eq!(scanner.list.height, 0);
             assert_eq!(scanner.detail.width, width - 4);
             assert_eq!(scanner.controls, summary.controls);
@@ -573,6 +493,20 @@ mod tests {
                 .join(" "),
             "\"question\": \"Which callers are trusted?\""
         );
+    }
+
+    #[test]
+    fn missing_catalog_name_keeps_the_exact_inspected_revision_visible() {
+        let reference = ThreatModelRef {
+            model_id: kuzushi_core::ThreatModelId::new(),
+            revision_id: kuzushi_core::ThreatModelRevisionId::new(),
+            sha256: "sha256:selected-digest".into(),
+        };
+        assert_eq!(
+            context_identity(&[], Some(&reference)),
+            format!("Context: {}", reference.revision_id)
+        );
+        assert_eq!(context_identity(&[], None), "Context: no revision selected");
     }
 
     #[test]

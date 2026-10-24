@@ -1,0 +1,236 @@
+name: Context experiment evidence stays distinct, completely readable and source-bound
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR NODE_OPTIONS KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/matrix_result_evidence.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: use sast
+submit: options sast:scan
+submit: set taskMode manual
+submit: set tasks agentic
+submit: scan batch
+require-live-snap: 25 PLAN A STUDY | fresh-study
+keys: Down Down Down Enter
+require-live-snap: 20 CHOOSE STUDY CONTEXT | choose-baseline
+keys: Up Up Enter
+require-live-snap: 25 Labeled diagram Alpha | inspect-alpha
+keys: b
+require-live-snap: 20 CONTEXT CASES | explicit-baseline
+ask: Is Alpha explicitly the baseline, with three repetitions and unchanged spending, while the incomplete one-case draft starts no work?
+keys: a
+require-live-snap: 20 CHOOSE STUDY CONTEXT | choose-beta
+keys: Up Enter
+require-live-snap: 25 Labeled diagram Beta | inspect-beta
+keys: +
+require-live-snap: 20 2 cases | two-cases
+keys: a
+require-live-snap: 20 CHOOSE STUDY CONTEXT | choose-gamma
+keys: Enter
+require-live-snap: 25 Labeled diagram Gamma | inspect-gamma
+keys: +
+require-live-snap: 20 3 cases | three-cases
+keys: L
+require-live-snap: 30 Matrix draft ready | fixed-matrix
+require-shell: python3 -B @REPO/scripts/devex/fixtures/matrix_result_evidence.py @TMP_TARGET @ART draft
+ask: Does preparation freeze nine jobs and three exact contexts without model requests, global-context replacement or automatic approval?
+keys: Escape
+require-live-snap: 20 PLAN A STUDY | allowance-origin
+resize: 40x12
+wait: 0.3
+keys: Home
+require-live-snap: 20 Discovery passes | first-input-40x12
+keys: End
+require-live-snap: 20 Next action | last-input-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/matrix_result_evidence.py @TMP_TARGET @ART draft
+keys: Home
+resize: 120x36
+wait: 0.3
+keys: Down Down Down Down Down Enter
+live-snap: total-call-editor
+keys: 1 1 Enter
+keys: Down Enter
+keys: 2 Enter
+keys: L
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | approval
+keys: End
+require-live-snap: 15 y approve | approval-terms
+expect: 9 fixed jobs
+expect: Total provider calls: 11
+expect: Protected review calls: 2
+ask: Are the entire nine-job workload, one worker, exact model, eleven-call limit, protected review and uncertain dollars understandable before approval?
+keys: y
+require-live-snap: 25 Approval saved | approved-matrix
+keys: L
+require-live-snap: 25 Plan approved | approved-jobs
+keys: L
+require-live-snap: 25 dispatcher pid | launched
+require-shell: python3 -B @REPO/scripts/devex/fixtures/matrix_result_evidence.py @TMP_TARGET @ART finished
+keys: r
+require-live-snap: 25 9 completed | completed
+keys: a
+require-live-snap: 25 APPROVED STUDY | recovered-plan
+keys: Home Down Down Down Down Down Down Down Down Down Down Enter
+require-live-snap: 20 CONTEXT CASES | saved-cases
+keys: v
+require-live-snap: 25 observed 3 / 3 | alpha-results
+keys: Down
+require-live-snap: 25 observed 2 / 3 | beta-results
+keys: Down
+require-live-snap: 25 observed 1 / 3 | gamma-results
+keys: Up
+live-snap: case-results
+expect: baseline
+expect: candidate
+expect: Location:
+ask: Do Alpha, Beta and Gamma retain separate recurrence denominators, completed work and unchanged decisions instead of inflating confidence across contexts?
+keys: b
+require-live-snap: 20 Choose | baseline-pass
+keys: Enter
+require-live-snap: 20 Baseline pass selected | explicit-baseline-pass
+keys: Enter Down Down
+require-live-snap: 20 Pass 3 | missed-candidate-pass
+keys: Enter
+require-live-snap: 25 RUN DIFF | missing-observation-comparison
+require-live-snap: 25 1 not observed | recorded-missing-observation
+keys: Tab
+require-live-snap: 20 [Sources & context] | source-and-context
+expect: Recorded content fingerprints match
+expect-not: Unknown content cannot distinguish
+ask: Does comparing the missing Beta observation keep source/context differences and raw history visible without claiming the finding was fixed?
+keys: Escape
+require-live-snap: 20 Pass 3 | exact-comparison-origin
+keys: Escape
+resize: 160x48
+wait: 0.3
+live-snap: results-160x48
+resize: 96x89
+wait: 0.3
+live-snap: results-96x89
+resize: 80x24
+wait: 0.3
+live-snap: results-80x24
+resize: 60x20
+wait: 0.3
+live-snap: results-60x20
+resize: 40x12
+wait: 0.3
+live-snap: results-40x12
+keys: Down
+live-snap: last-case-40x12
+keys: NPage
+wait: 0.3
+live-snap: evidence-40x12-page-1
+keys: NPage
+wait: 0.3
+live-snap: evidence-40x12-page-2
+keys: NPage
+wait: 0.3
+live-snap: evidence-40x12-page-3
+keys: NPage
+wait: 0.3
+live-snap: evidence-40x12-page-4
+keys: NPage
+wait: 0.3
+live-snap: evidence-40x12-page-5
+keys: NPage
+wait: 0.3
+live-snap: evidence-40x12-page-6
+keys: NPage
+wait: 0.3
+live-snap: evidence-40x12-page-7
+keys: NPage
+wait: 0.3
+live-snap: evidence-40x12-page-8
+keys: End
+wait: 0.3
+live-snap: evidence-end-40x12
+keys: PPage
+wait: 0.3
+live-snap: evidence-back-40x12
+keys: Home
+keys: Enter Down Down
+require-live-snap: 20 Pass 3 | last-pass-40x12
+keys: Escape
+resize: 120x36
+wait: 0.3
+keys: R
+require-live-snap: 25 Context cases: 3 | matrix-report
+expect: Evidence: 15 raw observations
+expect: 9 committed / 11 calls
+expect: Location:
+require-shell: python3 -B @REPO/scripts/devex/fixtures/matrix_result_evidence.py @TMP_TARGET @ART recap
+resize: 160x48
+wait: 0.3
+live-snap: report-160x48
+resize: 96x89
+wait: 0.3
+live-snap: report-96x89
+resize: 80x24
+wait: 0.3
+live-snap: report-80x24
+resize: 60x20
+wait: 0.3
+live-snap: report-60x20
+resize: 40x12
+wait: 0.3
+live-snap: report-40x12
+keys: End
+wait: 0.3
+live-snap: report-end-40x12
+keys: PPage
+wait: 0.3
+live-snap: report-back-40x12
+keys: Home
+resize: 160x48
+wait: 0.3
+keys: p End
+require-live-snap: 20 Observation receipt: | report-observation-receipts
+expect: Fingerprint:
+expect: Run:
+ask: Do the recurrence recap's locations distinguish the same-title findings, with source and allowance above the cases and full observation receipts available in details?
+keys: p Home
+resize: 120x36
+wait: 0.3
+require-live-snap: 20 Context cases: 3 | report-recap-restored
+keys: j j j
+require-live-snap: 25 format json (4/6) | selected-export
+keys: Enter
+require-live-snap: 25 EXPORTED | faithful-export
+require-shell: python3 -B @REPO/scripts/devex/fixtures/matrix_result_evidence.py @TMP_TARGET @ART exported
+keys: Escape
+require-live-snap: 25 CONTEXT CASES | evidence-origin-restored
+keys: Escape
+ask: Can every case, pass and evidence page be read without skipped lines, with distinct same-title source observations, exact context and source receipts, export and unchanged verdicts?
+resize: 120x36
+wait: 0.3
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 9 completed | recovered-jobs
+nav-mode:
+keys: a
+require-live-snap: 25 APPROVED STUDY | restarted-plan
+require-shell: python3 -B @REPO/scripts/devex/fixtures/matrix_result_evidence.py @TMP_TARGET @ART hide-accounting
+keys: r
+require-live-snap: 25 Accounting is unavailable | accounting-failure
+expect: 9 committed / 11 total
+ask: Does an unavailable ledger block continuation while retaining nine committed calls, protected review, cases and the same investigation?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/matrix_result_evidence.py @TMP_TARGET @ART restore-accounting
+keys: r
+require-live-snap: 25 Matrix allowance refreshed | accounting-recovered
+expect: 9 committed / 11 total
+keys: Home Down Down Down Down Down Down Down Down Down Down Enter v
+require-live-snap: 25 observed 3 / 3 | recovered-alpha-results
+keys: Down
+require-live-snap: 25 observed 2 / 3 | recovered-case-results
+require-shell: python3 -B @REPO/scripts/devex/fixtures/matrix_result_evidence.py @TMP_TARGET @ART restarted
+ask: Does no-color restart recover three cases, exact contexts, nine committed requests and protected review without another request or implicit model/context change?
+keys: C-c
+require-exit: 10

@@ -88,7 +88,8 @@
       "liveOutcome": "One discovery pass completed after four underlying requests with zero findings. The other two finite passes failed before any provider reservation at the protected Review boundary. Model precision and useful finding production were not established. The later fourteen-file application case completes all three jobs using three requests and records three observations under one finding identity with 3/3 recurrence. No human verdict or runtime proof follows.",
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:8654342f6a50961d427ee5a70b06a54bf7032b22fe86bdff6c8bab2262414a0b"
     },
     {
       "tool": "android-apk:scan",
@@ -135,8 +136,9 @@
         "interfaceParity": "Canonical selectors and limits reach CLI/TUI. Named partial stages and short actionable dependency/preparation errors have native reading evidence."
       },
       "declaredModuleMaturity": "labs",
-      "discoveryMaturityOverride": null,
-      "phaseResultDeclared": false
+      "discoveryMaturityOverride": "labs",
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:358b7dc5f875bfc3e78ef76ed3ed4a6ff613237d312d4883ec20f6632fefd986"
     },
     {
       "tool": "campaign:allowance",
@@ -180,12 +182,13 @@
       "evidencePath": "docs/assessments/allowance-controls-module-audit-2026-10-10.md",
       "evidenceSourceCommit": "c25b38fd67d0f535631cbe66e5faf360ba48f3b7",
       "evidenceSourceState": "Uncommitted main; native fingerprint retained in assessment. Existing maturity unchanged.",
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:bc8e462cdbc01df43704232b50d4b4f2f1490bb43db1d0722decd5fdbfcb6330"
     },
     {
       "tool": "campaign:approve-allowance",
       "scope": "allowance administration; starts no jobs",
-      "executionEvidence": "Shared prepared-dispatch tests exercise explicit approval, invalid limits/revisions, restart inspection and no model calls. Optional finite discovery work plans are now persisted and consumed by shared dispatch and the campaign launcher; see modules/allowance_dispatch/work_tests.rs and campaign_run/approved_work.rs tests.",
+      "executionEvidence": "Shared prepared-dispatch tests exercise explicit approval, invalid limits/revisions, restart inspection and no model calls. Optional finite discovery work plans are now persisted and consumed by shared dispatch and the campaign launcher; see modules/allowance_dispatch/work_tests.rs and campaign_run/approved_work.rs tests. October 23: actual prepared approval authenticates the exact source/context plan and advances the existing live investigation to revision two with a two-call cumulative limit, one fixed job and one attempt. Exactly one new call is later spent. Source-inventory tampering is refused before allowance creation. See docs/assessments/context-reader-live-2026-10-23.md.",
       "readinessVerdict": "scoped native finite planning/approval/status evidence; full option, scale and live-model acceptance pending",
       "module": "campaign",
       "declaredMaturity": "core",
@@ -236,7 +239,8 @@
       "evidencePath": "docs/assessments/allowance-controls-module-audit-2026-10-10.md",
       "evidenceSourceCommit": "c25b38fd67d0f535631cbe66e5faf360ba48f3b7",
       "evidenceSourceState": "Uncommitted main; native fingerprint retained in assessment. Existing maturity unchanged.",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:225eb6754dfe07099b31131bb86d4d8c25dc3da88c78c8eb7f96a47ff6837cbf"
     },
     {
       "tool": "campaign:brief",
@@ -275,7 +279,8 @@
       "discoveryMaturityOverride": null,
       "evidencePath": "docs/assessments/investigation-brief-2026-10-10.md",
       "evidenceSourceState": "Uncommitted main; native fingerprint retained in assessment. No maturity promotion.",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:10b2150ec307e8e474bfd6fa4b7ec13121ab7d3fc7ef859ca37d043b610ab93f"
     },
     {
       "tool": "campaign:context-map",
@@ -312,7 +317,8 @@
       "inputContract": "Executor requires either campaignId plus expectedPlanSha256, or exact threatModelRef. Mixed, absent or incomplete origins fail. Descriptor optional flags do not express this one-of contract.",
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:7f580e04225c13e8265ff25116cd4a28acb7eb080092aed7dfcdee96f8dec926"
     },
     {
       "tool": "campaign:context-study",
@@ -340,8 +346,8 @@
         "scopeStudyOrigin",
         "allowanceRef"
       ],
-      "executionEvidence": "Shared prepared dispatch freezes one context job and up to two deterministic preparation jobs without spending. Core tests execute both preparation tools, run the real generator with a mocked provider, retain a non-active immutable result, refuse a second attempt, recover the run-associated revision, and approve a subsequent scan study under the same consumed allowance. CLI integration binds every exact job and refuses worker expansion. J67 verifies Setup entry, Back/draft preservation, exact inputs, paged approval, named jobs and a proven fresh no-color restart: 35 machine checks and 16 manual judgments pass. No live provider quality claim. Current recovery tests distinguish pending generation from stopped or unavailable output. J69 verifies Setup result inspection, same-investigation scan-plan binding, complete error reading, unknown cost, all viewport sizes and a proven fresh no-color restart: 53 machine checks and 16 manual judgments pass. Its imported context and injected queue outcomes test recovery UI only; no generator, scan job or provider runs in that journey.",
-      "readinessVerdict": "scoped native finite planning/approval/status evidence; full option, scale and live-model acceptance pending",
+      "executionEvidence": "Shared prepared dispatch freezes one context job and up to two deterministic preparation jobs without spending. Core tests execute both preparation tools, run the real generator with a mocked provider, retain a non-active immutable result, refuse a second attempt, recover the run-associated revision, and approve a subsequent scan study under the same consumed allowance. CLI integration binds every exact job and refuses worker expansion. J67 verifies Setup entry, Back/draft preservation, exact inputs, paged approval, named jobs and a proven fresh no-color restart: 35 machine checks and 16 manual judgments pass. No live provider quality claim. Current recovery tests distinguish pending generation from stopped or unavailable output. J69 verifies Setup result inspection, same-investigation scan-plan binding, complete error reading, unknown cost, all viewport sizes and a proven fresh no-color restart: 53 machine checks and 16 manual judgments pass. Its imported context and injected queue outcomes test recovery UI only; no generator, scan job or provider runs in that journey. October 23: the prepared live-current-context-20261023 draft binds exactly one inactive context job to seven literal files and the inherited immutable revision. Approval revision two authorizes one additional request, then the normal dispatcher completes one attempt with no extra jobs. Final J339 has 60 machine passes, zero failures and three operator judgments pending; saved live-result reading adds no inference. See docs/assessments/context-reader-live-2026-10-23.md.",
+      "readinessVerdict": "Scoped live exact-file draft, approval, one-job execution and restart reading verified; full option, scale, other generation actions and general model usefulness remain open",
       "evidenceSourceCommit": "c25b38fd67d0f535631cbe66e5faf360ba48f3b7",
       "evidencePath": "docs/assessments/allowance-controls-module-audit-2026-10-10.md",
       "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
@@ -350,8 +356,8 @@
         "phaseAgreement": "Planning and approval are auxiliary Map tools with phase_result=false; allowance inspection is Operate. An approved plan can resume its still-incomplete Map page. J166 explicitly reopens Setup and verifies no accepted Map. No source analysis or finding verdict follows.",
         "requiredInputs": "Registry descriptors remain canonical. Native owned dispatch exercises investigation identity, exact plan digest/count/attempts, explicit model, limits, scanInput and contextInput. Unknown study keys and invalid limits refuse. Optional run_id resolves through the declared runId alias. Complete option combinations remain pending.",
         "sharedDispatchExecution": "J166 executes actual CLI run through prepared Rust dispatch, then shell allowance inspection. Core allowance/dispatch and context-study tests exercise the real registry and authorization boundary. No provider adapter is invoked by native planning or inspection.",
-        "artifactConsumption": "Native study receipts lead to an authenticated three-job workPlan with one attempt each. The one-job context plan retains its explicit model and activate=false. Headless and shell allowance reads consume the approved revision/workPlan; restart returns an identical snapshot. Actual context generation and subsequent child execution are outside this audit.",
-        "failureAndRecovery": "Native missing approval, stale revision, wrong digest, protected calls exceeding total, unknown study options and source drift are refused. Exact restoration retains the prior approval. Core tests cover protected capacity, unresolved reservations, cancellation/restart and unapproved work. Malformed IO and all concurrent/native failure states remain pending.",
+        "artifactConsumption": "The exact prepared plan and approved work item feed the actual context generator. Its inactive generated revision is recovered from campaign history, read as Summary/DFD/complete document, and compared with its inherited parent without acceptance. Before/after source, plan, queue, result and accounting checks are unchanged.",
+        "failureAndRecovery": "The inventory-tamper regression refuses approval before allowance creation even after the plan digest is recomputed. Partial-inventory membership and cancellation have explicit refusal states. Final native J339 retains the original five-pass parent, different global context, exact inactive result and spent allowance through no-color restart. General failure combinations remain open.",
         "approvedResources": "Owned native audit starts no jobs and retains zero observations, provider reservations, work attempts and decisions. Pure snapshot capacity subtracts remaining protected Review/Report calls without changing admission. Future dollar charges remain uncertain. Planning IO/latency at large scale and live requests are unproven.",
         "scopeEnforcement": "The owned two-file target stays hash-identical after explicit drift/restoration. The exact source-bound plan/digest gates approval. Native queues remain absent. This default whole-repository planning audit does not establish every scoped study, context matrix or alternate target option.",
         "interfaceParity": "Shared Core dispatch, native headless run, shell status, six-size transcript reading and no-color restart consume the same contract. Scan embedding, every option, all global configurations and complete product parity remain pending."
@@ -362,7 +368,8 @@
       "evidenceSourceState": "Uncommitted main; native fingerprint retained in assessment. Existing maturity unchanged.",
       "briefBindingEvidence": "October 10 immutable brief tests authenticate frozen operator intent without changing child inputs, model prompts or active context. Native ordinary study retains revision 1 after revision 2; scope/matrix/context-generation binding remains focused-test evidence.",
       "goalGuidanceEvidence": "Explicit useBriefGuidance with exact briefRef supplies declared operatorBriefRef to one fresh inactive context job. Shared dispatch requires fixed approved work/allowance. J171 qualifies selection, freezing, planned-text reading and restart without generation; repository/scoped real executors consume exact revision 1 with stub providers. Live usefulness remains pending.",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:3cce491ea12b7b0bdfdc061f10eaf4d9297c202afc54cdc7e8acac170e1856f6"
     },
     {
       "tool": "campaign:coverage",
@@ -377,7 +384,7 @@
       "findingStoreRequirement": "required",
       "requiredOptions": [],
       "declaredOptions": [],
-      "executionEvidence": "Not yet functionally audited in this increment.",
+      "executionEvidence": "Scoped historical execution evidence is recorded in operational-module-audit-2026-10-08.md: 75 coverage checks, renderer checks and native J123/J124. No fresh coverage execution was added by the October 23 planner audit; large-history qualification remains open.",
       "readinessVerdict": "Compatibility historical shard-progress reader; accepted scopes use investigation Report",
       "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
       "auditDimensions": {
@@ -393,7 +400,8 @@
       },
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": "compatibility",
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:595f600ea32dfc8f2d77721e3eca04dc1641cc49f8bca9b9df382ddaa8d65fa7"
     },
     {
       "tool": "campaign:plan",
@@ -401,7 +409,7 @@
       "declaredMaturity": "compatibility",
       "declaredPhase": "map",
       "purpose": "Compatibility shard planner. Prefer campaign:study for accepted scope and finite investigation approval. Deterministically cross the threat model (or a modelsDir of subsystem models) with the shard manifest and optional model list into a ranked job matrix at .kuzushi/v3/campaigns/<id>/plan.json, with one seasoned prompt file per threat-scoped job. No model calls.",
-      "scope": "audit-pending",
+      "scope": "Compatibility shard planner. Owned scope-file compilation, canonical child preparation and explicit dry-run consumption checked; full legacy input and resource qualification remains open.",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
       "workspaceRequirement": "required",
@@ -420,27 +428,29 @@
         "allowUnseasoned",
         "allowanceRef"
       ],
-      "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "Compatibility planner; accepted scopes and finite approval use campaign:study",
+      "executionEvidence": "October 23: 35 focused campaign passes, three inventory passes and three registry metadata checks. Final native J345 has 30 machine passes, zero failures, 24 captures and two pending operator judgments. Actual prepared parent dispatch emits a scope file consumed by a separate explicit full-mode dry run over exactly two owned source files. Zero provider requests or scan chunks.",
+      "readinessVerdict": "Compatibility only. New source-bound investigations use campaign:study. Standard-agentic legacy scope files and incompatible child options refuse before plan publication; no automatic strategy substitution.",
       "resourceEvidence": [
-        "Planning writes a finite job matrix without model calls. The existing campaign dollar guard operates between jobs and from retrospective child runtime receipts.",
-        "An immutable accepted investigation plan and allowance binding still need to reach every child."
+        "Planning starts no model work or queues and approves no allowance. Scope files derive from one inventory with 100000 entries, 512 MiB overall inspection and 256 KiB per file; complete enumeration is required. Total memberships are capped at 100000, each list at 4 MiB and the inventory artifact at 16 MiB.",
+        "Existing plan IDs refuse replacement under a cancellable legacy planning lock. Planning does not freeze source/context for future execution. modelsDir aggregate IO, historical folds, cross-SHA fillGaps and the complete maxJobs input boundary still need qualification."
       ],
       "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
       "auditDimensions": {
-        "purposeAndValue": "Distinct legacy shard/threat matrix retained, with explicit supported replacement.",
-        "phaseAgreement": "Map planning remains exact-callable but absent from default investigation discovery.",
-        "requiredInputs": "pending outcome evidence",
-        "sharedDispatchExecution": "pending outcome evidence",
-        "artifactConsumption": "pending outcome evidence",
-        "failureAndRecovery": "pending outcome evidence",
-        "approvedResources": "pending outcome evidence",
-        "scopeEnforcement": "pending outcome evidence",
-        "interfaceParity": "Descriptor and exact resolution retained; full legacy executor/options audit pending."
+        "purposeAndValue": "Retain legacy shard/threat/model planning and history interoperability. Prepared dispatch catches unusable child inputs before publication; bounded inventory replaces repeated unbounded traversal. No engine precision or complementary coverage claim is established.",
+        "phaseAgreement": "Auxiliary Map work with phase_result=false. Native setup still offers Start Map; no Map or Scan evidence is created. Discovery remains Compatibility and exact dispatch remains available.",
+        "requiredInputs": "A current built-in tool, workspace, optional shard manifest, model axis and threat documents. Shared preparation checks child options and scope bindings. Explicit full-mode scope consumption requires no threat seasoning; standard agentic scopeFile input refuses. Alternate options, dynamic children and all model configurations remain unqualified.",
+        "sharedDispatchExecution": "Focused real ModuleRegistry parent dispatch and actual shell run use shared prepared execution. Every generated child is prepared before publication. Native J345 separately dispatches the real scope-file consumer with explicit dryRun=true and cache reuse disabled; no analysis or provider request executes.",
+        "artifactConsumption": "The exact sorted scope file selects loose.c and src/owned.c in the real dry-run consumer. An additive authenticated scopeInventory receipt discloses ignored paths and a truncated unselected prefix. Structured absolute planPath remains available while the human receipt uses a target-relative path.",
+        "failureAndRecovery": "Owned regressions cover parent traversal, ambiguous newline names, pre-cancellation, incomplete or legacy-unknown enumeration, overlaps and source drift during plan-ID reuse. Concurrent legacy compilation publishes one plan. Native unsupported-strategy and reuse refusals retain exact receipts through no-color restart; general failure combinations remain open.",
+        "approvedResources": "No queues, work attempts, reservations, observations or decisions are added. Inventory, scope-list and artifact bounds are enforced without model requests. Aggregate legacy document/history IO and all maxJobs boundary cases remain pending; no strict dollar ceiling is claimed.",
+        "scopeEnforcement": "Inventory-only literal membership excludes symlinks, preserves root files and shares one list across repeated shard jobs. Native consumption reads exactly the two selected C files. This local dry run does not prove every format, live scanner read policy or cross-SHA historical-gap applicability. Accepted scopes require the supported study format.",
+        "interfaceParity": "Shared prepared dispatch is exercised by focused Core checks and native shell execution. The same saved receipt is readable at six sizes and after no-color restart, with all 30 narrow document rows reached by visible page keys. Scan embedding and complete legacy option/global-config parity remain open."
       },
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": "compatibility",
-      "phaseResultDeclared": true
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:cd550feb63d0f7f2a856591f006b863b8a1ef32b38a2fa8dbbadfa66beb8a1a5",
+      "evidenceSourceState": "Uncommitted main at f744320dc3ed4cf0ded3122ebbc012e8d6e58479; final native ccab63c8a29eb250258023fb61251ead845b1cb892c7e7a34c364fe67091329d. See legacy-scope-planner-2026-10-23.md. No maturity promotion."
     },
     {
       "tool": "campaign:status",
@@ -474,7 +484,8 @@
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
       "finiteJobReaderEvidence": "Shared snapshot labels preserve raw job identity and use recorded case/pass metadata. Prepared native campaign:study and campaign:status consumption is tested. TUI inspection reads recorded inputs, outcome and unknown charges; return/adjacent selection preserve the composer. Missing metadata stays unavailable, with no current-setting substitution. See docs/assessments/finite-job-reader-2026-10-14.md for native scope and full-workflow evidence and remaining limits.",
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:31caa2e7d6b0513452f99b16248b8e723d9b8dcfe379544e3d0199ff301b3d33"
     },
     {
       "tool": "campaign:study",
@@ -529,7 +540,8 @@
       "evidenceSourceState": "Uncommitted main; native fingerprint retained in assessment. Existing maturity unchanged.",
       "briefBindingEvidence": "October 10 immutable brief tests authenticate frozen operator intent without changing child inputs, model prompts or active context. Native ordinary study retains revision 1 after revision 2; scope/matrix/context-generation binding remains focused-test evidence.",
       "recordedGoalGuidanceEvidencePath": "docs/assessments/context-goal-reading-2026-10-10.md",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:fe201494e23a570ddd438c1465f9417435b6346fba9053eb14da56c54f3ee860"
     },
     {
       "tool": "cargo-audit:scan",
@@ -573,7 +585,8 @@
       "scopeEvidence": "Exact stdin snapshot has a recorded content hash. Missing, nonregular and symlinked lockfiles fail before command execution. Selected child lockfiles work without a root lockfile. Independent a/b lockfile identities remain separate. No automatic subdivision or extra jobs.",
       "liveEvidence": "docs/assessments/cargo-audit-module-audit-2026-10-11.md",
       "liveOutcome": "Installed local scanner, copied advisory database and labeled hypothetical lockfile; no real deployed vulnerability or exploit verified.",
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:ac312ccee9fc6778a12f619d1cac548590c1ccd7c31125656422e876e82e94ff"
     },
     {
       "tool": "codeql:create-db",
@@ -614,7 +627,8 @@
       },
       "declaredModuleMaturity": "labs",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:0dc88ddef975390352b73adc23662e9de024c8b93321034bf044542bfbaaa120"
     },
     {
       "tool": "codeql:scan",
@@ -660,7 +674,8 @@
       },
       "declaredModuleMaturity": "labs",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:8a546df92b2aaefc5d83bb43cf0b4ef523c9bc18cd9961ae16c85021abac1a0e"
     },
     {
       "tool": "config:show",
@@ -691,7 +706,8 @@
       },
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:ac93aff604ad7e15a41b63e5dca0070131021e6c45427934fb402ef40bdfa139"
     },
     {
       "tool": "context:build",
@@ -741,7 +757,8 @@
       "discoveryMaturityOverride": null,
       "phaseResult": false,
       "inventoryBoundaryEvidence": "inventory-root-2026-10-14.md records pinned Unix root/directory/file handling, omissions before membership and byte accounting, growing-file/FIFO checks, wide collection cancellation and native partial/recovery consumers. Existing limits remain; cross-platform race behavior and atomic source snapshots are unqualified.",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:447a68fd92a4b205ac9f23d852cb34a67198969ff0298c0cdc1ab2ec400182a9"
     },
     {
       "tool": "coverage:baselines",
@@ -774,7 +791,8 @@
       "discoveryMaturityOverride": null,
       "phaseResult": false,
       "tuiEvidence": "J148 has 22 machine passes, no failures, 20 verified native capture pairs and four scoped assistant screen judgments; raw REVIEW_REQUIRED and operatorApproval=false remain. Broader Setup/error/chrome gaps are recorded.",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:93332399c2f428cbcb6dc4c7543438548604f06b710a34681c5e7cee6d588f81"
     },
     {
       "tool": "coverage:recommend",
@@ -814,7 +832,8 @@
       "resourceEvidence": [
         "Live J176 exposed six parent/engine records mislabeled as passes. New recommendations do not infer saturation or additional discovery from record counts and no longer read full baseline history for that unsupported inference. Existing public compatibility values remain."
       ],
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:0b8e7a48c4ea2a7bf9b5e3021ad6d7daed48587847dd94cd52364b227a45d20e"
     },
     {
       "tool": "coverage:sweep",
@@ -851,7 +870,8 @@
       "discoveryMaturityOverride": null,
       "phaseResult": false,
       "tuiEvidence": "J148 has 22 machine passes, no failures, 20 verified native capture pairs and four scoped assistant screen judgments; raw REVIEW_REQUIRED and operatorApproval=false remain. Broader Setup/error/chrome gaps are recorded.",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:9d931dc0ca8f9c90d160b2acbf632bf8ca732c839ac53c19f2c9640ef969da52"
     },
     {
       "tool": "cpg:build",
@@ -895,7 +915,8 @@
       "scopeEvidence": [
         "Actual first-directory build excludes sibling source, writes only beneath the root scoped artifact directory, and preserves exact dispatch. This is directory graph preparation, not accepted exact-file discovery; normal MCP scoped-graph consumption remains unqualified."
       ],
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:d66e84257e33ec0dbb10ca1ad4a0aadc3162cb5235ea0cabe411437fcb55b6f6"
     },
     {
       "tool": "dep-hygiene:check",
@@ -936,7 +957,8 @@
       "scopeEvidence": [
         "Loose root and nested files are inspected, vendor/artifact directories excluded, and a separate child workspace excludes parent/siblings. Valid accepted SAST exact-file membership refuses before discovery instead of widening. Parent-workspace inline child evidence rebasing and all scanner settings remain unqualified."
       ],
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:6fc8129474513ca420e0576a4dbcbc249d05637a89a1cbd57840611dabfba13c"
     },
     {
       "tool": "engagement:aim",
@@ -971,7 +993,8 @@
       },
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": "compatibility",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:9b1fb2af0a1584e75057104b462a4f188fdf7e02c121f6969d53c78e876f418a"
     },
     {
       "tool": "entry-points:extract",
@@ -1016,7 +1039,8 @@
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
       "phaseResult": false,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:53f8b299b1707551b4dee77b602cc4e006e226d5c371e5ba09c7544331ce1dc9"
     },
     {
       "tool": "findings:chains",
@@ -1052,7 +1076,8 @@
       },
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": "labs",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:a0322ddccfb62c8a22d4e047e604ad0609c27d36ed6eb4b4ead3d5f46d59fcfe"
     },
     {
       "tool": "findings:dismiss",
@@ -1094,7 +1119,8 @@
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
       "phaseResult": false,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:16e7fe9789ea5794aecc176c7484e26531577265940546a0e7eeb993646ec33c"
     },
     {
       "tool": "findings:ground",
@@ -1131,7 +1157,8 @@
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
       "phaseResultDeclared": false,
-      "citationAuditEvidence": "docs/assessments/citation-module-audit-2026-10-09.md"
+      "citationAuditEvidence": "docs/assessments/citation-module-audit-2026-10-09.md",
+      "descriptorSha256": "sha256:9b20fb56fe4a41da71b539d36dabf80337bf38b59974c3ff0d1980c627c81d76"
     },
     {
       "tool": "findings:groups",
@@ -1171,7 +1198,8 @@
       },
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:e64c7320f98de378d5ebe2fd15e5eddf2f9f91697742dc74a468f2bfc8b5b02b"
     },
     {
       "tool": "findings:lesson-generate",
@@ -1231,7 +1259,8 @@
         "purposeAndValue": "Draft reusable defensive review guidance from a human-confirmed historical observation. Seven current executor/allowance tests demonstrate an immutable unaccepted draft and separate review; the retained live receipt records one completed request, not general lesson quality.",
         "phaseAgreement": "Auxiliary Review with explicit Learning accounting. Generation cannot accept a lesson, change a finding verdict, publish Map or start discovery; later human review and context selection are separate."
       },
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:eb05719b0dbfd2fe325532491af3a8e3dfd29123eb327ce7e828131851d9b768"
     },
     {
       "tool": "findings:lesson-review",
@@ -1276,7 +1305,8 @@
       ],
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:1ade3a1933fefb031c9c0d26c67f1818655d7894a3ff9e89c01affa6c928e62b"
     },
     {
       "tool": "findings:lesson-save",
@@ -1319,7 +1349,8 @@
       ],
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:1b181858741eb839a80783ef8de59ac9c2225cc0b18fdffda7715494066d2783"
     },
     {
       "tool": "findings:lessons",
@@ -1361,7 +1392,8 @@
       ],
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:869f63f4cc0758d285f054d18ae8c9a280b29a5221906f6b45a6ba01f6d3eece"
     },
     {
       "tool": "findings:list",
@@ -1417,7 +1449,8 @@
       "phaseResultDeclared": true,
       "evidence": [
         "docs/assessments/recorded-scope-findings-2026-10-17.md"
-      ]
+      ],
+      "descriptorSha256": "sha256:4b7bbd6a4b7d63b5b83b13c41b70b2edc1deba18d17bd0e7354b3439eed9104e"
     },
     {
       "tool": "findings:relationship",
@@ -1460,7 +1493,8 @@
       "declaredEffect": "workspace-write",
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:0714eb8ca8060b0cd18284df7dab9f3b56ee06db6a2c7f9f8d855d04bc9a100c"
     },
     {
       "tool": "findings:relationship-batch",
@@ -1501,7 +1535,8 @@
       },
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:57437bb0fe076ce0ff69a9655c9d1c9ecbbc525db44883b013f0a1874ed68907"
     },
     {
       "tool": "findings:relationships",
@@ -1538,7 +1573,8 @@
       "declaredEffect": "read",
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:2d7a1a38510d98e2777f6aba606b021f9311258199d6d41e629e69aa36df322e"
     },
     {
       "tool": "fleet:diff-findings",
@@ -1585,7 +1621,8 @@
         "No provider requests or new investigation jobs. Fleet-wide ingestion, registry IO, cancellation latency and concurrent scratch-file replacement remain unqualified."
       ],
       "scopeEvidence": "Operator-global registered targets are explicit inputs. SHA comparison cannot establish complete source coverage, dirty-content equality, context equality or fix status. No repository discovery work runs.",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:4827ea149fe43f2f2c7aae6d45ed3bb32095374c8562eca0ef5722276b5406b3"
     },
     {
       "tool": "fleet:findings",
@@ -1627,7 +1664,8 @@
         "No provider requests or new investigation jobs. Fleet-wide ingestion, registry IO, cancellation latency and concurrent scratch-file replacement remain unqualified."
       ],
       "scopeEvidence": "Operator-global registered targets are explicit inputs. SHA comparison cannot establish complete source coverage, dirty-content equality, context equality or fix status. No repository discovery work runs.",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:ef43f3803b70341768652bfb64e2ac78527ef30d94a3d1be4a9b614df72cb5b0"
     },
     {
       "tool": "fleet:ingest",
@@ -1666,7 +1704,8 @@
         "No provider requests or new investigation jobs. Fleet-wide ingestion, registry IO, cancellation latency and concurrent scratch-file replacement remain unqualified."
       ],
       "scopeEvidence": "Operator-global registered targets are explicit inputs. SHA comparison cannot establish complete source coverage, dirty-content equality, context equality or fix status. No repository discovery work runs.",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:f8dc8ea6f6b90275316b3cbe255b6e9efd5c541465d2a250cd9ed181a08f270b"
     },
     {
       "tool": "fleet:register",
@@ -1713,7 +1752,8 @@
         "No provider requests or new investigation jobs. Fleet-wide ingestion, registry IO, cancellation latency and concurrent scratch-file replacement remain unqualified."
       ],
       "scopeEvidence": "Operator-global registered targets are explicit inputs. SHA comparison cannot establish complete source coverage, dirty-content equality, context equality or fix status. No repository discovery work runs.",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:d851be59516d3e2dbee10880baf78da6eb7bc84ca4648a3d468a4be01da3378c"
     },
     {
       "tool": "fleet:status",
@@ -1752,7 +1792,8 @@
         "No provider requests or new investigation jobs. Fleet-wide ingestion, registry IO, cancellation latency and concurrent scratch-file replacement remain unqualified."
       ],
       "scopeEvidence": "Operator-global registered targets are explicit inputs. SHA comparison cannot establish complete source coverage, dirty-content equality, context equality or fix status. No repository discovery work runs.",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:fae0aa7bc829a8c79f9d21ad5c1b473d47dfad719fa0318e6733dee049d49c0a"
     },
     {
       "tool": "fuzz:author",
@@ -1808,14 +1849,15 @@
         "implementationChanged": false,
         "compatibilityDispatchRetained": true
       },
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:0b760952726475d37411d6a4cb200e28aee6ca013dbf5e8bb890b5f1a53685e1"
     },
     {
       "tool": "fuzz:differential",
       "module": "fuzz",
       "declaredMaturity": "labs",
       "declaredPhase": "scan",
-      "purpose": "Replay one engine target's corpus through N implementations (fork vs upstream, or one command as a metamorphic self-check) and rank the divergences: crash-split first, then validity- and output-splits \u2014 the silent-wrong-data oracle the crash lane never fires on.",
+      "purpose": "Replay one engine target's corpus through N implementations (fork vs upstream, or one command as a metamorphic self-check) and rank the divergences: crash-split first, then validity- and output-splits — the silent-wrong-data oracle the crash lane never fires on.",
       "scope": "excluded-work",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -1866,7 +1908,8 @@
         "implementationChanged": false,
         "compatibilityDispatchRetained": true
       },
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:0051bc0a2427ef360f3de49dc67c3ac365775ffd28b55f32445127ac86c6a24a"
     },
     {
       "tool": "fuzz:import",
@@ -1903,7 +1946,8 @@
       },
       "declaredModuleMaturity": "labs",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:1da4c03ab7521f62ba288ed5286f4a8c41943493d41bc316a2e95e49e098b507"
     },
     {
       "tool": "fuzz:prove",
@@ -1958,7 +2002,8 @@
         "implementationChanged": false,
         "compatibilityDispatchRetained": true
       },
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:478555e8b67ccae217b2487512989f99466e6c2d39d1c54bf8d5ceb50a722f99"
     },
     {
       "tool": "fuzz:run",
@@ -2019,7 +2064,8 @@
         "implementationChanged": false,
         "compatibilityDispatchRetained": true
       },
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:44af4fe9b857a186724dceed140f4d06653ca7315b52b2735bef2783e41dd8e6"
     },
     {
       "tool": "fuzz:status",
@@ -2055,7 +2101,8 @@
       },
       "declaredModuleMaturity": "labs",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:01f8af890ef6782387a9235ca4af06ed1e21d91b697f5e8b7b919feffc1d6afe"
     },
     {
       "tool": "fuzz:sweep",
@@ -2113,7 +2160,8 @@
         "implementationChanged": false,
         "compatibilityDispatchRetained": true
       },
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:ab4856b7ee47a5c030a42f6a65b5f3ceb95d389c32fbb71923e9701605b86064"
     },
     {
       "tool": "govulncheck:scan",
@@ -2150,7 +2198,8 @@
       "resourceEvidence": "Parser rejects output above 16 MiB or 100000 messages; existing ten-minute subprocess timeout is not operator-configurable. Network and capture bounds remain unqualified.",
       "scopeEvidence": "Directory-oriented ./... execution is retained; imports, module roots and module-relative trace positions are not authenticated as complete selected-scope coverage.",
       "assessment": "docs/assessments/govulncheck-module-audit-2026-10-12.md",
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:edf5590f23a8c65cb37c54a2a31dff86b4595cd2a0e15488389217ce7a9f8290"
     },
     {
       "tool": "iac-scan:scan",
@@ -2188,7 +2237,8 @@
       },
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:a25dd398f8bd603ec615d11ad2666a168f31a621f79cc2c684c56e93607b022b"
     },
     {
       "tool": "license-scan:scan",
@@ -2223,7 +2273,8 @@
       },
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:f61b45a72d78bf3743ce71f884cc2d01c6c32bfe59310b7c15a6d224bbd1ecfe"
     },
     {
       "tool": "ndiff:extract-fix-pattern",
@@ -2273,10 +2324,11 @@
         "interfaceParity": "Declared canonical/alias inputs use shared preparation. Eleven CLI cases and sequential J246 verify supplied files, omissions, external consent, unaccepted authority and explicit artifact consumption at six sizes and no-color restart. Four human questions remain pending."
       },
       "declaredModuleMaturity": "labs",
-      "discoveryMaturityOverride": null,
+      "discoveryMaturityOverride": "labs",
       "phaseResult": false,
       "allowanceCategory": "learning",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:48e1009b1caf24439e320dd696ff221ac8c8db05bcebd5b6aefb2c0454d0a3c0"
     },
     {
       "tool": "ndiff:fetch-cve",
@@ -2315,13 +2367,14 @@
         "interfaceParity": "Eight final native JSON/plain CLI cases and sequential J238 agree on outcomes. Six viewport sizes and normal no-color restart retain receipts and no Map continuation. Human UX review remains pending."
       },
       "declaredModuleMaturity": "labs",
-      "discoveryMaturityOverride": null,
+      "discoveryMaturityOverride": "labs",
       "phaseResult": false,
       "resourceEvidence": [
         "Declared maxMetadataBytes accepts 1 through 8388608 bytes, default 8388608, over the encoded contents of both record and fixtures. A counting writer avoids materializing another serialized copy.",
         "No live requests were made. The six-request live allowance remains exhausted. Live retrieval, cancellation and global online work limits remain unqualified."
       ],
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:3a84c9ffcfe188743b8edbb19d237f2b61db19f835ec3eecc9e62eb5c95581e0"
     },
     {
       "tool": "ndiff:hunt-variants",
@@ -2366,9 +2419,10 @@
         "interfaceParity": "Canonical/alias inputs pass shared preparation. Eight native CLI JSON/plain cases and sequential J245 use the real boundary; six sizes and no-color restart retain the exact human decision and partial receipt. Four human questions remain pending."
       },
       "declaredModuleMaturity": "labs",
-      "discoveryMaturityOverride": null,
+      "discoveryMaturityOverride": "labs",
       "phaseResult": false,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:dc8dcd570f9d388702bfb39b4ae5f239f9ce9177e59b280fc10fdd8c7282dd71"
     },
     {
       "tool": "offense-review:threat-hunt",
@@ -2419,7 +2473,8 @@
         "source/knowledge-context/cost metadata",
         "ledger observations and typed deltas"
       ],
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:be63342ac1c668829dd816417f8ffb2b5f1e8a3da61fddfbef18daf3ce8d83de"
     },
     {
       "tool": "pack:lint",
@@ -2463,7 +2518,8 @@
       "evidenceAssessment": "docs/assessments/pack-inspection-audit-2026-10-09.md",
       "evidenceSourceCommit": "c25b38fd67d0f535631cbe66e5faf360ba48f3b7",
       "evidenceSourceState": "Uncommitted main; qualified claims refer to the recorded native binary and owned fixtures.",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:3ac8739fd45ddd7ee361ee4bb62fe8120a709def3c98da3086cf093e4a56197d"
     },
     {
       "tool": "pack:scopes",
@@ -2509,7 +2565,8 @@
       "evidencePath": "docs/assessments/scope-exclusion-recovery-2026-10-10.md",
       "sharedContextEvidence": "J206 uses explicit shared-context creation/removal, 131 inert files and three accepted primary boundaries with 65/65/1 discovery memberships. Nine fixed installed Semgrep jobs produce only their selected marker, preserve second batches, reach owner deferral and JSON export, and survive no-color restart after a newer unaccepted edit. Zero provider requests; one protected Review call remains. See docs/assessments/shared-monorepo-2026-10-11.md. Giant repositories and live scope usefulness remain pending.",
       "discoveryMembershipEvidence": "Add discovery scope uses the additive add-scope edit through shared prepared dispatch. Exact inventory membership, eight-scope limits and overlap validation remain authoritative. Invalid forms preserve input; a saved addition clears acceptance and preserves earlier history. The owned nine-file copy of the actual proposal closes two uncovered greeting members while retaining context-only shared membership. Separate acceptance compiles four boundaries into twelve unstarted jobs. See docs/assessments/scope-membership-addition-2026-10-14.md. No provider calls, scanner runs or original live-fixture edits.",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:0ea81d5299f62648b7edadd4cfb0f614fc463e8f2d4419d2476da2de021eb969"
     },
     {
       "tool": "pack:suggest-scopes",
@@ -2554,7 +2611,8 @@
       "evidencePath": "docs/assessments/live-scope-proposal-2026-10-14.md",
       "evidenceSourceCommit": "f8649511f74695f3f4dbd75197a2148f538047e7",
       "evidenceSourceState": "Uncommitted main. Existing maturity unchanged. Live producing native fingerprint retained separately.",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:cf1c51049f7883cd3045d14892a62950d5b5188206e06834d4c4bed680049440"
     },
     {
       "tool": "pack:suggest-shards",
@@ -2594,7 +2652,8 @@
       "evidenceSourceCommit": "c25b38fd67d0f535631cbe66e5faf360ba48f3b7",
       "evidenceSourceState": "Uncommitted main; qualified claims refer to the recorded native binary and owned fixtures.",
       "inventoryBoundaryEvidence": "inventory-root-2026-10-14.md records pinned Unix root/directory/file handling, omissions before membership and byte accounting, growing-file/FIFO checks, wide collection cancellation and native partial/recovery consumers. Existing limits remain; cross-platform race behavior and atomic source snapshots are unqualified.",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:7d5b277cc66280111d651cbe8e796d948c06e34c86dfa8a27e9cf5138d3298fd"
     },
     {
       "tool": "patch:finding",
@@ -2645,7 +2704,8 @@
         "implementationChanged": false,
         "compatibilityDispatchRetained": true
       },
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:1f282031b4ff5e76842f7ba79c32cf474ca806045d62f7dd3dbb27438eb6f031"
     },
     {
       "tool": "patch:reverify",
@@ -2691,7 +2751,8 @@
         "implementationChanged": false,
         "compatibilityDispatchRetained": true
       },
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:35660d86c4cc59dd2b1766935e243b786d0858ec448af14c3490e42c2c9b8df9"
     },
     {
       "tool": "recon:http-fingerprint",
@@ -2731,7 +2792,8 @@
       "resourceEvidence": [
         "Declared 1..300-second process timeout, bounded stdout/stderr, cancellation before storage and existing descendant cleanup. Multiple processes, network fanout, aggregate row/memory bounds and atomic recovery remain unqualified. RuntimeNever incurs no model requests."
       ],
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:f69b2d33827641dd0527a4f15661f54b7cf478ed2452b36c5587bec7bf669160"
     },
     {
       "tool": "recon:import",
@@ -2770,7 +2832,8 @@
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
       "phaseResult": false,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:f5c8fb780fd815e7fcecaac5fc0ca61ab2bf2efdf37ee851eca45e200342712d"
     },
     {
       "tool": "recon:nmap",
@@ -2811,7 +2874,8 @@
       "resourceEvidence": [
         "Declared 1..300-second process timeout, bounded stdout/stderr, cancellation before storage and existing descendant cleanup. Multiple processes, network fanout, aggregate row/memory bounds and atomic recovery remain unqualified. RuntimeNever incurs no model requests."
       ],
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:f8dcb95441b8046f7f10e2d005aa553a2807f4cae84d46ce7da1309c19a4cf34"
     },
     {
       "tool": "recon:subdomain",
@@ -2852,7 +2916,8 @@
       "resourceEvidence": [
         "Declared 1..300-second process timeout, bounded stdout/stderr, cancellation before storage and existing descendant cleanup. Multiple processes, network fanout, aggregate row/memory bounds and atomic recovery remain unqualified. RuntimeNever incurs no model requests."
       ],
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:9f150457bfcd3e279deed47000bb2b0007997f83cae3aa7b8df9e51de00dce1b"
     },
     {
       "tool": "report:build",
@@ -2890,7 +2955,8 @@
       "evidenceSourceCommit": "7a5d3ece7687bb696013e798179607e2ed657f85",
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:9a5039b575fa5235304aefb28813f33ef848b3c76e6a84c040c2c80402e8c98a"
     },
     {
       "tool": "report:sarif",
@@ -2928,7 +2994,8 @@
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
       "evidenceSourceState": "dirty main, native debug binary fingerprint retained in assessment",
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:dfbf0b58db332f36b469c956326b9e32ac0317b4ab78c8be130988f033b18e59"
     },
     {
       "tool": "router:show",
@@ -2971,7 +3038,8 @@
       },
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:b2c98fa91551d42c4c5e5b38b886dd230fd3bb92afc93d66788a9bbfe819d07a"
     },
     {
       "tool": "sast:scan",
@@ -3087,7 +3155,8 @@
       "resourceEvidence": [
         "Optional 1-40 agentic query turns are canonicalized and validated before work, then delivered to the real scanner request; shared allowance still counts repairs and retries. J175 observed three completed real OAuth passes with one request each on owned inert source."
       ],
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:dc6697e4bf9f042b782635bddb10b275ae7c1068ceba41f9c1f44e19a2f600af"
     },
     {
       "tool": "sbom-scan:scan",
@@ -3123,7 +3192,8 @@
       },
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:9497fd4e3fae68c6fe2a37f9bbc49f02d9e963eaf20a5f7a3e2c7b50a97b9e3c"
     },
     {
       "tool": "secret-scan:scan",
@@ -3164,7 +3234,8 @@
       "discoveryMaturityOverride": null,
       "evidencePath": "docs/assessments/secret-module-audit-2026-10-10.md",
       "evidenceSourceCommit": "c25b38fd67d0f535631cbe66e5faf360ba48f3b7 plus uncommitted bounded inspection changes",
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:1493cfe113313d332cfe12c6becbcb140fdfe408673af1fd147cbb3e340ac477"
     },
     {
       "tool": "semgrep:scan",
@@ -3214,7 +3285,8 @@
       "evidence": [
         "docs/assessments/reviewed-learning-loop-2026-10-16.md"
       ],
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:0accfa5c3b7daf48f524d49240d4b844ba7261df139d5646fe2b5e08c3e6c24d"
     },
     {
       "tool": "suppress:add",
@@ -3264,7 +3336,8 @@
       "discoveryMaturityOverride": null,
       "effect": "workspace-write",
       "phaseResult": false,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:85330920fc38217933dc2b1429896e9cba950db3874fa6ad3671cf365f35bb6e"
     },
     {
       "tool": "suppress:list",
@@ -3299,7 +3372,8 @@
       "discoveryMaturityOverride": null,
       "effect": "workspace-write",
       "phaseResult": false,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:5a820514b4a5bc95b5dc985e7e635eee2bcdac60a012b76ab5ec4a9131ea3b7f"
     },
     {
       "tool": "suppress:remove",
@@ -3337,7 +3411,8 @@
       "discoveryMaturityOverride": null,
       "effect": "workspace-write",
       "phaseResult": false,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:cdee8d5b8a0c4145130488d5c0a35b929ae56570988fba4f990200b2aa5b3a93"
     },
     {
       "tool": "taint-iris-next:dataflow-plan",
@@ -3389,7 +3464,8 @@
       },
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": "labs",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:110e6b1bcadd8a5a7130defdf53b4c570e3834b22bbaed63fad0b38604f34352"
     },
     {
       "tool": "taint-iris-next:finding-review",
@@ -3452,7 +3528,8 @@
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": "labs",
       "phaseResult": false,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:f4d2c810f3885709ceffa6aa7a2533c97b56f639e8402d1cd5eb472d6768f757"
     },
     {
       "tool": "taint-iris-next:import-sinks",
@@ -3491,7 +3568,8 @@
       },
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:957914e9a1e328a763a2660fe876d5c30d439979aa58542f79b1c1da38df4955"
     },
     {
       "tool": "taint-iris-next:source-sink-trace",
@@ -3543,7 +3621,8 @@
       },
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": "compatibility",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:9bfdb556f06023e4550df219685e3a56d29bc584d1c10b353f4fdc96181e1b17"
     },
     {
       "tool": "threat-intel:apply",
@@ -3578,7 +3657,8 @@
       },
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": "labs",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:25b5db7156d32dafaed50a532749c139c8cb733b75a914fb76d33bf0d540914b"
     },
     {
       "tool": "threat-intel:discover",
@@ -3612,7 +3692,8 @@
       },
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": "labs",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:6bb05eaf24da93242d09a185df9f2858236fe602805e7e617098cd1a59b14624"
     },
     {
       "tool": "threat-intel:harvest",
@@ -3666,7 +3747,8 @@
       "discoveryMaturityOverride": "labs",
       "phaseResult": false,
       "allowanceCategory": "learning",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:0707b5d61685477e258d02fc9da319ab913c65ef14f31265f56641d4c12a0025"
     },
     {
       "tool": "threat-intel:list",
@@ -3700,7 +3782,8 @@
       },
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:c969a61593ab2280812fefb959869b0f1584d114fe3b7183569fda29f6cdadb3"
     },
     {
       "tool": "threat-intel:research",
@@ -3755,7 +3838,8 @@
       "discoveryMaturityOverride": "labs",
       "phaseResult": false,
       "allowanceCategory": "learning",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:8016805e07288986e4ea43921c51171e6ab99e90ec9a35f47b5e97fb2052db63"
     },
     {
       "tool": "threat-model:activate",
@@ -3801,7 +3885,8 @@
       "evidenceSourceCommit": "c25b38fd67d0f535631cbe66e5faf360ba48f3b7",
       "evidenceSourceState": "dirty main, source/binary/capture receipts retained",
       "contextHistoryTuiEvidence": "J141 provides exact revision selection, summary/full inspection, baseline comparison, explicit activation/restore and no-color restart. Browsing uses the hydrated immutable manifest; actions use shared dispatch. J140 retains headless/typed command and adoption compatibility. Large stores, all option paths and reference parity remain pending.",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:9b550d3f0b43718026fe8f5ba996d1984f801571b386db3d5928394ea08cab2d"
     },
     {
       "tool": "threat-model:adopt",
@@ -3842,7 +3927,8 @@
       "evidenceSourceCommit": "c25b38fd67d0f535631cbe66e5faf360ba48f3b7",
       "evidenceSourceState": "dirty main, source/binary/capture receipts retained",
       "contextHistoryTuiEvidence": "J141 provides exact revision selection, summary/full inspection, baseline comparison, explicit activation/restore and no-color restart. Browsing uses the hydrated immutable manifest; actions use shared dispatch. J140 retains headless/typed command and adoption compatibility. Large stores, all option paths and reference parity remain pending.",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:1e5c9a3642d02fd7f1ede9086ecd27de15c720c8837e26d6302e178c4742f446"
     },
     {
       "tool": "threat-model:build",
@@ -3862,6 +3948,7 @@
         "scope",
         "methodology",
         "scanScopeRef",
+        "sourcePaths",
         "inheritedContextRef",
         "sources",
         "seed",
@@ -3897,27 +3984,28 @@
         "model",
         "allowanceRef"
       ],
-      "executionEvidence": "J175 executes deterministic context and entry-point producers, one real GPT-6 Luna/low OAuth synthesis, explicit inactive context acceptance, three scoped discovery passes, scripted human fixture triage, selected-study export and no-color restart. Source remains inert at a real clean Git commit. This proves a small owned workflow, not production precision or completeness.",
-      "readinessVerdict": "one-live-fixture-draft-verified; reliability, precision and full workflow remain open",
+      "executionEvidence": "J175 executes deterministic context and entry-point producers, one real GPT-6 Luna/low OAuth synthesis, explicit inactive context acceptance, three scoped discovery passes, scripted human fixture triage, selected-study export and no-color restart. Source remains inert at a real clean Git commit. This proves a small owned workflow, not production precision or completeness. October 23: one approved source-only request through the current frozen runtime, stored OAuth and GPT-6 Luna low produces an inactive seven-component, seven-flow draft from seven selected files. Its 76 citation occurrences resolve to selected paths and valid line bounds. Source bytes and active context remain unchanged. No source execution or findings are added. See docs/assessments/context-reader-live-2026-10-23.md. Fresh generated-role rejection, parse-only cost retention and final J343 are recorded in docs/assessments/generated-context-rejection-2026-10-23.md; the settled baseline J121 has 212 machine passes and no failures. Current Report reading and readiness checks are recorded in the same assessment.",
+      "readinessVerdict": "Scoped live exact-file context draft and current reader verified; repeated node semantics, reliability, full configurations and complete operator workflow remain open",
       "resourceEvidence": [
         "Staged synthesis and conditional gap-fill use estimated stage deposits. Settlement now requires a complete cost receipt; transport failures and incomplete structured-output costs retain the reservation.",
         "Focused offline tests cover reported zero, unknown success, unreported failure, exact failure cost, incomplete repair cost, and unknown gap-fill cost.",
-        "Internal structured-output repair and optional continuation still need admission at the provider boundary; stage deposits do not certify a strict dollar limit."
+        "Internal structured-output repair and optional continuation still need admission at the provider boundary; stage deposits do not certify a strict dollar limit.",
+        "Exact-file and accepted-group synthesis use a parse-only structured contract: invalid output retains its original cause and observed cost without a repair-call capability. Generic/staged modes retain separate qualification."
       ],
       "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
       "auditDimensions": {
-        "purposeAndValue": "Produce source-grounded context, entry-point annotations, a DFD and open questions for operator review. Current model-fixture and deterministic producer tests consume real artifacts; model accuracy and complete coverage are separate claims.",
+        "purposeAndValue": "The live summary distinguishes the two adapters and names absent deployment/authentication evidence. Its response flow returns through the gateway. Invoice and Principal still appear as disconnected process nodes in both file-context live outputs. Citations and execution plumbing are evidenced; human architecture review and broader model usefulness remain open.",
         "phaseAgreement": "Map producer. Deterministic preparation is explicitly partial and artifact-review-only. A completed or partial result must be inspected and accepted; registration, DAG labels and page visits do not establish Map acceptance.",
-        "requiredInputs": "Explicit target, bounded source/context artifacts and declared pipeline options. Model-backed synthesis additionally needs the selected compatible runtime/model and approved fixed context work; deterministic mode is an explicit choice.",
-        "sharedDispatchExecution": "Current prepared-dispatch tests execute both the model-backed fixture and deterministic pipeline, persist nonempty documents and feed exact readers. The runtime is scripted in these checks; no live request is added.",
+        "requiredInputs": "Exact-file mode accepts 1 to 256 literal sourcePaths and an immutable inheritedContextRef under an approved context study. It excludes accepted-group and legacy build/scope selectors. Current live evidence supplies seven selected files (2221 raw bytes) from one owned 14-file fixture. Other modes retain separate qualification.",
+        "sharedDispatchExecution": "The current frozen runtime completes one approved threat-model:build job through normal stored-OAuth transport with GPT-6 Luna low, no tools or output repair. Exact-file, source inventory and regeneration contracts use shared prepared dispatch. General model accuracy remains unqualified.",
         "artifactConsumption": "Inventory and entry-point catalog feed the persisted context and DFD. Exact revision readers and campaign:context-map consume authenticated producing results; source/citation limitations remain in the document and Map view.",
-        "failureAndRecovery": "Shared preparation refuses missing runtime, invalid inputs and stale context sources. Malformed output, cancellation and source drift retain failure/partial state. Existing source-bound generation/handoff tests and historical live rejection/recovery records distinguish these outcomes.",
-        "approvedResources": "Model-backed generation requires explicit or inherited allowance binding before provider work. Internal requests and retries share durable admission. Source inventory retains its entry/file/byte limits; requested output tokens and unknown dollars are not a strict dollar guarantee.",
-        "scopeEnforcement": "The selected Map source snapshot and any declared scoped boundary feed context generation. This action creates context, not discovery jobs; it does not authorize automatic repository subdivision or later scans.",
+        "failureAndRecovery": "Shared preparation refuses missing runtime, invalid inputs and stale context sources. Malformed output, cancellation and source drift retain failure/partial state. Existing source-bound generation/handoff tests and historical live rejection/recovery records distinguish these outcomes. Fresh unknown/missing DFD node roles reject before compatibility normalization. Final J343 retains one spent call and unchanged source/context through local diagnostic inspection and restart; no repair or extra job occurs.",
+        "approvedResources": "The current live case admits exactly one new provider request including retries, using the final available call in its two-call investigation allowance. Both reservations are settled; provider dollar evidence remains incomplete. Cumulative experiment usage is 16 with no allowance remaining. This is separate from the synthetic J339 allowance and does not prove a strict dollar ceiling.",
+        "scopeEnforcement": "Exact-file mode validates literal membership against source-bound inventory and retains selected excerpts, file hashes, byte limits, omissions and inherited revision in its receipt. Known selected members work under partial inventory; unknown members, cancellation and invented extent are refused. No complete-repository, discovery-scope acceptance or follow-up permission is inferred.",
         "interfaceParity": "Descriptor options and prepared dispatch are shared by shell, headless tools and Map orchestration. Fresh producer tests and current full-journey validation cover the supported path; unsupported pipeline choices are not implied to work."
       },
-      "liveEvidence": "Sequential source-only OAuth validation at /tmp/kuzushi-live-model-ua7rhauw, GPT-6 Luna low, eight total requests with two protected for Review. Normal adapter, no transport interception.",
-      "liveOutcome": "Initial single-synthesis context failed schema validation after one repair, using two calls. The approved diagnostic completed with one additional real OAuth request, three DFD nodes, four flows, one boundary and two conditional threat candidates. The first requests share recorded model and prompt hash. One useful draft on an owned fixture does not establish reliability or production scanner quality.",
+      "liveEvidence": "Historical earlier synthesis evidence remains in liveOutcome. Current exact-file execution, receipts and bounded accounting are recorded in docs/assessments/context-reader-live-2026-10-23.md and scripts/devex/artifacts/context-form-hierarchy-20261023/live-current-execution/verified-result.json.",
+      "liveOutcome": "Initial single-synthesis context failed schema validation after one repair, using two calls. The approved diagnostic completed with one additional real OAuth request, three DFD nodes, four flows, one boundary and two conditional threat candidates. The first requests share recorded model and prompt hash. One useful draft on an owned fixture does not establish reliability or production scanner quality. October 23: the separately approved current-runtime request completes an inactive draft with seven nodes, seven flows, one boundary and five open questions, with 76 valid citation occurrences over 34 distinct path/line references. No global activation, finding observation or source execution. The two data-type process nodes remain a semantic weakness. Different inventory/prompt inputs mean this is not an identical-condition repetition.",
       "rejectedOutputEvidence": "Optional bounded local diagnosis for single-synthesis build rejection, authenticated against the frozen context input and published content object. Core rejection/read tests and native J90 cover explicit inspection, ordinary-error redaction, inert keys and restart. No live-model success or per-tool usefulness certification follows.",
       "deterministicEvidence": "Real shared-dispatch integration consumes a nonempty generated catalog, emits actual DFD nodes/flows and entry-point links, preserves source framework facts, reports status partial, and can be read by its immutable modelRef. This source-derived result is artifact-review-only; no model or empirical verification ran. It does not repair the prior live model contract failure or establish model usefulness. Existing-revision review now consumes authenticated source snapshot receipts and preserves partial outcome. Three real admission checks and native J94 cover non-Git source, acknowledgement and exact study inheritance without model calls.",
       "liveAcceptanceEvidence": "J96 at /tmp/kuzushi-experiment-main-20261006/tui/20261006-113921/J96: 21 machine checks and seven separate passing screen judgments, raw REVIEW_REQUIRED retained. Source-bound exact context inspected and explicitly accepted as Map; global active context remains unset. All six sizes, real narrow detail paging and no-color restart. Request count unchanged at seven during UI work.",
@@ -3925,12 +4013,13 @@
       "discoveryMaturityOverride": null,
       "goalGuidanceEvidence": "Exact accepted goal is loaded only for an approved inactive source-only build, supplied as non-evidence priorities and stamped as system-owned provenance. Goal head edits do not alter the frozen request. Stub executor/allowance tests cover repository and file-group builds; no live quality certification.",
       "sourceIdentityEvidencePath": "docs/assessments/map-source-provenance-2026-10-13.md",
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:8709e11313e070c4edd51641ea183c324b5f4177aa3ae79acdb931eed045eb47"
     },
     {
       "tool": "threat-model:diff",
       "scope": "One explicit owned workspace and immutable context history; no model, scanner or target-source execution.",
-      "executionEvidence": "Context lifecycle assessment: six real prepared lifecycle tests, eight diff, nine text-comparison, thirty-five store/recovery, nine TUI comparison and three phase-ownership checks. J140 has twelve machine passes and fourteen authenticated live captures; J105 manual edit regression has thirty-one passes. No provider request.",
+      "executionEvidence": "Context lifecycle assessment: six real prepared lifecycle tests, eight diff, nine text-comparison, thirty-five store/recovery, nine TUI comparison and three phase-ownership checks. J140 has twelve machine passes and fourteen authenticated live captures; J105 manual edit regression has thirty-one passes. No provider request. October 23: complete stored-value comparison passes the real prepared-dispatch regression and 710 core context checks. Final J342 has 39 machine passes, zero failures and two pending operator judgments, including compact controls, exact parent/candidate reads, draft recovery and no-color restart. The saved owned live-model result compares as 121 stored field changes without new inference or any source, active-context, plan, findings-decision or accounting change. See docs/assessments/context-structure-comparison-2026-10-23.md. This does not establish semantic equivalence or revision-specific finding fixes.",
       "readinessVerdict": "scoped native context-management and shared-dispatch evidence; all options, cancellation, scale and complete investigation acceptance pending",
       "module": "threat-model",
       "declaredMaturity": "core",
@@ -3955,8 +4044,8 @@
         "phaseAgreement": "The guided Map remains separate from auxiliary context management. A false partial Map receipt was reproduced and repaired in the shared descriptors; existing build/import producers remain unchanged.",
         "requiredInputs": "Selected workspace, typed lineage/revision identifiers and declared options use prepared dispatch. Missing/malformed selectors, unknown keys and a foreign inline target refuse; methods retain their existing workspace requirements. All combinations remain pending.",
         "sharedDispatchExecution": "Core lifecycle tests and actual native run/shell operations pass through shared prepared dispatch with existing explicit-command authorization. No new per-mode policy or parser was added.",
-        "artifactConsumption": "Immutable objects and manifest metadata feed exact reads, comparison, active-pointer presentation, history and restart. Full text/hashes/changed sections are retained; activation and restoration do not alter original objects. Adoption invalidates old verification and protects later edits.",
-        "failureAndRecovery": "Divergent mirror, unchanged adoption, malformed selection, mirror drift before withdrawal and existing crash-recovery cases have focused evidence. Large-store cancellation and every failure mode remain pending.",
+        "artifactConsumption": "Exact saved revisions feed the shared complete domain comparison. Legacy structural and contextText fields remain; additive contextStructure schema version 1 retains full values, before/after pointers, literal matching method, collection order and recognized saved source claims. The study reader and exhaustive plain output consume those same comparisons. Stored claims do not verify current source or finding verdicts.",
+        "failureAndRecovery": "Loading or failed exact-parent reads cannot select the candidate; retries remain local and foreign receipts are ignored. Duplicate IDs use disclosed ambiguous positional matching, absent fields remain distinct from null, and added/removed rows retain complete objects. Final native J342 restores the original five-pass draft and cursor explicitly after restart; two operator UX judgments remain pending.",
         "approvedResources": "Audited lifecycle is runtime-free. Owned native evidence has zero provider/scanner/source execution, finding observations, campaign plans and allowance work/reservations. Existing bounded store reads and text previews remain; large-case IO/latency is unverified.",
         "scopeEnforcement": "Active workspace containment rejects a different inline target through shared preparation. Exact references stay isolated from later activation. Labeled source and original object hashes remain unchanged; no discovery jobs are created.",
         "interfaceParity": "Native headless operations and interactive diff/activate/restore/adopt have actual evidence. TUI lineage presentation consumes the same manifest; revision metadata is newest first. Full plain reader behavior, every option and scan embedding remain pending."
@@ -3971,7 +4060,8 @@
       "evidenceSourceCommit": "c25b38fd67d0f535631cbe66e5faf360ba48f3b7",
       "evidenceSourceState": "dirty main, source/binary/capture receipts retained",
       "contextHistoryTuiEvidence": "J141 provides exact revision selection, summary/full inspection, baseline comparison, explicit activation/restore and no-color restart. Browsing uses the hydrated immutable manifest; actions use shared dispatch. J140 retains headless/typed command and adoption compatibility. Large stores, all option paths and reference parity remain pending.",
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:78b79b32781a84467c194269963ee546318bea562f1f05d13d0807953ba6b7c0"
     },
     {
       "tool": "threat-model:import",
@@ -4012,7 +4102,8 @@
       },
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:b8197e85e4eeda7ab4e3ac3a847e7d140a7447f4b49a5aa0ca3954558a8b7d3b"
     },
     {
       "tool": "threat-model:methodologies",
@@ -4043,7 +4134,8 @@
       },
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:10ac5b03d9cbee37f1202c228f90ddb5cdbc6cb18622aaeb6e0758422ab9fa58"
     },
     {
       "tool": "threat-model:models",
@@ -4084,7 +4176,8 @@
       "evidenceSourceCommit": "c25b38fd67d0f535631cbe66e5faf360ba48f3b7",
       "evidenceSourceState": "dirty main, source/binary/capture receipts retained",
       "contextHistoryTuiEvidence": "J141 provides exact revision selection, summary/full inspection, baseline comparison, explicit activation/restore and no-color restart. Browsing uses the hydrated immutable manifest; actions use shared dispatch. J140 retains headless/typed command and adoption compatibility. Large stores, all option paths and reference parity remain pending.",
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:7402fd2457f1eb0b1514d434598267ad80184ddb0e6105984443c13a00aa51bc"
     },
     {
       "tool": "threat-model:read",
@@ -4107,7 +4200,7 @@
         "methodology",
         "allowanceRef"
       ],
-      "executionEvidence": "Shared exact-context read authenticates the selected document without activating it. Focused core tests cover exact reads and conflicting overlays; TUI tests cover foreign/malformed completion, selection isolation and all six viewport sizes. J68 executes real offline reads and scan-plan compilation: 29 machine checks and 12 manual judgments pass, including the selected revision DFD and a proven fresh no-color restart. No scans or provider requests start. Legacy/scoped read variants remain part of the broader audit. October 14 adds existing-digest preview, shared limits, omission disclosure and explicit text-view navigation; focused exact-context/digest and shell checks preserve prompt behavior. See docs/assessments/scanner-context-preview-2026-10-14.md.",
+      "executionEvidence": "Shared exact-context read authenticates the selected document without activating it. Focused core tests cover exact reads and conflicting overlays; TUI tests cover foreign/malformed completion, selection isolation and all six viewport sizes. J68 executes real offline reads and scan-plan compilation: 29 machine checks and 12 manual judgments pass, including the selected revision DFD and a proven fresh no-color restart. No scans or provider requests start. Legacy/scoped read variants remain part of the broader audit. October 14 adds existing-digest preview, shared limits, omission disclosure and explicit text-view navigation; focused exact-context/digest and shell checks preserve prompt behavior. See docs/assessments/scanner-context-preview-2026-10-14.md. October 23: normal shared exact-context reading consumes the completed real-model draft without inference or global activation. The final reader has 430 context checks, six viewport sizes, complete compact paging, source-state warnings, exact revision fallback while the catalog loads, and no-color restart. Final J339 has 60 machine passes, zero failures and three operator UX judgments pending. See docs/assessments/context-reader-live-2026-10-23.md.",
       "readinessVerdict": "scoped exact-context, projection and native reader evidence; legacy/scoped variants, broad resource/scale behavior and operator UX acceptance remain unqualified",
       "evidenceSourceCommit": "77d69695602a5240a539819911c83eb0e4f9b5b5 plus uncommitted exact-context reader and DFD inspection",
       "evidencePath": "/tmp/kuzushi-bounded-investigations-tui/20260910-044815/J68/manual-review.json",
@@ -4117,8 +4210,8 @@
         "phaseAgreement": "Declared Map read surface. Exact reads return source/lesson/goal state without accepting Map, generating findings, activating context or authorizing work. The owned native fixture and existing consumer tests check that reading alone advances no workflow reality.",
         "requiredInputs": "Selected workspace and an exact threatModelRef, or explicit null omission. References authenticate model/revision/content hash. Exact reads reject scope, output-directory and methodology overlays. No model or credentials are required. A context with selected lessons needs its original ledger for eligibility inspection; findings_store remains optional in dispatch.",
         "sharedDispatchExecution": "Core prepared-registry exact reads and native CLI/shell use the same descriptor/executor. The added preview invokes the existing agentic/triage digest renderer and shared limit constants; execution prompt text is unchanged.",
-        "artifactConsumption": "data.document and data.modelRef feed summary, complete document and DFD. Additive data.scannerContextPreview v1 supplies text/hash, limits and omissions to the scanner view. Its hash identifies the digest portion, not the full request or a source snapshot. Historical documents and references remain unchanged.",
-        "failureAndRecovery": "Focused tests reject bad references and incompatible overlays; source/goal warnings and lesson eligibility remain explicit. Missing or malformed preview receipts show reread guidance without another context substitution. Reader switching preserves study/composer state, and asynchronous check results preserve the chosen projection. Legacy/scoped IO and every cancellation race remain outside this checkpoint.",
+        "artifactConsumption": "The saved live draft and immutable inherited reference remain readable through campaign history, Summary, source/omission receipt, DFD and text comparison. Inspected context gets the full reading area, with architecture before longer metadata. Missing catalog names show the exact inspected revision ID instead of substituting another context.",
+        "failureAndRecovery": "The reader preserves drift/unknown status, full source details, draft/caret, selected reference and paging. A stopped source check clears the compact match status. The final native recovery uses the exact revision while catalog loading is disclosed. Full operator acceptance and broader large-history behavior remain open.",
         "approvedResources": "Runtime-free reading starts no provider request, discovery job or allowance reservation. The existing renderer caps threats/section items and lesson fields; projection exposes those limits without silently increasing context. Source inspection still performs filesystem work; full-operation CPU/memory/latency and large-workspace qualification remain open.",
         "scopeEnforcement": "Exact revision remains workspace-bound and hash-authenticated. TUI selection and reading leave the active model and source unchanged. This read does not establish discovery coverage or transfer a historical finding verdict to another SHA.",
         "interfaceParity": "Exact native headless JSON and shell consume the same preview text/hash. Unit projections and paging cover six viewport sizes; native J271 verifies the owned context/lesson reader and no-color restart. Full legacy/scoped variants, every configuration and reference-product parity remain unqualified."
@@ -4128,7 +4221,8 @@
       "discoveryMaturityOverride": null,
       "recordedGoalGuidanceEvidencePath": "docs/assessments/context-goal-reading-2026-10-10.md",
       "sourceIdentityEvidencePath": "docs/assessments/map-source-provenance-2026-10-13.md",
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:8570e315e82e4357d87b8ade3a782a8534c889738083a5c04ae7623723b1ecac"
     },
     {
       "tool": "threat-model:regenerate",
@@ -4179,7 +4273,8 @@
       "discoveryMaturityOverride": null,
       "phaseResult": false,
       "phaseOwnershipEvidence": "TUI prepared-dispatch consumer regression and J105/J140 show auxiliary context actions preserve Map ownership; see context-lifecycle-2026-10-09.md.",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:33a14a6337bd95544b96704b7f0028a26ee939d81d6713103f389e4da8488182"
     },
     {
       "tool": "threat-model:restore",
@@ -4223,7 +4318,8 @@
       "evidenceSourceCommit": "c25b38fd67d0f535631cbe66e5faf360ba48f3b7",
       "evidenceSourceState": "dirty main, source/binary/capture receipts retained",
       "contextHistoryTuiEvidence": "J141 provides exact revision selection, summary/full inspection, baseline comparison, explicit activation/restore and no-color restart. Browsing uses the hydrated immutable manifest; actions use shared dispatch. J140 retains headless/typed command and adoption compatibility. Large stores, all option paths and reference parity remain pending.",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:aa96b9e9e34deae6b4c0a5a78dbce4be73c24091683eacb7b3465f316bc5d99b"
     },
     {
       "tool": "threat-model:reuse-lessons",
@@ -4269,14 +4365,15 @@
       ],
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:5d7b93ce1197fd850c2d219051ec1264b001f4e0662593fcdd1f0cf4df97ef0d"
     },
     {
       "tool": "threat-model:revise",
       "module": "threat-model",
       "declaredMaturity": "core",
       "declaredPhase": "map",
-      "purpose": "Save reviewed text edits as an inactive immutable context copy. No model requests.",
+      "purpose": "Save reviewed narration and architecture corrections as an inactive immutable context copy. No model requests.",
       "scope": "Selected workspace; original source and scope binding retained.",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -4293,7 +4390,7 @@
         "label",
         "allowanceRef"
       ],
-      "executionEvidence": "Ten Core context-edit checks use real shared prepared dispatch, immutable store/read consumption, protected fields, mismatched target/digest and real lock-wait cancellation. Native J105 uses actual imports, two text edits, copy inspection, finite three-pass preparation and no-color restart. No model calls or jobs start.",
+      "executionEvidence": "Ten Core context-edit checks use real shared prepared dispatch, immutable store/read consumption, protected fields, mismatched target/digest and real lock-wait cancellation. Native J105 uses actual imports, two text edits, copy inspection, finite three-pass preparation and no-color restart. No model calls or jobs start. October 23: 23 core edit checks, 443 broader context checks and final 22 edit checks cover operator architecture constraints and local choice/form ownership. Final J344 has 46 machine passes, zero failures and four pending operator judgments; it preserves source/active context, reviews three corrections and binds the copy to three unstarted jobs through no-color restart. See docs/assessments/context-architecture-edits-2026-10-23.md. Suites overlap; no semantic model-quality claim.",
       "readinessVerdict": "narrow-functional-evidence; full investigation remains pending",
       "resourceEvidence": [
         "Runtime-free execution with no model requests. Hard limits:64 edits,16 KiB per field,2 KiB label and existing16 MiB object reader/writer limit. Canceled lock waits publish no revision."
@@ -4314,7 +4411,8 @@
       "discoveryMaturityOverride": null,
       "phaseResult": false,
       "phaseOwnershipEvidence": "TUI prepared-dispatch consumer regression and J105/J140 show auxiliary context actions preserve Map ownership; see context-lifecycle-2026-10-09.md.",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:a5b68aa43ed5eece5f11b2c1765d6c95eb1d86ff12d6895fbcd6881253b6a285"
     },
     {
       "tool": "threat-model:revisions",
@@ -4358,7 +4456,8 @@
       "evidenceSourceCommit": "c25b38fd67d0f535631cbe66e5faf360ba48f3b7",
       "evidenceSourceState": "dirty main, source/binary/capture receipts retained",
       "contextHistoryTuiEvidence": "J141 provides exact revision selection, summary/full inspection, baseline comparison, explicit activation/restore and no-color restart. Browsing uses the hydrated immutable manifest; actions use shared dispatch. J140 retains headless/typed command and adoption compatibility. Large stores, all option paths and reference parity remain pending.",
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:dcd507337d512a89d6f17710f876c71512f46207f60b5f97b3ed968a9a098950"
     },
     {
       "tool": "threat-model:verify",
@@ -4400,7 +4499,8 @@
       ],
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:e41a67d62befc4089dfc798ecc25792f1f89135ae34d2d6403d78540bbe0f567"
     },
     {
       "tool": "trace:expand",
@@ -4444,7 +4544,8 @@
         "questions and notes",
         "graph append and source/cost receipts"
       ],
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:dd37eb47b68ff3282e7c5514a461a0e500dbea711f256a39a273fec0b110e345"
     },
     {
       "tool": "triage:chain-hunt",
@@ -4484,7 +4585,8 @@
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": "labs",
       "phaseResult": false,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:f2406142b4b2b3c6f3dfb1b0e46af0837ec3d0580d88d173f6fbba1ca38923cd"
     },
     {
       "tool": "triage:dedupe",
@@ -4524,7 +4626,8 @@
       "declaredEffect": "workspace-write",
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:b7bd90c1cb7a00966eb7e0c88458772902d88d7ae1b70b69a572f464985d9dee"
     },
     {
       "tool": "triage:run",
@@ -4590,7 +4693,8 @@
       "supplementalAssessment": "docs/assessments/actual-review-recovery-2026-10-11.md",
       "sourceInputAssessment": "docs/assessments/review-source-evidence-2026-10-15.md",
       "supportingInputAssessment": "docs/assessments/live-supporting-review-2026-10-15.md",
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:1945fbc123fe527bdb43aee151122eba41b01a0b703386c101da6e151cb2991b"
     },
     {
       "tool": "variant:hunt",
@@ -4633,7 +4737,8 @@
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": "labs",
       "phaseResult": false,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:f43575102bdfd2eb944a96d7832ae1bcfbee56dd57cdf1a54b89495ff31f5512"
     },
     {
       "tool": "variant:lift-pattern",
@@ -4672,7 +4777,8 @@
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": "labs",
       "phaseResult": false,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:a8f05e584207b737f10346058bac0c497fe27f121df13cdef25ba1474cc261fa"
     },
     {
       "tool": "verify:finding",
@@ -4722,7 +4828,8 @@
         "excludedMode": "empirical",
         "reason": "Source-evidence review is distinct from excluded reproduction execution. Neither mode is qualified by this annotation."
       },
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:717e7c3d524cd368f8720b8961b5eb430f7a34ed380c3819c97d741959c898cb"
     },
     {
       "tool": "worklist:rank",
@@ -4763,7 +4870,8 @@
       "resourceEvidence": [
         "Explicit deep ranking uses one shared inventory, at most 2000 production file attempts, 16 KiB prefixes, 16 MiB total prefixes and a 512 MiB inventory/source ceiling. Evidence retention is capped at 32 signals per file. SQL/query-wide cost and latency remain separately unqualified."
       ],
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:e7505fd7c7411ee78321449e7aad3176d0c1ea09f01e4f13fc7e5221a5a18e9a"
     },
     {
       "tool": "workspace:export-findings",
@@ -4808,7 +4916,8 @@
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
       "recordedGoalGuidanceEvidencePath": "docs/assessments/context-goal-reading-2026-10-10.md",
-      "phaseResultDeclared": true
+      "phaseResultDeclared": true,
+      "descriptorSha256": "sha256:9aca6bd6df2d0962f138d25d685d97cc9a7cde3ff64382f16a79c2251b71c59a"
     },
     {
       "tool": "workspace:import-findings",
@@ -4845,7 +4954,8 @@
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
       "phaseResultDeclared": false,
-      "citationAuditEvidence": "docs/assessments/citation-module-audit-2026-10-09.md"
+      "citationAuditEvidence": "docs/assessments/citation-module-audit-2026-10-09.md",
+      "descriptorSha256": "sha256:f1b0cb8e9138ffdb79ced63a08d4152fea4bdc3aa5a098b49fbc5baa6028bfa1"
     },
     {
       "tool": "workspace:status",
@@ -4876,7 +4986,8 @@
       },
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:1253d0fd521b0e03085ed526f70380ddd05e783d0038a9e595f7c023df6edd29"
     },
     {
       "tool": "x-ray:read",
@@ -4915,7 +5026,8 @@
         "Current read cost is known zero; legacy generation cost stays unknown. No strict generation dollar ceiling is inferred."
       ],
       "scopeEvidence": "Canonical explicit target/workspace with containment, regular-file and symlink checks. Source currency and graph semantics remain unassessed; original generation has no immutable source/context join.",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:3ab9529063d7333f5b984194d4cd1ca8b220321b0f9fd9dc33bd0578d3a07b68"
     },
     {
       "tool": "x-ray:run",
@@ -4954,7 +5066,8 @@
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": "labs",
       "phaseResult": false,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:93b6b7f3932b4a6e7d348b62990506e55740e51dff1241d7180ce82f2c7cebb9"
     },
     {
       "tool": "campaign:review-study",
@@ -4995,7 +5108,8 @@
       "discoveryMaturityOverride": null,
       "assessment": "docs/assessments/bounded-review-2026-10-10.md",
       "supplementalAssessment": "docs/assessments/actual-review-recovery-2026-10-11.md",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:1dc784c1d977f74716312dff1ecf5b206cfbd713b3fbbfade0f87c1267664193"
     },
     {
       "tool": "findings:review-source",
@@ -5041,7 +5155,8 @@
       "assessment": "docs/assessments/current-source-review-2026-10-11.md",
       "declaredModuleMaturity": "core",
       "phaseResultDeclared": false,
-      "discoveryMaturityOverride": null
+      "discoveryMaturityOverride": null,
+      "descriptorSha256": "sha256:9b7c547fd2ba2eeaade38f95023be0fbe015bb5f3980f34499905530bd452260"
     },
     {
       "tool": "threat-model:ask",
@@ -5091,7 +5206,8 @@
       "discoveryMaturityOverride": null,
       "phaseResult": false,
       "phaseOwnershipEvidence": "Core test refuses Map completion from a question study; existing context remains unchanged.",
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:af49d3c93e60ee074e69ae7276e455ef8bbceb3d5d64940671b445a7090b7634"
     },
     {
       "tool": "planner:propose",
@@ -5140,7 +5256,8 @@
         "scopeEnforcement": "This is a workflow draft rather than a scanner. Proposed run tools cannot change target, model, allowance or internal work bindings.",
         "interfaceParity": "Canonical descriptor/preparation/dispatch are shared with headless execution. /plan and selected-phase prose open the same study. Keyboard and full reference-product acceptance remain open."
       },
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:58322448dce320a939ccf1d9b9351539392f306423fd93b7f4f8583f270b2ce6"
     },
     {
       "tool": "findings:goals",
@@ -5184,7 +5301,8 @@
       ],
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:4f45af86e7bfcdeca6179de051cb2ed4d66d27bf6ddfeaf458f8d376bda6cba5"
     },
     {
       "tool": "findings:goal-assess",
@@ -5233,7 +5351,8 @@
       ],
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
-      "phaseResultDeclared": false
+      "phaseResultDeclared": false,
+      "descriptorSha256": "sha256:171cc2561e9b375f70cadb738809b07fb74593a77a18b4f1994e30ce4e9cad2b"
     },
     {
       "tool": "taint-iris-next:catalog-read",
@@ -5270,7 +5389,8 @@
       "requiredOptions": [],
       "discoveryMaturityOverride": null,
       "headlessDeclared": true,
-      "runtimeDeclaration": "Explicit runtime-free helper, checked through real prepared dispatch and headless policy tests."
+      "runtimeDeclaration": "Explicit runtime-free helper, checked through real prepared dispatch and headless policy tests.",
+      "descriptorSha256": "sha256:bb16c1c2f44bdf6b357e1c232da5e17c19196e5ba27162efc8a23caf5eff746f"
     },
     {
       "tool": "taint-iris-next:catalog-accept",
@@ -5309,7 +5429,8 @@
       ],
       "discoveryMaturityOverride": null,
       "headlessDeclared": true,
-      "runtimeDeclaration": "Explicit runtime-free helper, checked through real prepared dispatch and headless policy tests."
+      "runtimeDeclaration": "Explicit runtime-free helper, checked through real prepared dispatch and headless policy tests.",
+      "descriptorSha256": "sha256:b60cf40fe91720638b23928ed7b5937f1e25af32e376c447fb6d92ac1ba4ddc8"
     }
   ],
   "curationChanges": [
@@ -6262,12 +6383,12 @@
   },
   "internalToolAuditRef": "internal-investigation-tools.json",
   "currentRegistryCensus": {
-    "capturedAt": "2026-10-18T10:33:09.976178+00:00",
-    "publishedCommit": "41998697dbc114bab95763ebdfb2edaead0026ee",
-    "sourceState": "Prepared main checkpoint adds saved scan advice, bounded source comparisons, compact completion receipts and history-free agentic discovery. Broader qualification remains open.",
-    "binarySha256": "5ef378825a34d277450a98feaa4158500e45f801a7187ee30120f951bfe22f6c",
+    "capturedAt": "2026-10-23T21:27:43.711159+00:00",
+    "publishedCommit": "5a35a06271cd95e4480a8e47d210e46dcb17943d",
+    "sourceState": "Main with the exact staged reader checkpoint preserved and separate local audit/comparison drafts. Current frozen catalog verified after complete stored-context comparison; metadata consistency does not qualify all functional paths.",
+    "binarySha256": "613d48f83384d57bb2fb862a34f9fb445a543b6b9d922d2bee383f3b5ece4f1c",
     "catalogCommand": "kuzushi tools --all --json",
-    "catalogSha256": "6973268f257cb330f14a4103984ff21813653359903b88682f71c1bded28d930",
+    "catalogSha256": "f2f4b37fb2f44b1a0ca0e74f8b7f69495c6682a3b04c0658882e009375bc1ef9",
     "operatorVisibleTools": 118,
     "defaultCatalogTools": 81,
     "effectiveMaturityCounts": {
@@ -6316,15 +6437,48 @@
     ],
     "descriptorDifferences": [
       {
-        "tool": "agentic-sast:scan",
+        "tool": "android-apk:scan",
         "fields": [
-          "purpose"
+          "discoveryMaturityOverride"
+        ]
+      },
+      {
+        "tool": "ndiff:fetch-cve",
+        "fields": [
+          "discoveryMaturityOverride"
+        ]
+      },
+      {
+        "tool": "ndiff:extract-fix-pattern",
+        "fields": [
+          "discoveryMaturityOverride"
+        ]
+      },
+      {
+        "tool": "ndiff:hunt-variants",
+        "fields": [
+          "discoveryMaturityOverride"
+        ]
+      },
+      {
+        "tool": "threat-model:build",
+        "fields": [
+          "declaredOptions"
         ]
       }
     ],
     "coreInScopeGenericOutcomePlaceholders": 0,
     "meaning": "Visible metadata is refreshed from the frozen native catalog, decoding omitted Never runtime and true phase-result defaults according to ToolDescriptor serde. Internal classifications retain their named evidence. Metadata does not establish model accuracy or full module qualification.",
-    "inScopeOperatorTools": 110
+    "inScopeOperatorTools": 110,
+    "additionalDescriptorChanges": [
+      {
+        "tool": "threat-model:diff",
+        "fields": [
+          "description"
+        ],
+        "policyOrMaturityChanged": false
+      }
+    ]
   },
   "catalogSnapshot": {
     "sha256": "51afdb1b3330bc8614fd74ab9889e136cb7f18a99c698341abe279be1f1b91a2",
@@ -6334,14 +6488,14 @@
     "count": 113
   },
   "currentOperatorToolCount": 118,
-  "catalogSource": "/tmp/kuzushi-context-matrix-acceptance-20261018/catalog.json",
+  "catalogSource": "scripts/devex/artifacts/context-structure-diff-20261023/catalog-all.json",
   "currentPolicyInventory": {
     "registeredToolCount": 189,
     "fingerprint": "175b006df1cedbbd4ef1ac43d803f12cc32c36ab45f98e3e681243648c4bba3d",
     "source": "modules::registry::tests::builtin_dispatch_policy_inventory_is_reviewed_as_one_contract",
     "meaning": "The reviewed dispatch-policy fingerprint remains unchanged. UAF gains auxiliary Labs metadata, honest partial outcomes and descriptor-backed limits without changing runtime, approval, workspace, finding-store or phase assignment."
   },
-  "catalogFactsRefreshed": "2026-10-18: 118 visible tools, 81 Core defaults, 110 in-scope visible tools and unchanged 189 registered policy tuples. Agentic discovery description now permits rediscoveries; prior coverage option changes retain their named evidence. No maturity change.",
+  "catalogFactsRefreshed": "2026-10-23: 118 visible tools, 81 Core defaults, 110 in-scope visible actions and unchanged 189 registered policy tuples. Five stale metadata rows are corrected. Full serialized descriptors are now digest-bound for visible rows; functional evidence and tier decisions remain separate. Later comparison checkpoint: the current 118-tool catalog changes only the threat-model:diff description; its exact descriptor digest is verified against the frozen binary. No policy or maturity changes.",
   "functionalAuditCheckpoint": {
     "scope": "Deterministic source context and Map consumers; no exploit development, reproducer work, patching, model calls or source execution.",
     "testFile": "crates/kuzushi-core/tests/map_context_contract.rs",
@@ -10737,5 +10891,91 @@
     "machineFail": 0,
     "pendingHumanJudgments": 8,
     "remainingLimits": "No hard isolation claim for every filesystem/custom runtime; no model precision or complete source coverage claim. Other engines still need separate evidence."
+  },
+  "descriptorConsistencyContract": {
+    "schemaVersion": 1,
+    "test": "modules::registry::audit_matrix_contract_tests",
+    "visibleDescriptorDigests": 118,
+    "registeredMembership": 189,
+    "internalFactRows": 71,
+    "algorithm": "SHA-256 over compact canonical JSON of the unflattened Rust ToolDescriptor, recursively sorting object keys and preserving array order. Owning and effective maturity are checked separately.",
+    "meaning": "A matching descriptor proves metadata consistency, not useful execution, scope enforcement, failure recovery, model accuracy, or product qualification. Named evidence and remaining limits retain those meanings."
+  },
+  "exactFileLiveContextCheckpoint": {
+    "assessment": "docs/assessments/context-reader-live-2026-10-23.md",
+    "date": "2026-10-23",
+    "newProviderRequests": 1,
+    "cumulativeExperimentRequests": 16,
+    "remainingApprovedProviderRequests": 0,
+    "dollarCost": "unknown",
+    "selectedFiles": 7,
+    "selectedRawBytes": 2221,
+    "sourceFilesUnchanged": 14,
+    "contextInactive": true,
+    "maturityChanges": [],
+    "qualification": "Scoped current-runtime execution and reading only; architecture semantics, broader module and operator acceptance remain open."
+  },
+  "storedContextComparisonCheckpoint": {
+    "assessment": "docs/assessments/context-structure-comparison-2026-10-23.md",
+    "comparisonSchemaVersion": 1,
+    "nativeMachinePasses": 39,
+    "nativeFailures": 0,
+    "operatorJudgmentsPending": 2,
+    "newModelRequests": 0,
+    "savedLiveFieldChanges": 121,
+    "maturityChanges": []
+  },
+  "generatedContextRolesCheckpoint": {
+    "assessment": "docs/assessments/generated-context-rejection-2026-10-23.md",
+    "nativeSha256": "9e9a90d0fc41169f8a4a2ea99a48fc0c517b175130a22a13ea27a6a85c5ed7b4",
+    "visibleTools": 118,
+    "coreDefaults": 81,
+    "J343": {
+      "machinePass": 23,
+      "fail": 0,
+      "operatorPending": 3
+    },
+    "J121": {
+      "machinePass": 212,
+      "fail": 0,
+      "operatorPending": 20,
+      "remaining": "Operator judgments and broader qualification remain open; earlier failed capture is retained"
+    },
+    "newLiveRequests": 0,
+    "maturityChanged": false
+  },
+  "reportReadingCheckpoint": {
+    "assessment": "docs/assessments/generated-context-rejection-2026-10-23.md",
+    "nativeSha256": "5e3fe3741ef56a0e996d04660df2171535d0d7ba57b2166a7a460882d167194f",
+    "frozenRepositoryInputs": 6419,
+    "frozenExecutables": 13,
+    "J153": {
+      "machinePass": 26,
+      "fail": 0,
+      "captures": 21,
+      "operatorPending": 4
+    },
+    "J121": {
+      "machinePass": 216,
+      "fail": 0,
+      "captures": 130,
+      "operatorPending": 20
+    },
+    "newLiveRequests": 0,
+    "maturityChanged": false
+  },
+  "contextArchitectureEditsCheckpoint": {
+    "assessment": "docs/assessments/context-architecture-edits-2026-10-23.md",
+    "nativeSha256": "d0ffaf2a1e806cec02b62d0179ae6d4b1a1ccd21a481a9509fa7f98404f76ca6",
+    "J344": {
+      "machinePass": 46,
+      "fail": 0,
+      "captures": 35,
+      "operatorPending": 4
+    },
+    "frozenRepositoryInputs": 6427,
+    "frozenExecutables": 13,
+    "newLiveRequests": 0,
+    "maturityChanged": false
   }
 }

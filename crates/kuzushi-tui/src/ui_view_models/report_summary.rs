@@ -86,7 +86,11 @@ fn workspace_export_ready(app: &ShellApp) -> Result<Option<String>, String> {
 pub(crate) fn report_action_error(app: &ShellApp) -> Option<String> {
     let route = app.router.report();
     if route.export_read_error() {
-        return report_export_campaign(app).err();
+        let message = match report_export_campaign(app) {
+            Err(error) => format!("Export was not started. {error}"),
+            Ok(_) => "Export was not started. The current report is ready; Enter exports.".into(),
+        };
+        return Some(message);
     }
     route.reveal_error().map(str::to_string)
 }

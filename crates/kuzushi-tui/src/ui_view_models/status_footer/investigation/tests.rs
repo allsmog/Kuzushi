@@ -137,3 +137,99 @@ fn other_shell_surfaces_keep_their_existing_routing_and_diagnostic_contract() {
         assert!(full_segments(&app).is_none());
     }
 }
+
+#[test]
+fn investigation_readers_prioritize_source_and_decisions_over_shell_diagnostics() {
+    let (_root, mut app) = app();
+    app.domain_mut().set_returning_source_unverified(true);
+    app.router.workbench_mut().review_mut().mode = ReviewMode::Conflict {
+        message: "An operator decision changed".into(),
+        target_fp: "owned".into(),
+    };
+    for view in [
+        ShellView::Lessons,
+        ShellView::Relationships,
+        ShellView::Scene,
+        ShellView::RunDiff,
+        ShellView::Replay,
+        ShellView::Activity,
+    ] {
+        app.set_shell_view(view);
+        let model = status_footer_model(&app);
+        assert!(
+            model.left_segments.contains(&"Source unchecked".into()),
+            "{view:?}: {model:?}"
+        );
+        assert!(
+            model.left_segments.contains(&"review:conflict".into()),
+            "{view:?}: {model:?}"
+        );
+        assert!(model.left_segments[0].contains("autonomy:fix"));
+        for segments in [model.left_segments, model.compact_left_segments] {
+            assert!(
+                segments.iter().all(|s| !s.contains("route")
+                    && !s.contains("notify:")
+                    && !s.contains("focus unknown")),
+                "{view:?}: {segments:?}"
+            );
+        }
+        assert_eq!(
+            (app.input(), app.cursor()),
+            ("Held investigation draft\nsecond line", 4)
+        );
+        assert_eq!(app.shell_view(), view);
+    }
+}
+
+fn study_snapshot(
+    kind: Option<&str>,
+) -> kuzushi_core::capabilities::campaign::snapshot::CampaignSnapshot {
+    kuzushi_core::capabilities::campaign::snapshot::CampaignSnapshot {
+        campaign_id: "owned-study".into(),
+        kind: kind.map(str::to_string),
+        requested_workers: Some(1),
+        effective_workers: Some(1),
+        parallel_safety_reason: None,
+        tool: None,
+        created_at_ms: None,
+        paused_until_ms: None,
+        budget_usd: None,
+        job_budget_usd: None,
+        fill_gaps: false,
+        skipped_covered_cells: None,
+        total_cost_usd: 0.0,
+        provider_spend_unresolved: true,
+        jobs: vec![],
+    }
+}
+
+#[test]
+fn fixed_study_readers_use_the_investigation_footer_and_legacy_campaigns_keep_diagnostics() {
+    let (_root, mut app) = app();
+    app.set_shell_view(ShellView::Campaign);
+    for kind in [
+        "scan-batch",
+        "context-study",
+        "review-study",
+        "context-matrix",
+        "scope-study",
+    ] {
+        app.router.campaign_mut().campaigns = vec![study_snapshot(Some(kind))];
+        let model = status_footer_model(&app);
+        assert!(
+            !model
+                .left_segments
+                .iter()
+                .any(|s| s.contains("route") || s.contains("notify:")),
+            "{kind}: {model:?}"
+        );
+        assert!(model.left_segments[0].contains("autonomy:fix"));
+    }
+    for kind in [None, Some("legacy-campaign")] {
+        app.router.campaign_mut().campaigns = vec![study_snapshot(kind)];
+        assert!(full_segments(&app).is_none());
+        assert!(status_footer_model(&app)
+            .left_segments
+            .contains(&"module route".into()));
+    }
+}

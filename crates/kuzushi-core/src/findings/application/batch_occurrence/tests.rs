@@ -1,9 +1,11 @@
 use super::*;
+mod page_gate;
 use crate::capabilities::campaign::ScanBatchGateBinding;
 use crate::findings::{Finding, FindingIdentityBasis, FindingStore, Severity};
 use serde_json::json;
 use std::path::Path;
 mod page_membership;
+mod pending_receipt;
 mod retained_attempts;
 
 #[test]

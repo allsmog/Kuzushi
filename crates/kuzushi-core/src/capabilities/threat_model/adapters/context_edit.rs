@@ -10,7 +10,7 @@ pub(crate) fn revise_context_adapter(
     let document = load_exact_threat_model(root, &reference)?;
     let edits: Vec<ContextTextEdit> = serde_json::from_value(input["edits"].clone())
         .context("edits must be context text edits")?;
-    let mut revised = apply_context_text_edits(&document, &edits)?;
+    let mut revised = apply_context_operator_edits(&document, &edits)?;
     stamp_operator_context(&mut revised, &reference, &edits)?;
     let request = edit_commit_request(root, &reference, input.get("label"))?;
     let committed = ctx.with_cancellation(|cancel| {

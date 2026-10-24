@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    mod literal_paths;
     use super::super::*;
     use crate::allowance::InvestigationWork;
     use crate::config::V2Config;

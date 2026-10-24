@@ -12,6 +12,7 @@ pub(crate) struct FindingsRefreshState {
     next_id: u64,
     pending: Option<PendingFindingsRefresh>,
     failed_target: Option<PathBuf>,
+    waiting_target: Option<PathBuf>,
 }
 
 struct PendingFindingsRefresh {
@@ -36,6 +37,7 @@ impl std::fmt::Debug for FindingsRefreshState {
                 &self.pending.as_ref().map(|pending| &pending.request),
             )
             .field("failed_target", &self.failed_target)
+            .field("waiting_target", &self.waiting_target)
             .finish()
     }
 }
@@ -44,6 +46,7 @@ impl FindingsRefreshState {
     pub(crate) fn accept_projection(&mut self) {
         self.pending = None;
         self.failed_target = None;
+        self.waiting_target = None;
     }
     pub(crate) fn invalidate_scheduling(&mut self) {
         if let Some(pending) = &mut self.pending {
@@ -82,6 +85,7 @@ impl ShellApp {
         self.runtime_state.findings_refresh.pending = Some(pending);
         self.runtime_state.requested_findings_page = None;
         self.runtime_state.findings_refresh.failed_target = None;
+        self.runtime_state.findings_refresh.waiting_target = None;
         self.schedule_pending_findings_refresh();
     }
 
@@ -180,7 +184,7 @@ impl ShellApp {
             self.runtime_state.findings_refresh.pending = None;
             return false;
         }
-        if pending.scheduled {
+        if pending.scheduled || self.waiting_for_findings_receipt() {
             return false;
         }
         let target = pending.target.clone();
@@ -209,6 +213,9 @@ impl ShellApp {
         use crate::ui_view_models::ReviewReadFeedback;
         let state = &self.runtime_state.findings_refresh;
         let study = self.router.campaign().active_batch_id.is_some();
+        if self.waiting_for_findings_receipt() {
+            return Some(ReviewReadFeedback::waiting(study));
+        }
         if let Some(pending) = &state.pending {
             return Some(ReviewReadFeedback::loading(
                 study,
@@ -261,7 +268,7 @@ impl ShellApp {
         &mut self,
         target: &Path,
         request: &FindingsReadRequest,
-        value: Result<FindingsReadSnapshot, String>,
+        value: Result<FindingsReadSnapshot, FindingsReadFailure>,
     ) {
         let Some(pending) = &self.runtime_state.findings_refresh.pending else {
             return;
@@ -273,13 +280,48 @@ impl ShellApp {
         if !self.findings_refresh_request_is_current(&pending) {
             return;
         }
+        self.finish_current_findings_read(pending, request, value);
+    }
+
+    fn finish_current_findings_read(
+        &mut self,
+        mut pending: PendingFindingsRefresh,
+        request: &FindingsReadRequest,
+        value: Result<FindingsReadSnapshot, FindingsReadFailure>,
+    ) {
         match value {
             Ok(snapshot) => {
                 self.apply_findings_read_snapshot(snapshot, request, pending.announce);
                 self.resume_findings_refresh_presentation(pending);
             }
-            Err(error) => self.fail_findings_refresh(request, error),
+            Err(FindingsReadFailure::ReceiptPending) => {
+                pending.scheduled = false;
+                self.record_pending_findings_receipt();
+                self.runtime_state.findings_refresh.pending = Some(pending);
+            }
+            Err(FindingsReadFailure::Failed(error)) => self.fail_findings_refresh(request, error),
         }
+    }
+
+    fn waiting_for_findings_receipt(&self) -> bool {
+        self.runtime_state
+            .findings_refresh
+            .waiting_target
+            .as_deref()
+            .is_some_and(|target| self.target() == Some(target))
+    }
+
+    pub(crate) fn record_pending_findings_receipt(&mut self) {
+        if self.waiting_for_findings_receipt() {
+            return;
+        }
+        self.runtime_state.findings_refresh.waiting_target = self.target_owned();
+        self.runtime_state.findings_refresh.failed_target = None;
+        self.invalidate_findings_review_completion();
+        self.log(
+            "note",
+            "Work receipts pending; previous findings retained. Retry: findings refresh",
+        );
     }
 
     fn fail_findings_refresh(&mut self, request: &FindingsReadRequest, error: String) {
@@ -297,6 +339,7 @@ impl ShellApp {
     }
 
     pub(crate) fn record_findings_read_failure(&mut self) {
+        self.runtime_state.findings_refresh.waiting_target = None;
         self.runtime_state.findings_refresh.failed_target = self.target_path_buf().cloned();
         let deck = self.router.campaign_mut();
         if deck.active_batch_id.is_some() {

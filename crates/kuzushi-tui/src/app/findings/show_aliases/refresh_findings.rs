@@ -371,6 +371,10 @@ impl ShellApp {
     }
 
     pub(crate) fn log_refresh_findings_error(&mut self, error: anyhow::Error, announce: bool) {
+        if error.is::<kuzushi_core::findings::BatchReceiptPending>() {
+            self.record_pending_findings_receipt();
+            return;
+        }
         self.record_findings_read_failure();
         if announce {
             self.log(

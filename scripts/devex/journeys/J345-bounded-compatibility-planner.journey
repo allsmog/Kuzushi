@@ -1,0 +1,102 @@
+name: Bounded compatibility scope planning and honest source-only consumer readiness
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/legacy_scope_planner.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+submit: run campaign:plan {"campaignId":"standard","tool":"agentic-sast:scan","seasonPrompts":false}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/legacy_scope_planner.py @TMP_TARGET @ART refused
+paste-file: @ART/refusal-replay.txt
+keys: Enter
+require-live-snap: 25 REPLAY · Result | refusal-reader-ready
+require-live-snap: 25 strategy=chunked. | unsupported-standard-scope
+expect: No executable plan was published.
+expect: campaign:study
+keys: Escape
+submit: run campaign:plan {"campaignId":"bounded","tool":"full-mode:hunt","seasonPrompts":false}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/legacy_scope_planner.py @TMP_TARGET @ART planned
+paste-file: @ART/plan-replay.txt
+keys: Enter
+require-live-snap: 25 REPLAY · Result | plan-reader-ready
+require-live-snap: 25 Scope inventory: | inventory-receipt
+expect: Compatibility draft only
+expect: 1 truncated file prefixes
+resize: 160x48
+wait: 0.3
+require-live-snap: 20 REPLAY · Result | plan-160x48
+expect: Compatibility draft only
+resize: 96x89
+wait: 0.3
+require-live-snap: 20 REPLAY · Result | plan-96x89
+expect: Compatibility draft only
+resize: 80x24
+wait: 0.3
+require-live-snap: 20 REPLAY · Result | plan-80x24
+expect: Compatibility draft only
+resize: 60x20
+wait: 0.3
+require-live-snap: 20 REPLAY · Result | plan-60x20
+expect: Compatibility draft
+resize: 40x12
+wait: 0.3
+require-live-snap: 20 Tab receipt | plan-40x12
+keys: NPage
+wait: 0.5
+live-snap: plan-page-1-40x12
+keys: NPage
+wait: 0.5
+live-snap: plan-page-2-40x12
+keys: NPage
+wait: 0.5
+live-snap: plan-page-3-40x12
+keys: NPage
+wait: 0.5
+live-snap: plan-page-4-40x12
+keys: NPage
+wait: 0.5
+live-snap: plan-page-5-40x12
+keys: NPage
+wait: 0.5
+live-snap: plan-page-6-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/legacy_scope_planner.py @TMP_TARGET @ART narrow
+ask: Can the operator read the inventory limits, omissions and supported study route at all six sizes without mistaking this compatibility draft for completed analysis or approved work?
+resize: 120x36
+keys: Escape
+paste-file: @ART/consumer-command.txt
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/legacy_scope_planner.py @TMP_TARGET @ART consumed
+paste-file: @ART/consumer-replay.txt
+keys: Enter
+require-live-snap: 25 REPLAY · Result | consumer-reader-ready
+require-live-snap: 25 Planning only | exact-scope-consumer
+expect: Cache reuse: disabled
+keys: Escape
+submit: run campaign:plan {"campaignId":"bounded","tool":"full-mode:hunt","seasonPrompts":false}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/legacy_scope_planner.py @TMP_TARGET @ART reused
+paste-file: @ART/reuse-replay.txt
+keys: Enter
+require-live-snap: 25 REPLAY · Result | reuse-reader-ready
+require-live-snap: 25 already has a plan | preserved-plan
+keys: Escape
+submit: setup
+require-live-snap: 25 Start Map | auxiliary-plans
+ask: Does explicit dry-run consumption select only the two scope files, keep Map incomplete and refuse replacing the saved plan, with no provider requests or scan jobs?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: logs
+paste-file: @ART/plan-replay.txt
+keys: Enter
+require-live-snap: 25 REPLAY · Result | recovered-reader-ready
+require-live-snap: 25 Compatibility draft only | recovered-plan
+require-shell: python3 -B @REPO/scripts/devex/fixtures/legacy_scope_planner.py @TMP_TARGET @ART restarted
+keys: C-c
+require-exit: 10

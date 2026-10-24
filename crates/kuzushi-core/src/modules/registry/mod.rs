@@ -76,6 +76,8 @@ mod advisory_catalog_contract_tests;
 #[cfg(test)]
 mod android_pipeline_contract_tests;
 #[cfg(test)]
+mod audit_matrix_contract_tests;
+#[cfg(test)]
 mod chain_hunt_contract_tests;
 #[cfg(test)]
 mod chunked_input_contract_tests;

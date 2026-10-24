@@ -197,6 +197,7 @@ fn plain_projection_discloses_selection_and_paging_keeps_controls() {
     app.handle_scope_context_key(KeyCode::Char('o'));
     let config = app.scope_context_config().unwrap();
     let detail = scope_context::detail(config, 38).join(" ");
+    let detail = detail.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(detail.contains("Boundary: app"));
     assert!(detail.contains("explicitly omitted"));
     for width in [38, 58, 78, 118, 158] {

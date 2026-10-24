@@ -2354,14 +2354,22 @@ inclusion. Some historical pattern labels remain included in full. The preview
 does not impose a new prompt, token or dollar limit.
 
 The context browser's `e` action edits a copy of the inspected exact revision.
-It offers overview, component description/purpose and human question answers.
-Multiline text has its own input owner. Back retains drafts and cursors within
+It offers overview, component description/purpose and human question answers,
+plus local architecture corrections: component names, roles and trust zones,
+flow descriptions and endpoints, and boundary names and descriptions. Role
+choices use the three supported values; endpoints use unique existing component
+IDs within the edit limits. Tab opens complete-value details. Browsing a choice
+does not change the draft; Enter applies the selected value locally. Ctrl+S and
+paste in that choice view cannot apply it or start work. Names and zones use
+one-line input; explanatory text keeps multiline input. Back retains drafts and cursors within
 the shell session, including leaving and reopening the study. Ctrl+S reviews
 changes; Enter in the review saves. Discard requires its own confirmation.
 Saving selects the new catalog row for inspection, while choosing it for a
 study remains a separate `a` action. The original revision and globally active
-model stay unchanged. Unsaved text is a session draft; saving is the durable
-boundary. No context edit starts model work or scan jobs.
+model stay unchanged. Private checkpoints can recover unsaved edits when
+recording is enabled; saving publishes the separate context revision. No context
+edit starts model work or scan jobs. Model regeneration keeps the original
+text-only field allowlist; architecture corrections stay operator actions.
 
 Shell and run modes share `threat-model:revise` through prepared dispatch. The
 tool requires an exact `threatModelRef` and an `edits` array containing `pointer`
@@ -2370,7 +2378,7 @@ scope and verification changes are refused. A different inline target cannot
 redirect a write from the selected workspace. The result contains
 `sourceModelRef`, the new `modelRef`, its document and `activated=false`.
 Source membership and revision binding are inherited from the edited revision;
-editing historical context does not make it current. New text invalidates the
+editing historical context does not make it current. Any edit invalidates the
 old verification stamp. Model calls are never required, and a canceled store
 lock wait does not publish a revision. After an uncertain save, inspect the
 context catalog before retrying; the editor preserves the draft.
@@ -3015,6 +3023,24 @@ Completed cells describe historical job progress. They establish neither
 repository coverage nor applicability to current source. Empty matrices do not
 invent a column.
 
+The compatibility planner is auxiliary Map work and creates no selectable Map
+result. Before publishing, it prepares every child through the shared registry;
+unknown options and incompatible strategies refuse the plan. Revisions require
+a new campaign ID so existing scope files and history remain intact. Concurrent
+legacy planners serialize publication for the same ID.
+
+Scope-file jobs share one bounded repository inventory. The additive
+`scopeInventory` receipt authenticates the saved inventory and discloses ignored
+paths, uninspected content and content prefixes. Complete file enumeration does
+not establish complete repository analysis or freeze source for execution.
+Incomplete enumeration refuses scope-file planning. Total file memberships
+across unique shards are capped at 100,000; each list must fit the existing
+consumer's 4 MiB limit. Root files, literal path spelling and symlink exclusions
+come from that inventory. Standard agentic discovery cannot consume this legacy
+scope-file form. Use `campaign:study` for accepted exact scopes and context.
+An explicitly selected `full-mode:hunt` can consume legacy scope files without
+threat seasoning; the planner never substitutes that strategy automatically.
+
 Status and coverage use Operate rather than Map. Status writes a deduplicated
 trend snapshot; coverage reads existing data. Neither can replace an analysis
 run when `report:build` chooses its source implicitly. Historical status spending
@@ -3190,6 +3216,12 @@ fresh, inactive, source-only single synthesis with explicit fixed-plan approval.
 It reads literal discovery and shared-context members, including disjoint
 paths, within the source byte and file limits. The tool-free request has one
 turn; malformed output or unsupported citations create no repair request.
+Fresh model-generated DFD nodes must declare a recognized `process`,
+`external-entity` or `data-store` role. Known spelling aliases normalize; missing,
+nontext, unknown and flow-as-node roles fail acceptance. Historical/manual
+imports retain compatibility normalization. Role vocabulary does not validate
+architectural meaning. File-group parsing retains the original failure cause
+and observed cost without constructing a repair request.
 Its receipt records the supplied excerpts, omissions, inheritance, source,
 model and run. Complete repository coverage is never claimed. Source drift
 before publication keeps spending but commits no context revision.
@@ -3233,8 +3265,9 @@ remain separate under the same investigation allowance. The inactive draft's
 `provenance.fileContext.receipt` retains requested files, supplied excerpts,
 omissions, inherited revision, model and run. The context summary names these
 limitations; the complete document reader includes the actual excerpts.
-The context browser's `d` compares explanatory text with the exact inherited
-revision. It does not claim a complete structural diagram comparison.
+The study context browser's `d` compares saved Text, Graph, Source and Other
+fields with the exact inherited revision. Full values and matching provenance
+remain available; comparison does not establish architecture or source validity.
 Selected-text regeneration preserves this file membership instead of expanding
 to the repository. Full replacement generation preserves the original revision.
 Back and job navigation retain the original diagram and parent study in the
@@ -3437,6 +3470,27 @@ component description/purpose and question answers retain complete before/after
 values in `data.contextText`. Unique component/question ids and exact question
 text match reordered rows; ambiguous or unkeyed rows compare by position.
 Removed text remains visible. Both selectors include their content SHA.
+
+`data.contextStructure` (schema version 1) also retains full changed values and
+before/after JSON pointers for DFD types, trust zones, flow endpoints, evidence
+links, security context, questions, source inputs and other stored fields.
+Unique literal collection IDs match across ordering. Duplicate IDs are explicitly
+ambiguous positional comparisons; missing IDs remain positional. Added/removed
+rows keep complete objects, missing values differ from JSON `null`, and reordered
+unique-ID collections are separate records. Other arrays retain their order.
+Recognized source claims are retained separately on both sides, including
+conflicting locations. These are saved claims, not current-checkout validation.
+Disagreeing recorded revision fields are flagged without choosing one identity.
+
+The study context picker offers `d` after inspecting a candidate with a recorded
+parent. Text, Graph (including security context and questions), Source and Other
+views share the complete domain comparison. Arrows choose a record, PgUp/PgDn
+and Home/End read its values, and Tab/BackTab preserve each view's cursor. Wide
+terminals show list and detail side by side; narrow terminals stack them with
+controls pinned. Plain output enumerates all records independently of selection.
+`a` associates the exact candidate with this study only after the authenticated
+parent read succeeds. Errors require local retry; comparison does not activate
+context, approve a plan or make model requests.
 
 `documentChanged` and `changedDocumentSections` disclose changes elsewhere,
 including metadata, so an unchanged structural/text subset cannot establish
@@ -3930,6 +3984,29 @@ keep line numbers outside the quotes. The selected Review location precedes the
 claim text and preserves meaningful spaces while wrapping. This presentation does
 not rewrite raw finding paths, identity fields, filters or exported location data.
 
+Agentic and generic finding adapters now preserve literal path whitespace before
+persistence. Agentic merge and prior-identity reuse compare native paths without
+trimming or case folding. Ordinary producer fingerprints remain stable; new keys
+encode paths affected by legacy normalization and escape their reserved encoding
+prefix. Existing observations, identities and decisions remain unchanged. New
+observations for an affected path can receive a different identity; no historical
+verdict should be transferred automatically. See the [migration notes](../RELEASING.md#literal-finding-paths-and-context-matrix-evidence).
+
+The context matrix result reader presents all observation summaries and locations
+before exact case/context/source and observation receipts. Paging follows actual
+viewport capacity; End and PageUp remain reversible. Plain output reads every
+case independently of the interactive scroll position. Receipt read failures
+retain their full explanation without substituting stale observations or starting
+new work.
+
+Matrix Report recaps share the case reader's quoted recorded locations and
+severity. Source and shared allowance appear before recurrence; `p` details retain
+fingerprints, identities, alternate locations and run references. Run comparison
+reads recorded content hashes to distinguish matching, differing and unverified
+content, independently of Git SHA labels. Unknown or malformed hashes stay
+unverified. Both projections preserve the existing receipts and decisions; see
+the [current Report evidence](assessments/report-source-recap-2026-10-24.md).
+
 ## Reviewed reusable lessons
 
 The `lessons` shell reader and the prepared `findings:lessons`,
@@ -4196,3 +4273,13 @@ prefixes shown in Replay. Stored observations bind the authenticated original
 snapshot and bytes. If capture cannot establish that binding or exceeds its
 limit, the result retains unpublished candidates and the paid call, with no
 automatic retry. See the [captured-source assessment](assessments/captured-observation-sources-2026-10-16.md).
+
+### Reading an inspected study context
+
+After exact revision inspection, the TUI uses the full reading area for the
+architecture or complete document. Source status stays separate from claim and
+finding validation. Longer source, revision, inheritance and omission details
+remain reachable by paging. Catalog loading falls back to the inspected revision
+ID; it does not substitute the active context. Choosing another row restores the
+catalog. Scanner preview, diagram, comparison and the action menu preserve their
+existing controls. Reading does not accept context or authorize model work.

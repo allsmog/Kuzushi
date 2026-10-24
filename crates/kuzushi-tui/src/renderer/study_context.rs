@@ -8,6 +8,7 @@ mod actions;
 mod comparison;
 mod diagram;
 mod editor;
+pub(crate) use editor::{context_choice_offset_after_page, context_choice_page_rows};
 
 pub(super) fn render_context_picker(frame: &mut Frame<'_>, app: &ShellApp, area: Rect) {
     let Some(picker) = app.study_context_picker() else {
@@ -18,7 +19,12 @@ pub(super) fn render_context_picker(frame: &mut Frame<'_>, app: &ShellApp, area:
     }
     render_context_header(frame, app, area);
     let catalog = context_catalog(app);
-    let layout = context_reader_layout(area, catalog.rows.len(), picker.text_view);
+    let layout = context_reader_layout(
+        area,
+        catalog.rows.len(),
+        picker.text_view,
+        picker.preview.is_some(),
+    );
     render_context_selection(frame, &catalog.rows, picker, area, layout.list);
     render_context_detail(
         frame,
@@ -40,25 +46,22 @@ fn render_context_selection(
     area: Rect,
     list: Rect,
 ) {
-    if picker.text_view == crate::app::StudyContextTextView::Scanner {
-        render_scanner_identity(frame, rows, picker.selected.as_ref(), area);
+    if list.height == 0 {
+        render_context_identity(frame, rows, picker.selected.as_ref(), area);
         return;
     }
     render_context_rows(frame, rows, picker.selected.as_ref(), list);
 }
 
-fn render_scanner_identity(
+fn render_context_identity(
     frame: &mut Frame<'_>,
     rows: &[ContextRow],
     reference: Option<&kuzushi_core::ThreatModelRef>,
     area: Rect,
 ) {
-    let label = rows
-        .iter()
-        .find(|row| row.reference.as_ref() == reference)
-        .map_or("Selected revision unavailable", |row| row.label.as_str());
     let width = area.width.saturating_sub(4);
-    let text = fit(&format!("Context: {label}"), usize::from(width));
+    let identity = crate::ui_view_models::study_context::context_identity(rows, reference);
+    let text = fit(&identity, usize::from(width));
     frame.render_widget(
         Paragraph::new(Line::styled(text, theme::accent())),
         Rect::new(area.x + 2, area.y + 2, width, 1),
@@ -197,9 +200,9 @@ fn context_action_controls(width: u16, tab: &str, regeneration: bool) -> String 
         return "e choose text · Space actions".into();
     }
     if width < 72 {
-        "a use e edit c check Space actions".into()
+        "c check v diagram Space actions".into()
     } else if width < 96 {
-        format!("a use · Space actions · p scanner · Tab {tab} · Esc back")
+        format!("a use · c check · Space actions · p scanner · Tab {tab} · Esc back")
     } else {
         format!("a use · e edit · c check · Space actions · Tab {tab} · p scanner · Esc back")
     }

@@ -4,7 +4,12 @@ use crate::renderer::shared::text::{fit_path, wrap_text};
 use kuzushi_core::capabilities::campaign::ContextCaseInput;
 use kuzushi_core::capabilities::campaign::ContextMatrixReceipt;
 
+mod controls;
+mod plain;
+pub(crate) use controls::matrix_result_controls;
+mod result_detail;
 mod results;
+pub(crate) use plain::matrix_plain_lines;
 
 pub(crate) fn case_name_notice(config: &BatchScanConfig) -> &str {
     config
@@ -29,6 +34,59 @@ pub(crate) fn matrix_result_state(
     app.cached_context_matrix_report()
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct MatrixResultReadLimits {
+    pub(crate) page: usize,
+    pub(crate) max_scroll: usize,
+    pub(crate) total_lines: usize,
+}
+
+pub(crate) fn matrix_body(area: ratatui::layout::Rect, results: bool) -> ratatui::layout::Rect {
+    let mut body = area.inner(ratatui::layout::Margin::new(2, 1));
+    let controls = if body.width < 50 && !results { 4 } else { 3 };
+    body.height = body.height.saturating_sub(controls);
+    body
+}
+
+pub(crate) fn matrix_result_read_limits(
+    app: &crate::app::ShellApp,
+) -> Option<MatrixResultReadLimits> {
+    let config = app.router.campaign().batch_scan_config.as_ref()?;
+    let viewport = app.viewport();
+    let body = matrix_body(
+        super::study_config::study_config_area(viewport.columns, viewport.rows),
+        true,
+    );
+    match matrix_result_state(app) {
+        crate::app::ViewDataState::Ready(Ok(report)) => case_read_limits(config, &report, body),
+        crate::app::ViewDataState::Ready(Err(error)) => {
+            let page = usize::from(body.height).max(1);
+            let count = results::unavailable_lines(&error, usize::from(body.width)).len();
+            Some(MatrixResultReadLimits {
+                page,
+                max_scroll: count.saturating_sub(page),
+                total_lines: count,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn case_read_limits(
+    config: &BatchScanConfig,
+    report: &kuzushi_core::findings::ContextMatrixOccurrenceReport,
+    body: ratatui::layout::Rect,
+) -> Option<MatrixResultReadLimits> {
+    let case = report.cases.get(config.study.matrix.cursor)?;
+    let page = results::detail_capacity(config, report, usize::from(body.height)).max(1);
+    let count = results::detail_lines(config, report, case, usize::from(body.width)).len();
+    Some(MatrixResultReadLimits {
+        page,
+        max_scroll: count.saturating_sub(page),
+        total_lines: count,
+    })
+}
+
 pub(crate) fn matrix_result_lines(
     app: &crate::app::ShellApp,
     width: usize,
@@ -44,11 +102,16 @@ pub(crate) fn matrix_result_lines(
         crate::app::ViewDataState::Ready(Ok(report)) => {
             results::recorded_matrix_lines(config, &report, width, rows)
         }
-        crate::app::ViewDataState::Ready(Err(error)) => vec![
-            "Recorded results unavailable. r retries; no work starts.".into(),
-            error,
-        ],
-        _ => vec!["Loading recorded case results in the background. No model request.".into()],
+        crate::app::ViewDataState::Ready(Err(error)) => {
+            results::failure_lines(config, &error, width, rows)
+        }
+        _ => wrap_text(
+            "Loading recorded case results in the background. No model request.",
+            width.max(1),
+        )
+        .into_iter()
+        .take(rows)
+        .collect(),
     }
 }
 

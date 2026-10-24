@@ -56,6 +56,7 @@ mod source_review;
 mod study_brief;
 mod study_config;
 mod study_context;
+pub(crate) use study_context::{context_choice_offset_after_page, context_choice_page_rows};
 mod study_engines;
 mod study_resources;
 pub(crate) use answers::{

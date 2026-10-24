@@ -4,6 +4,8 @@ use kuzushi_core::{Severity, V2Config};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
+mod pending_receipt;
+
 #[derive(Debug, Default)]
 struct ControlledLedgerReader {
     started: (Mutex<bool>, Condvar),
@@ -50,7 +52,7 @@ impl ViewArtifactReader for ControlledLedgerReader {
             assert!(!timeout.timed_out(), "test releases bounded reader");
         }
         ViewHydrationValue::FindingsProjection(
-            read_findings_projection(target, request).map_err(|error| error.to_string()),
+            read_findings_projection(target, request).map_err(Into::into),
         )
     }
 }

@@ -52,7 +52,7 @@ fn campaign_plan_tool() -> ToolDescriptor {
          job matrix at .kuzushi/v3/campaigns/<id>/plan.json, with one seasoned \
          prompt file per threat-scoped job. No model calls.",
         campaign_plan_options(),
-    ).with_discovery_maturity(ModuleMaturity::Compatibility)
+    ).with_discovery_maturity(ModuleMaturity::Compatibility).without_phase_result()
 }
 
 fn campaign_plan_options() -> Vec<OptionSpec> {

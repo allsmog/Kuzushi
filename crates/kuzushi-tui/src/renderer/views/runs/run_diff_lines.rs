@@ -81,10 +81,7 @@ fn append_sources(lines: &mut Vec<Line<'static>>, model: &crate::ui_view_models:
         "Later threat model: {}",
         model.right_context
     )));
-    lines.push(Line::styled(
-        "Unknown content cannot distinguish dirty revisions.",
-        theme::muted(),
-    ));
+    lines.push(Line::styled(model.source_note, theme::muted()));
 }
 
 fn append_findings(lines: &mut Vec<Line<'static>>, model: &crate::ui_view_models::RunDiffModel) {

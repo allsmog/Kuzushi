@@ -88,7 +88,7 @@ fn editing_the_destination_or_changing_selection_clears_the_previous_outcome() {
 }
 
 #[test]
-fn failed_report_exposes_the_destination_editor_at_every_size() {
+fn failed_report_exposes_the_destination_editor_without_claiming_a_current_read() {
     let mut app = report_app(true);
     for (width, height) in [(40, 11), (60, 19), (80, 23), (96, 88), (120, 35), (160, 47)] {
         app.set_viewport(crate::TerminalViewport::new(width, height));
@@ -98,7 +98,7 @@ fn failed_report_exposes_the_destination_editor_at_every_size() {
             footer.contains("e path") || footer.contains("e edit path"),
             "{width}x{height}: {text}"
         );
-        assert!(footer.contains("Enter export"), "{text}");
+        assert!(footer.contains("Enter not ready"), "{text}");
     }
     app.set_viewport(crate::TerminalViewport::new(40, 11));
     app.reduce_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE));

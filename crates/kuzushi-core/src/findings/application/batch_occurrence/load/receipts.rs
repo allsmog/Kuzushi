@@ -52,12 +52,7 @@ fn validate_trial_receipt(
     validate_attempt_presence(trial)?;
     let mut authenticated = false;
     for run_id in &trial.attempt_run_ids {
-        authenticated |= authenticate_attempt(
-            root,
-            trial,
-            run_id,
-            expected,
-        )?;
+        authenticated |= authenticate_attempt(root, trial, run_id, expected)?;
     }
     validate_completed_trial_authentication(trial, authenticated)
 }
@@ -98,9 +93,16 @@ fn authenticate_attempt(
     let Some(summary) = attempt_summary(root, trial, run_id, expected.receiptless)? else {
         return Ok(false);
     };
-    validate_child_equivalence_receipt(root, trial, run_id, expected.batch_id, expected.key)?;
     validate_runtime_receipt(trial, &summary, expected.config, expected.model)?;
     ensure_receipt_provider(&trial.job_id, &summary, expected.provider)?;
+    validate_child_equivalence_receipt(
+        root,
+        trial,
+        run_id,
+        &summary,
+        expected.batch_id,
+        expected.key,
+    )?;
     Ok(true)
 }
 
@@ -139,11 +141,15 @@ fn validate_child_equivalence_receipt(
     root: &Path,
     trial: &BatchTrialReport,
     run_id: &str,
+    summary: &crate::run_artifacts::RunSummary,
     batch_id: &str,
     expected_key: &str,
 ) -> Result<()> {
     let receipt =
         crate::capabilities::campaign::load_scan_batch_child_equivalence_receipt(root, run_id)
+            .map_err(|error| {
+                super::super::pending_receipt::child_receipt_error(trial, run_id, summary, error)
+            })
             .with_context(|| {
                 format!(
                     "batch trial {} attempt {run_id} lacks child-consumption equivalence evidence",
@@ -169,7 +175,10 @@ fn attempt_summary(
     match crate::run_artifacts::load_run_summary(root, run_id) {
         Ok(summary) => Ok(Some(summary)),
         Err(_) if receiptless.contains(&(trial.job_id.clone(), run_id.to_string())) => Ok(None),
-        Err(error) => Err(error).with_context(|| {
+        Err(error) => Err(super::super::pending_receipt::current_attempt_error(
+            trial, run_id, "run.json", error,
+        ))
+        .with_context(|| {
             format!(
                 "batch trial {} attempt {run_id} has no receipt",
                 trial.job_id

@@ -177,3 +177,65 @@ fn corrupted_diagnostic_input_stays_inspectable_as_an_honest_failure() {
     assert!(!reader.contains("LABELED_PRIVATE_DIAGNOSTIC"));
     assert!(app.context_generation().unwrap().generated.is_none());
 }
+
+#[test]
+fn file_group_rejection_names_its_result_and_exposes_diagnostic_at_all_sizes() {
+    for input in [
+        json!({"sourcePaths":[" app /lib.py","app/lib.py"]}),
+        json!({"scanScopeRef":{"scopeId":"app"}}),
+    ] {
+        let (_root, mut app) = diagnostic_fixture();
+        app.router
+            .campaign_mut()
+            .batch_scan_config
+            .as_mut()
+            .unwrap()
+            .context_generation
+            .as_mut()
+            .unwrap()
+            .context_input = input;
+        for (width, height) in [(160, 48), (120, 36), (96, 89), (80, 24), (60, 20), (40, 12)] {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| crate::renderer::render_app(frame, &app))
+                .unwrap();
+            let text = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>();
+            assert!(
+                text.contains("CONTEXT JOB RESULT") && text.contains("d output"),
+                "{width}x{height}: {text}"
+            );
+        }
+        app.router
+            .campaign_mut()
+            .batch_scan_config
+            .as_mut()
+            .unwrap()
+            .context_generation
+            .as_mut()
+            .unwrap()
+            .show_rejected = true;
+        for (width, height) in [(160, 48), (120, 36), (96, 89), (80, 24), (60, 20), (40, 12)] {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| crate::renderer::render_app(frame, &app))
+                .unwrap();
+            let text = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>();
+            assert!(
+                text.contains("REJECTED CONTEXT OUTPUT") && text.contains("d / Esc back"),
+                "{width}x{height}: {text}"
+            );
+        }
+    }
+}

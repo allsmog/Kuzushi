@@ -1,6 +1,66 @@
 //! Keep selected excerpt completeness separate from repository enumeration.
 use serde_json::Value;
 
+pub(super) fn filename_receipt_lines(inventory: Option<&Value>) -> Vec<String> {
+    let Some(inventory) = inventory else {
+        return Vec::new();
+    };
+    if inventory["schemaVersion"] != 1
+        || !filename_counts_match(inventory)
+        || inventory["completeRepositoryCoverage"] != false
+    {
+        return vec!["Repository filename receipt unavailable: unsupported or inconsistent recorded limits. Inspect the saved context.".into()];
+    }
+    let mut lines = vec![
+        String::new(),
+        "BASE SYNTHESIS FILENAME INVENTORY".into(),
+        format!(
+            "Filename list: {} of {} enumerated paths; {} not listed here.",
+            count(&inventory["listedFiles"]),
+            count(&inventory["enumeratedFiles"]),
+            count(&inventory["unlistedFiles"])
+        ),
+    ];
+    lines.extend(receipt_lines(Some(inventory)));
+    if let Some(policy) = inventory["membershipPolicy"].as_str() {
+        lines.push(format!("Membership policy: {policy}"));
+    }
+    lines.extend(filename_examples(inventory));
+    lines.push("Other source sections have separate limits. A listed filename does not establish inspected code or complete coverage.".into());
+    lines
+}
+
+fn filename_examples(inventory: &Value) -> Vec<String> {
+    let mut lines = Vec::new();
+    for (key, label) in [
+        ("omittedPathExamples", "Omitted path"),
+        ("truncatedFileExamples", "Partial content"),
+    ] {
+        for row in inventory[key].as_array().into_iter().flatten().take(20) {
+            let value = row.get("path").unwrap_or(row);
+            lines.push(format!("{label}: {value}"));
+        }
+    }
+    lines
+}
+
+fn filename_counts_match(inventory: &Value) -> bool {
+    let Some(paths) = inventory["listedPaths"].as_array() else {
+        return false;
+    };
+    if inventory["listedFiles"].as_u64() != u64::try_from(paths.len()).ok()
+        || !paths.iter().all(Value::is_string)
+    {
+        return false;
+    }
+    inventory["listedFiles"]
+        .as_u64()
+        .zip(inventory["unlistedFiles"].as_u64())
+        .and_then(|(listed, unlisted)| listed.checked_add(unlisted))
+        .zip(inventory["enumeratedFiles"].as_u64())
+        .is_some_and(|(sum, enumerated)| sum == enumerated)
+}
+
 pub(super) fn receipt_lines(inventory: Option<&Value>) -> Vec<String> {
     let Some(inventory) = inventory else {
         return vec!["Repository inventory extent: not recorded for this context.".into()];
@@ -29,6 +89,10 @@ fn enumeration_extent(inventory: &Value) -> &'static str {
 }
 
 fn membership_label(inventory: &Value) -> &'static str {
+    if inventory["selectionKind"] == "filename-list" && inventory["selectedMembershipKnown"] == true
+    {
+        return "listed filename membership is recorded";
+    }
     if inventory["selectedMembershipKnown"] == true {
         "all selected files are recorded"
     } else {
@@ -92,5 +156,50 @@ mod tests {
         ] {
             assert_eq!(byte_limit(&value), expected);
         }
+    }
+    fn filename_inventory() -> Value {
+        json!({"schemaVersion":1,"selectionKind":"filename-list","selectedMembershipKnown":true,
+            "listedPaths":["owned.rs","second.rs"],"listedFiles":2,"enumeratedFiles":5,"unlistedFiles":3,"enumerationComplete":false,
+            "omittedPathCount":4,"truncatedFileCount":1,"maxEntries":100000,
+            "maxInspectedBytes":536870912,"maxFileInspectionBytes":262144,
+            "truncation":{"reason":"Owned enumeration cap"},"completeRepositoryCoverage":false})
+    }
+
+    #[test]
+    fn filename_receipt_keeps_listing_and_content_inspection_separate() {
+        let text = filename_receipt_lines(Some(&filename_inventory())).join("\n");
+        assert!(text.contains("Filename list: 2 of 5 enumerated paths; 3 not listed here."));
+        assert!(text.contains("enumeration: partial; listed filename membership is recorded"));
+        assert!(text.contains("partial inspections: 1"));
+        assert!(text.contains("Owned enumeration cap"));
+        assert!(text.contains("512 MiB") && text.contains("256 KiB"));
+        assert!(text.contains("A listed filename does not establish inspected code"));
+    }
+
+    #[test]
+    fn inconsistent_or_unsupported_filename_receipts_do_not_report_zero_or_complete_coverage() {
+        for (key, value) in [
+            ("schemaVersion", json!(2)),
+            ("listedFiles", json!(9)),
+            ("enumeratedFiles", Value::Null),
+            ("completeRepositoryCoverage", json!(true)),
+        ] {
+            let mut receipt = filename_inventory();
+            receipt[key] = value;
+            let text = filename_receipt_lines(Some(&receipt)).join("\n");
+            assert!(text.contains("receipt unavailable"), "{text}");
+            assert!(!text.contains("Filename list: 0"), "{text}");
+        }
+        assert!(filename_receipt_lines(None).is_empty());
+    }
+
+    #[test]
+    fn filename_receipt_does_not_conflate_complete_enumeration_with_full_content() {
+        let mut receipt = filename_inventory();
+        receipt["enumerationComplete"] = json!(true);
+        let text = filename_receipt_lines(Some(&receipt)).join("\n");
+        assert!(text.contains("enumeration: complete under inventory policy"));
+        assert!(text.contains("partial inspections: 1"));
+        assert!(text.contains("Complete repository coverage is not claimed"));
     }
 }

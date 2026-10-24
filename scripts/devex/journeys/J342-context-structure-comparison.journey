@@ -1,0 +1,103 @@
+name: Compare saved architecture, source claims and exact context identities without model calls
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NODE_OPTIONS NO_COLOR KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_structure.py @TMP_TARGET @ART seed @TMP_HOME
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: scan batch
+require-live-snap: 20 PLAN A STUDY | parent-study
+keys: Enter
+type: 5
+keys: Enter
+require-live-snap: 20 5 passes · 1 worker(s) | parent-five-passes
+keys: Down Down Down Enter Down Enter
+require-live-snap: 25 CONTEXT SUMMARY | inspected-candidate
+expect: Candidate
+keys: d
+require-live-snap: 25 Before: | text-comparison
+expect: COMPARE SAVED CONTEXT
+expect: Before:
+expect: After:
+keys: Tab
+require-live-snap: 20 Matched by exact literal ID. | graph-changes
+expect: field /sourceRefs on node
+expect: Matched by exact literal ID.
+expect: Before:
+expect: After:
+live-snap: graph-120x36
+resize: 160x48
+wait: 0.5
+live-snap: graph-160x48
+resize: 96x89
+wait: 0.5
+live-snap: graph-96x89
+resize: 80x24
+wait: 0.5
+live-snap: graph-80x24
+resize: 60x20
+wait: 0.5
+live-snap: graph-60x20
+resize: 40x12
+wait: 0.5
+live-snap: graph-40x12
+expect: Graph
+expect: PgUp/Dn
+expect: Tab view
+expect: Esc back
+keys: End
+live-snap: graph-40x12-end
+expect: Candidate pointer:
+keys: Tab
+require-live-snap: 20 SAVED SOURCE AND CONTEXT | source-40x12
+expect: Saved source claims differ.
+keys: NPage
+live-snap: source-page-40x12
+keys: End
+live-snap: source-end-40x12
+keys: BTab
+require-live-snap: 20 Candidate pointer: | graph-scroll-restored
+keys: Tab Home
+resize: 120x36
+wait: 0.5
+live-snap: source-120x36
+expect: Parent context reference:
+expect: Candidate context reference:
+keys: End
+live-snap: source-claims-120x36
+expect: 2222222222222222222222222222222222222222
+keys: Tab
+require-live-snap: 20 Other | other-changes
+keys: End
+live-snap: other-null-field
+ask: Are changed graph fields and saved source claims readable at all six sizes, with exact before/after values, clear view switching and no inferred finding-fix status?
+keys: Escape
+require-live-snap: 25 CONTEXT SUMMARY | comparison-return
+expect: Candidate
+keys: Escape
+require-live-snap: 20 5 passes · 1 worker(s) | parent-plan-retained
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_structure.py @TMP_TARGET @ART verify
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | no-color-restart
+submit: scan batch
+require-live-snap: 20 RECOVER STUDY DRAFT | restart-draft-recovery
+expect: 5 passes
+keys: Enter
+require-live-snap: 20 PLAN A STUDY | restart-study
+expect: 5 passes · 1 worker(s)
+keys: Enter Down Enter
+require-live-snap: 25 CONTEXT SUMMARY | restart-candidate
+keys: d
+require-live-snap: 25 COMPARE SAVED CONTEXT | restart-comparison
+keys: Tab Tab
+require-live-snap: 20 SAVED SOURCE AND CONTEXT | restart-source-identities
+live-snap: no-color-source
+ask: Does Back preserve the original five-pass draft and candidate, while restart reads the same saved parent/candidate with no activation, model work or new jobs?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_structure.py @TMP_TARGET @ART verify
+keys: C-c
+require-exit: 10

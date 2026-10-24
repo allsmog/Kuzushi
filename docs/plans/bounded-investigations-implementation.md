@@ -1,5 +1,96 @@
 # Bounded investigations implementation
 
+The [Report and source comparison correction](../assessments/report-source-recap-2026-10-24.md)
+closes the previous recap and hash-hint defects. Final J348 records 65 machine
+passes, zero failures, 72 captures and nine pending operator judgments through
+Report at all six sizes, details, export and recovery. All 123 focused checks,
+build, lint and risk pass. The broader delivery audit remains open.
+
+The [context matrix evidence correction](../assessments/context-matrix-evidence-2026-10-23.md)
+adds complete result receipts, finding summaries before receipts, accurate paging and plain
+output, and preserves literal paths through ingestion and identity reuse. Final
+J348 records 57 machine passes, zero failures and eight pending operator judgments;
+417 focused Rust checks pass. Its two display follow-ups are corrected by the
+Report increment above. No broad delivery item closes.
+
+The [general context inventory correction](../assessments/general-context-inventory-2026-10-23.md)
+reuses bounded inventory for the actual synthesis filename input, records its
+exact membership and limits, separates content truncation from enumeration, and
+retains historical receipts during refine. Explicit cached Map review now works
+with Activity auto-open disabled. Final J347 records 42 machine passes, zero
+failures and three pending operator judgments through accepted context, three
+local passes, triage, export and restart. No live request or broad delivery
+closure is added.
+
+The [study outcome correction](../assessments/study-outcome-clarity-2026-10-23.md)
+separates work completion from optional severity policy and fixes receipt loss
+during background findings refresh. Current J346 records 60 machine passes,
+zero failures, 50 captures and three pending operator judgments. All 170 focused
+checks, build, lint, risk and ten gates pass; no provider request is added.
+
+The [current learning and reader checkpoint](../assessments/learning-readers-current-2026-10-23.md)
+verifies accepted guidance in the exact downstream context, two finite three-job
+studies under one allowance, retirement refusal and historical export recovery.
+Investigation readers now keep operator state ahead of shell diagnostics.
+Sequential J304/J346 record 104 machine passes, zero failures, 85 captures and ten
+pending operator judgments. Thirty footer checks, 284 renderer checks, build,
+lint and ten summary gates pass. Six adapter requests are intercepted; no live
+request, module promotion or broad delivery closure follows.
+
+The [startup receipt correction](../assessments/pending-study-receipts-2026-10-23.md)
+reproduces and fixes the ledger refresh error from the large-diagram journey.
+Missing current-attempt receipts have a typed pending result; terminal, malformed,
+historical and mixed-runtime evidence still fails. The TUI retains loaded findings
+and drafts without repeatedly scheduling the read. Final J346 records 49 machine
+passes, zero failures, 31 captures and three pending operator judgments. Pending
+feedback is observed and the former error is absent through triage, export and
+restart. No model request, maturity change or broad delivery closure follows.
+
+The [large-diagram investigation](../assessments/large-dfd-investigation-2026-10-23.md)
+removes the silent 64-element cutoff, keeps selected neighbors visible and fixes
+stacked flow direction. Final J346 records 48 machine passes, zero failures and
+three pending operator judgments across 31 captures. A selected tail file moves
+through three fixed installed-engine passes, consolidation, deferral, export and
+no-color restart with no provider requests. That run exposed the child-startup
+ledger refresh error corrected in the increment above. This is scoped progress; the
+complete workflow, formal UX acceptance and broader delivery items remain open.
+
+The [compatibility planner audit](../assessments/legacy-scope-planner-2026-10-23.md)
+replaces recursive scope-file traversal with one bounded inventory, checks every
+child through shared preparation, preserves existing plan IDs and keeps planning
+out of Map evidence. Final J345 records 30 machine passes, zero failures and two
+pending operator judgments across 24 captures. Every narrow receipt row remains
+reachable, and the separate dry-run consumer reads exactly the selected two
+files. No model requests or scan work were added. Full legacy resource and input
+qualification remains open; no broader delivery item is closed.
+
+The [local architecture correction checks](../assessments/context-architecture-edits-2026-10-23.md)
+add component roles, names/zones and flow endpoints to the existing
+inactive-copy editor. Compact choices and single-line forms keep their controls
+nearby and preserve drafts, caret and detail scroll. Core/TUI checks, build,
+lint and ten gates pass. Final J344 records 46 machine passes, zero failures,
+35 captures and four pending operator judgments. The exact copy survives
+no-color restart in three unstarted jobs, with no provider requests or global
+context change. The five broader delivery items remain open.
+
+The [generated-context and Report recovery checks](../assessments/generated-context-rejection-2026-10-23.md)
+reject unsupported fresh DFD roles without repair and preserve observed cost and
+original context. Operator Report choices save without applying repository
+tracking policy to the operator home. Paging stays visible and a declined export
+keeps its explanation until an explicit retry. Core/TUI checks, build, lint and
+ten gates pass. Sequential J153/J121 record 242 machine passes, zero failures,
+151 captures and 24 pending operator judgments. Earlier J343 has 23 passes and
+zero failures. Earlier failed attempts remain evidence. No real request, maturity
+change or broad milestone is added.
+
+The [inspected-context reader and live test](../assessments/context-reader-live-2026-10-23.md)
+follow published checkpoint `5a35a06271`. One approved current-runtime request
+completed at 16 cumulative real requests; no allowance remains. The new reader
+passes 430 context checks, build, Clippy, ten gates and final J339 with 60 machine
+passes, zero failures and three pending operator judgments. The saved real result
+was inspected without new inference at six sizes. These new reader changes are
+a draft on main; four delivery items remain locally verified and five remain open.
+
 The [context planning hierarchy](../assessments/context-form-hierarchy-2026-10-23.md)
 now puts scope, allowance, model and next action on the first 40-column screen.
 Final J339/J341 have 89 machine passes, zero failures and six pending operator
@@ -5660,3 +5751,15 @@ input-only qualification and three held source-only boundaries. This is a
 readiness correction, not complete module qualification. All original nine
 delivery items, useful live-model coverage and human UX acceptance remain open.
 This increment adds no live requests, module deletion or publication.
+
+### Complete stored-context comparison checkpoint
+
+The [stored-context comparison assessment](../assessments/context-structure-comparison-2026-10-23.md)
+records additive complete values, exact pointers, explicit identity ambiguity,
+separate source claims and Text/Graph/Source/Other study views. The same frozen
+runtime compares the saved live-model draft with its exact inherited parent
+without new inference or state changes. Final J342 has 39 machine passes, zero
+failures and two pending operator judgments, including six sizes and explicit
+five-pass draft recovery. The module functional matrix and broad context,
+review, report and end-to-end UX qualification remain open. No maturity tier,
+follow-up allowance or finding-fix verdict is advanced by this checkpoint.

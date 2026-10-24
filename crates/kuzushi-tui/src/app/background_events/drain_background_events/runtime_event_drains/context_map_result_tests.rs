@@ -118,6 +118,30 @@ fn context_map_result_opens_map_for_explicit_acceptance_and_arms_empty_input() {
 }
 
 #[test]
+fn explicit_map_key_opens_the_cached_result_without_another_dispatch() {
+    let (_root, mut app) = published_context_map();
+    app.ui_mut().set_auto_open_activity(false);
+    app.set_activity(None);
+    let update = app.reduce_key(crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Char('m'),
+        crossterm::event::KeyModifiers::NONE,
+    ));
+    assert!(
+        update.effects.is_empty(),
+        "Recorded Map needs no new tool run"
+    );
+    assert_eq!(app.shell_view(), ShellView::Workbench);
+    assert_eq!(
+        crate::ui_view_models::active_workbench_page(&app),
+        WorkbenchPage::Map
+    );
+    assert!(app
+        .engagement
+        .selected_phase_attempt(WorkflowPhase::Map)
+        .is_none());
+}
+
+#[test]
 fn context_map_result_preserves_operator_typing_ownership() {
     let (_root, mut app) = published_context_map();
     app.set_input_mode(InputMode::Prompt);

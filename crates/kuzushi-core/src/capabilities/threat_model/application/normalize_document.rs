@@ -1,5 +1,10 @@
 use super::*;
 
+pub(crate) fn normalize_generated_document(value: Value, methodology: &str) -> Result<Value> {
+    require_generated_node_roles(value.get("document").unwrap_or(&value))?;
+    normalize_document(value, methodology)
+}
+
 pub(crate) fn normalize_document(mut value: Value, methodology: &str) -> Result<Value> {
     if value.get("document").is_some() {
         value = value

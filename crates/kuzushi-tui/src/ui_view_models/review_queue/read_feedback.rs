@@ -1,6 +1,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ReadState {
     Loading,
+    Waiting,
     Failed,
 }
 
@@ -12,6 +13,13 @@ pub(crate) struct ReviewReadFeedback {
 }
 
 impl ReviewReadFeedback {
+    pub(crate) fn waiting(study: bool) -> Self {
+        Self {
+            state: ReadState::Waiting,
+            study,
+            message: "Work receipts pending · previous results below".into(),
+        }
+    }
     pub(crate) fn loading(study: bool, filter: Option<&str>) -> Self {
         let message = match (study, filter) {
             (true, _) => "Reading study findings · scope retained".into(),
@@ -40,6 +48,7 @@ impl ReviewReadFeedback {
 
     pub(crate) fn population_title(&self) -> &'static str {
         match (self.state, self.study) {
+            (ReadState::Waiting, _) => "FINDINGS · receipts pending",
             (ReadState::Loading, true) => "FINDINGS · reading study",
             (ReadState::Failed, true) => "FINDINGS · study unavailable",
             (ReadState::Loading, false) => "FINDINGS · previous results",

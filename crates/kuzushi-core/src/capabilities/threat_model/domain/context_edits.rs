@@ -4,6 +4,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 mod comparison;
+mod operator_fields;
+pub use operator_fields::{
+    apply_context_operator_edits, context_operator_fields, ContextEditConstraint, ContextEditField,
+    ContextFieldChoice,
+};
 
 pub const MAX_CONTEXT_EDIT_BYTES: usize = 16 * 1024;
 pub const MAX_CONTEXT_EDITS: usize = 64;
@@ -113,19 +118,27 @@ fn rows<'a>(document: &'a Value, pointer: &str) -> &'a [Value] {
 }
 
 pub fn apply_context_text_edits(document: &Value, edits: &[ContextTextEdit]) -> Result<Value> {
+    let fields = context_text_fields(document)
+        .into_iter()
+        .map(|field| (field.pointer, field.text))
+        .collect();
+    apply_known_context_edits(document, edits, &fields)
+}
+
+fn apply_known_context_edits(
+    document: &Value,
+    edits: &[ContextTextEdit],
+    fields: &BTreeMap<String, String>,
+) -> Result<Value> {
     anyhow::ensure!(
         !edits.is_empty() && edits.len() <= MAX_CONTEXT_EDITS,
         "Supply 1 to {MAX_CONTEXT_EDITS} context text edits"
     );
-    let fields = context_text_fields(document)
-        .into_iter()
-        .map(|field| (field.pointer, field.text))
-        .collect::<BTreeMap<_, _>>();
     let mut seen = BTreeSet::new();
     let mut revised = document.clone();
     for edit in edits {
-        validate_text_edit(edit, &fields, &mut seen)?;
-        apply_changed_text(&mut revised, edit, &fields)?;
+        validate_text_edit(edit, fields, &mut seen)?;
+        apply_changed_text(&mut revised, edit, fields)?;
     }
     anyhow::ensure!(
         revised != *document,

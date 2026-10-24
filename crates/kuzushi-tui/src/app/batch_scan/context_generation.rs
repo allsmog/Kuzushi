@@ -380,25 +380,45 @@ impl ShellApp {
         if self.has_running_work() {
             return InputUpdate::handled();
         }
-        let Some(generation) = self.context_generation() else {
+        if let Some(update) = self.inspect_alternate_context_result() {
+            return update;
+        }
+        if self.open_reviewed_context_map() {
             return InputUpdate::handled();
-        };
+        }
+        self.record_generated_context_map()
+    }
+
+    fn inspect_alternate_context_result(&mut self) -> Option<InputUpdate> {
+        let generation = self.context_generation()?;
         if generation.is_lesson() {
-            return self.inspect_generated_lesson();
+            return Some(self.inspect_generated_lesson());
         }
         if generation.is_question() {
-            return self.inspect_question_answer();
+            return Some(self.inspect_question_answer());
         }
         if generation.is_workflow_proposal() {
-            return self.inspect_workflow_proposal();
+            return Some(self.inspect_workflow_proposal());
         }
+        self.inspect_scope_context_result()
+    }
+
+    fn inspect_scope_context_result(&mut self) -> Option<InputUpdate> {
+        let generation = self.context_generation()?;
         if generation.is_scope_proposal() {
-            return self.inspect_generated_scopes();
+            return Some(self.inspect_generated_scopes());
         }
         if generation.is_regeneration() {
             self.set_batch_config_notice("Regenerated text is an inactive draft. Enter inspects it; d compares it with its parent. In the context browser, c checks the exact revision before Map review.");
-            return InputUpdate::handled();
+            return Some(InputUpdate::handled());
         }
+        None
+    }
+
+    fn record_generated_context_map(&mut self) -> InputUpdate {
+        let Some(generation) = self.context_generation() else {
+            return InputUpdate::handled();
+        };
         if generation.generated.is_none() {
             self.set_batch_config_notice(
                 "A completed, readable context job is required before reviewing Map.",

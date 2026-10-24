@@ -3,6 +3,9 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+mod missing;
+pub use missing::RunArtifactMissing;
+
 /// The observable state of a containment-checked run artifact read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunArtifactRead<T> {
@@ -37,10 +40,7 @@ impl<T> RunArtifactRead<T> {
     pub fn require(self, label: &str) -> anyhow::Result<(PathBuf, T)> {
         match self {
             Self::Ready { path, value } => Ok((path, value)),
-            Self::Missing { path } => Err(anyhow::anyhow!(
-                "{label} is missing: {}",
-                escaped_path(&path)
-            )),
+            Self::Missing { path } => Err(RunArtifactMissing::new(label, path).into()),
             other => Err(non_readable_artifact_error(other, label)),
         }
     }

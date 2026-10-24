@@ -114,11 +114,7 @@ fn normalize_agentic_merge_key_part(value: &str) -> String {
 }
 
 fn normalize_agentic_merge_path(value: &str) -> String {
-    value
-        .trim()
-        .trim_start_matches("./")
-        .replace('\\', "/")
-        .to_ascii_lowercase()
+    crate::identity::finding_identity::native_source_path(value)
 }
 
 fn should_replace_agentic_finding(existing: &Finding, candidate: &Finding) -> bool {

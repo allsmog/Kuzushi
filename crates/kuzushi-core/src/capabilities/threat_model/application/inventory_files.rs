@@ -1,127 +1,135 @@
 use super::*;
+use crate::repository_inventory::RepositoryInventory;
 
-pub(crate) fn inventory_files(root: &Path, limit: usize) -> Result<Vec<String>> {
-    let mut out = Vec::new();
-    collect_inventory(root, root, limit, &mut out)?;
-    if out.is_empty() {
-        out.push("(no files found)".to_string());
-    }
-    Ok(out)
+const MAX_PROMPT_INVENTORY_BYTES: usize = 512 * 1024;
+const MAX_OMISSION_EXAMPLES: usize = 20;
+
+#[derive(Debug, Clone)]
+pub(crate) struct PromptRepositoryInventory {
+    pub(crate) files: Vec<String>,
+    pub(crate) receipt: Value,
 }
 
-/// Breadth-first so the row limit samples every subtree: a depth-first walk
-/// spends the whole budget inside the alphabetically-first directories on
-/// monorepo-scale targets, leaving late-sorting roots (`src/`) unlisted.
-pub(crate) fn collect_inventory(
+impl PromptRepositoryInventory {
+    pub(crate) fn collect(
+        root: &Path,
+        limit: usize,
+        ctx: &ToolExecutionContext<'_>,
+    ) -> Result<Self> {
+        Self::from_inventory(collect_context_inventory(root, ctx)?, limit)
+    }
+
+    pub(crate) fn from_inventory(inventory: RepositoryInventory, limit: usize) -> Result<Self> {
+        let inspection = inventory
+            .inspection
+            .as_ref()
+            .context("Threat-model inventory requires an inspection receipt")?;
+        let mut paths = inspection.files.iter().collect::<Vec<_>>();
+        paths.sort_by_key(|path| (path.split('/').count(), *path));
+        let files = paths.into_iter().take(limit).cloned().collect::<Vec<_>>();
+        let receipt = inventory_receipt(&inventory, &files, limit)?;
+        let prepared = Self { files, receipt };
+        anyhow::ensure!(
+            prepared.prompt_data()?.len() <= MAX_PROMPT_INVENTORY_BYTES,
+            "Repository filename inventory exceeds 512 KiB; reduce maxElements or select a narrower scope"
+        );
+        Ok(prepared)
+    }
+
+    pub(crate) fn prompt_data(&self) -> Result<String> {
+        serde_json::to_string(&self.receipt)
+            .context("Could not encode prepared repository filename inventory")
+    }
+
+    pub(crate) fn disclosure(&self) -> String {
+        let extent = match self.receipt["enumerationComplete"].as_bool() {
+            Some(true) => "complete",
+            Some(false) => "partial",
+            None => "unknown",
+        };
+        format!("Repository filename list: {} / {} enumerated paths; enumeration {extent}. Other source sections have separate limits. No complete repository coverage claim.", self.files.len(), self.receipt["enumeratedFiles"])
+    }
+}
+
+pub(crate) fn collect_context_inventory(
     root: &Path,
-    dir: &Path,
-    limit: usize,
-    out: &mut Vec<String>,
-) -> Result<()> {
-    let mut pending = std::collections::VecDeque::from([dir.to_path_buf()]);
-    while let Some(dir) = pending.pop_front() {
-        if inventory_limit_reached(out, limit) {
-            return Ok(());
-        }
-        for entry in sorted_inventory_entries(&dir) {
-            collect_inventory_entry_if_room(root, entry, limit, out, &mut pending)?;
-        }
-    }
-    Ok(())
-}
-
-fn sorted_inventory_entries(dir: &Path) -> Vec<fs::DirEntry> {
-    let Ok(read_dir) = fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut entries = read_dir.filter_map(|entry| entry.ok()).collect::<Vec<_>>();
-    entries.sort_by_key(|entry| entry.path());
-    entries
-}
-
-fn inventory_limit_reached(out: &[String], limit: usize) -> bool {
-    out.len() >= limit
-}
-
-fn collect_inventory_entry_if_room(
-    root: &Path,
-    entry: fs::DirEntry,
-    limit: usize,
-    out: &mut Vec<String>,
-    pending: &mut std::collections::VecDeque<PathBuf>,
-) -> Result<()> {
-    if inventory_limit_reached(out, limit) {
-        return Ok(());
-    }
-    collect_inventory_entry(root, entry, out, pending)
-}
-
-fn collect_inventory_entry(
-    root: &Path,
-    entry: fs::DirEntry,
-    out: &mut Vec<String>,
-    pending: &mut std::collections::VecDeque<PathBuf>,
-) -> Result<()> {
-    let Some(kind) = inventory_entry_kind(&entry) else {
-        return Ok(());
-    };
-    let path = entry.path();
-    collect_inventory_path(root, &path, kind, out, pending)
-}
-
-#[derive(Clone, Copy)]
-enum InventoryEntryKind {
-    Directory,
-    File,
-}
-
-fn inventory_entry_kind(entry: &fs::DirEntry) -> Option<InventoryEntryKind> {
-    if skipped_inventory_entry(entry) {
-        return None;
-    }
-    let file_type = entry.file_type().ok()?;
-    classify_inventory_entry_type(file_type)
-}
-
-fn classify_inventory_entry_type(file_type: fs::FileType) -> Option<InventoryEntryKind> {
-    if file_type.is_dir() {
-        return Some(InventoryEntryKind::Directory);
-    }
-    file_type.is_file().then_some(InventoryEntryKind::File)
-}
-
-fn collect_inventory_path(
-    root: &Path,
-    path: &Path,
-    kind: InventoryEntryKind,
-    out: &mut Vec<String>,
-    pending: &mut std::collections::VecDeque<PathBuf>,
-) -> Result<()> {
-    match kind {
-        InventoryEntryKind::Directory => {
-            pending.push_back(path.to_path_buf());
-            Ok(())
-        }
-        InventoryEntryKind::File => {
-            push_inventory_path(root, path, out);
-            Ok(())
-        }
-    }
-}
-
-fn skipped_inventory_entry(entry: &fs::DirEntry) -> bool {
-    let name = entry.file_name().to_string_lossy().to_string();
-    if should_skip_path(&name) {
-        return true;
-    }
-    entry.file_type().is_ok_and(|kind| kind.is_dir()) && should_skip_hidden_dir(&name)
-}
-
-fn push_inventory_path(root: &Path, path: &Path, out: &mut Vec<String>) {
-    out.push(
-        path.strip_prefix(root)
-            .unwrap_or(path)
-            .display()
-            .to_string(),
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<RepositoryInventory> {
+    anyhow::ensure!(
+        !ctx.is_cancelled(),
+        "Threat-model inventory preparation canceled"
     );
+    let mut heartbeat = crate::progress::HeartbeatGate::new(std::time::Duration::from_secs(1));
+    let inventory = crate::repository_inventory::build_repository_inventory_with_observer(
+        root,
+        &mut |entries| {
+            if heartbeat.ready() {
+                emit_inventory_progress(ctx, entries);
+            }
+        },
+        &|| ctx.is_cancelled(),
+    )?;
+    anyhow::ensure!(
+        !ctx.is_cancelled(),
+        "Threat-model inventory preparation canceled"
+    );
+    Ok(inventory)
 }
+
+fn inventory_receipt(
+    inventory: &RepositoryInventory,
+    files: &[String],
+    limit: usize,
+) -> Result<Value> {
+    let inspection = inventory
+        .inspection
+        .as_ref()
+        .context("Threat-model inventory requires an inspection receipt")?;
+    let listed = serde_json::to_string(files)?;
+    Ok(json!({
+        "schemaVersion":1,"purpose":"base-synthesis-filename-list","enumeration":inspection.enumeration,
+        "enumerationComplete":inspection.enumeration_complete,
+        "enumeratedFiles":inspection.files.len(),"listedFiles":files.len(),
+        "unlistedFiles":inspection.files.len().saturating_sub(files.len()),
+        "listedPaths":files,
+        "listLimit":limit,"listOrder":"depth_then_path",
+        "listedPathsSha256":crate::options::prompt_content_sha256(&listed),
+        "pathBasis":"analysis-root-relative",
+        "entriesExamined":inspection.entries,"maxEntries":inspection.max_entries,
+        "inspectedBytes":inspection.inspected_bytes,"maxInspectedBytes":inspection.max_inspected_bytes,
+        "maxFileInspectionBytes":inspection.max_file_inspection_bytes,
+        "omittedPathCount":inspection.omitted_paths.len(),
+        "omittedPathExamples":inspection.omitted_paths.iter().take(MAX_OMISSION_EXAMPLES).collect::<Vec<_>>(),
+        "omittedPathExamplesComplete":inspection.omitted_paths.len()<=MAX_OMISSION_EXAMPLES,
+        "truncatedFileCount":inspection.truncated_files.len(),
+        "truncatedFileExamples":inspection.truncated_files.iter().take(MAX_OMISSION_EXAMPLES).collect::<Vec<_>>(),
+        "truncatedFileExamplesComplete":inspection.truncated_files.len()<=MAX_OMISSION_EXAMPLES,
+        "truncation":inventory.truncation,
+        "selectionKind":"filename-list","selectedMembershipKnown":true,
+        "membershipPolicy":membership_policy(&inspection.enumeration),
+        "completeRepositoryCoverage":false
+    }))
+}
+
+fn membership_policy(enumeration: &str) -> &'static str {
+    match enumeration {
+        "git-index" => "Git-index paths only. Untracked and ignored files are outside this list; their count is unknown.",
+        "filesystem" => "Filesystem enumeration with built-in excludes. Git ignore rules are not evaluated.",
+        _ => "Enumeration was interrupted or is unverified. Membership outside the recorded list is unknown.",
+    }
+}
+
+fn emit_inventory_progress(ctx: &ToolExecutionContext<'_>, entries: usize) {
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool-progress",
+                "threat-model:build",
+                format!("repository inventory · {entries} entries examined"),
+            )
+            .emit();
+    }
+}
+
+#[cfg(test)]
+mod tests;

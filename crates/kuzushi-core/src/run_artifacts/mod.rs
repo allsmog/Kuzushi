@@ -72,7 +72,8 @@ pub use persisted_terminal_outcome::{
 pub use run_artifact::RunArtifact;
 pub use run_artifact_reader::{
     read_run_artifact_bytes, read_run_artifact_text, resolve_run_artifact_path,
-    RunArtifactBytesRead, RunArtifactRead, RunArtifactTextRead, MAX_RUN_ARTIFACT_READ_BYTES,
+    RunArtifactBytesRead, RunArtifactMissing, RunArtifactRead, RunArtifactTextRead,
+    MAX_RUN_ARTIFACT_READ_BYTES,
 };
 pub use run_events::{
     append_run_event, load_run_events, next_run_event_number, RunEvent, RunEventRead,

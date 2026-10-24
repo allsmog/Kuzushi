@@ -15,7 +15,9 @@ mod context_experiment;
 mod context_question;
 mod context_regeneration;
 mod workflow_proposal;
-pub(crate) use context_comparison::StudyContextComparison;
+pub(crate) use context_comparison::{
+    ContextComparisonCursor, ContextComparisonView, StudyContextComparison,
+};
 pub(crate) use context_edit::{
     ContextDraftRecovery, ContextEditDraft, ContextEditEntry, ContextEditMode,
 };

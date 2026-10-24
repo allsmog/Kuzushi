@@ -53,7 +53,7 @@ require-live-snap: 25 Accepted · Owned greeting | accepted-lesson
 require-shell: python3 -B @REPO/scripts/devex/fixtures/learning_loop.py accepted @TMP_TARGET @ART
 keys: Space u
 require-live-snap: 25 LESSONS INTO CONTEXT | explicit-base
-expect: 1 explicitly selected
+expect: Selected lessons: 1.
 keys: Enter
 require-live-snap: 20 Enter creates copy | copy-confirmation
 ask: Does context reuse name the exact reviewed lesson and base, require a separate copy confirmation and keep the active context unchanged?

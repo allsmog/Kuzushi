@@ -4,10 +4,11 @@
 //! deck; the retired whole-screen Workbench ASCII projection no longer owns a
 //! second diagram representation.
 
-// Generous bounds — real models stay well under; the renderer pages per zone
-// instead of silently dropping topology.
-const MAX_NODES: usize = 64;
-const MAX_FLOWS: usize = 64;
+use std::collections::{HashMap, HashSet};
+
+// Saved context documents are bounded at the storage boundary. The renderer
+// pages their topology; parsing must preserve every valid graph element.
+type NodeIndex<'a> = HashMap<&'a str, &'a DfdNode>;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DfdNode {
     pub(crate) id: String,
@@ -35,13 +36,7 @@ pub(crate) struct DfdFlow {
 pub(crate) fn parse_nodes(doc: &serde_json::Value) -> Vec<DfdNode> {
     doc.pointer("/dfd/nodes")
         .and_then(serde_json::Value::as_array)
-        .map(|nodes| {
-            nodes
-                .iter()
-                .filter_map(node_from_value)
-                .take(MAX_NODES)
-                .collect()
-        })
+        .map(|nodes| nodes.iter().filter_map(node_from_value).collect())
         .unwrap_or_default()
 }
 
@@ -61,19 +56,27 @@ fn node_from_value(value: &serde_json::Value) -> Option<DfdNode> {
 }
 
 pub(crate) fn parse_flows(doc: &serde_json::Value, nodes: &[DfdNode]) -> Vec<DfdFlow> {
+    let index = index_nodes(nodes);
     doc.pointer("/dfd/flows")
         .and_then(serde_json::Value::as_array)
         .map(|flows| {
             flows
                 .iter()
-                .filter_map(|flow| flow_from_value(flow, nodes))
-                .take(MAX_FLOWS)
+                .filter_map(|flow| flow_from_value(flow, &index))
                 .collect()
         })
         .unwrap_or_default()
 }
 
-fn flow_from_value(value: &serde_json::Value, nodes: &[DfdNode]) -> Option<DfdFlow> {
+fn index_nodes(nodes: &[DfdNode]) -> NodeIndex<'_> {
+    let mut index = HashMap::with_capacity(nodes.len());
+    for node in nodes {
+        index.entry(node.id.as_str()).or_insert(node);
+    }
+    index
+}
+
+fn flow_from_value(value: &serde_json::Value, nodes: &NodeIndex<'_>) -> Option<DfdFlow> {
     let source_id = string_field(value, "sourceId")?;
     let target_id = string_field(value, "targetId")?;
     let boundary_ids = trust_boundary_ids(value);
@@ -108,7 +111,7 @@ fn trust_boundary_ids(value: &serde_json::Value) -> Vec<String> {
 fn flow_crosses(
     value: &serde_json::Value,
     boundary_ids: &[String],
-    nodes: &[DfdNode],
+    nodes: &NodeIndex<'_>,
     source_id: &str,
     target_id: &str,
 ) -> bool {
@@ -119,27 +122,24 @@ fn flow_crosses(
 }
 
 pub(crate) fn zones_in_order(nodes: &[DfdNode]) -> Vec<String> {
-    let mut zones: Vec<String> = Vec::new();
-    for node in nodes {
-        if !zones.iter().any(|zone| zone == &node.zone) {
-            zones.push(node.zone.clone());
-        }
-    }
-    zones
-}
-
-fn zone_of(nodes: &[DfdNode], id: &str) -> String {
+    let mut seen = HashSet::new();
     nodes
         .iter()
-        .find(|node| node.id == id)
+        .filter(|node| seen.insert(node.zone.as_str()))
         .map(|node| node.zone.clone())
+        .collect()
+}
+
+fn zone_of<'a>(nodes: &NodeIndex<'a>, id: &str) -> &'a str {
+    nodes
+        .get(id)
+        .map(|node| node.zone.as_str())
         .unwrap_or_default()
 }
 
-fn display_name(nodes: &[DfdNode], id: &str) -> String {
+fn display_name(nodes: &NodeIndex<'_>, id: &str) -> String {
     nodes
-        .iter()
-        .find(|node| node.id == id)
+        .get(id)
         .map(|node| node.name.clone())
         .unwrap_or_else(|| id.to_string())
 }
@@ -152,6 +152,8 @@ fn string_field(value: &serde_json::Value, key: &str) -> Option<String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    mod large_graph;
 
     fn sample_doc() -> serde_json::Value {
         json!({

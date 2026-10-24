@@ -27,7 +27,7 @@ impl ShellApp {
             return Some(InputUpdate::handled());
         }
         if key == KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)
-            && mode != ContextEditMode::Saving
+            && !matches!(mode, ContextEditMode::Saving | ContextEditMode::Choosing)
         {
             self.review_context_edits();
             return Some(InputUpdate::handled());
@@ -49,6 +49,13 @@ impl ShellApp {
     }
 
     fn context_edit_mode_key(&mut self, key: KeyEvent, mode: ContextEditMode) -> InputUpdate {
+        if mode == ContextEditMode::Choosing {
+            return self.context_choice_key(key);
+        }
+        self.context_text_or_reading_key(key, mode)
+    }
+
+    fn context_text_or_reading_key(&mut self, key: KeyEvent, mode: ContextEditMode) -> InputUpdate {
         if mode == ContextEditMode::Recovery {
             return self.context_recovery_input(key);
         }
@@ -106,12 +113,7 @@ impl ShellApp {
 
     fn apply_context_field_action(&mut self, action: FieldAction) {
         match action {
-            FieldAction::Edit => {
-                let draft = self.context_edit_draft_mut().unwrap();
-                draft.entries[draft.cursor].begin_edit();
-                draft.mode = ContextEditMode::Writing;
-                draft.notice = None;
-            }
+            FieldAction::Edit => self.begin_context_field_edit(),
             FieldAction::Review => self.review_context_edits(),
             FieldAction::Discard => {
                 self.context_edit_draft_mut().unwrap().mode = ContextEditMode::Discard
@@ -120,16 +122,10 @@ impl ShellApp {
     }
 
     fn move_context_edit_field(&mut self, code: KeyCode) {
+        let page = self.viewport().rows.saturating_sub(8).max(1) as usize;
         let draft = self.context_edit_draft_mut().unwrap();
-        match code {
-            KeyCode::Up | KeyCode::Char('k') | KeyCode::BackTab => {
-                draft.cursor = draft.cursor.saturating_sub(1)
-            }
-            KeyCode::Down | KeyCode::Char('j') | KeyCode::Tab => {
-                draft.cursor = (draft.cursor + 1).min(draft.entries.len() - 1)
-            }
-            _ => {}
-        }
+        draft.cursor =
+            super::navigation::cursor_after_key(code, draft.cursor, draft.entries.len(), page);
         draft.scroll = 0;
     }
 
@@ -155,6 +151,9 @@ impl ShellApp {
     }
 
     fn context_text_key(&mut self, key: KeyEvent) -> InputUpdate {
+        if self.finish_context_line(key) {
+            return InputUpdate::handled();
+        }
         if let Some(text) = text_key_insert(key) {
             self.insert_context_text(&text);
         } else {
@@ -169,6 +168,9 @@ impl ShellApp {
     }
 
     fn insert_context_text(&mut self, text: &str) {
+        if self.refuse_context_line_break(text) {
+            return;
+        }
         let draft = self.context_edit_draft_mut().unwrap();
         let entry = &mut draft.entries[draft.cursor];
         let maximum = if entry.pointer.is_some() {
@@ -193,8 +195,15 @@ impl ShellApp {
         if mode == ContextEditMode::Writing {
             self.insert_context_text(text);
         } else {
-            self.context_edit_draft_mut().unwrap().notice =
-                Some("Enter a text field before pasting. Your draft is unchanged.".into());
+            self.context_edit_draft_mut().unwrap().notice = Some(
+                match mode {
+                    ContextEditMode::Choosing => {
+                        "Use arrows and Enter for choices. Paste was not applied."
+                    }
+                    _ => "Enter a text field before pasting. Your draft is unchanged.",
+                }
+                .into(),
+            );
         }
         self.checkpoint_context_draft();
         true

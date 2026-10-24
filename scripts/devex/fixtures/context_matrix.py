@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from rejected_context import execute
 from context_diagram import document
+from secret_settings import ledger
 
 
 def source_digest(root):
@@ -83,7 +84,7 @@ def verify(root, evidence, stage):
         assert queue.exists() and all(job["state"] == "completed" for job in json.loads(queue.read_text())["jobs"].values())
     assert len(calls(evidence)) == expected
     if expected:
-        with sqlite3.connect((root / ".kuzushi/v3/index.sqlite3").as_uri() + "?mode=ro",uri=True) as db:
+        with ledger(root, evidence) as db:
             assert db.execute("select count(*) from investigation_call_reservations").fetchone()[0] == 9
             assert db.execute("select count(*) from investigation_work_attempts").fetchone()[0] == 9
     (evidence / (stage + "-check.json")).write_text(json.dumps({"interceptedRequests":expected,"liveRequests":0,"sourceExecuted":False,

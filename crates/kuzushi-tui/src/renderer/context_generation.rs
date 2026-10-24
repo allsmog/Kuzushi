@@ -229,6 +229,9 @@ fn render_goal_generation_controls(
 }
 
 fn goal_generation_primary(generation: &crate::app::StudyContextGeneration) -> &'static str {
+    if generation.rejected_available {
+        return "d output · b goal · Tab · PgUp/Dn";
+    }
     if generation.has_result() && !generation.is_scope_context() {
         return "m Map · b goal · Tab · PgUp/Dn";
     }
@@ -253,6 +256,9 @@ fn goal_generation_navigation(generation: &crate::app::StudyContextGeneration) -
 fn generation_title_override(
     generation: &crate::app::StudyContextGeneration,
 ) -> Option<&'static str> {
+    if generation.show_rejected || generation.result_error.is_some() {
+        return None;
+    }
     if generation.context_input.get("sourcePaths").is_some() {
         return Some(if generation.has_result() {
             " EVIDENCE CONTEXT DRAFT "

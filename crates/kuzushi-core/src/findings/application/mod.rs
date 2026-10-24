@@ -51,7 +51,7 @@ pub(crate) use run_delta::{
 pub use batch_occurrence::{
     derive_batch_gate_binding, derive_batch_occurrence_report,
     derive_batch_occurrence_report_for_controller, finding_projection_key, BatchOccurrenceReport,
-    BatchOccurrenceRow, BatchTrialReport, IdentityFoldPolicy,
+    BatchOccurrenceRow, BatchReceiptPending, BatchTrialReport, IdentityFoldPolicy,
 };
 pub use cross_tool_clusters::{
     derive_cross_tool_cluster_report, CrossToolCandidateCluster, CrossToolClusterBasis,

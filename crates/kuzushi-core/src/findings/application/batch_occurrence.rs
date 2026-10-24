@@ -13,7 +13,9 @@ use std::path::Path;
 mod fold;
 mod gate_binding;
 mod load;
+mod pending_receipt;
 mod phase_runs;
+pub use pending_receipt::BatchReceiptPending;
 #[cfg(test)]
 mod tests;
 
@@ -171,15 +173,11 @@ impl BatchOccurrenceReport {
     }
 
     pub fn output(&self) -> String {
-        let mut lines = vec![self.summary_line()];
-        if let Some(gate) = &self.gate {
-            lines.push(format!(
-                "gate {} · blocking {} · completed runs {}",
-                gate.status.as_str(),
-                gate.blocking_safe_fold_count,
-                gate.completed_run_ids.len()
-            ));
-        }
+        let mut lines = vec![
+            self.summary_line(),
+            crate::findings::presentation::batch_severity_summary(self.gate.as_ref()),
+            "Occurrence counts completed trials; it does not establish proof.".into(),
+        ];
         if self.rows.is_empty() {
             lines.push("no findings observed in completed trials".to_string());
         } else {
@@ -188,18 +186,17 @@ impl BatchOccurrenceReport {
             );
             lines.extend(self.rows.iter().map(BatchOccurrenceRow::output_line));
         }
+        lines.push(format!("Equivalence: {}", self.equivalence_key));
+        if let Some(gate) = &self.gate {
+            lines.push(format!("completed runs {}", gate.completed_run_ids.len()));
+        }
         lines.join("\n")
     }
 
     fn summary_line(&self) -> String {
         format!(
-            "batch {} · completed {} / planned {} · failed {} · pending {} · {}",
-            self.batch_id,
-            self.completed,
-            self.planned,
-            self.failed,
-            self.pending,
-            self.equivalence_key
+            "batch {} · completed {} / planned {} · failed {} · pending {}",
+            self.batch_id, self.completed, self.planned, self.failed, self.pending
         )
     }
 }
@@ -327,6 +324,10 @@ fn load_batch_gate(
     };
     let outcome = serde_json::from_value(document)?;
     validate_loaded_batch_gate(batch_id, plan, &outcome)?;
+    anyhow::ensure!(
+        outcome.equivalence_key == report.equivalence_key,
+        "batch gate equivalence key disagrees with its occurrence report"
+    );
     let (binding, blocking_count) = derive_batch_gate_binding(
         store,
         report,
@@ -338,6 +339,16 @@ fn load_batch_gate(
         "batch gate is stale for the current trial/finding/SARIF state"
     );
     Ok(Some(outcome))
+}
+
+pub(super) fn hydrate_report_gate(
+    root: &Path,
+    store: &FindingStore,
+    report: &mut BatchOccurrenceReport,
+) -> Result<()> {
+    let plan = read_batch_document(root, &report.batch_id, "plan.json")?;
+    report.gate = load_batch_gate(root, &report.batch_id, &plan, store, report)?;
+    Ok(())
 }
 
 fn validate_loaded_batch_gate(

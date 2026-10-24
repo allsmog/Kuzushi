@@ -2,11 +2,13 @@
 
 use super::shards::{load_campaign_shards, CampaignShard};
 use super::threats::{planned_threats, PlannedThreat};
-use super::{campaign_plan_path, string_input, string_list_input, usize_input, write_json_atomic};
+use super::{campaign_plan_path, string_input, string_list_input, usize_input};
 use crate::modules::ToolExecutionContext;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
+
+mod scope_files;
 
 const DEFAULT_TOOL: &str = "sast:scan";
 const DEFAULT_MAX_JOBS: usize = 64;
@@ -21,7 +23,7 @@ const MAX_PLANNED_CELLS: usize = 100_000;
 /// instead of `paths`/`shard`. The planner adapts the canonical job input so
 /// dispatched jobs pass descriptor validation instead of parking on an
 /// unknown-option prepare failure.
-const SCOPE_FILE_TOOLS: &[&str] = &["agentic-sast:scan"];
+const SCOPE_FILE_TOOLS: &[&str] = &["agentic-sast:scan", "full-mode:hunt"];
 
 struct PlanRequest {
     campaign_id: String,
@@ -56,25 +58,24 @@ struct RankedCampaignPlan {
 }
 
 pub fn execute_campaign_plan(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
+    scope_files::ensure_active(ctx)?;
     let workspace = ctx
         .workspace
         .context("campaign:plan requires an active workspace target")?;
     let root = workspace.root().to_path_buf();
     let request = parse_plan_request(input)?;
+    let _plan_lock = acquire_plan_lock(&root, &request.campaign_id, ctx)?;
+    let plan_path = campaign_plan_path(&root, &request.campaign_id);
+    anyhow::ensure!(!plan_path.exists(), "campaign {:?} already has a plan; use a new campaignId to preserve its scope files and history", request.campaign_id);
     let ranked = rank_campaign_plan(&root, &request)?;
     let prior_overlaps =
         super::prior_runs::prior_scan_overlaps(&root, &request.tool, &job_shard_axis(&ranked.jobs));
-    let mut plan = plan_document(
-        &root,
-        &request,
-        &ranked.jobs,
-        &ranked.dropped,
-        ranked.skipped_covered,
-        ranked.threat_count,
-    )?;
+    let mut plan = plan_document(&root, &request, &ranked, ctx)?;
     decorate_plan(&mut plan, &ranked, &prior_overlaps);
-    let plan_path = campaign_plan_path(&root, &request.campaign_id);
-    write_json_atomic(&plan_path, &plan)?;
+    validate_planned_inputs(&plan, ctx)?;
+    scope_files::ensure_active(ctx)?;
+    let relative = plan_path.strip_prefix(&root)?;
+    crate::workspace::write_workspace_file(&root, relative, &serde_json::to_vec_pretty(&plan)?)?;
     Ok(plan_result(
         &request,
         &plan_path,
@@ -84,6 +85,16 @@ pub fn execute_campaign_plan(input: &Value, ctx: &ToolExecutionContext<'_>) -> R
         &plan,
         &prior_overlaps,
     ))
+}
+
+fn acquire_plan_lock(
+    root: &Path,
+    id: &str,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<crate::file_lock::ExclusiveFileLock> {
+    let relative = format!(".kuzushi/v3/campaigns/{id}/planning.lock");
+    let path = crate::workspace::prepare_workspace_output_path(root, relative)?;
+    crate::file_lock::ExclusiveFileLock::acquire_cancellable(&path, &|| ctx.is_cancelled())
 }
 
 fn rank_campaign_plan(root: &Path, request: &PlanRequest) -> Result<RankedCampaignPlan> {
@@ -451,38 +462,72 @@ fn threat_priority(threat: &PlannedThreat) -> i64 {
 fn plan_document(
     root: &Path,
     request: &PlanRequest,
-    jobs: &[PlannedJob],
-    dropped: &[PlannedJob],
-    skipped_covered: usize,
-    threat_count: usize,
+    ranked: &RankedCampaignPlan,
+    ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
-    let mut rows = Vec::new();
-    let mut scope_files = std::collections::HashMap::new();
-    for (index, job) in jobs.iter().enumerate() {
-        let job_id = format!("job-{:03}", index + 1);
-        let prompt_path = seasoned_prompt_path(root, request, &job_id, job)?;
-        let scope_path = job_scope_file(root, request, job, &mut scope_files)?;
-        rows.push(job_row(request, &job_id, job, prompt_path, scope_path));
-    }
-    Ok(json!({
+    let scopes = scope_files::CampaignScopeFiles::prepare(root, request, &ranked.jobs, ctx)?;
+    let rows = plan_rows(root, request, &ranked.jobs, &scopes, ctx)?;
+    let mut plan = json!({
         "campaignId": request.campaign_id,
         "tool": request.tool,
         "createdAtMs": epoch_ms(),
         "axes": {
-            "shards": jobs_axis_names(jobs),
+            "shards": jobs_axis_names(&ranked.jobs),
             "models": request.models,
             "promptOption": request.prompt_option,
         },
         "jobCount": rows.len(),
-        "threatCount": threat_count,
-        "seasoned": request.season_prompts && threat_count > 0,
-        "droppedJobs": dropped.len(),
-        "droppedByShard": dropped_by_shard(dropped),
-        "droppedTopPriority": dropped.iter().map(|job| job.priority).max(),
+        "threatCount": ranked.threat_count,
+        "seasoned": request.season_prompts && ranked.threat_count > 0,
+        "droppedJobs": ranked.dropped.len(),
+        "droppedByShard": dropped_by_shard(&ranked.dropped),
+        "droppedTopPriority": ranked.dropped.iter().map(|job| job.priority).max(),
         "fillGaps": request.fill_gaps,
-        "skippedCoveredCells": skipped_covered,
+        "skippedCoveredCells": ranked.skipped_covered,
         "jobs": rows,
-    }))
+    });
+    scopes.attach_receipt(&mut plan);
+    Ok(plan)
+}
+
+fn plan_rows(
+    root: &Path,
+    request: &PlanRequest,
+    jobs: &[PlannedJob],
+    scopes: &scope_files::CampaignScopeFiles,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<Vec<Value>> {
+    let mut rows = Vec::new();
+    for (index, job) in jobs.iter().enumerate() {
+        scope_files::ensure_active(ctx)?;
+        let job_id = format!("job-{:03}", index + 1);
+        let prompt_path = seasoned_prompt_path(root, request, &job_id, job)?;
+        rows.push(job_row(
+            request,
+            &job_id,
+            job,
+            prompt_path,
+            scopes.path(&job.shard.name),
+        ));
+    }
+    Ok(rows)
+}
+
+fn validate_planned_inputs(plan: &Value, ctx: &ToolExecutionContext<'_>) -> Result<()> {
+    let registry = crate::modules::ModuleRegistry::with_v2_builtins();
+    for job in plan["jobs"]
+        .as_array()
+        .context("campaign plan has no jobs")?
+    {
+        scope_files::ensure_active(ctx)?;
+        let tool = job["tool"].as_str().context("campaign job has no tool")?;
+        registry.prepare_dispatch_input(tool, job["input"].clone(), ctx, None)
+            .map_err(|error| anyhow::anyhow!(
+                "Campaign job {} is not ready.\n{error:#}\nNo executable plan was published. Use campaign:study for accepted scope and context.",
+                job["jobId"]
+            ))?;
+    }
+    Ok(())
 }
 
 /// Which shards lost how many jobs to the cap — the identity behind the
@@ -566,70 +611,6 @@ fn job_input(
     Value::Object(input)
 }
 
-/// For scope-file tools, materialize the shard's file list once per shard
-/// under the campaign directory and reuse it across that shard's jobs.
-fn job_scope_file(
-    root: &Path,
-    request: &PlanRequest,
-    job: &PlannedJob,
-    cache: &mut std::collections::HashMap<String, String>,
-) -> Result<Option<String>> {
-    if !SCOPE_FILE_TOOLS.contains(&request.tool.as_str()) || job.shard.paths.is_empty() {
-        return Ok(None);
-    }
-    if let Some(existing) = cache.get(&job.shard.name) {
-        return Ok(Some(existing.clone()));
-    }
-    let relative = format!(
-        ".kuzushi/v3/campaigns/{}/scope/{}.txt",
-        request.campaign_id, job.shard.name
-    );
-    write_shard_scope_file(root, &relative, &job.shard)?;
-    cache.insert(job.shard.name.clone(), relative.clone());
-    Ok(Some(relative))
-}
-
-fn write_shard_scope_file(root: &Path, relative: &str, shard: &CampaignShard) -> Result<()> {
-    let mut files = Vec::new();
-    for shard_path in &shard.paths {
-        collect_scope_files(root, Path::new(shard_path), &mut files)?;
-    }
-    anyhow::ensure!(
-        !files.is_empty(),
-        "shard {:?} matched no files under {:?}; fix the shard manifest before planning scope-file tools",
-        shard.name,
-        shard.paths
-    );
-    files.sort();
-    files.dedup();
-    let path = root.join(relative);
-    let parent = path.parent().context("scope path has no parent")?;
-    std::fs::create_dir_all(parent)
-        .with_context(|| format!("Could not create {}", parent.display()))?;
-    std::fs::write(&path, files.join("\n") + "\n")
-        .with_context(|| format!("Could not write {}", path.display()))
-}
-
-fn collect_scope_files(root: &Path, relative: &Path, out: &mut Vec<String>) -> Result<()> {
-    let absolute = root.join(relative);
-    if absolute.is_file() {
-        out.push(relative.to_string_lossy().into_owned());
-        return Ok(());
-    }
-    let Ok(entries) = std::fs::read_dir(&absolute) else {
-        return Ok(()); // missing entries surface via the empty-scope check
-    };
-    let mut children: Vec<_> = entries
-        .filter_map(|entry| entry.ok().map(|entry| entry.file_name()))
-        .filter(|name| !name.to_string_lossy().starts_with('.'))
-        .collect();
-    children.sort();
-    for child in children {
-        collect_scope_files(root, &relative.join(child), out)?;
-    }
-    Ok(())
-}
-
 /// Write the seasoning prompt for a threat-scoped job and return its
 /// workspace-relative path. The file is the FULL triage prompt (default
 /// text + campaign focus): `TRIAGE_PROMPT` replaces the default wholesale,
@@ -647,12 +628,11 @@ fn seasoned_prompt_path(
         ".kuzushi/prompts/campaign/{}/{job_id}.md",
         request.campaign_id
     );
-    let path = root.join(&relative);
-    let parent = path.parent().context("prompt path has no parent")?;
-    std::fs::create_dir_all(parent)
-        .with_context(|| format!("Could not create {}", parent.display()))?;
-    std::fs::write(&path, seasoned_prompt_body(root, request, threat))
-        .with_context(|| format!("Could not write {}", path.display()))?;
+    crate::workspace::write_workspace_file(
+        root,
+        &relative,
+        seasoned_prompt_body(root, request, threat).as_bytes(),
+    )?;
     Ok(Some(relative))
 }
 
@@ -737,6 +717,43 @@ fn plan_result(
     plan: &Value,
     prior_overlaps: &[super::prior_runs::PriorScanOverlap],
 ) -> Value {
+    let warnings = prior_overlap_warnings(prior_overlaps);
+    let output = plan_output(
+        request,
+        job_count,
+        dropped,
+        skipped_covered,
+        plan,
+        &warnings,
+    );
+    let mut result = crate::module_result::completed_output_result(
+        format!(
+            "Compatibility draft: {job_count} planned job(s), {} dropped; no jobs started.",
+            dropped.len()
+        ),
+        output,
+        json!({
+            "campaignId": request.campaign_id,
+            "planPath": plan_path.display().to_string(),
+            "jobCount": job_count,
+            "droppedJobs": dropped.len(),
+            "fillGaps": request.fill_gaps,
+            "skippedCoveredCells": skipped_covered,
+            "plan": plan,
+        }),
+    );
+    result["warnings"] = json!(warnings);
+    result
+}
+
+fn plan_output(
+    request: &PlanRequest,
+    job_count: usize,
+    dropped: &[PlannedJob],
+    skipped_covered: usize,
+    plan: &Value,
+    warnings: &[String],
+) -> String {
     let gap_note = if request.fill_gaps {
         format!(", {skipped_covered} covered cell(s) skipped by fillGaps")
     } else {
@@ -752,30 +769,19 @@ fn plan_result(
         None => "0 dropped by maxJobs".to_string(),
     };
     let seasoning_note = seasoning_note(plan);
-    let warnings = prior_overlap_warnings(prior_overlaps);
     let mut output = format!(
-        "campaign:plan wrote {} job(s) ({dropped_note}{gap_note}{seasoning_note}) to {}",
-        job_count,
-        plan_path.display()
+        "Compatibility draft only\n{job_count} planned job(s): {dropped_note}{gap_note}{seasoning_note}\nNo jobs started or investigation allowance approved."
     );
-    for warning in &warnings {
+    output.push_str(&scope_files::summary_note(plan));
+    output.push_str("\nUse campaign:study for accepted scope and context.");
+    output.push_str(&format!(
+        "\nTarget plan: .kuzushi/v3/campaigns/{}/plan.json",
+        request.campaign_id
+    ));
+    for warning in warnings {
         output.push_str(&format!("\n  WARNING: {warning}"));
     }
-    let mut result = crate::module_result::completed_output_result(
-        output.clone(),
-        output,
-        json!({
-            "campaignId": request.campaign_id,
-            "planPath": plan_path.display().to_string(),
-            "jobCount": job_count,
-            "droppedJobs": dropped.len(),
-            "fillGaps": request.fill_gaps,
-            "skippedCoveredCells": skipped_covered,
-            "plan": plan,
-        }),
-    );
-    result["warnings"] = json!(warnings);
-    result
+    output
 }
 
 /// Direct runs never mark coverage cells, so a plan over their scope is a

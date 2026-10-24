@@ -147,3 +147,32 @@ fn refresh_recovers_the_selected_study_summary_without_reopening_or_clearing_fil
         .join(".kuzushi/v3/campaigns/owned-empty-study/queue.json")
         .exists());
 }
+
+#[test]
+fn invalid_severity_receipt_warns_without_widening_membership_or_clearing_a_draft() {
+    let (root, mut app, _writer) = fixture();
+    let id = "owned-empty-study";
+    empty_study(root.path(), id);
+    let gate = root
+        .path()
+        .join(".kuzushi/v3/campaigns")
+        .join(id)
+        .join("gate.json");
+    std::fs::write(gate, b"not json").unwrap();
+    app.open_batch_results(id);
+    app.set_input("Held assessment recovery draft");
+    let request = app.findings_read_request(1, root.path().join("operator"), None);
+    let snapshot = read_findings_projection(root.path(), &request).unwrap();
+    assert!(snapshot
+        .page_recovery_notice
+        .as_deref()
+        .unwrap()
+        .contains("assessment unavailable"));
+    assert_eq!(snapshot.page.total, 0);
+    assert!(snapshot.study.as_ref().unwrap().gate.is_none());
+    app.apply_findings_read_snapshot(snapshot, &request, false);
+    assert!(app.router.campaign().active_batch_report().is_some());
+    assert_eq!(app.router.campaign().active_batch_id.as_deref(), Some(id));
+    assert_eq!(app.input(), "Held assessment recovery draft");
+    assert_eq!(app.findings_total_count(), 0);
+}

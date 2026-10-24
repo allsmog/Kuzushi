@@ -41,6 +41,7 @@ pub(crate) struct StudyContextPreview {
     pub(crate) raw: Vec<String>,
     pub(crate) dfd: crate::ui_view_models::DfdModel,
     pub(crate) source_state: String,
+    pub(crate) source_status: Option<String>,
     pub(crate) lesson_usable: bool,
     pub(crate) goal_state: Value,
     pub(crate) scanner_context: Value,
@@ -64,6 +65,10 @@ fn context_preview(
         raw: text.lines().map(str::to_string).collect(),
         dfd: crate::ui_view_models::study_context::context_diagram_model(document, target),
         source_state: context_read_state(data),
+        source_status: data
+            .pointer("/sourceState/status")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
         goal_state: data["goalState"].clone(),
         scanner_context: data["scannerContextPreview"].clone(),
     }))
@@ -270,6 +275,7 @@ impl ShellApp {
         let Some(picker) = self.study_context_picker() else {
             return InputUpdate::handled();
         };
+        let has_recorded_map = picker.map_attempt_id.is_some();
         let Some(reference) = picker.selected.clone().filter(|_| picker.preview.is_some()) else {
             self.set_batch_config_notice(
                 "Inspect an exact revision with Enter before reviewing Map.",
@@ -278,6 +284,9 @@ impl ShellApp {
         };
         if self.has_running_work() {
             self.set_batch_config_notice("Wait for active work, then review this context as Map.");
+            return InputUpdate::handled();
+        }
+        if has_recorded_map && self.open_reviewed_context_map() {
             return InputUpdate::handled();
         }
         self.dispatch_context_action("campaign:context-map", json!({"threatModelRef":reference}))
@@ -394,10 +403,14 @@ impl ShellApp {
         let text_view = self
             .study_context_picker()
             .map_or(StudyContextTextView::Summary, |picker| picker.text_view);
+        let inspected = self
+            .study_context_picker()
+            .is_some_and(|picker| picker.preview.is_some());
         let area = context_reader_layout(
             study_config_area(viewport.columns, viewport.rows),
             context_catalog(self).rows.len(),
             text_view,
+            inspected,
         )
         .detail;
         let max = context_detail_lines(self, area.width as usize)

@@ -1,49 +1,103 @@
 use super::*;
-use crate::app::StudyContextComparison;
+use crate::app::{ContextComparisonView, StudyContextComparison};
+use crate::ui_view_models::study_context::comparison;
 
-pub(super) fn render(frame: &mut Frame<'_>, area: Rect, comparison: &StudyContextComparison) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" COMPARE CONTEXT TEXT ");
-    let inner = block.inner(area).inner(ratatui::layout::Margin::new(1, 0));
-    frame.render_widget(block, area);
-    let lines =
-        crate::ui_view_models::study_context::comparison_lines(comparison, inner.width as usize);
-    let height = inner.height.saturating_sub(2) as usize;
-    let offset = comparison.scroll.min(lines.len().saturating_sub(height));
+pub(super) fn render(frame: &mut Frame<'_>, area: Rect, context: &StudyContextComparison) {
     frame.render_widget(
-        Paragraph::new(
-            lines
-                .into_iter()
-                .skip(offset)
-                .take(height)
-                .map(Line::from)
-                .collect::<Vec<_>>(),
-        ),
-        Rect {
-            height: height as u16,
-            ..inner
-        },
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(theme::subtle())
+            .title(Span::styled(" COMPARE SAVED CONTEXT ", theme::heading())),
+        area,
     );
+    let layout = comparison::layout(area);
+    render_tabs(frame, layout.tabs, context.view);
+    render_list(frame, layout.list, context);
+    render_detail(frame, layout.detail, context);
     frame.render_widget(
         Paragraph::new(vec![
-            Line::from("PgUp/Dn read · Esc back"),
-            Line::from(comparison_action(comparison)),
+            Line::styled("↑↓ choose PgUp/Dn Home/End read", theme::muted()),
+            Line::styled(controls(context), theme::accent()),
         ]),
-        Rect {
-            y: inner.bottom().saturating_sub(2),
-            height: 2,
-            ..inner
-        },
+        layout.controls,
     );
 }
 
-fn comparison_action(comparison: &StudyContextComparison) -> &'static str {
-    if comparison.error.is_some() {
-        return "Enter retry local parent read";
+fn render_tabs(frame: &mut Frame<'_>, area: Rect, selected: ContextComparisonView) {
+    let spans = ContextComparisonView::ALL
+        .into_iter()
+        .flat_map(|view| {
+            let style = if view == selected {
+                theme::selection()
+            } else {
+                theme::muted()
+            };
+            [
+                Span::styled(format!(" {} ", comparison::label(view)), style),
+                Span::raw(" "),
+            ]
+        })
+        .collect::<Vec<_>>();
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+fn render_list(frame: &mut Frame<'_>, area: Rect, context: &StudyContextComparison) {
+    let entries = comparison::entries(context, context.view);
+    let selected = context
+        .cursor()
+        .selected
+        .min(entries.len().saturating_sub(1));
+    let start = selected.saturating_sub((area.height as usize).saturating_sub(1));
+    let lines = entries
+        .iter()
+        .enumerate()
+        .skip(start)
+        .take(area.height as usize)
+        .map(|(index, entry)| {
+            let marker = if index == selected { "▸" } else { " " };
+            let style = if index == selected {
+                theme::selection()
+            } else {
+                theme::muted()
+            };
+            Line::styled(
+                fit(
+                    &format!(
+                        "{marker} {}/{} {}",
+                        index + 1,
+                        entries.len(),
+                        comparison::title(entry)
+                    ),
+                    area.width as usize,
+                ),
+                style,
+            )
+        })
+        .collect::<Vec<_>>();
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
+fn render_detail(frame: &mut Frame<'_>, area: Rect, context: &StudyContextComparison) {
+    let lines = comparison::selected_lines(context, area.width as usize);
+    let offset = context
+        .cursor()
+        .scroll
+        .min(lines.len().saturating_sub(area.height as usize));
+    let lines = lines
+        .into_iter()
+        .skip(offset)
+        .take(area.height as usize)
+        .map(|line| Line::styled(line, theme::primary()))
+        .collect::<Vec<_>>();
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
+fn controls(context: &StudyContextComparison) -> &'static str {
+    if context.error.is_some() {
+        return "Tab view · Enter retry · Esc back";
     }
-    if comparison.differences.is_some() {
-        return "a use inspected candidate for study";
+    if context.ready() {
+        return "Tab view · a use in study · Esc back";
     }
-    "Reading parent · selection unchanged"
+    "Reading parent · Esc back"
 }

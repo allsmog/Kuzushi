@@ -112,6 +112,24 @@ expect: 1 committed / 9
 keys: Enter
 require-live-snap: 30 CONTEXT SUMMARY | inspected-inactive-result
 expect: Draft evidence reader
+resize: 40x12
+wait: 0.5
+live-snap: inspected-summary-40x12
+expect: CONTEXT SUMMARY
+expect: Labeled transport fixture over two
+expect: c check
+expect: v diagram
+keys: NPage NPage
+live-snap: inspected-summary-paged-40x12
+keys: Home
+live-snap: inspected-summary-home-40x12
+expect: Labeled transport fixture over two
+resize: 80x24
+wait: 0.5
+live-snap: inspected-summary-80x24
+expect: Labeled transport fixture over two
+resize: 120x36
+wait: 0.5
 keys: d
 require-live-snap: 25 Before: | inherited-text-comparison
 expect: After:

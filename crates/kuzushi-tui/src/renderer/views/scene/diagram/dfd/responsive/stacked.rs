@@ -157,7 +157,7 @@ fn render_connection(
     y: u16,
 ) {
     let flows = relevant_flows_between(diagram, first_zone, second_zone);
-    let label = connection_label(&flows);
+    let label = connection_label(&diagram.model, &flows, first_zone);
     text(
         buf,
         area,
@@ -210,7 +210,7 @@ fn selected_item_owns_flow(diagram: &DfdDiagram, flow: &DfdFlowModel) -> bool {
     }
 }
 
-fn connection_label(flows: &[&DfdFlowModel]) -> String {
+fn connection_label(model: &DfdModel, flows: &[&DfdFlowModel], first_zone: usize) -> String {
     let Some(flow) = flows.first() else {
         return "│".to_string();
     };
@@ -220,7 +220,12 @@ fn connection_label(flows: &[&DfdFlowModel]) -> String {
     } else {
         String::new()
     };
-    format!("▼ {}{crossing}{more}", nonempty(&flow.label))
+    let arrow = if zone_index_for_node(model, &flow.from_id) == Some(first_zone) {
+        "▼"
+    } else {
+        "▲"
+    };
+    format!("{arrow} {}{crossing}{more}", nonempty(&flow.label))
 }
 
 fn draw_page_label(buf: &mut Buffer, area: Rect, zones: &[usize], total: usize) {

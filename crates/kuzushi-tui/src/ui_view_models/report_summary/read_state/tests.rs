@@ -46,6 +46,9 @@ fn previous_counts_remain_labeled_and_readable_while_export_waits_for_current_da
         .captured_choices(root.path().to_path_buf());
     app.open_report_from_current_origin();
     assert!(report_is_refreshing(&app));
+    assert!(crate::ui_view_models::footer_keybindings(&app)
+        .iter()
+        .any(|binding| binding.key == "Enter" && binding.label == "not ready"));
     assert!(report_review_summary(&app).contains("3 findings"));
     assert!(report_review_summary(&app).contains("previous read"));
     let plain = crate::renderer::render_plain_app(&app, 40);
@@ -74,9 +77,23 @@ fn previous_counts_remain_labeled_and_readable_while_export_waits_for_current_da
     assert!(!report_is_refreshing(&app));
     assert!(report_review_summary(&app).contains("4 findings"));
     assert!(report_export_campaign(&app).is_ok());
-    assert!(crate::ui_view_models::report_action_error(&app).is_none());
+    let action = crate::ui_view_models::report_action_error(&app).unwrap();
+    assert!(action.contains("Export was not started") && action.contains("Enter exports"));
     let plain = crate::renderer::render_plain_app(&app, 40);
-    assert!(!plain.contains("Report action:"), "{plain}");
+    assert!(plain.contains("Export was not started"), "{plain}");
+    assert!(
+        !app.report_export_pending(),
+        "A refused action must never queue an export"
+    );
+    assert!(crate::ui_view_models::footer_keybindings(&app)
+        .iter()
+        .any(|binding| binding.key == "Enter" && binding.label == "export/retry"));
+    let retry = app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+    assert!(matches!(
+        retry.effects.as_slice(),
+        [crate::app::ShellEffect::ExportReport(_)]
+    ));
+    assert!(crate::ui_view_models::report_action_error(&app).is_none());
 }
 
 #[test]

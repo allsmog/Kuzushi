@@ -70,11 +70,11 @@ fn threat_model_question_tool() -> ToolDescriptor {
 fn threat_model_revise_tool() -> ToolDescriptor {
     tool_with_options(
         "threat-model:revise",
-        "Save reviewed text edits as an inactive immutable context copy. No model requests.",
+        "Save reviewed narration and architecture corrections as an inactive immutable context copy. No model requests.",
         vec![
             target_option(),
             bound_threat_model_option().required(),
-            opt("edits", OptionType::Json, "Reviewed context text edits: pointer and text for system overview, component description/purpose or structured question answers.").required(),
+            opt("edits", OptionType::Json, "Reviewed pointer/text edits for overview, descriptions, purpose and answers; component names, roles and trust zones; flow descriptions and existing-component endpoints; boundary names and descriptions. IDs, evidence and source provenance are protected.").required(),
             opt("label", OptionType::String, "Name for the edited context copy."),
         ],
     ).with_policy(workspace_policy(ToolPhase::Map, RuntimeRequirement::Never, FindingStoreRequirement::Optional)).without_phase_result()
@@ -157,10 +157,12 @@ fn threat_model_revisions_tool() -> ToolDescriptor {
 fn threat_model_diff_tool() -> ToolDescriptor {
     tool_with_options(
         "threat-model:diff",
-        "Compare immutable context revisions or lineage heads. Show overview, \
-         component text and question-answer changes alongside threat/DFD \
-         membership, coverage and methodology. Disclose other changed stored \
-         sections; bounded text previews retain complete values in the result.",
+        "Compare immutable context revisions or lineage heads. Show complete \
+         stored field changes, DFD types and endpoints, security context, \
+         questions, ordering and source claims alongside the existing text, \
+         threat and coverage results. Literal unique IDs match across order; \
+         ambiguous rows compare explicitly by position. Bounded terminal \
+         previews retain complete values in the result. No finding verdicts.",
         vec![
             target_option(),
             opt(
@@ -295,7 +297,10 @@ fn threat_model_import_options() -> Vec<OptionSpec> {
 fn threat_model_build_tool() -> ToolDescriptor {
     tool_with_options(
         "threat-model:build",
-        "Build a threat model for the current target.",
+        "Build a threat model for the current target. Model-generated DFD nodes \
+         require process, external-entity or data-store roles. Known spelling \
+         aliases normalize; missing or unknown roles are rejected. Record \
+         flows in dfd.flows.",
         threat_model_build_options(),
     )
     .with_continuation(ContinuationSupport::Staged)

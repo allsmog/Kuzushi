@@ -56,23 +56,6 @@ pub(super) fn run_target(state: &JsonFileState) -> Option<String> {
     value.get("target")?.as_str().map(str::to_string)
 }
 
-pub(super) fn source_label(app: &ShellApp, run: &str) -> String {
-    let summary = artifact_json(app, run, RUN_FILE);
-    let result = artifact_json(app, run, "result.json");
-    kuzushi_core::run_artifacts::RunSourceRevision::from_artifacts(
-        summary.as_ref(),
-        result.as_ref(),
-    )
-    .label()
-}
-
-fn artifact_json(app: &ShellApp, run: &str, leaf: &str) -> Option<serde_json::Value> {
-    match run_json_state(app, run, leaf) {
-        ViewDataState::Ready(JsonFileState::Present(value)) => Some(value),
-        _ => None,
-    }
-}
-
 pub(super) fn context_label(app: &ShellApp, run: &str) -> String {
     recorded_context(app, run)
         .map(|context| context.label())

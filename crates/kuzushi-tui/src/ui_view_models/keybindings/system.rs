@@ -56,17 +56,10 @@ fn report_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     }
     vec![
         bind("Esc/q", "return"),
-        bind(
-            "Enter",
-            if app.report_export_pending() {
-                "export running"
-            } else {
-                "export/retry"
-            },
-        ),
+        bind("Enter", report_export_label(app)),
+        bind("PgUp/PgDn", "read"),
         bind("e", "edit path"),
         bind("r", "refresh report"),
-        bind("PgUp/PgDn", "read"),
         bind("j/k", "format"),
         bind("c", "completeness"),
         bind("s", "study/history"),
@@ -74,6 +67,16 @@ fn report_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
         bind("S", "save choices"),
         bind("o", "reveal"),
     ]
+}
+
+fn report_export_label(app: &ShellApp) -> &'static str {
+    if app.report_export_pending() {
+        return "export running";
+    }
+    if crate::ui_view_models::report_export_campaign(app).is_err() {
+        return "not ready";
+    }
+    "export/retry"
 }
 
 fn setup_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {

@@ -6,7 +6,9 @@ use kuzushi_core::{FindingListReport, PatchLifecycleRecord};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+mod failure;
 mod page;
+pub(crate) use failure::FindingsReadFailure;
 use page::read_projection_page;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

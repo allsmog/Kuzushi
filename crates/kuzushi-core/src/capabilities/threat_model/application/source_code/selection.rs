@@ -8,7 +8,7 @@ use std::path::Path;
 
 pub(super) fn select_files(
     input: &BuildInput,
-    inventory: RepositoryInventory,
+    inventory: &RepositoryInventory,
     surfaces: &[AttackSurface],
 ) -> Result<Selection> {
     let scope = input
@@ -17,14 +17,14 @@ pub(super) fn select_files(
         .context("source-code analysis scope is outside its workspace")?;
     let mut files: BTreeMap<_, _> = inventory
         .source_files
-        .into_iter()
+        .iter()
         .map(|file| {
             (
                 file.path.clone(),
                 Candidate {
                     citation_path: scope.join(&file.path).to_string_lossy().replace('\\', "/"),
-                    path: file.path,
-                    language: file.language,
+                    path: file.path.clone(),
+                    language: file.language.clone(),
                     anchors: Vec::new(),
                 },
             )

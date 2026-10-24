@@ -165,7 +165,7 @@ fn diagram_uses_inspected_revision_and_returns_to_the_exact_context_draft() {
         details.contains("Recorded request input") && details.contains("main.rs:1"),
         "{details}"
     );
-    for code in [KeyCode::Char('g'), KeyCode::Char('a'), KeyCode::Char('L')] {
+    for code in [KeyCode::Char('a'), KeyCode::Char('L')] {
         key(&mut app, code);
     }
     key(&mut app, KeyCode::Esc);
@@ -227,7 +227,7 @@ fn diagram_and_full_details_are_reachable_at_every_viewport_and_in_plain_output(
             assert!(
                 rendered.contains("CONTEXT DATA FLOW")
                     && rendered.contains("Esc context")
-                    && rendered.contains("s plan scan")
+                    && rendered.contains("s scan")
                     && rendered.contains("Enter details"),
                 "{width}x{height}: {rendered}"
             );
@@ -418,5 +418,5 @@ fn diagram_evidence_wrapping_keeps_literal_filename_whitespace() {
     key(&mut app, KeyCode::Char('v'));
     key(&mut app, KeyCode::Down);
     let lines = diagram_detail_lines(&app, 120).join("\n");
-    assert!(lines.contains("Source: app/a  b.rs#L7"), "{lines}");
+    assert!(lines.contains("Source: \"app/a  b.rs#L7\""), "{lines}");
 }

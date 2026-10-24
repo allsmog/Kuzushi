@@ -67,7 +67,7 @@ fn source_code_read_limits_and_invalid_text_are_disclosed() {
     std::fs::write(target.path().join("lib.rs"), "fn allowed() {}\n").unwrap();
     let input = input(target.path(), 4000);
     let inventory = crate::repository_inventory::build_repository_inventory(target.path()).unwrap();
-    let selected = selection::select_files(&input, inventory, &[]).unwrap();
+    let selected = selection::select_files(&input, &inventory, &[]).unwrap();
     let mut report = new_report(&input, "tree".into(), &selected);
     report.read_bytes = MAX_READ_BYTES;
     assert!(
@@ -100,7 +100,7 @@ fn source_code_rejects_a_selected_file_replaced_with_an_external_symlink() {
     std::fs::write(external.path().join("secret.rs"), "EXTERNAL_MARKER").unwrap();
     let input = input(target.path(), 4000);
     let inventory = crate::repository_inventory::build_repository_inventory(target.path()).unwrap();
-    let selected = selection::select_files(&input, inventory, &[]).unwrap();
+    let selected = selection::select_files(&input, &inventory, &[]).unwrap();
     let mut report = new_report(&input, "tree".into(), &selected);
     std::fs::remove_file(target.path().join("lib.rs")).unwrap();
     std::os::unix::fs::symlink(
@@ -241,7 +241,7 @@ fn source_code_selection_balances_components() {
     let mut input = input(target.path(), 4000);
     input.context_limit = 3;
     let inventory = crate::repository_inventory::build_repository_inventory(target.path()).unwrap();
-    let selected = selection::select_files(&input, inventory, &[]).unwrap();
+    let selected = selection::select_files(&input, &inventory, &[]).unwrap();
     assert_eq!(selected.eligible, 15);
     assert_eq!(
         selected
@@ -255,4 +255,40 @@ fn source_code_selection_balances_components() {
             "services/c/file0.rs"
         ]
     );
+}
+
+#[test]
+fn complete_enumeration_survives_a_large_unselected_lockfile() {
+    let target = tempfile::tempdir().unwrap();
+    std::fs::write(
+        target.path().join("lib.rs"),
+        "// Owned source text. Never executed.\n",
+    )
+    .unwrap();
+    std::fs::write(
+        target.path().join("Cargo.lock"),
+        "# Owned lockfile comment.\n".repeat(14_000),
+    )
+    .unwrap();
+    let config = V2Config::default();
+    let source =
+        collect_source_code(&input(target.path(), 4096), &[], None, &context(&config)).unwrap();
+    let body: serde_json::Value = serde_json::from_str(&source.content).unwrap();
+    assert_eq!(body["files"].as_array().unwrap().len(), 1);
+    assert_eq!(body["files"][0]["path"], "lib.rs");
+    assert!(!source.content.contains("Owned lockfile comment"));
+}
+
+#[test]
+fn incomplete_or_unknown_enumeration_is_still_refused() {
+    let root = tempfile::tempdir().unwrap();
+    let mut inventory =
+        crate::repository_inventory::build_repository_inventory(root.path()).unwrap();
+    for complete in [Some(false), None] {
+        inventory.inspection.as_mut().unwrap().enumeration_complete = complete;
+        assert!(require_complete_enumeration(&inventory)
+            .unwrap_err()
+            .to_string()
+            .contains("complete filename enumeration"));
+    }
 }

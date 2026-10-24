@@ -141,48 +141,32 @@ fn render_context_matrix(
         .title(" CONTEXT CASES ");
     let inner = block.inner(area).inner(ratatui::layout::Margin::new(1, 0));
     frame.render_widget(block, area);
-    let lines = matrix_surface_lines(app, config, inner);
-    frame.render_widget(
-        ratatui::widgets::Paragraph::new(lines.join("\n")),
-        Rect::new(
-            inner.x,
-            inner.y,
-            inner.width,
-            inner.height.saturating_sub(matrix_control_height(
-                inner.width,
-                config.study.matrix.results,
-            )),
-        ),
-    );
+    let body = crate::ui_view_models::matrix_body(area, config.study.matrix.results);
+    let lines = matrix_surface_lines(app, config, body);
+    frame.render_widget(ratatui::widgets::Paragraph::new(lines.join("\n")), body);
     if config.study.matrix.results {
-        render_matrix_result_controls(frame, inner);
+        render_matrix_result_controls(frame, app, inner);
     } else {
         render_matrix_controls(frame, inner)
     };
 }
 
-fn matrix_surface_lines(app: &ShellApp, config: &BatchScanConfig, inner: Rect) -> Vec<String> {
+fn matrix_surface_lines(app: &ShellApp, config: &BatchScanConfig, body: Rect) -> Vec<String> {
     if config.study.matrix.results {
         return crate::ui_view_models::matrix_result_lines(
             app,
-            inner.width as usize,
-            inner.height.saturating_sub(3) as usize,
+            body.width as usize,
+            body.height as usize,
         );
     }
-    crate::ui_view_models::context_matrix_lines(
-        config,
-        inner.width as usize,
-        inner
-            .height
-            .saturating_sub(matrix_control_height(inner.width, false)) as usize,
-    )
+    crate::ui_view_models::context_matrix_lines(config, body.width as usize, body.height as usize)
 }
 
-fn render_matrix_result_controls(frame: &mut Frame<'_>, inner: Rect) {
-    let hints = "↑↓ · Enter pass · b base · R report\nPgUp/PgDn detail · r refresh · Esc";
+fn render_matrix_result_controls(frame: &mut Frame<'_>, app: &ShellApp, inner: Rect) {
+    let hints = crate::ui_view_models::matrix_result_controls(app);
     frame.render_widget(
-        ratatui::widgets::Paragraph::new(hints),
-        Rect::new(inner.x, inner.bottom().saturating_sub(2), inner.width, 2),
+        ratatui::widgets::Paragraph::new(hints.join("\n")),
+        Rect::new(inner.x, inner.bottom().saturating_sub(3), inner.width, 3),
     );
 }
 
@@ -207,14 +191,6 @@ fn render_matrix_controls(frame: &mut Frame<'_>, inner: Rect) {
             height,
         ),
     );
-}
-
-fn matrix_control_height(width: u16, results: bool) -> u16 {
-    if width < 50 && !results {
-        4
-    } else {
-        3
-    }
 }
 
 fn render_context_results(frame: &mut Frame<'_>, app: &ShellApp, area: Rect) {

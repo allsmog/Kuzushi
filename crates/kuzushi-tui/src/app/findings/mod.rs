@@ -23,7 +23,7 @@ pub use format_chain_alias::parse_chain_alias;
 pub(super) use format_chain_alias::short_fingerprint;
 pub(crate) use format_chain_alias::sorted_chain_aliases;
 pub(crate) use read_projection::{
-    read_findings_projection, FindingsReadRequest, FindingsReadSnapshot,
+    read_findings_projection, FindingsReadFailure, FindingsReadRequest, FindingsReadSnapshot,
 };
 pub(crate) use refresh_background::FindingsRefreshState;
 pub(crate) use review_write::ReviewWriteState;

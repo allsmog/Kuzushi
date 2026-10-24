@@ -114,7 +114,9 @@ impl ShellApp {
 
 fn mark_inspection_uncertain(picker: &mut StudyContextPicker) {
     if let Some(preview) = picker.preview.as_mut() {
-        std::sync::Arc::make_mut(preview).source_state = "The source check stopped. Treat the recorded check as historical; inspect again to compare source identity.".into();
+        let preview = std::sync::Arc::make_mut(preview);
+        preview.source_status = None;
+        preview.source_state = "The source check stopped. Treat the recorded check as historical; inspect again to compare source identity.".into();
     }
 }
 

@@ -309,3 +309,68 @@ fn report_destination_editor_owns_refresh_letters() {
     assert_eq!(app.input(), "retained composer");
     assert!(!app.has_running_work());
 }
+
+#[test]
+fn report_paging_is_visible_and_preserves_choices_and_draft_at_every_viewport() {
+    use ratatui::{backend::TestBackend, Terminal};
+    for (width, height) in [(40, 12), (60, 20), (80, 24), (96, 89), (120, 36), (160, 48)] {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), Some(&workspace));
+        app.open_report_from_current_origin();
+        app.router.report_mut().toggle_scope();
+        hydrate_workspace_report(&app);
+        app.set_input("retained composer");
+        app.reduce_resize(width, height);
+        app.router.report_mut().set_reveal_error(Some(format!(
+            "{} END_OF_RECORDED_REPORT_ERROR",
+            "Labeled report read failure remains available for inspection. ".repeat(300)
+        )));
+        let choices = app.router.report().captured_choices("/owned".into());
+        let cursor = app.cursor();
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| crate::renderer::render_app(frame, &app))
+            .unwrap();
+        let text = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(text.contains("PgUp/PgDn read"), "{width}x{height}: {text}");
+        assert!(!text.contains("END_OF_RECORDED_REPORT_ERROR"));
+        let mut reached_end = false;
+        for _ in 0..512 {
+            press(&mut app, KeyCode::PageDown, KeyModifiers::NONE);
+            terminal
+                .draw(|frame| crate::renderer::render_app(frame, &app))
+                .unwrap();
+            let text = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>();
+            assert!(text.contains("PgUp/PgDn read"));
+            if text.contains("END_OF_RECORDED_REPORT_ERROR") {
+                reached_end = true;
+                break;
+            }
+        }
+        assert!(
+            reached_end,
+            "{width}x{height}: paging must reach all recorded error text"
+        );
+        assert!(app.router.default_scroll().offset() > 0);
+        assert_eq!(
+            app.router.report().captured_choices("/owned".into()),
+            choices
+        );
+        assert_eq!(app.cursor(), cursor);
+        press(&mut app, KeyCode::Home, KeyModifiers::NONE);
+        assert_eq!(app.router.default_scroll().offset(), 0);
+    }
+}

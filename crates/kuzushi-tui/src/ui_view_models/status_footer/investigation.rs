@@ -3,11 +3,39 @@ use super::*;
 
 fn applies(app: &ShellApp) -> bool {
     match app.shell_view() {
-        ShellView::Report => true,
         ShellView::Workbench => crate::app::WorkflowPhase::INVESTIGATION_ORDER
             .contains(&super::super::active_workbench_page(app).phase()),
-        _ => false,
+        ShellView::Campaign => fixed_study_view(app),
+        view => investigation_reader(view),
     }
+}
+
+fn investigation_reader(view: ShellView) -> bool {
+    matches!(
+        view,
+        ShellView::Report
+            | ShellView::Scene
+            | ShellView::Lessons
+            | ShellView::Relationships
+            | ShellView::RunDiff
+            | ShellView::Replay
+            | ShellView::Activity
+    )
+}
+
+fn fixed_study_view(app: &ShellApp) -> bool {
+    let deck = app.router.campaign();
+    let drafting = [
+        deck.batch_scan_config.as_ref(),
+        deck.setup_context_study.as_ref(),
+        deck.workflow_proposal_study.as_ref(),
+    ]
+    .iter()
+    .any(Option::is_some);
+    drafting
+        || deck
+            .selected_campaign()
+            .is_some_and(crate::app::is_fixed_study_snapshot)
 }
 
 pub(super) fn full_segments(app: &ShellApp) -> Option<Vec<String>> {
@@ -71,6 +99,7 @@ fn freshness_attention(app: &ShellApp) -> Option<String> {
 
 fn operational_segments(app: &ShellApp) -> impl Iterator<Item = String> {
     [
+        reader_orientation(app),
         review_conflict_footer_segment(app),
         attention_footer_segment(app),
         scope_footer_segment(app),
@@ -78,6 +107,13 @@ fn operational_segments(app: &ShellApp) -> impl Iterator<Item = String> {
     ]
     .into_iter()
     .flatten()
+}
+
+fn reader_orientation(app: &ShellApp) -> Option<String> {
+    if matches!(app.shell_view(), ShellView::Workbench | ShellView::Report) {
+        return None;
+    }
+    journey_footer_segment(app)
 }
 
 #[cfg(test)]

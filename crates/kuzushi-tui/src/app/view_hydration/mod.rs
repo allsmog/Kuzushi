@@ -324,7 +324,9 @@ pub(crate) enum ViewHydrationValue {
     FindingGroups(Result<kuzushi_core::findings::FindingGroupsPage, String>),
     FindingRelationships(Result<kuzushi_core::findings::FindingRelationshipPage, String>),
     FindingLessons(Result<kuzushi_core::findings::FindingLessonPage, String>),
-    FindingsProjection(Result<super::findings::FindingsReadSnapshot, String>),
+    FindingsProjection(
+        Result<super::findings::FindingsReadSnapshot, super::findings::FindingsReadFailure>,
+    ),
     FileCompletionValues(FileCompletionIndex),
     FindingCompletionValues(Vec<String>),
     RunIdCompletionValues(Vec<String>),

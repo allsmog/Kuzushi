@@ -1,6 +1,60 @@
 use super::*;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+#[test]
+fn report_source_comparison_note_follows_recorded_content_in_plain_and_interactive_output() {
+    for (left, right, expected) in [
+        (
+            Some("a".repeat(64)),
+            Some("a".repeat(64)),
+            "Recorded content fingerprints match",
+        ),
+        (
+            Some("a".repeat(64)),
+            Some("A".repeat(64)),
+            "Recorded content fingerprints match",
+        ),
+        (
+            Some("a".repeat(64)),
+            Some("b".repeat(64)),
+            "Recorded content fingerprints differ",
+        ),
+        (
+            Some("a".repeat(64)),
+            None,
+            "Source content comparison unverified",
+        ),
+        (None, None, "Source content comparison unverified"),
+        (
+            Some("a".repeat(64)),
+            Some("malformed".into()),
+            "Source content comparison unverified",
+        ),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        for (run, hash) in [("base", left), ("later", right)] {
+            let dir = ui_run_dir(Some(root.path()), run);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join("result.json"),
+                serde_json::json!({"data":{"treeHash":hash}}).to_string(),
+            )
+            .unwrap();
+        }
+        let mut app = comparison_app(root.path(), 1);
+        key(&mut app, KeyCode::Tab);
+        let plain = render_plain_app(&app, 120);
+        assert!(plain.contains(expected), "{plain}");
+        assert!(
+            !plain.contains("Unknown content cannot distinguish"),
+            "{plain}"
+        );
+        let mut terminal = Terminal::new(TestBackend::new(120, 36)).unwrap();
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        assert!(format!("{:?}", terminal.backend().buffer()).contains(expected));
+    }
+}
+
 fn comparison_app(root: &std::path::Path, count: usize) -> ShellApp {
     let rows = (0..count)
         .map(|index| {

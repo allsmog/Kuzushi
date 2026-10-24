@@ -2,6 +2,11 @@
 use crate::app::{ContextDraftRecovery, ContextEditDraft, ContextEditMode};
 use crate::renderer::shared::text::wrap_text;
 use kuzushi_core::session_transcript::RecoveredContextDraft;
+mod choices;
+pub(crate) use choices::{
+    context_choice_area, context_choice_detail_lines, context_choice_lines,
+    context_single_line_area,
+};
 
 pub(crate) fn context_edit_title(mode: ContextEditMode) -> &'static str {
     if mode == ContextEditMode::Recovery {
@@ -16,6 +21,7 @@ fn context_copy_title(mode: ContextEditMode) -> &'static str {
             "EDIT CONTEXT COPY"
         }
         ContextEditMode::Review => "REVIEW CONTEXT CHANGES",
+        ContextEditMode::Choosing => "CHOOSE CONTEXT VALUE",
         ContextEditMode::Saving => "SAVING CONTEXT COPY",
         ContextEditMode::Discard => "DISCARD CONTEXT DRAFT",
     }
@@ -30,14 +36,33 @@ pub(crate) fn context_edit_controls(mode: ContextEditMode) -> [&'static str; 2] 
     }
     if mode == ContextEditMode::Fields {
         return [
-            "↑↓ Enter edit · r review · g regen",
-            "d discard · Esc back (keep draft)",
+            "↑↓/PgUp/Dn · Enter edit · r review",
+            "g regen · d discard · Esc keep draft",
         ];
     }
     context_read_controls(mode)
 }
 
 pub(crate) fn context_draft_controls(draft: &ContextEditDraft) -> [&'static str; 2] {
+    if draft.mode == ContextEditMode::Choosing {
+        return choices::choice_controls(draft.choice_details);
+    }
+    if draft.mode == ContextEditMode::Fields && !draft.entries[draft.cursor].regeneratable {
+        return [
+            "↑↓/PgUp/Dn · Enter edit · r review",
+            "d discard · Esc keep draft",
+        ];
+    }
+    context_text_draft_controls(draft)
+}
+
+fn context_text_draft_controls(draft: &ContextEditDraft) -> [&'static str; 2] {
+    if draft.mode == ContextEditMode::Writing
+        && draft.entries[draft.cursor].constraint
+            == kuzushi_core::capabilities::threat_model::ContextEditConstraint::SingleLine
+    {
+        return ["Enter done · Ctrl+S review", "Esc back (keep draft)"];
+    }
     if draft.mode != ContextEditMode::Recovery {
         return context_edit_controls(draft.mode);
     }
@@ -67,6 +92,7 @@ pub(crate) fn context_edit_review_lines(draft: &ContextEditDraft, width: usize) 
         format!("Copy name: {}", draft.entries[0].text()),
         "Saving creates a separate inactive revision. Select it for work only after inspection."
             .into(),
+        "Architecture corrections are operator judgments. Existing evidence references stay unchanged.".into(),
     ];
     for entry in draft.entries.iter().skip(1).filter(|entry| entry.changed()) {
         text.extend([String::new(), entry.label.clone(), "Before:".into()]);
@@ -121,6 +147,7 @@ fn context_edit_body_lines(draft: &ContextEditDraft, width: usize) -> Vec<String
             .flat_map(|line| wrap_text(&line, width))
             .collect(),
         ContextEditMode::Writing => selected_context_text_lines(draft, width),
+        ContextEditMode::Choosing => context_choice_detail_lines(draft, width),
         _ => context_edit_review_lines(draft, width),
     }
 }

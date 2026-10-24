@@ -1,5 +1,157 @@
 # Releasing Kuzushi
 
+## Report recurrence and recorded source comparison
+
+The context matrix Report recap shares the case reader's literal location and
+severity presentation. Source and allowance precede recurrence; `p` details add
+complete observation references. Run comparison derives matching, differing or
+unverified content notes from recorded artifacts. Missing content never becomes
+known merely because Git SHAs match. Plain output preserves the same meaning.
+These are presentation changes; no persisted artifact or public tool migration
+is needed. See the [native Report and source comparison evidence](docs/assessments/report-source-recap-2026-10-24.md).
+
+## Literal finding paths and context matrix evidence
+
+Agentic and generic finding adapters preserve path whitespace. Agentic merging
+and prior-identity reuse preserve case and native path semantics. Ordinary v3
+producer fingerprints stay stable. New producer and structural identity keys
+encode paths changed by legacy normalization with the reserved
+`kuzushi-literal-path-v1:` component; real filenames beginning with that tag are
+escaped too. Fingerprint and persisted artifact schemas remain unchanged.
+
+Existing records and human decisions are not rewritten. A new observation for an
+affected literal path may have a different identity. Do not automatically migrate
+an old verdict, repair historical paths by guessing, or treat absence as a fix.
+Inspect the exact source and record a fresh observation instead.
+
+Matrix results now show claims and locations before exact case/source and
+observation receipts. Narrow paging and End/PageUp retain all evidence; plain
+output includes every case. These presentation changes need no artifact migration.
+See the [native evidence and remaining display work](docs/assessments/context-matrix-evidence-2026-10-23.md).
+
+## Bounded general context filename input
+
+General context builds reuse the canonical bounded inventory and add
+`provenance.repositoryInventory` schema 1 plus tool-data `repositoryInventory`.
+The base-synthesis receipt records the exact filename list, its digest, limits
+and exclusions separately from inspected source. Refine retains a historical
+synthesis receipt and does not claim a new filename input. Existing contexts and
+public options need no migration. Complete enumeration can include bounded
+content-prefix inspections; incomplete enumeration still blocks source selection.
+
+The explicit Map control opens an authenticated already recorded result without
+another tool run, including when Activity auto-open is disabled. Background
+completions retain focus ownership and Map acceptance remains explicit. See the
+[general context and native workflow evidence](docs/assessments/general-context-inventory-2026-10-23.md).
+
+## Study outcome wording and refreshed receipts
+
+Human study summaries distinguish completed work, an optional severity cutoff
+and proof. An unconfigured cutoff no longer says security is disabled. Findings
+precede equivalence metadata; requested SARIF export status remains visible.
+Stored gate schema, status values and exit behavior are preserved.
+
+The in-process `FindingPageSnapshot` adds `study_gate_error`. Consumers should
+surface it when an optional severity receipt cannot be authenticated. Finding
+membership and its cursor remain usable; a stale assessment is not reused.
+The TUI warns while retaining triage, and background refresh retains valid
+receipts. Strict standalone batch reads keep rejecting invalid receipts. Existing
+artifacts need no migration. See the [outcome and native recovery evidence](docs/assessments/study-outcome-clarity-2026-10-23.md).
+
+## Investigation reader footers
+
+Lesson, relationship, diagram, comparison, saved-result and Activity readers,
+plus fixed-study views, use the existing investigation footer. Source warnings,
+operator ceiling, attention, conflicts, scope, work, cancellation and allowance
+remain; shell routing and notification diagnostics stay on their configuration
+and diagnostic surfaces. Secondary readers retain phase orientation. Legacy
+campaigns keep their existing footer. No artifact or option migration is needed.
+See the [current learning and diagram evidence](docs/assessments/learning-readers-current-2026-10-23.md).
+
+## Study reads during startup
+
+Batch and finding-page readers distinguish an unpublished current-attempt receipt
+from malformed or unauthenticated evidence. Required artifact errors add the
+typed `run_artifacts::RunArtifactMissing` without changing their display text.
+Study readers add `findings::BatchReceiptPending` for the bounded startup case.
+Existing successful results and artifact formats remain unchanged.
+
+The TUI preserves loaded findings and drafts while showing pending receipts. It
+waits for a later store update or explicit refresh without polling the same read,
+and never credits completed work without its receipts. Existing plans and saved
+artifacts need no migration. See the [native recovery evidence](docs/assessments/pending-study-receipts-2026-10-23.md).
+
+## Complete large diagrams
+
+The TUI no longer drops nodes or flows after the first 64 valid elements of a
+saved context. Existing context storage limits remain in place. Selected nodes
+and boundaries bring their connected flow endpoints into the visible zone pages,
+and stacked arrows preserve source-to-destination direction when selection
+changes zone order. Existing artifacts, public tools and schema need no migration.
+See the [scoped native investigation and open refresh defect](docs/assessments/large-dfd-investigation-2026-10-23.md).
+
+## Local architecture corrections
+
+`threat-model:revise` retains its exact-reference and pointer/text contract and
+adds operator edits for component names, roles and trust zones, flow descriptions
+and existing-component endpoints, and boundary names and descriptions. IDs,
+evidence, scope and source provenance remain protected. New values must satisfy
+the shared field constraints; ambiguous or unsupported endpoint IDs are not
+offered. Model text regeneration keeps its narrower allowlist.
+
+The TUI offers local role and endpoint choices, complete-value details and an
+explicit apply action before review and saving. Browsing, paste and Ctrl+S in a
+choice view cannot apply a value or start work. Names use one-line input. Saving
+still creates a separate inactive context, with explicit inspection and study
+selection afterward. Existing context and checkpoint artifacts need no migration.
+Reprepare unstarted revision-edit jobs when their recorded descriptor differs.
+
+## Generated context roles and operator Report choices
+
+New model-generated DFD nodes require a recognized `process`, `external-entity`
+or `data-store` role before compatibility normalization. Known spelling aliases
+remain accepted. Missing or unsupported roles fail acceptance; legacy imports
+and saved contexts retain their existing readers. This validates role vocabulary,
+not architecture or finding verdicts. Reprepare unstarted jobs whose descriptor
+digest changes with the clarified builder description. No stored artifact
+migration is needed.
+
+File-group structured-output rejection preserves the original cause and observed
+cost without attempting a repair call. Retained diagnostics remain opt-in and
+unaccepted. The failure page names its current state and exposes local inspection.
+
+Saving operator Report choices no longer initializes target Git tracking policy
+at the operator home. Containment, no-follow checks, schema version 1 and existing
+paths remain unchanged. Existing choices need no migration; no ignore file is
+changed. See the [scoped qualification and retained earlier failures](docs/assessments/generated-context-rejection-2026-10-23.md).
+
+The Report footer keeps paging visible at 80 columns and labels export readiness
+using the same cached-read guard as dispatch. An export declined during refresh
+remains visible after loading completes and requires an explicit retry. Nothing
+is queued by a declined click. Existing export artifacts and choices need no
+migration.
+
+## Complete saved-context comparison
+
+`threat-model:diff` additively returns `data.contextStructure` with schema version
+1: complete changed values, exact before/after JSON pointers, matching method,
+collection order changes and recognized saved source claims on both sides.
+Existing fields, selectors, module names and stored context artifacts retain
+their contracts. No artifact migration is required. Reprepare unstarted jobs
+whose descriptor digest changes with the updated tool description.
+
+Unique literal IDs match across collection order. Duplicate IDs use explicitly
+ambiguous positional comparison; missing IDs remain positional. Added and removed
+rows retain complete objects. Missing fields remain distinct from explicit JSON
+`null`. Other arrays retain their stored order. Matching context or source claims
+does not establish current source, semantic equivalence or finding verdicts.
+
+The study context reader adds Text, Graph, Source and Other comparison views.
+Arrows choose a change, paging reads its complete values, and Tab preserves each
+view's selection and scroll. Source distinguishes context object references from
+recorded source identities. `a` uses the candidate for that study only after a
+successful parent read. Comparison and retry make no model requests.
+
 ## Evidence-bound architecture context
 
 `threat-model:build` adds `sourcePaths` (`source_paths` alias) for 1 to 256
@@ -45,6 +197,13 @@ model and unknown dollar cost on the first narrow-terminal screen. Frozen
 evidence and model labels remain tied to the prepared receipt. Draft model
 labels respect explicit input precedence. Literal DFD paths are quoted and
 inventory byte limits use exact readable units.
+
+Inspected study context now uses the full reader area, with architecture and
+source status before longer metadata. Context checks remain visible at compact
+and medium widths. Catalog loading preserves the exact revision identity, and
+failed checks clear the compact source-match status. Existing context, scanner
+projection and artifact formats remain readable without migration. See the
+[reader and live-test assessment](docs/assessments/context-reader-live-2026-10-23.md).
 
 ## Review decision write receipts
 
@@ -1999,6 +2158,18 @@ an earlier cursor is refused rather than reused for a changed query.
   `CoverageReport` Rust literals must add `excluded_jobs: 0`. Non-discovery,
   unclassified and modern non-shard jobs no longer populate legacy cells. Old
   cell names remain job-progress values, never a current-source coverage claim.
+
+- The compatibility `campaign:plan` now prepares every child input before
+  publishing a plan and cannot contribute Map evidence. Existing plan IDs
+  refuse replacement; use a new `campaignId` for a revised plan. Its optional
+  `scopeInventory` receipt links an authenticated inventory artifact and
+  discloses inspection limits. Scope files use one bounded inventory with no
+  recursive traversal, at most 100,000 total file memberships and 4 MiB per
+  list. Incomplete enumeration refuses planning. Existing scope-file consumers
+  keep the same line format. Standard agentic discovery refuses this legacy
+  scope-file adapter; use accepted scopes through `campaign:study`. Explicit
+  `full-mode:hunt` remains a compatibility consumer and does not accept threat
+  seasoning. No strategy, model or runtime changes silently.
 
 - Runtime-free status projects historical spending under its existing `data`
   fields. Shared dispatch adds `dataCostScope: projection` from the resolved

@@ -196,7 +196,7 @@ fn reusable_exact_fingerprint_identity(
 }
 
 fn normalized_identity_file(file_path: &str) -> String {
-    crate::identity::finding_identity::normalize_path(file_path)
+    crate::identity::finding_identity::native_source_path(file_path)
 }
 
 fn normalized_identity_token(value: &str) -> String {
@@ -253,5 +253,59 @@ mod symbol_compatibility_tests {
         assert!(!finding(Some("crate::db::execute"))
             .has_compatible_symbol_locator(&finding(Some("crate::db::prepare"))));
         assert!(!finding(None).has_compatible_symbol_locator(&finding(Some("crate::db::execute"))));
+    }
+
+    #[test]
+    fn literal_path_identity_reuse_rejects_legacy_whitespace_collisions() {
+        let mut prior = finding(None);
+        prior.identity_id = Some("owned-prior-identity".into());
+        let rekeyed = std::collections::HashSet::new();
+        for path in [" src/db.rs", "src/db.rs "] {
+            let mut incoming = finding(None);
+            incoming.file_path = path.into();
+            assert!(!reusable_prior_identity(&prior, &incoming, &rekeyed));
+            assert!(!reusable_exact_fingerprint_identity(
+                &prior, &incoming, &rekeyed
+            ));
+        }
+        let mut alias = finding(None);
+        alias.file_path = "./src/db.rs".into();
+        assert!(reusable_prior_identity(&prior, &alias, &rekeyed));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn literal_path_identity_reuse_keeps_backslashes_distinct_on_unix() {
+        let mut prior = finding(None);
+        prior.identity_id = Some("owned-prior-identity".into());
+        let mut incoming = finding(None);
+        incoming.file_path = "src\\db.rs".into();
+        assert!(!reusable_prior_identity(
+            &prior,
+            &incoming,
+            &std::collections::HashSet::new()
+        ));
+    }
+
+    #[test]
+    fn literal_path_identity_assignment_does_not_reuse_a_legacy_producer_key() {
+        let root = tempfile::tempdir().unwrap();
+        let store = FindingStore::open(root.path().join("owned-findings.db")).unwrap();
+        store
+            .record_run_started("old", root.path(), "running")
+            .unwrap();
+        let prior = finding(None);
+        store.insert_finding("old", &prior).unwrap();
+        store
+            .record_run_started("new", root.path(), "running")
+            .unwrap();
+        let mut incoming = prior;
+        incoming.file_path = " src/db.rs".into();
+        store.insert_finding("new", &incoming).unwrap();
+        let old = store.list_findings_for_scan_id("old").unwrap();
+        let new = store.list_findings_for_scan_id("new").unwrap();
+        assert_ne!(old[0].identity_id, new[0].identity_id);
+        assert_eq!(old[0].file_path, "src/db.rs");
+        assert_eq!(new[0].file_path, " src/db.rs");
     }
 }

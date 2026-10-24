@@ -1,5 +1,8 @@
 //! A report projects each context separately; counts never imply coverage or a fix.
 use super::*;
+use crate::ui_view_models::occurrence_evidence::{
+    append_observation_receipt, append_observation_summary,
+};
 use kuzushi_core::workspace::ContextMatrixInvestigationReceipt;
 
 pub(super) fn lines(
@@ -26,12 +29,13 @@ pub(super) fn lines(
         "Missing observations do not establish a fix or change decisions.".into(),
     ];
     lines.extend(source_currency_lines(current));
-    lines.extend(case_lines(receipt));
     lines.extend(source_lines(receipt));
-    lines.extend(scope::lines(&receipt.scope, details));
     lines.extend(shared_allowance_lines(receipt.allowance.as_ref()));
+    lines.extend(case_lines(&receipt.occurrence));
+    lines.extend(scope::lines(&receipt.scope, details));
     if details {
         lines.extend(provenance_lines(receipt));
+        lines.extend(observation_receipts(&receipt.occurrence));
     }
     lines
 }
@@ -53,9 +57,9 @@ fn source_lines(receipt: &ContextMatrixInvestigationReceipt) -> Vec<String> {
     ]
 }
 
-fn case_lines(receipt: &ContextMatrixInvestigationReceipt) -> Vec<String> {
+fn case_lines(receipt: &kuzushi_core::findings::ContextMatrixOccurrenceReport) -> Vec<String> {
     let mut lines = Vec::new();
-    for case in &receipt.occurrence.cases {
+    for case in &receipt.cases {
         let role = if case.id == receipt.baseline_case_id {
             "baseline"
         } else {
@@ -67,14 +71,27 @@ fn case_lines(receipt: &ContextMatrixInvestigationReceipt) -> Vec<String> {
             case.label, work.completed, work.planned, work.failed, work.pending
         ));
         for finding in &work.rows {
-            lines.push(format!(
-                "  observed {} / {} · {}",
-                finding.seen, work.completed, finding.representative_title
-            ));
+            append_observation_summary(&mut lines, finding, work.completed);
         }
     }
     lines
 }
+
+fn observation_receipts(
+    report: &kuzushi_core::findings::ContextMatrixOccurrenceReport,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    for case in &report.cases {
+        lines.push(format!("Observation receipts: {}", case.label));
+        for row in &case.occurrence.rows {
+            append_observation_receipt(&mut lines, row);
+        }
+    }
+    lines
+}
+
+#[cfg(test)]
+mod tests;
 
 fn provenance_lines(receipt: &ContextMatrixInvestigationReceipt) -> Vec<String> {
     let mut lines = vec![format!("Plan digest: {}", receipt.plan_sha256)];

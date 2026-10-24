@@ -24,22 +24,28 @@ pub(crate) fn apply_agentic_static_validation(
 }
 
 pub(crate) fn resolve_agentic_schema_file_path(object: &Map<String, Value>) -> String {
-    read_object_string(object, &["filePath", "file_path"])
-        .or_else(|| read_nested_object_string(object, "source", &["filePath", "file_path"]))
-        .or_else(|| read_nested_object_string(object, "sink", &["filePath", "file_path"]))
-        .or_else(|| first_citation_string(object, &["filePath", "file_path"]))
+    read_literal_path(object)
+        .or_else(|| read_nested_object_path(object, "source"))
+        .or_else(|| read_nested_object_path(object, "sink"))
+        .or_else(|| first_citation_path(object))
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-pub(crate) fn read_nested_object_string(
-    object: &Map<String, Value>,
-    nested_key: &str,
-    keys: &[&str],
-) -> Option<String> {
+fn read_literal_path(object: &Map<String, Value>) -> Option<String> {
+    ["filePath", "file_path"].iter().find_map(|key| {
+        object
+            .get(*key)
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+    })
+}
+
+fn read_nested_object_path(object: &Map<String, Value>, nested_key: &str) -> Option<String> {
     object
         .get(nested_key)
         .and_then(Value::as_object)
-        .and_then(|nested| read_object_string(nested, keys))
+        .and_then(read_literal_path)
 }
 
 pub(crate) fn read_nested_object_u64(
@@ -53,13 +59,13 @@ pub(crate) fn read_nested_object_u64(
         .and_then(|nested| read_object_u64(nested, keys))
 }
 
-pub(crate) fn first_citation_string(object: &Map<String, Value>, keys: &[&str]) -> Option<String> {
+fn first_citation_path(object: &Map<String, Value>) -> Option<String> {
     object
         .get("citations")
         .and_then(Value::as_array)
         .and_then(|citations| citations.first())
         .and_then(Value::as_object)
-        .and_then(|citation| read_object_string(citation, keys))
+        .and_then(read_literal_path)
 }
 
 pub(crate) fn first_citation_u64(object: &Map<String, Value>, keys: &[&str]) -> Option<u64> {
@@ -131,13 +137,5 @@ pub(crate) fn read_object_u64(object: &Map<String, Value>, keys: &[&str]) -> Opt
 }
 
 pub(crate) fn normalize_reported_file_path(path: String, target: &Path) -> String {
-    let candidate = PathBuf::from(path.trim());
-    if candidate.is_absolute() {
-        return candidate
-            .strip_prefix(target)
-            .unwrap_or(&candidate)
-            .display()
-            .to_string();
-    }
-    path.trim().to_string()
+    crate::findings::normalize_reported_source_path(path, target)
 }

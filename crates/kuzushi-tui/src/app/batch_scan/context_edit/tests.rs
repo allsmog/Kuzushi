@@ -6,13 +6,14 @@ use kuzushi_core::capabilities::threat_model::{
     ThreatModelRevisionSource,
 };
 use kuzushi_core::{modules::ToolExecutionContext, ThreatModelRef, V2Config, WorkspaceTarget};
+mod architecture;
 mod checkpoints;
 
 fn commit(root: &std::path::Path, label: &str) -> ThreatModelRef {
     commit_threat_model_revision(root, &json!({"version":"1","methodology":"stride","systemContext":"Original overview","dfd":{"nodes":[{"id":"reader","name":"Reader","type":"process","trustZone":"internal"}],"flows":[],"trustBoundaries":[]},"threats":[],"summary":{},"openQuestions":["Who owns the input?"]}), ThreatModelCommit {model_id:None,new_model:true,label:label.into(),scope:ScopeRef::legacy_root(root,&format!("sha256:{}","1".repeat(64))),methodology:"stride".into(),source:ThreatModelRevisionSource::Import,source_revision_id:None,run_id:None,activate:Some(true),actor:"test".into()}).unwrap().model_ref
 }
 
-fn read(app: &mut ShellApp, root: &std::path::Path, reference: &ThreatModelRef) {
+fn read(app: &mut ShellApp, root: &std::path::Path, reference: &ThreatModelRef) -> Value {
     let workspace = WorkspaceTarget::new(root).unwrap();
     let config = app.config().clone();
     let ctx = ToolExecutionContext {
@@ -37,6 +38,7 @@ fn read(app: &mut ShellApp, root: &std::path::Path, reference: &ThreatModelRef) 
         .dispatch_prepared_input_with_runtime(prepared, &ctx, None)
         .unwrap();
     app.cache_study_context_preview(&result["data"]);
+    result["data"]["document"].clone()
 }
 
 fn fixture() -> (tempfile::TempDir, ShellApp, ThreatModelRef, ThreatModelRef) {

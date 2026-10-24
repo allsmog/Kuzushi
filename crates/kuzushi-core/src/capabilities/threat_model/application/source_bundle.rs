@@ -8,9 +8,42 @@ const X_RAY_INVARIANTS_MD: &str = "invariants.md";
 #[derive(Debug, Clone)]
 pub(crate) struct ThreatModelSourceBundle {
     records: Vec<ThreatModelSourceRecord>,
+    inventory: Option<PromptRepositoryInventory>,
 }
 
 impl ThreatModelSourceBundle {
+    pub(crate) fn prompt_inventory(&self) -> Result<&PromptRepositoryInventory> {
+        self.inventory
+            .as_ref()
+            .context("Repository filename inventory was not prepared")
+    }
+
+    pub(crate) fn inventory_receipt(&self) -> Option<&Value> {
+        self.inventory.as_ref().map(|inventory| &inventory.receipt)
+    }
+
+    pub(crate) fn inventory_disclosure(&self) -> Option<String> {
+        self.inventory
+            .as_ref()
+            .map(PromptRepositoryInventory::disclosure)
+    }
+
+    pub(crate) fn stamp_inventory(&self, document: &mut Value) -> Result<()> {
+        let Some(receipt) = self.inventory_receipt() else {
+            return Ok(());
+        };
+        let provenance = document
+            .as_object_mut()
+            .context("Generated context is not an object")?
+            .entry("provenance")
+            .or_insert_with(|| json!({}));
+        provenance
+            .as_object_mut()
+            .context("Generated context provenance is not an object")?
+            .insert("repositoryInventory".into(), receipt.clone());
+        Ok(())
+    }
+
     /// Code depends on the authenticated selected surfaces. Load it only after
     /// parent context exists and catalog grounding has been resolved.
     pub(crate) fn attach_source_code(
@@ -21,24 +54,34 @@ impl ThreatModelSourceBundle {
         ctx: &ToolExecutionContext<'_>,
     ) -> Result<CodeEvidence> {
         if !input.sources.iter().any(|source| source == "source-code") {
+            self.prepare_prompt_inventory(input, ctx, None)?;
             return Ok(CodeEvidence::default());
         }
         emit_source_step(ctx, "source:code collect");
-        let source = super::source_code::collect_source_code(input, surfaces, tree_hash, ctx)?;
-        let mut record = ThreatModelSourceRecord::loaded(
-            "derived",
-            "source-code",
-            None,
-            source.content,
-            input.max_source_bytes,
-        );
-        record.truncated = source.partial;
-        let evidence = CodeEvidence {
-            prompt: record.prompt_block().unwrap_or_default(),
-            references: source.references,
-        };
+        let (source, inventory) = super::source_code::collect_source_code_with_inventory(
+            input, surfaces, tree_hash, ctx,
+        )?;
+        self.prepare_prompt_inventory(input, ctx, Some(inventory))?;
+        let (record, evidence) = source_code_record(source, input.max_source_bytes);
         self.records.push(record);
         Ok(evidence)
+    }
+
+    fn prepare_prompt_inventory(
+        &mut self,
+        input: &BuildInput,
+        ctx: &ToolExecutionContext<'_>,
+        inventory: Option<crate::repository_inventory::RepositoryInventory>,
+    ) -> Result<()> {
+        if input.is_refine() {
+            return Ok(());
+        }
+        let limit = input.max_elements.saturating_mul(4).max(40);
+        self.inventory = Some(match inventory {
+            Some(inventory) => PromptRepositoryInventory::from_inventory(inventory, limit)?,
+            None => PromptRepositoryInventory::collect(input.analysis_root(), limit, ctx)?,
+        });
+        Ok(())
     }
 
     pub(crate) fn metadata_json(&self) -> Value {
@@ -114,6 +157,20 @@ impl ThreatModelSourceBundle {
         );
         Ok(())
     }
+}
+
+fn source_code_record(
+    source: super::source_code::CodeSource,
+    limit: usize,
+) -> (ThreatModelSourceRecord, CodeEvidence) {
+    let mut record =
+        ThreatModelSourceRecord::loaded("derived", "source-code", None, source.content, limit);
+    record.truncated = source.partial;
+    let evidence = CodeEvidence {
+        prompt: record.prompt_block().unwrap_or_default(),
+        references: source.references,
+    };
+    (record, evidence)
 }
 
 fn catalog_pair_digest_from_receipt(
@@ -283,7 +340,10 @@ pub(crate) fn load_threat_model_source_bundle(
         load_parent_artifacts(ctx, input, &mut records)?;
     }
     load_operator_sources(ctx, input, &mut records)?;
-    Ok(ThreatModelSourceBundle { records })
+    Ok(ThreatModelSourceBundle {
+        records,
+        inventory: None,
+    })
 }
 
 fn parent_artifacts_enabled(input: &BuildInput) -> bool {
@@ -904,6 +964,7 @@ mod source_size_contract_tests {
         );
         let bundle = ThreatModelSourceBundle {
             records: vec![context, catalog],
+            inventory: None,
         };
 
         let error = bundle
@@ -935,7 +996,10 @@ mod source_size_contract_tests {
         let attachments = threat_model_attachments(&workspace).unwrap();
         let mut records = Vec::new();
         append_attachment_records(&workspace, &attachments, 32, &mut records).unwrap();
-        let bundle = ThreatModelSourceBundle { records };
+        let bundle = ThreatModelSourceBundle {
+            records,
+            inventory: None,
+        };
         let prompt = bundle.prompt_blocks();
 
         assert_eq!(
@@ -987,6 +1051,7 @@ mod source_size_contract_tests {
         );
         let bundle = ThreatModelSourceBundle {
             records: vec![context, catalog],
+            inventory: None,
         };
 
         let error = bundle
@@ -1301,3 +1366,6 @@ mod source_size_contract_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod inventory_tests;

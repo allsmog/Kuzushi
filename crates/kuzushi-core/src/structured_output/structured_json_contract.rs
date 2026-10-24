@@ -339,6 +339,20 @@ pub(crate) fn parse_or_repair_required_structured_json<T>(
     )
 }
 
+/// Parse a closed response without granting a repair-call capability.
+pub(crate) fn parse_required_structured_json_with_cost<T>(
+    response: AgentQueryResponse,
+    contract: StructuredJsonContract,
+    validate: impl Fn(Value) -> Result<T>,
+) -> Result<CostedStructuredJson<T>> {
+    let cost = checked_response_cost(&response, RuntimeCostReport::INCOMPLETE_ZERO)?;
+    let material = checked_response_material(&response, cost)?;
+    reject_truncated_response(&response, &contract, &material, cost)?;
+    let value = parse_and_validate_measured(&response, &contract, &validate)
+        .map_err(|error| observed_failure(error, cost, FailureReason::ResponseRejected))?;
+    Ok(CostedStructuredJson::from_cost_report(value, cost))
+}
+
 pub(crate) fn parse_or_repair_required_structured_json_with_cost<T>(
     response: AgentQueryResponse,
     contract: StructuredJsonContract,

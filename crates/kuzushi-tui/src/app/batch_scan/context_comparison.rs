@@ -2,10 +2,37 @@ use crate::app::{state_transitions::InputUpdate, ShellApp};
 use anyhow::Context;
 use crossterm::event::KeyCode;
 use kuzushi_core::{
-    capabilities::threat_model::{context_text_differences, ContextTextDifference},
+    capabilities::threat_model::{
+        context_document_differences, context_text_differences, ContextDocumentDiff,
+        ContextTextDifference,
+    },
     ThreatModelRef,
 };
 use serde_json::{json, Value};
+mod navigation;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum ContextComparisonView {
+    #[default]
+    Text,
+    Structure,
+    Source,
+    Other,
+}
+
+impl ContextComparisonView {
+    pub const ALL: [Self; 4] = [Self::Text, Self::Structure, Self::Source, Self::Other];
+
+    pub fn index(self) -> usize {
+        Self::ALL.iter().position(|view| *view == self).unwrap()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct ContextComparisonCursor {
+    pub selected: usize,
+    pub scroll: usize,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct StudyContextComparison {
@@ -13,8 +40,34 @@ pub(crate) struct StudyContextComparison {
     pub parent: ThreatModelRef,
     pub candidate: ThreatModelRef,
     pub differences: Option<Vec<ContextTextDifference>>,
+    pub structure: Option<ContextDocumentDiff>,
     pub error: Option<String>,
-    pub scroll: usize,
+    pub view: ContextComparisonView,
+    pub cursors: [ContextComparisonCursor; 4],
+}
+
+impl StudyContextComparison {
+    pub fn ready(&self) -> bool {
+        self.error.is_none() && self.differences.is_some() && self.structure.is_some()
+    }
+
+    pub fn cursor(&self) -> ContextComparisonCursor {
+        self.cursors[self.view.index()]
+    }
+
+    fn store_outcome(
+        &mut self,
+        outcome: anyhow::Result<(Vec<ContextTextDifference>, ContextDocumentDiff)>,
+    ) {
+        match outcome {
+            Ok((differences, structure)) => {
+                self.differences = Some(differences);
+                self.structure = Some(structure);
+                self.error = None;
+            }
+            Err(error) => self.error = Some(error.to_string()),
+        }
+    }
 }
 
 impl ShellApp {
@@ -74,8 +127,10 @@ impl ShellApp {
             parent: serde_json::from_value(parent.clone())?,
             candidate,
             differences: None,
+            structure: None,
             error: None,
-            scroll: 0,
+            view: ContextComparisonView::Text,
+            cursors: [ContextComparisonCursor::default(); 4],
         })
     }
 
@@ -96,7 +151,12 @@ impl ShellApp {
             .get("document")
             .filter(|value| value.is_object())
             .context("The exact parent reader returned no document")
-            .map(|parent| context_text_differences(parent, &preview.document));
+            .map(|parent| {
+                (
+                    context_text_differences(parent, &preview.document),
+                    context_document_differences(parent, &preview.document),
+                )
+            });
         self.edit_context_picker(|config| {
             let comparison = config
                 .context_picker
@@ -105,10 +165,7 @@ impl ShellApp {
                 .comparison
                 .as_mut()
                 .unwrap();
-            match outcome {
-                Ok(differences) => comparison.differences = Some(differences),
-                Err(error) => comparison.error = Some(error.to_string()),
-            }
+            comparison.store_outcome(outcome);
         });
         true
     }
@@ -119,23 +176,41 @@ impl ShellApp {
     ) -> Option<InputUpdate> {
         let comparison = self.study_context_picker()?.comparison.as_ref()?;
         if code == KeyCode::Enter && comparison.error.is_some() {
-            return Some(self.compare_study_context());
+            return Some(self.retry_context_comparison());
         }
-        if code == KeyCode::Char('a') && comparison.differences.is_some() {
+        if code == KeyCode::Char('a') && comparison.ready() {
             self.edit_context_picker(|config| {
                 config.context_picker.as_mut().unwrap().comparison = None
             });
             return Some(self.handle_study_context_key(code));
         }
-        let page = self.viewport().rows.saturating_sub(6).max(1) as usize;
+        let limits = navigation::limits(self, comparison);
         self.edit_context_picker(|config| {
-            update_comparison_key(config.context_picker.as_mut().unwrap(), code, page)
+            navigation::update(config.context_picker.as_mut().unwrap(), code, limits)
         });
         Some(InputUpdate::handled())
     }
 }
 
 impl ShellApp {
+    fn retry_context_comparison(&mut self) -> InputUpdate {
+        let previous = self
+            .study_context_picker()
+            .unwrap()
+            .comparison
+            .as_ref()
+            .unwrap();
+        let (view, cursors) = (previous.view, previous.cursors);
+        let update = self.compare_study_context();
+        self.edit_context_picker(|config| {
+            if let Some(comparison) = config.context_picker.as_mut().unwrap().comparison.as_mut() {
+                comparison.view = view;
+                comparison.cursors = cursors;
+            }
+        });
+        update
+    }
+
     pub(crate) fn context_comparison_failed(&mut self, tool: &str, error: &str) {
         if tool != "threat-model:read" {
             return;
@@ -170,17 +245,4 @@ fn matches_parent_receipt(
             .study_context_picker()
             .and_then(|picker| picker.selected.as_ref())
             == Some(&comparison.candidate)
-}
-
-fn update_comparison_key(picker: &mut super::StudyContextPicker, code: KeyCode, page: usize) {
-    if matches!(code, KeyCode::Esc | KeyCode::Char('q')) {
-        picker.comparison = None;
-        return;
-    }
-    let comparison = picker.comparison.as_mut().unwrap();
-    match code {
-        KeyCode::PageUp => comparison.scroll = comparison.scroll.saturating_sub(page),
-        KeyCode::PageDown => comparison.scroll = comparison.scroll.saturating_add(page),
-        _ => {}
-    }
 }

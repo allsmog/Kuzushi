@@ -1,0 +1,174 @@
+name: Inspect a large diagram and scan its tail through triage, report and restart
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR SEMGREP_APP_TOKEN SEMGREP_AGENT_TOKEN
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_dfd.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: run threat-model:import {"path":".kuzushi/manual-context.json","label":"Large","activate":true}
+require-live-snap: 30 threat-model:import saved | imported
+submit: map
+require-live-snap: 25 SYSTEM SUMMARY | map-summary
+nav-mode:
+keys: u
+require-live-snap: 25 Map ✓ | accepted-context
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_dfd.py @TMP_TARGET @ART mapped
+submit: use sast
+submit: options sast:scan
+submit: set taskMode manual
+submit: set tasks semgrep
+paste-file: @ART/rule-setting.txt
+keys: Enter
+submit: set semgrepTimeoutMs 60000
+submit: map
+require-live-snap: 25 SYSTEM SUMMARY | ready-summary
+nav-mode:
+keys: G
+require-live-snap: 25 Tail worker 095 | last-summary-component
+keys: Enter z
+require-live-snap: 25 s plan scan | tail-diagram
+expect: Tail worker 095
+expect: Worker 094
+resize: 160x48
+wait: 0.3
+require-live-snap: 20 s plan scan | tail-160x48
+expect: Worker 094
+resize: 96x89
+wait: 0.3
+require-live-snap: 20 s plan scan | tail-96x89
+expect: Worker 094
+expect: ▲ Declared transfer 095
+resize: 80x24
+wait: 0.3
+require-live-snap: 20 s plan scan | tail-80x24
+resize: 60x20
+wait: 0.3
+require-live-snap: 20 s plan scan | tail-60x20
+resize: 40x12
+wait: 0.3
+require-live-snap: 20 s plan scan | tail-40x12
+expect: f findings
+ask: Does the tail component beyond the former 64-element cutoff retain its flow, evidence, selection and scoped actions across all six sizes?
+resize: 120x36
+keys: s
+require-live-snap: 25 PLAN A STUDY | tail-study
+expect: 1 exact source path
+expect: No jobs started
+keys: Escape
+require-live-snap: 25 s plan scan | canceled-study-return
+expect: Tail worker 095
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_dfd.py @TMP_TARGET @ART canceled-draft
+keys: s
+require-live-snap: 25 PLAN A STUDY | new-tail-study
+keys: Home Down Down Down Down Down Enter
+type: 1
+keys: Enter Down Enter
+type: 1
+keys: Enter L
+require-live-snap: 35 Draft ready | fixed-tail-plan
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_dfd.py @TMP_TARGET @ART draft
+keys: L Home
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | approval-terms
+expect: 3 fixed jobs
+expect: Total provider calls: 1
+expect: Protected review calls: 1
+keys: End
+require-live-snap: 20 y approve | exact-approval
+keys: y
+require-live-snap: 25 Approval saved | approved
+keys: L
+require-live-snap: 25 L starts its fixed jobs | explicit-launch
+keys: L
+require-live-snap: 25 dispatcher pid | started
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_dfd.py @TMP_TARGET @ART completed
+keys: r
+require-live-snap: 25 3 completed | complete
+expect-not: Ledger refresh failed
+expect: Severity cutoff: not configured
+expect: Owned policy marker needs an owner decision
+expect: Equivalence:
+expect-not: security disabled
+expect-not: blocking 0
+resize: 160x48
+wait: 0.3
+require-live-snap: 20 Severity cutoff: not configured | outcome-160x48
+resize: 96x89
+wait: 0.3
+require-live-snap: 20 Severity cutoff: not configured | outcome-96x89
+resize: 80x24
+wait: 0.3
+require-live-snap: 20 work finished | outcome-80x24
+keys: NPage
+live-snap: outcome-80x24-page
+resize: 60x20
+keys: g
+wait: 0.3
+require-live-snap: 20 work finished | outcome-60x20
+keys: NPage
+live-snap: outcome-60x20-page-1
+keys: NPage
+live-snap: outcome-60x20-page-2
+keys: NPage
+live-snap: outcome-60x20-page-3
+keys: NPage
+live-snap: outcome-60x20-page-4
+resize: 40x12
+keys: g
+wait: 0.3
+require-live-snap: 20 work finished | outcome-40x12
+keys: NPage
+live-snap: outcome-40x12-page-1
+keys: NPage
+live-snap: outcome-40x12-page-2
+keys: NPage
+live-snap: outcome-40x12-page-3
+keys: NPage
+live-snap: outcome-40x12-page-4
+keys: NPage
+live-snap: outcome-40x12-page-5
+keys: NPage
+live-snap: outcome-40x12-page-6
+keys: NPage
+live-snap: outcome-40x12-page-7
+keys: NPage
+live-snap: outcome-40x12-page-8
+resize: 120x36
+keys: g
+require-live-snap: 20 Severity cutoff: not configured | outcome-return
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_dfd.py @TMP_TARGET @ART completed-screen
+keys: q
+require-live-snap: 25 s plan scan | exact-diagram-return
+expect: Tail worker 095
+submit: workbench
+require-live-snap: 25 Viewing Scan | selected-scan
+nav-mode:
+keys: n
+require-live-snap: 25 Viewing Review | accepted-scan
+paste-file: @ART/open-tail.txt
+keys: Enter
+require-live-snap: 25 OWNER_POLICY_REVIEW | tail-finding
+expect-not: live source missing or changed
+submit: decision deferred Owned tail source inspection
+submit: report
+require-live-snap: 25 Evidence: 3 producer observations | faithful-report
+keys: j j j
+require-live-snap: 20 format json (4/6) | export-format
+keys: Enter
+require-live-snap: 25 EXPORTED | exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_dfd.py @TMP_TARGET @ART exported
+ask: Does the diagram launch only three approved tail-file jobs, retain three observations under one deferred identity and export the exact context, source and spending without scanning other modules?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: report
+require-live-snap: 25 Evidence: 3 producer observations | recovered-report
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_dfd.py @TMP_TARGET @ART restarted
+ask: Does no-color restart preserve the completed fixed plan, exact tail finding, deferred decision, source and unused protected Review capacity without any new work?
+keys: C-c
+require-exit: 10

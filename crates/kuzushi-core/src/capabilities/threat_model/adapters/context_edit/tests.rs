@@ -181,3 +181,47 @@ fn a_different_inline_target_cannot_redirect_a_workspace_edit() {
         before
     );
 }
+
+#[test]
+fn prepared_architecture_correction_is_inactive_and_retains_its_exact_parent() {
+    let root = tempfile::tempdir().unwrap();
+    let base = commit_test_model(root.path(), "Selected");
+    let original = load_exact_threat_model(root.path(), &base).unwrap();
+    let active = load_threat_model_manifest(root.path())
+        .unwrap()
+        .unwrap()
+        .active;
+    let result = dispatch(
+        root.path(),
+        json!({"threatModelRef":base,"edits":[
+            {"pointer":"/dfd/nodes/0/type","text":"external-entity"},
+            {"pointer":"/dfd/nodes/0/name","text":"Human operator"}
+        ]}),
+    )
+    .unwrap();
+    let reference: ThreatModelRef =
+        serde_json::from_value(result["data"]["modelRef"].clone()).unwrap();
+    let copy = load_exact_threat_model(root.path(), &reference).unwrap();
+    assert_eq!(copy["dfd"]["nodes"][0]["type"], "external-entity");
+    assert_eq!(
+        copy["dfd"]["nodes"][0]["id"],
+        original["dfd"]["nodes"][0]["id"]
+    );
+    assert_eq!(
+        load_exact_threat_model(root.path(), &base).unwrap(),
+        original
+    );
+    assert_eq!(
+        load_threat_model_manifest(root.path())
+            .unwrap()
+            .unwrap()
+            .active,
+        active
+    );
+    assert_eq!(
+        copy["provenance"]["operatorEdit"]["sourceModelRef"],
+        json!(base)
+    );
+    assert_eq!(copy["provenance"]["operatorEdit"]["actor"], "operator");
+    assert_eq!(result["data"]["activated"], false);
+}

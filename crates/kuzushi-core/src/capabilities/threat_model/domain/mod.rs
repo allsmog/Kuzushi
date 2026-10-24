@@ -1,9 +1,18 @@
+mod context_document_diff;
 use super::*;
+pub use context_document_diff::{
+    context_document_differences, ContextCollectionOrderDifference, ContextDifferenceMatching,
+    ContextDifferenceSection, ContextDocumentDiff, ContextSourceClaims, ContextValueDifference,
+};
 pub use context_edits::{
-    apply_context_text_edits, context_text_differences, context_text_fields, ContextTextDifference,
-    ContextTextEdit, ContextTextField, MAX_CONTEXT_EDITS, MAX_CONTEXT_EDIT_BYTES,
+    apply_context_operator_edits, apply_context_text_edits, context_operator_fields,
+    context_text_differences, context_text_fields, ContextEditConstraint, ContextEditField,
+    ContextFieldChoice, ContextTextDifference, ContextTextEdit, ContextTextField,
+    MAX_CONTEXT_EDITS, MAX_CONTEXT_EDIT_BYTES,
 };
 mod context_edits;
+mod generated_node_roles;
+pub(crate) use generated_node_roles::require_generated_node_roles;
 mod import_source;
 pub use import_source::validate_threat_model_import_source;
 pub(crate) use import_source::{select_import_source, ThreatModelImportSource};

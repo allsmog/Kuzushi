@@ -1,0 +1,66 @@
+name: Reject an unsupported generated node role without repair, acceptance or lost spending
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_node_roles.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/context-command.txt
+keys: Enter
+require-live-snap: 25 1 planned | one-approved-job
+nav-mode:
+keys: L
+require-live-snap: 25 dispatcher pid | one-job-started
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_node_roles.py @TMP_TARGET @ART verify
+keys: r
+require-live-snap: 25 1 failed | rejected-role
+keys: a
+require-live-snap: 25 CONTEXT JOB RESULT | retained-rejection
+expect: rejected-context-output.txt
+expect: d output
+expect: no model repair request
+ask: Does a successful model reply with an unsupported DFD role clearly fail context acceptance, retain the spent request and offer explicit local inspection without automatic repair?
+keys: d
+require-live-snap: 25 REJECTED CONTEXT OUTPUT | local-diagnostic
+expect: UNACCEPTED MODEL OUTPUT
+keys: Enter m n s t Tab
+require-live-snap: 15 REJECTED CONTEXT OUTPUT | diagnostic-owns-input
+expect-not: REVIEW PLAN & ALLOWANCE
+resize: 160x48
+live-snap: diagnostic-160x48
+resize: 96x89
+live-snap: diagnostic-96x89
+resize: 80x24
+live-snap: diagnostic-80x24
+resize: 60x20
+live-snap: diagnostic-60x20
+resize: 40x12
+live-snap: diagnostic-40x12
+expect: d / Esc back · PgUp/Dn read
+keys: NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage
+require-live-snap: 15 This output is unaccepted. | diagnostic-tail
+ask: Is the complete bounded rejected response readable at all six sizes, with acceptance blocked and the original context and source intact?
+resize: 120x36
+keys: Escape
+require-live-snap: 15 CONTEXT JOB RESULT | failure-restored
+keys: Enter
+require-live-snap: 15 CAMPAIGN invalid-node-role | job-history
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/context-command.txt
+keys: Enter
+require-live-snap: 25 1 failed | same-failed-job
+nav-mode:
+keys: a
+require-live-snap: 25 d output | same-rejection
+keys: d
+require-live-snap: 25 REJECTED CONTEXT OUTPUT | no-color-rejection
+require-shell: python3 -B @REPO/scripts/devex/fixtures/generated_node_roles.py @TMP_TARGET @ART verify
+ask: Does restart retain the same failed attempt, bounded diagnostic, one consumed request and original active context without creating another job or request?
+keys: C-c
+require-exit: 10

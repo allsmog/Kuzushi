@@ -185,7 +185,8 @@ pub fn finding_observation_identity(finding: &Finding) -> &str {
 /// fallback, so stored identities are not rewritten.
 fn stable_identity_key(input: &FindingIdentityInput<'_>) -> String {
     let weakness = weakness_key(input.rule_id);
-    let file_path = crate::identity::finding_identity::normalize_path(input.file_path);
+    let file_path =
+        crate::identity::finding_identity::recorded_source_path_identity(input.file_path);
     let identity_scope = input
         .symbol_locator
         .map(|symbol| format!("{file_path}#{symbol}"))
@@ -242,7 +243,7 @@ pub fn finding_identity_alias(identity_id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::findings::FindingEvidence;
+    use crate::findings::{FindingEvidence, Severity};
 
     fn finding(message: &str, line: u32) -> Finding {
         Finding {
@@ -255,6 +256,32 @@ mod tests {
             tool: "semgrep".to_string(),
             ..Finding::default()
         }
+    }
+
+    #[test]
+    fn literal_paths_keep_distinct_durable_identity_fallbacks() {
+        let ordinary = Finding::new_tool(
+            "agentic",
+            "owned-rule",
+            "owned.rs",
+            1,
+            None,
+            Severity::Info,
+            "Owned observation",
+        );
+        let literal = Finding::new_tool(
+            "agentic",
+            "owned-rule",
+            " owned.rs",
+            1,
+            None,
+            Severity::Info,
+            "Owned observation",
+        );
+        assert_ne!(
+            finding_identity_key_for_finding(&ordinary),
+            finding_identity_key_for_finding(&literal)
+        );
     }
 
     #[test]

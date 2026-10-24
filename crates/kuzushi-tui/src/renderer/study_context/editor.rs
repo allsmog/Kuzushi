@@ -2,13 +2,15 @@ use super::*;
 use crate::app::{ContextEditDraft, ContextEditMode};
 use crate::renderer::shared::{field_editor_lines, text::wrap_text};
 use crate::ui_view_models::context_edit::{
-    context_draft_controls, context_edit_review_lines, context_edit_title,
+    context_choice_area, context_choice_detail_lines, context_choice_lines, context_draft_controls,
+    context_edit_review_lines, context_edit_title, context_single_line_area,
 };
 
 pub(super) fn render(frame: &mut Frame<'_>, app: &ShellApp, area: Rect) {
     let Some(draft) = app.context_edit_draft() else {
         return;
     };
+    let area = editor_area(draft, area, app.context_checkpoint_note().is_some());
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme::subtle())
@@ -24,24 +26,18 @@ pub(super) fn render(frame: &mut Frame<'_>, app: &ShellApp, area: Rect) {
         inner.width,
         inner.height.min(2),
     );
-    let mut body = Rect::new(
-        inner.x,
-        inner.y,
-        inner.width,
-        inner.height.saturating_sub(footer.height),
-    );
-    render_edit_notice(frame, draft, body);
-    body.y += 1;
-    body.height = body.height.saturating_sub(1);
+    render_edit_notice(frame, draft, inner);
     if let Some(note) = app.context_checkpoint_note() {
         frame.render_widget(
-            Paragraph::new(fit(&note, body.width as usize)).style(theme::muted()),
-            Rect::new(body.x, body.y, body.width, 1),
+            Paragraph::new(fit(&note, inner.width as usize)).style(theme::muted()),
+            Rect::new(inner.x, inner.y + 1, inner.width, 1),
         );
-        body.y += 1;
-        body.height = body.height.saturating_sub(1);
     }
-    render_editor_body(frame, draft, body);
+    render_editor_body(
+        frame,
+        draft,
+        content_area(inner, app.context_checkpoint_note().is_some()),
+    );
     render_edit_controls(frame, draft, footer);
 }
 
@@ -69,6 +65,14 @@ fn render_edit_controls(frame: &mut Frame<'_>, draft: &ContextEditDraft, area: R
 }
 
 fn render_editor_body(frame: &mut Frame<'_>, draft: &ContextEditDraft, area: Rect) {
+    if draft.mode == ContextEditMode::Choosing {
+        render_choices(frame, draft, area);
+        return;
+    }
+    render_text_or_review(frame, draft, area);
+}
+
+fn render_text_or_review(frame: &mut Frame<'_>, draft: &ContextEditDraft, area: Rect) {
     if draft.mode == ContextEditMode::Recovery {
         let lines = crate::ui_view_models::context_edit::context_recovery_lines(
             draft,
@@ -90,6 +94,78 @@ fn render_editor_body(frame: &mut Frame<'_>, draft: &ContextEditDraft, area: Rec
         return;
     }
     render_context_review(frame, draft, area);
+}
+
+fn render_choices(frame: &mut Frame<'_>, draft: &ContextEditDraft, area: Rect) {
+    let lines = context_choice_lines(draft, area.width as usize, area.height as usize);
+    frame.render_widget(
+        Paragraph::new(lines.into_iter().map(Line::from).collect::<Vec<_>>()),
+        area,
+    );
+}
+
+fn content_area(inner: Rect, checkpoint: bool) -> Rect {
+    let heading = 1 + u16::from(checkpoint);
+    Rect::new(
+        inner.x,
+        inner.y.saturating_add(heading),
+        inner.width,
+        inner.height.saturating_sub(heading + 2),
+    )
+}
+
+fn editor_area(draft: &ContextEditDraft, area: Rect, checkpoint: bool) -> Rect {
+    if draft.mode == ContextEditMode::Choosing {
+        return context_choice_area(draft, area, checkpoint);
+    }
+    if draft.mode == ContextEditMode::Writing
+        && draft.entries[draft.cursor].constraint
+            == kuzushi_core::capabilities::threat_model::ContextEditConstraint::SingleLine
+    {
+        return context_single_line_area(area, checkpoint);
+    }
+    area
+}
+
+fn choice_body_area(app: &ShellApp, draft: &ContextEditDraft) -> Rect {
+    let viewport = app.viewport();
+    let outer =
+        crate::ui_view_models::study_config::study_config_area(viewport.columns, viewport.rows);
+    let checkpoint = app.context_checkpoint_note().is_some();
+    let area = editor_area(draft, outer, checkpoint);
+    content_area(area.inner(ratatui::layout::Margin::new(1, 1)), checkpoint)
+}
+
+pub(crate) fn context_choice_page_rows(app: &ShellApp) -> usize {
+    let Some(draft) = app.context_edit_draft() else {
+        return 1;
+    };
+    choice_body_area(app, draft).height.saturating_sub(2).max(1) as usize
+}
+
+pub(crate) fn context_choice_offset_after_page(
+    app: &ShellApp,
+    code: crossterm::event::KeyCode,
+) -> usize {
+    use crossterm::event::KeyCode;
+    let Some(draft) = app.context_edit_draft() else {
+        return 0;
+    };
+    let body = choice_body_area(app, draft);
+    let maximum = context_choice_detail_lines(draft, body.width as usize)
+        .len()
+        .saturating_sub(body.height as usize);
+    let current = draft.scroll.min(maximum);
+    let step = body.height.saturating_sub(1).max(1) as usize;
+    [
+        (KeyCode::PageUp, current.saturating_sub(step)),
+        (KeyCode::PageDown, current.saturating_add(step).min(maximum)),
+        (KeyCode::Home, 0),
+        (KeyCode::End, maximum),
+    ]
+    .into_iter()
+    .find_map(|(key, offset)| (key == code).then_some(offset))
+    .unwrap_or(current)
 }
 
 fn render_text_field(frame: &mut Frame<'_>, draft: &ContextEditDraft, area: Rect) {

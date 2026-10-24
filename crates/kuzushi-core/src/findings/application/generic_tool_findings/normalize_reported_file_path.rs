@@ -9,15 +9,7 @@ pub(crate) struct GenericPersistedRun {
 }
 
 pub(crate) fn normalize_reported_file_path(path: String, target: &Path) -> String {
-    let candidate = PathBuf::from(path.trim());
-    if candidate.is_absolute() {
-        return candidate
-            .strip_prefix(target)
-            .unwrap_or(&candidate)
-            .display()
-            .to_string();
-    }
-    path.trim().to_string()
+    crate::findings::normalize_reported_source_path(path, target)
 }
 
 pub(crate) fn normalize_agent_json_findings(
@@ -94,7 +86,15 @@ fn with_agent_finding_metadata(mut finding: Finding, object: &Map<String, Value>
 
 fn agent_finding_file_path(object: &Map<String, Value>, target: &Path) -> String {
     normalize_reported_file_path(
-        read_object_string(object, &["filePath", "file_path", "path"])
+        ["filePath", "file_path", "path"]
+            .iter()
+            .find_map(|key| {
+                object
+                    .get(*key)
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned)
+            })
             .unwrap_or_else(|| "unknown".to_string()),
         target,
     )
@@ -190,6 +190,23 @@ fn read_object_u64(object: &Map<String, Value>, keys: &[&str]) -> Option<u64> {
 #[cfg(test)]
 mod metadata_tests {
     use super::*;
+
+    #[test]
+    fn literal_paths_survive_generic_agent_output_fields() {
+        for key in ["filePath", "file_path", "path"] {
+            let mut item =
+                serde_json::json!({"ruleId":"owned-rule","title":"Owned claim","severity":"info"});
+            item[key] = serde_json::json!(" literal 東京.rs ");
+            let findings = normalize_agent_json_findings(
+                serde_json::json!({"findings":[item]}),
+                Path::new("/owned"),
+                "owned-tool",
+                1,
+            )
+            .unwrap();
+            assert_eq!(findings[0].file_path, " literal 東京.rs ");
+        }
+    }
 
     #[test]
     fn generic_agent_findings_keep_optional_symbol_and_rule_version() {

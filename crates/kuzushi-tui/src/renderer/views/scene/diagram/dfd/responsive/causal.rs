@@ -1,3 +1,4 @@
+use super::super::neighborhood::{selected_flow, SelectedFlow};
 use super::super::*;
 use super::{context_name, context_node_label};
 use crate::renderer::fit;
@@ -7,12 +8,6 @@ use ratatui::layout::Rect;
 
 const NODE_H: u16 = 3;
 const NORMAL_MIN_HEIGHT: u16 = 11;
-
-struct SelectedFlow<'a> {
-    flow: &'a DfdFlowModel,
-    hidden: usize,
-    kind: &'static str,
-}
 
 pub(super) fn render(diagram: &DfdDiagram, buf: &mut Buffer, area: Rect) {
     if let Some(selected) = selected_flow(diagram) {
@@ -156,56 +151,6 @@ fn draw_hidden_flows(buf: &mut Buffer, area: Rect, y: u16, hidden: usize) {
             diagram_muted(),
         );
     }
-}
-
-fn selected_flow(diagram: &DfdDiagram) -> Option<SelectedFlow<'_>> {
-    match selected_item(diagram)? {
-        DfdSelected::Flow(flow) => Some(SelectedFlow {
-            flow,
-            hidden: 0,
-            kind: "selected flow",
-        }),
-        DfdSelected::Boundary(boundary) => selected_boundary_flow(diagram, boundary),
-        DfdSelected::Node(node) => selected_node_flow(diagram, node),
-    }
-}
-
-fn selected_boundary_flow<'a>(
-    diagram: &'a DfdDiagram,
-    boundary: &DfdBoundaryModel,
-) -> Option<SelectedFlow<'a>> {
-    let flows = diagram
-        .model
-        .flows
-        .iter()
-        .filter(|flow| flow_crosses_boundary(flow, boundary))
-        .collect::<Vec<_>>();
-    Some(SelectedFlow {
-        flow: *flows.first()?,
-        hidden: flows.len().saturating_sub(1),
-        kind: "boundary flow",
-    })
-}
-
-fn selected_node_flow<'a>(
-    diagram: &'a DfdDiagram,
-    node: &DfdNodeModel,
-) -> Option<SelectedFlow<'a>> {
-    let flows = diagram
-        .model
-        .flows
-        .iter()
-        .filter(|flow| flow.from_id == node.key || flow.to_id == node.key)
-        .collect::<Vec<_>>();
-    let flow = flows
-        .iter()
-        .find(|flow| flow.from_id == node.key)
-        .or_else(|| flows.first())?;
-    Some(SelectedFlow {
-        flow,
-        hidden: flows.len().saturating_sub(1),
-        kind: "node neighborhood",
-    })
 }
 
 fn selected_node(diagram: &DfdDiagram) -> Option<&DfdNodeModel> {

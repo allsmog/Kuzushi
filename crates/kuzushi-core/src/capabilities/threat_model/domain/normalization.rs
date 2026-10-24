@@ -1,13 +1,20 @@
 use super::*;
 
 pub(in crate::capabilities::threat_model) fn normalize_dfd_type(kind: &str) -> &'static str {
+    recognized_dfd_type(kind).unwrap_or("process")
+}
+
+pub(in crate::capabilities::threat_model) fn recognized_dfd_type(
+    kind: &str,
+) -> Option<&'static str> {
     // camelCase becomes lower-case without separators here, so accept the
     // flattened forms emitted by LLMs as well as kebab/snake case.
     match kind.to_lowercase().replace('_', "-").as_str() {
-        "external-entity" | "externalentity" | "external" => "external-entity",
-        "data-store" | "datastore" => "data-store",
-        "data-flow" | "dataflow" => "data-flow",
-        _ => "process",
+        "process" => Some("process"),
+        "external-entity" | "externalentity" | "external" => Some("external-entity"),
+        "data-store" | "datastore" => Some("data-store"),
+        "data-flow" | "dataflow" => Some("data-flow"),
+        _ => None,
     }
 }
 

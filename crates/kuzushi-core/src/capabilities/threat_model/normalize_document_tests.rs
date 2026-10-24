@@ -224,3 +224,16 @@ fn system_prompt_carries_the_harness_scoring_guide() {
     assert!(prompt.contains("residual"));
     assert!(prompt.contains("Evidence raises likelihood"));
 }
+
+#[test]
+fn generated_context_rejects_unknown_node_role_without_inventing_process() {
+    let document = json!({"version":"1","methodology":"stride","dfd":{
+        "nodes":[{"id":"invoice","name":"Invoice record","type":"data-type","trustZone":"internal"}],
+        "flows":[],"trustBoundaries":[]},"threats":[],"summary":{}});
+    let error = normalize_threat_model_raw(document, "stride")
+        .err()
+        .expect("Unknown generated node roles must not silently become processes");
+    let text = format!("{error:#}");
+    assert!(text.contains("/dfd/nodes/0/type"), "{text}");
+    assert!(text.contains("data-type"), "{text}");
+}

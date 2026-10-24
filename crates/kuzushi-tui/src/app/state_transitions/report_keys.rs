@@ -80,13 +80,15 @@ impl ShellApp {
                 .set_reveal_error(Some("Enter a destination path.".into()));
             return InputUpdate::handled();
         }
-        InputUpdate::handled_with_effects(vec![ShellEffect::ExportReport(ReportExport {
+        let export = ReportExport {
             format: route.format(),
             completeness: route.completeness(),
             output: PathBuf::from(output),
             target: self.target_owned(),
             campaign_id,
-        })])
+        };
+        self.router.report_mut().set_reveal_error(None);
+        InputUpdate::handled_with_effects(vec![ShellEffect::ExportReport(export)])
     }
 
     fn page_report(&mut self, direction: isize) {

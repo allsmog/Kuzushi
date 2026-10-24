@@ -533,6 +533,7 @@ fn seal_build_document(
         !input.is_refine(),
     );
     stamp_source_tree_hash(document, input.captured_source_tree_hash.as_deref());
+    source_bundle.stamp_inventory(document)?;
     finalize_document_identity(document, input)?;
     require_complete_security_context_links(document)
 }
@@ -1034,7 +1035,7 @@ fn begin_threat_model_llm_scope(
 
 fn validate_threat_model_raw(raw: Value, methodology: &str) -> Result<Value> {
     let (document_candidate, _) = extract_document_and_findings(raw.clone())?;
-    let document = normalize_document(document_candidate, methodology)?;
+    let document = normalize_generated_document(document_candidate, methodology)?;
     require_complete_security_context_links(&document)?;
     Ok(raw)
 }
@@ -1044,7 +1045,7 @@ pub(crate) fn normalize_threat_model_raw(
     methodology: &str,
 ) -> Result<GeneratedThreatModel> {
     let (document_candidate, bridge_findings) = extract_document_and_findings(raw)?;
-    let document = normalize_document(document_candidate, methodology)?;
+    let document = normalize_generated_document(document_candidate, methodology)?;
     let document = apply_methodology(document, methodology)?;
     Ok(GeneratedThreatModel {
         document,
@@ -1204,6 +1205,7 @@ fn threat_model_response(
     mut lines: Vec<String>,
     source_bundle: ThreatModelSourceBundle,
 ) -> Result<Value> {
+    lines.extend(source_bundle.inventory_disclosure());
     append_top_threats(&mut lines, &generated.document);
     let target = input.workspace_root().to_path_buf();
     let persistent_artifact = persistent_threat_model_path(input.workspace_root());
@@ -1298,6 +1300,7 @@ fn threat_model_result_data(
         "slice": input.slice,
         "stages": input.stages,
         "sources": source_bundle.metadata_json(),
+        "repositoryInventory": source_bundle.inventory_receipt(),
         "document": generated.document,
         "findings": findings,
         "persisted": artifacts.persisted,
@@ -1467,3 +1470,7 @@ mod catalog_receipt_tests {
         .model_ref
     }
 }
+
+#[cfg(test)]
+#[path = "build_threat_model/role_validation_tests.rs"]
+mod role_validation_tests;

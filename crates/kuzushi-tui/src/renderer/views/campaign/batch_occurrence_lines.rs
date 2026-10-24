@@ -1,7 +1,5 @@
 use super::*;
-use kuzushi_core::capabilities::campaign::{
-    BatchOperationalStatus, BatchSecurityGateStatus, ScanBatchGateOutcome,
-};
+use kuzushi_core::findings::presentation::batch_severity_summary;
 use kuzushi_core::findings::{BatchOccurrenceReport, BatchOccurrenceRow};
 
 pub(super) fn append_batch_occurrence(
@@ -16,13 +14,11 @@ pub(super) fn append_batch_occurrence(
         area.width as usize,
         theme::subtle(),
     ));
-    if let Some(gate) = &report.gate {
-        lines.extend(batch_wrapped(
-            &batch_gate_summary(gate),
-            area.width as usize,
-            theme::subtle(),
-        ));
-    }
+    lines.extend(batch_wrapped(
+        &batch_severity_summary(report.gate.as_ref()),
+        area.width as usize,
+        theme::subtle(),
+    ));
     lines.extend(batch_wrapped(
         "Occurrence counts completed trials; it does not establish proof.",
         area.width as usize,
@@ -34,7 +30,6 @@ pub(super) fn append_batch_occurrence(
             area.width as usize,
             theme::muted(),
         ));
-        return;
     }
     lines.extend(
         report
@@ -42,42 +37,42 @@ pub(super) fn append_batch_occurrence(
             .iter()
             .flat_map(|row| batch_occurrence_row(row, area.width as usize)),
     );
+    append_batch_receipt(lines, report, area.width as usize);
 }
 
-fn batch_gate_summary(gate: &ScanBatchGateOutcome) -> String {
-    format!(
-        "  gate {} · operational {} · security {} · blocking {} · SARIF {}",
-        gate.status.as_str(),
-        operational_status_label(gate.operational_status),
-        security_status_label(gate.security_status),
-        gate.blocking_safe_fold_count,
-        if gate.sarif_written {
-            "written"
+fn append_batch_receipt(
+    lines: &mut Vec<Line<'static>>,
+    report: &BatchOccurrenceReport,
+    width: usize,
+) {
+    lines.push(blank());
+    lines.extend(batch_wrapped(
+        &format!("Equivalence: {}", report.equivalence_key),
+        width,
+        theme::muted(),
+    ));
+    if let Some(gate) = report
+        .gate
+        .as_ref()
+        .filter(|gate| gate.policy.sarif.is_some())
+    {
+        let status = if gate.sarif_written {
+            "saved"
         } else {
-            "not written"
-        }
-    )
-}
-
-fn operational_status_label(status: BatchOperationalStatus) -> &'static str {
-    match status {
-        BatchOperationalStatus::Complete => "complete",
-        BatchOperationalStatus::Incomplete => "incomplete",
-    }
-}
-
-fn security_status_label(status: BatchSecurityGateStatus) -> &'static str {
-    match status {
-        BatchSecurityGateStatus::Disabled => "disabled",
-        BatchSecurityGateStatus::Passed => "passed",
-        BatchSecurityGateStatus::Failed => "failed",
+            "not saved"
+        };
+        lines.extend(batch_wrapped(
+            &format!("SARIF: {status}"),
+            width,
+            theme::muted(),
+        ));
     }
 }
 
 fn batch_summary(report: &BatchOccurrenceReport) -> String {
     format!(
-        "  completed {} / planned {} · failed {} · pending {} · equivalence {}",
-        report.completed, report.planned, report.failed, report.pending, report.equivalence_key
+        "  completed {} / planned {} · failed {} · pending {}",
+        report.completed, report.planned, report.failed, report.pending
     )
 }
 

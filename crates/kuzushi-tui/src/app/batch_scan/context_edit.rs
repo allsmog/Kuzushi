@@ -3,8 +3,10 @@ use crate::app::{state_transitions::InputUpdate, ShellApp};
 use anyhow::Context;
 use serde_json::{json, Value};
 use std::path::PathBuf;
+mod choices;
 mod completion;
 mod keys;
+mod navigation;
 mod state;
 #[cfg(test)]
 mod tests;
@@ -119,7 +121,7 @@ impl ShellApp {
                 draft.scroll = 0;
                 draft.notice = None;
             }
-            Err(error) => draft.notice = Some(error.to_string()),
+            Err(error) => draft.notice = Some(format!("{error:#}")),
         }
     }
 
@@ -133,7 +135,7 @@ impl ShellApp {
         let edits = match draft.validate() {
             Ok(edits) => edits,
             Err(error) => {
-                draft.notice = Some(error.to_string());
+                draft.notice = Some(format!("{error:#}"));
                 return InputUpdate::handled();
             }
         };

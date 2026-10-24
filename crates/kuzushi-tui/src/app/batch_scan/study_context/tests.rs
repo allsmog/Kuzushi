@@ -43,6 +43,7 @@ fn commit_document(root: &std::path::Path, label: &str, document: &Value) -> Thr
 
 mod diagram;
 mod goal_guidance;
+mod readability;
 mod scanner;
 mod scopes;
 
@@ -253,7 +254,7 @@ fn study_context_reader_pages_at_every_viewport_and_plain_output_keeps_the_docum
             .draw(|frame| crate::renderer::render_app(frame, &app))
             .unwrap();
         let screen = format!("{:?}", terminal.backend().buffer());
-        assert!(screen.contains("CHOOSE STUDY CONTEXT"), "{screen}");
+        assert!(screen.contains("CONTEXT SUMMARY"), "{screen}");
         assert!(screen.contains("Esc back"), "{screen}");
         let mut read = screen;
         for _ in 0..80 {

@@ -7,6 +7,8 @@ use kuzushi_core::findings::{
     ContextMatrixOccurrenceReport, IdentityFoldPolicy,
 };
 
+mod reading;
+
 fn report() -> ContextMatrixOccurrenceReport {
     ContextMatrixOccurrenceReport {
         schema_version: 1,
@@ -272,11 +274,12 @@ fn selected_last_case_and_pass_remain_visible_in_every_viewport() {
 }
 
 #[test]
-fn detail_paging_reaches_the_last_observation_and_case_changes_restore_the_top() {
+fn detail_end_reaches_case_provenance_and_case_changes_restore_the_top() {
     let (_root, mut app) = result_fixture();
+    app.reduce_resize(40, 12);
     app.handle_matrix_result_key(KeyCode::End);
     let lines = crate::ui_view_models::matrix_result_lines(&app, 36, 7).join("\n");
-    assert!(lines.contains("observation 19"), "{lines}");
+    assert!(lines.contains("Fingerprint: 19"), "{lines}");
     app.handle_matrix_result_key(KeyCode::Down);
     let lines = crate::ui_view_models::matrix_result_lines(&app, 36, 7).join("\n");
     assert!(lines.contains("observed 2 / 10"), "{lines}");

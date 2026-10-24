@@ -1,6 +1,6 @@
 use crate::app::FieldEditor;
 use kuzushi_core::capabilities::threat_model::{
-    context_text_fields, ContextTextEdit, MAX_CONTEXT_EDITS,
+    context_operator_fields, ContextEditConstraint, ContextTextEdit, MAX_CONTEXT_EDITS,
 };
 use kuzushi_core::ThreatModelRef;
 use serde_json::Value;
@@ -10,6 +10,7 @@ pub(crate) enum ContextEditMode {
     Recovery,
     Fields,
     Writing,
+    Choosing,
     Review,
     Saving,
     Discard,
@@ -21,6 +22,8 @@ pub(crate) struct ContextEditEntry {
     pub label: String,
     pub original: String,
     pub editor: Option<FieldEditor>,
+    pub constraint: ContextEditConstraint,
+    pub regeneratable: bool,
 }
 
 impl ContextEditEntry {
@@ -48,6 +51,8 @@ pub(crate) struct ContextEditDraft {
     pub notice: Option<String>,
     pub recovery: ContextDraftRecovery,
     pub checkpoint_origins: Vec<String>,
+    pub choice_cursor: usize,
+    pub choice_details: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -69,17 +74,19 @@ impl ContextEditDraft {
             label: "Copy name".into(),
             original: label,
             editor: None,
+            constraint: ContextEditConstraint::Text,
+            regeneratable: false,
         }];
-        entries.extend(
-            context_text_fields(document)
-                .into_iter()
-                .map(|field| ContextEditEntry {
-                    pointer: Some(field.pointer),
-                    label: field.label,
-                    original: field.text,
-                    editor: None,
-                }),
-        );
+        entries.extend(context_operator_fields(document).into_iter().map(|field| {
+            ContextEditEntry {
+                pointer: Some(field.text.pointer),
+                label: field.text.label,
+                original: field.text.text,
+                editor: None,
+                constraint: field.constraint,
+                regeneratable: field.regeneratable,
+            }
+        }));
         Self {
             reference,
             entries,
@@ -89,6 +96,8 @@ impl ContextEditDraft {
             notice: None,
             recovery: Default::default(),
             checkpoint_origins: Vec::new(),
+            choice_cursor: 0,
+            choice_details: false,
         }
     }
 
@@ -109,17 +118,28 @@ impl ContextEditDraft {
         let edits = self.edits();
         anyhow::ensure!(
             !edits.is_empty(),
-            "Edit context text before reviewing a copy."
+            "Edit a context field before reviewing a copy."
         );
         anyhow::ensure!(
             edits.len() <= MAX_CONTEXT_EDITS,
-            "Review at most {MAX_CONTEXT_EDITS} text fields per copy."
+            "Review at most {MAX_CONTEXT_EDITS} fields per copy."
         );
         let label = self.entries[0].text().trim();
         anyhow::ensure!(
             !label.is_empty() && label.len() <= 2048,
             "Copy name must contain 1 to 2048 bytes."
         );
+        self.validate_changed_values()?;
         Ok(edits)
+    }
+
+    fn validate_changed_values(&self) -> anyhow::Result<()> {
+        for entry in self.entries.iter().filter(|entry| entry.changed()) {
+            entry
+                .constraint
+                .validate(entry.text())
+                .map_err(|error| anyhow::anyhow!("{error}. Field: {}", entry.label))?;
+        }
+        Ok(())
     }
 }

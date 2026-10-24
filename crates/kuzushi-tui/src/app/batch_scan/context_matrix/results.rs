@@ -68,9 +68,20 @@ impl ShellApp {
         if matches!(code, KeyCode::Enter | KeyCode::Char('b')) {
             return Some(self.activate_matrix_result(code));
         };
-        let config = self.router.campaign_mut().batch_scan_config.as_mut()?;
-        navigate_results(config, code);
-        Some(InputUpdate::handled())
+        Some(self.navigate_matrix_results(code))
+    }
+
+    fn navigate_matrix_results(&mut self, code: KeyCode) -> InputUpdate {
+        let limits = match code {
+            KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End => {
+                crate::ui_view_models::matrix_result_read_limits(self).unwrap_or_default()
+            }
+            _ => Default::default(),
+        };
+        if let Some(config) = self.router.campaign_mut().batch_scan_config.as_mut() {
+            navigate_results(config, code, limits);
+        }
+        InputUpdate::handled()
     }
 
     fn matrix_report_read_key(&mut self, code: KeyCode) -> Option<InputUpdate> {
@@ -207,7 +218,11 @@ pub(crate) fn selected_trial<'a>(
     case.occurrence.trials.get(matrix.pass_cursor)
 }
 
-fn navigate_results(config: &mut BatchScanConfig, code: KeyCode) {
+fn navigate_results(
+    config: &mut BatchScanConfig,
+    code: KeyCode,
+    limits: crate::ui_view_models::MatrixResultReadLimits,
+) {
     if matches!(code, KeyCode::Esc | KeyCode::Char('q')) {
         if config.study.matrix.pass_selection.take().is_none() {
             config.study.matrix.results = false
@@ -228,24 +243,30 @@ fn navigate_results(config: &mut BatchScanConfig, code: KeyCode) {
         let count = matrix.cases.get(index).map_or(0, |case| case.passes);
         matrix.pass_cursor = move_cursor(matrix.pass_cursor, code, count);
     } else {
-        navigate_case_results(matrix, code)
+        navigate_case_results(matrix, code, limits)
     };
 }
 
-fn navigate_case_results(matrix: &mut StudyContextMatrix, code: KeyCode) {
+fn navigate_case_results(
+    matrix: &mut StudyContextMatrix,
+    code: KeyCode,
+    limits: crate::ui_view_models::MatrixResultReadLimits,
+) {
     let cursor = move_cursor(matrix.cursor, code, matrix.cases.len());
     if cursor != matrix.cursor {
         matrix.cursor = cursor;
         matrix.detail_scroll = 0;
         return;
     }
-    match code {
-        KeyCode::PageUp => matrix.detail_scroll = matrix.detail_scroll.saturating_sub(5),
-        KeyCode::PageDown => matrix.detail_scroll = matrix.detail_scroll.saturating_add(5),
-        KeyCode::Home => matrix.detail_scroll = 0,
-        KeyCode::End => matrix.detail_scroll = usize::MAX,
-        _ => {}
-    }
+    let current = matrix.detail_scroll.min(limits.max_scroll);
+    let page = limits.page.max(1);
+    matrix.detail_scroll = match code {
+        KeyCode::PageUp => current.saturating_sub(page),
+        KeyCode::PageDown => current.saturating_add(page).min(limits.max_scroll),
+        KeyCode::Home => 0,
+        KeyCode::End => limits.max_scroll,
+        _ => matrix.detail_scroll,
+    };
 }
 
 fn move_cursor(index: usize, code: KeyCode, count: usize) -> usize {

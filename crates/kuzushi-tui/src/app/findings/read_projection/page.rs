@@ -45,11 +45,15 @@ fn finish_page_read(
     snapshot: FindingPageSnapshot,
     recovery_notice: Option<String>,
 ) -> ReadFindingPage {
+    let notices = [recovery_notice, snapshot.study_gate_error]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
     let page = snapshot.page;
     ReadFindingPage {
         report: page.report,
         metadata: page.page,
-        recovery_notice,
+        recovery_notice: (!notices.is_empty()).then(|| notices.join("\n")),
         study: snapshot.study,
     }
 }

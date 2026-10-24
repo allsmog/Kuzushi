@@ -23,6 +23,7 @@ use ratatui::widgets::{Block, Borders, Paragraph, Widget};
 use std::collections::HashMap;
 
 mod focus;
+mod neighborhood;
 mod overview;
 pub(crate) use overview::summary_reading_rows;
 mod responsive;
@@ -479,8 +480,8 @@ impl DfdDiagram {
     }
 
     fn selected_flow(&self) -> Option<&DfdFlowModel> {
-        self.selected_flow_index()
-            .and_then(|index| self.model.flows.get(index))
+        self.selection?;
+        neighborhood::selected_flow(self).map(|selected| selected.flow)
     }
 
     /// Route a connector for every flow whose endpoints both have anchors;
@@ -1322,6 +1323,8 @@ fn selection_color() -> Color {
 mod tests {
     use super::*;
     use crate::ui_view_models::{DfdSecurityItem, DfdSecurityKind};
+
+    mod selected_neighborhood;
 
     #[test]
     fn selected_position_is_one_based_and_clamped_to_the_available_items() {

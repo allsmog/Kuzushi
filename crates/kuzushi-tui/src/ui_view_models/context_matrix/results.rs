@@ -13,7 +13,7 @@ pub(super) fn recorded_matrix_lines(
     }
     let mut lines = heading(config, width);
     let available = rows.saturating_sub(lines.len());
-    let count = available.saturating_sub(2).max(1).min(report.cases.len());
+    let count = case_count(available, report.cases.len());
     let selected = config.study.matrix.cursor;
     let start = selected.saturating_sub(count.saturating_sub(1));
     append_cases(&mut lines, report, selected, start, count, width);
@@ -28,6 +28,32 @@ fn heading(config: &BatchScanConfig, width: usize) -> Vec<String> {
     lines
 }
 
+pub(super) fn unavailable_lines(error: &str, width: usize) -> Vec<String> {
+    [
+        "Recorded results unavailable.",
+        "r retries the read; no work starts.",
+        error,
+    ]
+    .into_iter()
+    .flat_map(|line| wrap_text(line, width.max(1)))
+    .collect()
+}
+
+pub(super) fn failure_lines(
+    config: &BatchScanConfig,
+    error: &str,
+    width: usize,
+    rows: usize,
+) -> Vec<String> {
+    let lines = unavailable_lines(error, width);
+    let start = config
+        .study
+        .matrix
+        .detail_scroll
+        .min(lines.len().saturating_sub(rows));
+    lines.into_iter().skip(start).take(rows).collect()
+}
+
 fn append_cases(
     lines: &mut Vec<String>,
     report: &ContextMatrixOccurrenceReport,
@@ -38,8 +64,13 @@ fn append_cases(
 ) {
     for (index, case) in report.cases.iter().enumerate().skip(start).take(count) {
         let marker = if index == selected { "▸" } else { " " };
+        let role = if case.id == report.baseline_case_id {
+            "baseline"
+        } else {
+            "candidate"
+        };
         let counts = format!(
-            "{marker} {}/{} complete · ",
+            "{marker} {}/{} · {role} · ",
             case.occurrence.completed, case.occurrence.planned
         );
         let label = fit_path(&case.label, width.saturating_sub(counts.chars().count()));
@@ -47,21 +78,26 @@ fn append_cases(
     }
 }
 
-fn detail_lines(case: &ContextCaseOccurrenceReport, width: usize) -> Vec<String> {
-    let mut lines = vec![format!(
-        "{} failed · {} pending",
-        case.occurrence.failed, case.occurrence.pending
-    )];
-    for row in &case.occurrence.rows {
-        lines.push(format!(
-            "observed {} / {} · {}",
-            row.seen, case.occurrence.completed, row.representative_title
-        ));
-    }
-    if case.occurrence.rows.is_empty() {
-        lines.push("No recorded observations. Decisions stay unchanged.".into());
-    }
-    lines
+fn case_count(available: usize, cases: usize) -> usize {
+    available.saturating_sub(3).max(1).min(cases)
+}
+
+pub(super) fn detail_capacity(
+    config: &BatchScanConfig,
+    report: &ContextMatrixOccurrenceReport,
+    rows: usize,
+) -> usize {
+    let available = rows.saturating_sub(heading(config, 1).len());
+    available.saturating_sub(case_count(available, report.cases.len()))
+}
+
+pub(super) fn detail_lines(
+    config: &BatchScanConfig,
+    report: &ContextMatrixOccurrenceReport,
+    case: &ContextCaseOccurrenceReport,
+    width: usize,
+) -> Vec<String> {
+    super::result_detail::recorded_case_detail(config, report, case)
         .into_iter()
         .flat_map(|line| wrap_text(&line, width.max(1)))
         .collect()
@@ -77,7 +113,7 @@ fn append_detail(
     let Some(case) = report.cases.get(config.study.matrix.cursor) else {
         return;
     };
-    let detail = detail_lines(case, width);
+    let detail = detail_lines(config, report, case, width);
     let count = rows.saturating_sub(lines.len());
     let start = config
         .study

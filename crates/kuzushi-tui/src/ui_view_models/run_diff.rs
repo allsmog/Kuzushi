@@ -16,6 +16,7 @@ pub(crate) struct RunDiffModel {
     pub(crate) right_revision: String,
     pub(crate) left_source: String,
     pub(crate) right_source: String,
+    pub(crate) source_note: &'static str,
     pub(crate) left_context: String,
     pub(crate) right_context: String,
     pub(crate) context_status: String,
@@ -102,8 +103,9 @@ pub(crate) fn run_diff_model(app: &ShellApp, left: &str, right: &str) -> RunDiff
         right_run: right.to_string(),
         left_revision: left_metadata.revision,
         right_revision: right_metadata.revision,
-        left_source: assessment::source_label(app, left),
-        right_source: assessment::source_label(app, right),
+        left_source: sources::source_label(app, left),
+        right_source: sources::source_label(app, right),
+        source_note: sources::comparison_note(app, left, right),
         left_context: assessment::context_label(app, left),
         right_context: assessment::context_label(app, right),
         context_status: assessment::context_comparison(app, left, right),
@@ -411,6 +413,13 @@ fn run_json_state(app: &ShellApp, run_id: &str, leaf: &str) -> ViewDataState<Jso
         .cached_run_artifact_json(target, run_id, leaf)
 }
 
+fn artifact_json(app: &ShellApp, run: &str, leaf: &str) -> Option<serde_json::Value> {
+    match run_json_state(app, run, leaf) {
+        ViewDataState::Ready(JsonFileState::Present(value)) => Some(value),
+        _ => None,
+    }
+}
+
 fn findings_array(value: &serde_json::Value) -> Option<&Vec<serde_json::Value>> {
     value.as_array().or_else(|| {
         value
@@ -609,6 +618,7 @@ fn target_git_revision_label(git: &RunTargetGitMetadata) -> String {
 }
 
 mod assessment;
+mod sources;
 
 #[cfg(test)]
 mod tests;

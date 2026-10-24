@@ -44,31 +44,41 @@ pub(super) fn collect_source_code(
     expected_tree_hash: Option<&str>,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<CodeSource> {
+    collect_source_code_with_inventory(input, surfaces, expected_tree_hash, ctx)
+        .map(|(source, _)| source)
+}
+
+pub(super) fn collect_source_code_with_inventory(
+    input: &BuildInput,
+    surfaces: &[AttackSurface],
+    expected_tree_hash: Option<&str>,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<(CodeSource, crate::repository_inventory::RepositoryInventory)> {
     anyhow::ensure!(input.max_source_bytes >= 1024, "source-code requires maxSourceBytes >= 1024; increase the budget or select sources without source-code");
     ensure_not_cancelled(ctx)?;
     let tree_hash = current_tree_hash(input.analysis_root())?;
     authenticate_tree(expected_tree_hash, &tree_hash)?;
-    let inventory = crate::repository_inventory::build_repository_inventory_with_observer(
-        input.analysis_root(),
-        &mut |_| {},
-        &|| {
-            ctx.cancellation
-                .is_some_and(crate::scan::ScanCancellation::is_cancelled)
-        },
-    )?;
-    ensure_not_cancelled(ctx)?;
-    anyhow::ensure!(
-        inventory.truncation.is_none(),
-        "source-code requires a complete source-file inventory; narrow the selected scope"
-    );
-    let selected = selection::select_files(input, inventory, surfaces)?;
+    let inventory = super::collect_context_inventory(input.analysis_root(), ctx)?;
+    require_complete_enumeration(&inventory)?;
+    let selected = selection::select_files(input, &inventory, surfaces)?;
     let mut report = new_report(input, tree_hash, &selected);
     collect_selected_files(input, &selected.files, &mut report, ctx)?;
     authenticate_tree(
         Some(&report.tree_hash),
         &current_tree_hash(input.analysis_root())?,
     )?;
-    finish_report(report, input.max_source_bytes)
+    let source = finish_report(report, input.max_source_bytes)?;
+    Ok((source, inventory))
+}
+
+fn require_complete_enumeration(
+    inventory: &crate::repository_inventory::RepositoryInventory,
+) -> Result<()> {
+    anyhow::ensure!(
+        inventory.inspection.as_ref().and_then(|receipt| receipt.enumeration_complete) == Some(true),
+        "source-code requires complete filename enumeration; narrow the selected scope. Content inspection limits alone do not make enumeration incomplete"
+    );
+    Ok(())
 }
 
 fn new_report(input: &BuildInput, tree_hash: String, selected: &model::Selection) -> CodeReport {

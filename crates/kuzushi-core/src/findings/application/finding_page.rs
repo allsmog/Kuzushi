@@ -12,6 +12,7 @@ mod anchor;
 mod batch_membership;
 mod cursor;
 mod scope_membership;
+mod study_receipt;
 pub use anchor::{finding_page_anchor_index, finding_page_continuity_anchor};
 use batch_membership::{matching_report, BatchPageMembership};
 pub use scope_membership::FindingScopeFilterReceipt;
@@ -93,6 +94,8 @@ pub struct FindingListPage {
 pub struct FindingPageSnapshot {
     pub page: FindingListPage,
     pub study: Option<crate::findings::BatchOccurrenceReport>,
+    /// A gate read failure does not change authenticated finding membership.
+    pub study_gate_error: Option<String>,
 }
 
 pub fn read_finding_page(
@@ -140,6 +143,7 @@ fn read_finding_page_projection(
         before == store.projection_meta()?,
         "Findings changed while reading; reload the first page"
     );
+    let study = query.batch.map(|membership| membership.report);
     window_report(
         query.report,
         filter.limit.min(FindingListFilter::MAX_LIMIT),
@@ -150,10 +154,7 @@ fn read_finding_page_projection(
     )
     .map(|mut page| {
         page.page.scope_filter = query.scope.map(|scope| scope.receipt);
-        FindingPageSnapshot {
-            page,
-            study: query.batch.map(|membership| membership.report),
-        }
+        study_receipt::page_snapshot(page, study, workspace, store)
     })
 }
 

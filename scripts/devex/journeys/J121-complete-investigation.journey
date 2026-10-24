@@ -121,8 +121,8 @@ expect: 1 queued
 expect-not: legacy inferred
 nav-mode:
 keys: c
-require-live-snap: 20 Jobs: 3 | admitted-study-link
-expect: Esc Scan
+require-live-snap: 20 Esc Scan | admitted-study-link
+expect: Jobs: 3
 expect-not: q list
 expect-not: Esc returns to prompt
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART study
@@ -130,8 +130,8 @@ keys: Enter
 require-live-snap: 20 Esc jobs | admitted-study-job
 expect-not: Esc returns to prompt
 keys: Escape
-require-live-snap: 20 Jobs: 3 | admitted-study-jobs
-expect: Esc Scan
+require-live-snap: 20 Esc Scan | admitted-study-jobs
+expect: Jobs: 3
 keys: Escape
 require-live-snap: 20 APPROVED STUDY | admitted-study-return
 keys: Escape
@@ -200,8 +200,9 @@ keys: R
 require-live-snap: 25 TP: | bounded-report-40x12
 expect: Enter export
 resize: 120x36
-require-live-snap: 25 4 committed / 6 calls | bounded-report-loaded
-expect: 2 completed / 3 planned
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 4/6 report
+require-live-snap: 25 2 completed / 3 planned | bounded-report-loaded
+expect: 4 committed / 6 calls
 keys: Escape
 require-live-snap: 25 Allowance reached | bounded-report-return
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART partial
@@ -334,6 +335,7 @@ submit: decision deferred Reassessed the owned fixture after pass 3
 require-live-snap: 25 deferred | reassessed-deferral
 submit: report
 require-live-snap: 25 5 committed / 7 calls | final-report
+expect-not: Saved choices unavailable
 expect: 4 producer observations
 expect: 2 protected review remaining
 require-live-snap: 25 0 pending · TP: 0 · FP: 1 · 1 deferred | final-reviewed-report
@@ -343,9 +345,13 @@ expect-not: missing metadata
 expect-not: unreadable/invalid
 keys: p Home
 require-live-snap: 25 format json (4/6) · all | final-json-selection
+require-live-snap: 25 Enter export/retry | final-json-ready
 keys: Enter
 require-live-snap: 25 json · 2 finding(s) | final-export
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART final-report
+# The verifier records context-read runs. Wait for the two-second ledger poll
+# and the resulting report refresh before selecting another explicit export.
+wait: 3
 keys: Up Up
 require-live-snap: 25 format markdown-bundle (2/6) · all | bundle-selection
 keys: e
@@ -356,6 +362,7 @@ keys: Enter
 require-live-snap: 20 format markdown-bundle (2/6) · all | bundle-blocked-path-saved
 expect: main.rs
 expect-not: EXPORT DESTINATION
+require-live-snap: 25 Enter export/retry | bundle-export-ready
 keys: Enter
 require-live-snap: 25 EXPORT FAILED | bundle-path-refused
 expect: needs a directory path
@@ -375,12 +382,17 @@ expect: study-bundle
 expect-not: EXPORT DESTINATION
 keys: Enter
 require-live-snap: 25 EXPORTED | bundle-exported-40x12
+expect-not: Saved choices unavailable
 expect: e path
 require-shell: python3 -B @REPO/scripts/devex/fixtures/report_bundle.py @TMP_TARGET @ART exported
 ask: Can the operator recover from the blocked bundle path using the visible destination editor, while the completed bundle retains exact findings, decisions, coverage and shared accounting without more model work?
+# Host verification records context-read runs. Allow the two-second ledger poll
+# and its asynchronous report refresh to settle before requesting another export.
+wait: 3
 resize: 120x36
 keys: Down Down Home
 require-live-snap: 25 format json (4/6) · all | return-to-json-report
+require-live-snap: 25 Enter export/retry | restored-json-ready
 keys: Enter
 require-live-snap: 25 json · 2 finding(s) | restored-json-export
 resize: 160x48
@@ -401,6 +413,7 @@ keys: Home
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 5/7 report
 require-live-snap: 25 format json (4/6) · all | report-80x24
 expect: Shared allowance:
+expect: PgUp/PgDn read
 resize: 60x20
 keys: Home
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 5/7 report
@@ -443,9 +456,9 @@ keys: Enter
 require-live-snap: 25 Jobs: 3 | recorded-context-jobs-after-loss
 nav-mode:
 keys: a
-require-live-snap: 25 Context result unavailable | missing-context-result
+require-live-snap: 25 Enter outcome | missing-context-result
+expect: Context result unavailable
 expect: no immutable context manifest
-expect: Enter outcome
 resize: 80x24
 live-snap: missing-context-result-80x24
 resize: 40x12
