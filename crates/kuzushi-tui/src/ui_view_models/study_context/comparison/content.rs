@@ -1,5 +1,5 @@
 use super::*;
-use kuzushi_core::capabilities::threat_model::ContextDifferenceMatching;
+use kuzushi_core::capabilities::threat_model::{ContextDifferenceMatching, ContextSourceClaims};
 use serde_json::{json, Value};
 
 pub(super) fn field_title(change: &ContextValueDifference) -> String {
@@ -39,7 +39,7 @@ pub(super) fn lines(context: &StudyContextComparison, entry: &ComparisonEntry<'_
         ComparisonEntry::Text(change) => text_lines(change),
         ComparisonEntry::Field(change) => field_lines(change),
         ComparisonEntry::Order(change) => order_lines(change),
-        ComparisonEntry::Source => source_lines(context),
+        ComparisonEntry::Source(claims) => source_lines(context, claims),
     }
 }
 
@@ -102,8 +102,7 @@ fn order_lines(change: &ContextCollectionOrderDifference) -> Vec<String> {
     lines
 }
 
-fn source_lines(context: &StudyContextComparison) -> Vec<String> {
-    let claims = &context.structure.as_ref().unwrap().source_claims;
+fn source_lines(context: &StudyContextComparison, claims: &ContextSourceClaims) -> Vec<String> {
     let mut lines = vec![
         "SAVED SOURCE AND CONTEXT IDENTITIES".into(),
         source_summary(claims).into(),
@@ -137,9 +136,7 @@ fn revision_warning(
     (values.len() > 1).then(|| format!("{side} recorded revision fields disagree. Review every claim; no source identity is selected automatically."))
 }
 
-fn source_summary(
-    claims: &kuzushi_core::capabilities::threat_model::ContextSourceClaims,
-) -> &'static str {
+fn source_summary(claims: &ContextSourceClaims) -> &'static str {
     if claims.before.is_empty() || claims.after.is_empty() {
         return "Source claims missing on at least one side; comparison is incomplete.";
     }

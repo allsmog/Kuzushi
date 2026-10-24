@@ -71,6 +71,13 @@ const AUDITED_PANIC_SITES: &[(&str, &str)] = &[
         "ui_view_models/scope_review/paths.rs",
         "a path string is serializable",
     ),
+    // The same writer over a `serde_json::Value`, which can hold neither a
+    // non-finite number nor a non-string map key, so neither error the
+    // writer reports is reachable from one.
+    (
+        "ui_view_models/study_context/comparison/content.rs",
+        "JSON values serialize",
+    ),
 ];
 
 // Split so this file never matches its own detection patterns.
