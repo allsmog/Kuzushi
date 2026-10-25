@@ -200,6 +200,8 @@ keys: End
 require-live-snap: 25 y approve | retry-approval
 expect: Total provider calls: 6
 expect: Protected review calls: 2
+expect: Recorded calls: 3 committed · 1 unsettled
+expect: Left under proposed limits: 1 context/scan · 2 protected Review
 expect-not: openai-codex:gpt-5.5
 ask: Does retrying the canceled job require an explicit two-attempt approval for the same fixed plan, with prior call consumption and unknown cost retained?
 keys: y
@@ -327,6 +329,16 @@ require-live-snap: 25 y approve | specific-new-approval
 expect: Total provider calls: 7
 expect: Protected review calls: 2
 expect: 3 fixed jobs
+expect: Recorded calls: 4 committed · 1 unsettled
+expect: Left under proposed limits: 1 context/scan · 2 protected Review
+resize: 40x12
+keys: End
+require-live-snap: 25 Used 4 · left Scan 1 Review 2 | specific-new-approval-40x12
+expect: y approve
+resize: 120x36
+keys: End
+require-live-snap: 25 Recorded calls: 4 committed · 1 unsettled | specific-new-approval-restored
+expect: Left under proposed limits: 1 context/scan · 2 protected Review
 ask: Does the seven-call revision retain previous spending and the same three jobs, with exactly one new discovery call available and a separate approval decision?
 keys: y
 require-live-snap: 25 Approval saved | revised-approved

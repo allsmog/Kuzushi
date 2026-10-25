@@ -1042,7 +1042,7 @@ without qualifying the complete operator experience or closing a broad milestone
 - [ ] Optional AI scope proposals, coverage checks, and TUI scope editing. [Workload previews](../assessments/scope-workload-preview-2026-10-18.md) now expose all-boundary and selected-study job counts before approval; broader qualification remains open.
 - [ ] Comparable context experiments and complete observation provenance.
 - [ ] Reversible review relationships and accepted reusable lessons.
-- [ ] Complete TUI journey, report, layout and recovery verification.
+- [ ] Complete TUI journey, report, layout and recovery verification. [Current complete keyboard journey](../assessments/approval-spending-2026-10-24.md) has 239 machine passes and zero failures, including cancellation, limits, export recovery and restart. Spending remains visible at approval; broader experience qualification remains open.
 
 ## Verification
 

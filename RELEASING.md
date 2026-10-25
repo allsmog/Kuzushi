@@ -1,5 +1,21 @@
 # Releasing Kuzushi
 
+## Historical baseline read limits and timestamp ties
+
+Coverage ledger readers now enforce an 8 MiB aggregate retained-text limit in
+addition to the existing 10,000-row limit. Oversized metadata returns an explicit
+error without truncating or removing history. Ordinary histories need no
+migration. Existing `.kuzushi/v3/coverage.sqlite3` schema version 1, findings,
+context objects, run receipts and public options are unchanged. Back up and
+archive oversized derived metadata deliberately before requesting history advice;
+the reader performs no automatic cleanup. Restoring a valid saved ledger restores
+inspection without altering finding decisions or source.
+
+Equal baseline timestamps now select the last stored row across modes. This
+tie-breaker describes database storage order, not finer completion time, Git
+ancestry or a fixed finding. See the
+[history reader evidence](docs/assessments/baseline-history-selection-2026-10-24.md).
+
 ## Boundary context reading order
 
 Boundary-context detail now leads with the association and preparation state,

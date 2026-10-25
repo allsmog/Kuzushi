@@ -164,3 +164,145 @@ fn zero_calls_and_long_selectors_keep_readable_limits_and_exhaustive_plain_terms
     assert!(plain.contains("ZERO PROVIDER CALLS"));
     assert!(!app.has_running_work());
 }
+
+fn approval_with_recorded_spending() -> (tempfile::TempDir, ShellApp) {
+    let (root, mut app) = prepared_approval(7, 2, "openai-codex:gpt-5.5");
+    app.router
+        .campaign_mut()
+        .batch_scan_config
+        .as_mut()
+        .unwrap()
+        .study
+        .allowance = Some(kuzushi_core::allowance::AllowanceSnapshot {
+        schema_version: 1,
+        investigation_id: "operator-study".into(),
+        revision: 0,
+        model: "openai-codex:gpt-5.5".into(),
+        limits: kuzushi_core::allowance::AllowanceLimits {
+            max_provider_calls: 6,
+            protected_review_calls: 2,
+        },
+        committed_calls: 4,
+        review_calls: 0,
+        unresolved_calls: 1,
+        cost: kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE,
+        work_plan: None,
+    });
+    (root, app)
+}
+
+#[test]
+fn recorded_spending_and_proposed_capacity_stay_visible_at_the_approval_control() {
+    let (_root, mut app) = approval_with_recorded_spending();
+    for &(columns, rows) in SIZES {
+        app.set_viewport(TerminalViewport {
+            columns,
+            rows: rows - 1,
+        });
+        for code in [KeyCode::Home, KeyCode::End] {
+            key(&mut app, code);
+            let text = rendered(&app);
+            let required = if columns < 76 {
+                ["Used 4 · left Scan 1 Review 2", "Total calls 7"]
+            } else {
+                [
+                    "Recorded calls: 4 committed · 1 unsettled",
+                    "Left under proposed limits: 1 context/scan · 2 protected Review",
+                ]
+            };
+            for term in required {
+                assert!(text.contains(term), "{columns}x{rows}: missing {term}");
+            }
+            assert!(text.contains("$ unknown"));
+            assert!(model(&app).page_rows > 0);
+        }
+        assert!(model(&app).allows_approval());
+        assert!(rendered(&app).contains("y approve"));
+    }
+    assert!(!app.has_running_work());
+    assert_eq!(
+        app.router
+            .campaign()
+            .batch_scan_config
+            .as_ref()
+            .unwrap()
+            .study
+            .allowance
+            .as_ref()
+            .unwrap()
+            .limits
+            .max_provider_calls,
+        6
+    );
+}
+
+#[test]
+fn pinned_accounting_never_uses_an_unrelated_or_unreadable_snapshot() {
+    for problem in ["investigation", "revision", "error"] {
+        let (_root, mut app) = approval_with_recorded_spending();
+        let study = &mut app
+            .router
+            .campaign_mut()
+            .batch_scan_config
+            .as_mut()
+            .unwrap()
+            .study;
+        match problem {
+            "investigation" => study.allowance.as_mut().unwrap().investigation_id = "other".into(),
+            "revision" => study.allowance.as_mut().unwrap().revision = 1,
+            _ => study.accounting_error = Some("unavailable".into()),
+        }
+        let text = model(&app).pinned.join("\n");
+        assert!(!text.contains("Recorded") && !text.contains("Left:"));
+    }
+}
+
+#[test]
+fn consumed_review_capacity_is_not_presented_as_still_protected() {
+    let (_root, mut app) = approval_with_recorded_spending();
+    app.router
+        .campaign_mut()
+        .batch_scan_config
+        .as_mut()
+        .unwrap()
+        .study
+        .allowance
+        .as_mut()
+        .unwrap()
+        .review_calls = 1;
+    let text = model(&app).pinned.join("\n");
+    assert!(text.contains("2 context/scan · 1 protected Review"));
+    assert!(!app.has_running_work());
+}
+
+#[test]
+fn large_numbers_never_remove_the_compact_terms_or_approval_control() {
+    let (_root, mut app) = prepared_approval(1_000_000, 333_333, "openai-codex:gpt-5.5");
+    let (_other, recorded) = approval_with_recorded_spending();
+    app.router
+        .campaign_mut()
+        .batch_scan_config
+        .as_mut()
+        .unwrap()
+        .study
+        .allowance = recorded
+        .router
+        .campaign()
+        .batch_scan_config
+        .as_ref()
+        .unwrap()
+        .study
+        .allowance
+        .clone();
+    app.set_viewport(TerminalViewport {
+        columns: 40,
+        rows: 11,
+    });
+    key(&mut app, KeyCode::End);
+    assert!(model(&app).page_rows > 0 && model(&app).allows_approval());
+    let text = rendered(&app);
+    for term in ["1000000", "333333", "y approve", "$ unknown"] {
+        assert!(text.contains(term), "missing {term}");
+    }
+    assert!(!app.has_running_work());
+}

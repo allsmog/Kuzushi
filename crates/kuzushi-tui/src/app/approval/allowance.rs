@@ -118,7 +118,7 @@ fn resource_terms(app: &ShellApp, input: &serde_json::Value) -> String {
     format!("RESOURCE ESTIMATE\n{}", lines.join("\n"))
 }
 
-fn revised_snapshot(
+pub(crate) fn revised_snapshot(
     app: &ShellApp,
     input: &serde_json::Value,
 ) -> Option<kuzushi_core::allowance::AllowanceSnapshot> {

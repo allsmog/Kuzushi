@@ -2,7 +2,7 @@ use crate::renderer::shared::text::{fit, wrap_text};
 use crate::ShellApp;
 use serde_json::Value;
 
-pub(super) fn lines(app: &ShellApp, width: usize) -> Vec<String> {
+pub(super) fn lines(app: &ShellApp, width: usize, max_rows: usize) -> Vec<String> {
     let Some(launch) = app.advisory().pending_confirm_launch.as_ref() else {
         return Vec::new();
     };
@@ -17,10 +17,36 @@ pub(super) fn lines(app: &ShellApp, width: usize) -> Vec<String> {
         &format!("Allowance: {}", crate::app::display_model_selector(model)),
         width,
     ));
+    let mut pinned = wrap_lines(lines, width);
+    let accounting = wrap_lines(accounting_lines(app, input, width), width);
+    if pinned.len() + accounting.len() <= max_rows {
+        pinned.extend(accounting);
+    }
+    pinned
+}
+
+fn wrap_lines(lines: Vec<String>, width: usize) -> Vec<String> {
     lines
         .into_iter()
         .flat_map(|line| wrap_text(&line, width))
         .collect()
+}
+
+fn accounting_lines(app: &ShellApp, input: &Value, width: usize) -> Vec<String> {
+    let Some(snapshot) = crate::allowance::revised_snapshot(app, input) else {
+        return Vec::new();
+    };
+    let used = snapshot.committed_calls;
+    let unsettled = snapshot.unresolved_calls;
+    let scan = snapshot.remaining_discovery_calls();
+    let review = snapshot.protected_review_remaining();
+    if width < 72 {
+        return vec![format!("Used {used} · left Scan {scan} Review {review}")];
+    }
+    vec![
+        format!("Recorded calls: {used} committed · {unsettled} unsettled"),
+        format!("Left under proposed limits: {scan} context/scan · {review} protected Review"),
+    ]
 }
 
 fn work_line(app: &ShellApp, input: &Value, width: usize) -> Option<String> {
