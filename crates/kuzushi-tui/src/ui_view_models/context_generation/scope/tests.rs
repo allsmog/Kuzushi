@@ -1,6 +1,43 @@
 use super::*;
 
 #[test]
+fn explicit_saved_context_does_not_claim_map_acceptance() {
+    let root = tempfile::tempdir().unwrap();
+    let mut config = BatchScanConfig::load(root.path(), None);
+    let reference = serde_json::json!({"modelId":"inactive-manual", "revisionId":"saved-one",
+        "sha256":format!("sha256:{}", "a".repeat(64))});
+    config.context_generation = Some(StudyContextGeneration {
+        generation_tool: Some("pack:suggest-scopes".into()),
+        context_input: serde_json::json!({"threatModelRef":reference}),
+        ..Default::default()
+    });
+    for width in [40, 60, 80, 96, 120, 160] {
+        let text = summary(&config, width).join(" ");
+        assert!(text.contains("exact saved revision"), "{width}: {text}");
+        assert!(!text.contains("accepted Map"), "{width}: {text}");
+    }
+}
+
+#[test]
+fn frozen_scope_receipt_names_explicit_effort_without_inventing_a_default() {
+    let mut receipt: kuzushi_core::capabilities::campaign::ContextStudyReceipt =
+        serde_json::from_value(serde_json::json!({"generationTool":"pack:suggest-scopes",
+            "campaignId":"scope-fixture", "investigationId":"scope-fixture",
+            "planSha256":"sha256:owned", "sourceIdentity":"tree:owned", "configSha256":"sha256:owned",
+            "model":"openai-codex:gpt-6-luna", "input":{"thinkingLevel":"low","maxOutputTokens":4096}})).unwrap();
+    let text = receipt_lines(&receipt).join("\n");
+    assert!(text.contains("reasoning: low"));
+    receipt
+        .input
+        .as_object_mut()
+        .unwrap()
+        .remove("thinkingLevel");
+    let text = receipt_lines(&receipt).join("\n");
+    assert!(text.contains("reasoning: recorded runtime setting"));
+    assert!(!text.contains("reasoning: medium"));
+}
+
+#[test]
 fn failed_scope_cause_precedes_planning_terms_at_every_required_width() {
     let root = tempfile::tempdir().unwrap();
     let mut config = BatchScanConfig::load(root.path(), None);

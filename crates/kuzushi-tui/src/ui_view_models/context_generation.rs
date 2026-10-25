@@ -428,7 +428,7 @@ fn non_question_receipt_lines(
         return lesson_receipt_lines(receipt);
     }
     if receipt.generation_tool == "pack:suggest-scopes" {
-        return scope_receipt_lines(receipt);
+        return scope::receipt_lines(receipt);
     }
     if receipt.generation_tool == "threat-model:regenerate" {
         return regeneration_receipt_lines(receipt);
@@ -466,16 +466,6 @@ fn lesson_receipt_lines(
         format!("Recorded source excerpt: at most {} bytes. Missing captures are disclosed; current files are not substituted.", receipt.input["maxSourceBytes"]),
         "Tab shows every exact generation option.".into(),
     ]
-}
-
-fn scope_receipt_lines(
-    receipt: &kuzushi_core::capabilities::campaign::ContextStudyReceipt,
-) -> Vec<String> {
-    vec![format!("Model: {}",crate::app::display_model_selector(&receipt.model)),format!("Source: {}",receipt.source_identity),
-        format!("Plan: {}",receipt.campaign_id),format!("Plan digest: {}",receipt.plan_sha256),
-        format!("Requested output: {} tokens. Subscription OAuth may not enforce this ceiling.",receipt.input["maxOutputTokens"]),
-        "Model data: at most 64 KiB, using the saved inventory and bounded architecture. Omitted rows and incomplete inventory are disclosed in the resulting scope draft.".into(),
-        "Tab shows every exact proposal option. M chooses a model for a new draft.".into()]
 }
 
 pub(crate) fn format_options(input: &serde_json::Value) -> Vec<String> {

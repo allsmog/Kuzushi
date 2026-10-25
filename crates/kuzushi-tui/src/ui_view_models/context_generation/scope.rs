@@ -37,9 +37,26 @@ fn architecture_line(generation: &StudyContextGeneration) -> String {
     let context = if generation.context_input["threatModelRef"].is_null() {
         "explicitly omitted"
     } else {
-        "exact accepted Map revision"
+        "exact saved revision"
     };
     format!("Architecture context: {context}")
+}
+
+pub(super) fn receipt_lines(
+    receipt: &kuzushi_core::capabilities::campaign::ContextStudyReceipt,
+) -> Vec<String> {
+    let reasoning = receipt.input["thinkingLevel"]
+        .as_str()
+        .unwrap_or("recorded runtime setting");
+    vec![
+        format!("Model: {} · reasoning: {reasoning}", crate::app::display_model_selector(&receipt.model)),
+        format!("Source: {}", receipt.source_identity),
+        format!("Plan: {}", receipt.campaign_id),
+        format!("Plan digest: {}", receipt.plan_sha256),
+        format!("Requested output: {} tokens. Subscription OAuth may not enforce this ceiling.", receipt.input["maxOutputTokens"]),
+        "Model data: at most 64 KiB, using the saved inventory and bounded architecture. Omitted rows and incomplete inventory are disclosed in the resulting scope draft.".into(),
+        "Tab shows every exact proposal option. M chooses a model for a new draft.".into(),
+    ]
 }
 
 #[cfg(test)]
