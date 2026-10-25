@@ -13704,7 +13704,8 @@ fn target_revision_effect_defers_findings_and_scope_reload_to_followups() {
     .unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
     app.domain_mut().set_findings(Vec::new());
-    app.domain_mut().set_program_scope(None);
+    app.domain_mut()
+        .set_program_scope_state(crate::app::ProgramScopeState::Unconfigured);
 
     let effects = app.switch_target_revision_effect(TargetRevisionSwitch {
         target: repo.clone(),
