@@ -1,0 +1,76 @@
+name: Diagram links preserve literal file identity and return without starting work
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE KUZUSHI_AGENT_MCPS NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NODE_OPTIONS=--import=@REPO/scripts/devex/fixtures/deny_provider_transport.mjs KUZUSHI_TEST_DENIED_FETCH_LOG=@ART/denied-fetch.jsonl
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dfd_literal_links.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: map
+require-live-snap: 20 SYSTEM SUMMARY | map-summary
+nav-mode:
+keys: Tab z
+require-live-snap: 20 findings at paths | literal-topology
+keys: f
+require-live-snap: 20 FILTER files:["src/a\\b.rs"] | literal-findings
+expect: 1 of 1
+expect: literal-file observation
+expect: q diagram
+resize: 160x48
+wait: 1
+require-live-snap: 20 q diagram | literal-160x48
+resize: 96x89
+wait: 1
+require-live-snap: 20 q diagram | literal-96x89
+resize: 80x24
+wait: 1
+require-live-snap: 20 q diagram | literal-80x24
+resize: 60x20
+wait: 1
+require-live-snap: 20 q diagram | literal-60x20
+resize: 40x12
+wait: 1
+require-live-snap: 20 q diagram | literal-40x12
+ask: Can the operator read the single matched literal-file observation, its saved-revision limitation and the return control across the six sizes without mistaking it for the nested file?
+resize: 120x36
+wait: 1
+keys: q
+require-live-snap: 20 findings at paths | returned-literal
+keys: j f
+require-live-snap: 20 FILTER files:["src/a/b.rs"] | nested-findings
+expect: 1 of 1
+expect: nested-file observation
+keys: q
+require-live-snap: 20 findings at paths | returned-nested
+keys: j f
+require-live-snap: 20 FILTER files:["src/a\\b.rs"] | flow-findings
+expect: 1 of 1
+expect: literal-file observation
+keys: q
+require-live-snap: 20 findings at paths | returned-flow
+keys: j f
+require-live-snap: 20 FILTER files:["src/a/b.rs"] | boundary-findings
+expect: 1 of 1
+expect: nested-file observation
+keys: q
+require-live-snap: 20 findings at paths | returned-boundary
+ask: Do node, flow and boundary links retain their literal evidence identity and selected diagram origin without adding jobs or finding decisions?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dfd_literal_links.py @TMP_TARGET @ART navigation @TMP_HOME
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NODE_OPTIONS=--import=@REPO/scripts/devex/fixtures/deny_provider_transport.mjs KUZUSHI_TEST_DENIED_FETCH_LOG=@ART/denied-fetch.jsonl NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: map
+require-live-snap: 20 SYSTEM SUMMARY | restarted-map
+nav-mode:
+keys: Tab z f
+require-live-snap: 20 FILTER files:["src/a\\b.rs"] | restarted-literal
+expect: 1 of 1
+expect: q diagram
+expect: literal-file observation
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dfd_literal_links.py @TMP_TARGET @ART restarted @TMP_HOME
+ask: Does no-color restart restore the same exact literal file and two unchanged observations while disclosing that a path match does not establish source-revision or verdict equivalence?
+keys: C-c
+require-exit: 10

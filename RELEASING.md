@@ -1,5 +1,18 @@
 # Releasing Kuzushi
 
+## Literal diagram links and exact finding filters
+
+On Unix, `findings:list` `filePaths` and shell `files:[...]` filters now keep
+literal backslashes distinct from directory separators. A query for `src/a\b.rs`
+no longer matches `src/a/b.rs`. Windows keeps native separator equivalence, and
+leading `./` remains accepted. Existing findings and decisions are not rewritten.
+Queries that relied on the former Unix alias must supply the intended recorded
+path explicitly. No schema or option migration is required.
+
+Diagram finding links and scoped planning now share lexical containment checks
+and preserve the same native filename spelling. A path match can include saved
+revisions; it does not establish current-source equivalence or a finding verdict.
+
 ## Bounded duplicate proposal inputs
 
 `triage:dedupe` keeps its name, existing result fields and reversible proposal

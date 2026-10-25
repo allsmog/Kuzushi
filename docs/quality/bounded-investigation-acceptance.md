@@ -1,5 +1,13 @@
 # Bounded investigation acceptance ledger
 
+The [literal diagram-link correction](../assessments/dfd-literal-links-2026-10-25.md)
+keeps literal Unix backslashes distinct in both diagram navigation and shared
+exact-file queries. All 55 focused Rust checks, build, lint and risk pass. Final
+J361 has 34 machine passes, zero failures, nineteen captures and three pending
+operator judgments. Source, observations, decisions and accounting remain
+unchanged through six sizes and no-color restart. Visual review retains a
+separate imported-origin wording gap; no broad delivery item closes.
+
 The [bounded duplicate input correction](../assessments/dedupe-input-bounds-2026-10-25.md)
 removes full-ledger materialization before candidate selection and preserves literal
 paths in selection, source confirmation and JSONL import. Forty-eight focused Rust

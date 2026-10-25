@@ -84,6 +84,7 @@ mod catalog;
 mod command_palette;
 mod command_router;
 mod coverage;
+mod dfd_evidence;
 mod editor_state;
 mod effect_runtime;
 mod effects;

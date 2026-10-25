@@ -1006,6 +1006,9 @@ The `files:["app/a b.rs","app/a,b.rs"]` expression matches the same paths in
 the shell, CLI filters and findings tools. Paths use OR within this selection
 and AND with other filters. The legacy `file:` expression and `filePath` option
 retain substring matching. Use JSON array entries for literal commas and spaces.
+Exact selections preserve case and literal backslashes on Unix; `src/a\b.rs`
+and `src/a/b.rs` identify different files. Windows accepts its native directory
+separators. A leading `./` is accepted on both platforms.
 
 ### Fleet history and revision comparisons
 

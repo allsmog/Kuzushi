@@ -1060,6 +1060,15 @@ validation requires an explicitly approved test allowance and runs sequentially.
 
 ## Current implementation evidence
 
+October 25, 2026: [Literal diagram links](../assessments/dfd-literal-links-2026-10-25.md)
+repair two conversions that confused a literal Unix backslash filename with a
+nested path. The real findings consumer now loads the exact single observation.
+Fifty-five focused Rust checks, build, lint and risk pass. Final J361 has 34
+machine passes, zero failures, nineteen captures and three pending operator
+judgments through six sizes and no-color restart. No source execution or model
+request is added. The separately observed imported-origin label gap remains open;
+four delivery items retain local acceptance and five remain open.
+
 October 19, 2026: [Diagram context planning](../assessments/diagram-context-2026-10-19.md)
 replaces the legacy regeneration hotkey with one evidence-bound architecture
 draft through the existing context study. Exact displayed inheritance, literal

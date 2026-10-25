@@ -2,6 +2,62 @@ use super::*;
 use kuzushi_core::{ScopeRef, ThreatModelCommit, ThreatModelRevisionSource, V2Config};
 use serde_json::json;
 
+#[cfg(unix)]
+fn literal_path_store(root: &Path) -> kuzushi_core::FindingStore {
+    std::fs::create_dir_all(root.join("src/a")).unwrap();
+    let workspace = kuzushi_core::WorkspaceTarget::new(root).unwrap();
+    let store = kuzushi_core::FindingStore::open(workspace.findings_db_path()).unwrap();
+    let rows = [
+        (r"src/a\b.rs", "literal", "Owned literal-file observation"),
+        ("src/a/b.rs", "nested", "Owned nested-file observation"),
+    ];
+    let mut findings = Vec::new();
+    for (path, rule, title) in rows {
+        std::fs::write(
+            root.join(path),
+            "// Owned inert evidence. Never executed.\n",
+        )
+        .unwrap();
+        findings.push(kuzushi_core::Finding::new_tool(
+            "owned-links",
+            rule,
+            path,
+            1,
+            None,
+            kuzushi_core::Severity::Info,
+            title,
+        ));
+    }
+    store
+        .record_run_started("owned-literal-links", root, "running")
+        .unwrap();
+    store
+        .insert_findings("owned-literal-links", &findings)
+        .unwrap();
+    store
+        .record_run_finished("owned-literal-links", "completed", findings.len())
+        .unwrap();
+    store
+}
+
+#[cfg(unix)]
+#[test]
+fn literal_backslash_evidence_opens_its_finding_instead_of_a_nested_sibling() {
+    let (target, mut app) = fixture();
+    let _store = literal_path_store(target.path());
+    let document = json!({"dfd":{"nodes":[{"id":"api","name":"Literal source",
+        "type":"process","trustZone":"owned","sourceRefs":[r"src/a\b.rs:1"]}],
+        "flows":[],"trustBoundaries":[]}});
+    let model = crate::ui_view_models::study_context::context_diagram_model(&document, None);
+    let update = app.open_dfd_finding_query(&model, 0, None);
+    assert_eq!(filter(&update).file_paths, [r"src/a\b.rs"]);
+    crate::app::EffectRuntime::execute(&mut app, update.effects);
+    settle(&mut app);
+    assert_eq!(app.findings().len(), 1);
+    assert_eq!(app.findings()[0].file_path, r"src/a\b.rs");
+    assert_eq!(app.findings()[0].title, "Owned literal-file observation");
+}
+
 fn fixture() -> (tempfile::TempDir, ShellApp) {
     let target = tempfile::tempdir().unwrap();
     let document = json!({"version":"1","methodology":"stride","summary":{},"threats":[],

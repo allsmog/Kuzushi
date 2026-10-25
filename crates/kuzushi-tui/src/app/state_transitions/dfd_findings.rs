@@ -1,5 +1,6 @@
 use super::*;
-use std::path::{Component, Path, PathBuf};
+use crate::app::dfd_evidence::relative_file_path;
+use std::path::{Path, PathBuf};
 
 impl ShellApp {
     pub(super) fn is_dfd_findings_key(&self, key: KeyEvent) -> bool {
@@ -125,42 +126,10 @@ impl ShellApp {
 fn evidence_finding_paths(target: &Path, paths: Vec<String>) -> Vec<String> {
     paths
         .iter()
-        .filter_map(|path| relative_evidence_path(target, path))
+        .filter_map(|path| relative_file_path(target, path).ok())
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
         .collect()
-}
-
-fn relative_evidence_path(target: &Path, evidence: &str) -> Option<String> {
-    let value = evidence.replace('\\', "/");
-    if value.contains("://") {
-        return None;
-    }
-    let path = Path::new(&value);
-    let relative = if path.is_absolute() {
-        path.strip_prefix(target).ok()?
-    } else {
-        path
-    };
-    if relative
-        .components()
-        .any(|part| !matches!(part, Component::Normal(_) | Component::CurDir))
-    {
-        return None;
-    }
-    let path = relative
-        .components()
-        .filter_map(normal_component)
-        .collect::<Vec<_>>()
-        .join("/");
-    (!path.is_empty()).then_some(path)
-}
-
-fn normal_component<'a>(component: Component<'a>) -> Option<&'a str> {
-    match component {
-        Component::Normal(part) => part.to_str(),
-        _ => None,
-    }
 }
 
 #[cfg(test)]
