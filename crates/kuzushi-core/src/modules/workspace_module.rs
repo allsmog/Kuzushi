@@ -174,7 +174,7 @@ fn sast_scan_options() -> Vec<OptionSpec> {
     options
 }
 
-fn sast_semgrep_options() -> Vec<OptionSpec> {
+pub(in crate::modules) fn sast_semgrep_options() -> Vec<OptionSpec> {
     vec![
         opt("semgrepConfig", OptionType::StringList,
             "Rule files or selectors for the selected Semgrep task. Local files allow offline scans.").advanced(),
@@ -190,7 +190,7 @@ fn sast_semgrep_options() -> Vec<OptionSpec> {
     ]
 }
 
-fn sast_secret_scan_options() -> Vec<OptionSpec> {
+pub(in crate::modules) fn sast_secret_scan_options() -> Vec<OptionSpec> {
     vec![
         opt("secretScanMaxFileBytes", OptionType::Int, "Secret inspection maximum bytes per file. Native default is 2 MiB.")
             .aliases(&["secret_scan_max_file_bytes"]).integer_range(1024, 67_108_864).advanced(),
@@ -203,7 +203,7 @@ fn sast_secret_scan_options() -> Vec<OptionSpec> {
     ]
 }
 
-fn sast_iac_scan_options() -> Vec<OptionSpec> {
+pub(in crate::modules) fn sast_iac_scan_options() -> Vec<OptionSpec> {
     vec![
         opt("iacScanMaxFileBytes", OptionType::Int, "IaC maximum bytes per file; default is 512 KiB.")
             .aliases(&["iac_scan_max_file_bytes"]).integer_range(1024, 67_108_864).advanced(),
@@ -539,14 +539,7 @@ fn sast_agent_policy_options() -> Vec<OptionSpec> {
 
 fn sast_agent_runtime_options() -> Vec<OptionSpec> {
     vec![
-        opt(
-            "agenticMaxModelTurns",
-            OptionType::Int,
-            "Agentic scanner turns per query (1-40). Structured-output repairs also consume the shared allowance. Omitted keeps the scanner default.",
-        )
-        .aliases(&["agentic_max_model_turns"])
-        .integer_range(1, crate::runtime::domain::MAX_AGENT_MODEL_TURNS as i64)
-        .advanced(),
+        sast_agentic_turn_limit_option(),
         opt(
             "languages",
             OptionType::StringList,
@@ -566,6 +559,17 @@ fn sast_agent_runtime_options() -> Vec<OptionSpec> {
         ])
         .advanced(),
     ]
+}
+
+pub(in crate::modules) fn sast_agentic_turn_limit_option() -> OptionSpec {
+    opt(
+        "agenticMaxModelTurns",
+        OptionType::Int,
+        "Agentic scanner turns per query (1-40). Structured-output repairs also consume the shared allowance. Omitted keeps the scanner default.",
+    )
+    .aliases(&["agentic_max_model_turns"])
+    .integer_range(1, crate::runtime::domain::MAX_AGENT_MODEL_TURNS as i64)
+    .advanced()
 }
 
 fn sast_taint_backend_options() -> Vec<OptionSpec> {

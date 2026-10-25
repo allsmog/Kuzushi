@@ -190,11 +190,16 @@ require-live-snap: 20 Attempts per job | attempt-allowance-row
 keys: Enter
 require-live-snap: 20 Attempts per job | revise-attempts
 type: 2
-keys: Enter L End
+keys: Enter L Home
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | retry-work-overview
+expect: Engines: agentic
+expect: Scope: whole repository
+expect: Execution model: openai-oauth:gpt-5.5
+expect-not: openai-codex:gpt-5.5
+keys: End
 require-live-snap: 25 y approve | retry-approval
 expect: Total provider calls: 6
 expect: Protected review calls: 2
-expect: Execution model: openai-oauth:gpt-5.5
 expect-not: openai-codex:gpt-5.5
 ask: Does retrying the canceled job require an explicit two-attempt approval for the same fixed plan, with prior call consumption and unknown cost retained?
 keys: y

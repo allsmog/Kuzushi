@@ -33,17 +33,46 @@ pub(super) fn summary(
         .file_name()
         .unwrap_or(config.target.as_os_str())
         .to_string_lossy();
-    let repository = format!("Repository: {name}");
-    let mut overview = vec![repository.clone()];
+    let mut overview = vec![format!("Repository: {name}")];
     overview.extend(frozen.lines.first().cloned());
+    overview.extend(decision_lines(frozen));
     overview.extend(model_overview(&frozen.models));
-    let mut details = vec![repository];
-    details.extend(frozen.lines.iter().filter(|line| !line.is_empty()).cloned());
+    let details = detail_lines(frozen, &overview);
     Some(super::AllowanceWorkSummary {
         overview,
         details,
         workers: Some(frozen.workers),
     })
+}
+
+fn decision_lines(frozen: &FrozenWorkSummary<'_>) -> Vec<String> {
+    if frozen.models.len() != 1 {
+        return Vec::new();
+    }
+    frozen
+        .lines
+        .iter()
+        .filter(|line| is_decision_line(line))
+        .cloned()
+        .collect()
+}
+
+fn is_decision_line(line: &str) -> bool {
+    ["Action:", "Engines:", "Scope:", "Strategy:", "Evidence:"]
+        .iter()
+        .any(|prefix| line.starts_with(prefix))
+}
+
+fn detail_lines(frozen: &FrozenWorkSummary<'_>, overview: &[String]) -> Vec<String> {
+    let multiple_cases = frozen.models.len() > 1;
+    frozen
+        .lines
+        .iter()
+        .skip(1)
+        .filter(|line| !line.is_empty())
+        .filter(|line| multiple_cases || !overview.contains(line))
+        .cloned()
+        .collect()
 }
 
 fn frozen_summaries(config: &BatchScanConfig) -> Vec<FrozenWorkSummary<'_>> {

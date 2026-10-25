@@ -95,6 +95,7 @@ pub(crate) fn engine_detail(app: &ShellApp, width: usize) -> Vec<String> {
         lines.extend([notice.clone(), String::new()]);
     }
     lines.extend(path_conflict_lines(picker));
+    lines.extend(inactive_option_lines(picker));
     if let Some(row) = rows.get(picker.cursor) {
         lines.push(row.label.clone());
         lines.push(row.unsupported.as_ref().map_or_else(
@@ -140,6 +141,19 @@ fn path_conflict_lines(picker: &crate::app::StudyEnginePicker) -> Vec<String> {
 }
 
 pub(crate) fn engine_apply_controls(app: &ShellApp) -> &'static str {
+    if app.study_engine_picker().is_some_and(has_inactive_options) {
+        return "c clear unused · a apply · Esc";
+    }
+    scope_engine_apply_controls(app)
+}
+
+fn has_inactive_options(picker: &crate::app::StudyEnginePicker) -> bool {
+    picker
+        .inactive_options()
+        .is_ok_and(|groups| !groups.is_empty())
+}
+
+fn scope_engine_apply_controls(app: &ShellApp) -> &'static str {
     let paths = app
         .study_engine_picker()
         .and_then(|picker| picker.conflicting_paths())
@@ -153,6 +167,24 @@ pub(crate) fn engine_apply_controls(app: &ShellApp) -> &'static str {
         (false, true) => "a apply choices · m files · Esc",
         (false, false) => "a apply choices · Esc cancel",
     }
+}
+
+fn inactive_option_lines(picker: &crate::app::StudyEnginePicker) -> Vec<String> {
+    let groups = match picker.inactive_options() {
+        Ok(groups) => groups,
+        Err(error) => return vec![format!("Option selection needs attention: {error:#}")],
+    };
+    if groups.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = vec!["Settings belong to unselected engines:".into()];
+    lines.extend(
+        groups
+            .into_iter()
+            .map(|group| format!("{}: {}", group.task, group.options.join(", "))),
+    );
+    lines.extend(["c clears only these settings in this draft. Or select their engines. Esc keeps the original study. Global settings and spending stay unchanged.".into(),String::new()]);
+    lines
 }
 
 pub(crate) fn engine_line(row: &StudyEngineRow, focused: bool) -> String {

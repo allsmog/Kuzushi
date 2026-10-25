@@ -3,6 +3,7 @@ use crate::app::{state_transitions::InputUpdate, ShellApp};
 use crossterm::event::KeyCode;
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
+mod option_cleanup;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct StudyEnginePicker {
@@ -160,9 +161,17 @@ impl ShellApp {
         match code {
             KeyCode::Esc => self.close_study_engine_picker(),
             KeyCode::Char('a') => return Some(self.accept_study_engines()),
+            KeyCode::PageUp | KeyCode::PageDown => self.scroll_study_engines(code),
+            _ => return self.handle_engine_recovery_control(code),
+        }
+        Some(InputUpdate::handled())
+    }
+
+    fn handle_engine_recovery_control(&mut self, code: KeyCode) -> Option<InputUpdate> {
+        match code {
             KeyCode::Char('x') => self.clear_study_path_conflict(),
             KeyCode::Char('m') => self.choose_study_scoped_file_tools(),
-            KeyCode::PageUp | KeyCode::PageDown => self.scroll_study_engines(code),
+            KeyCode::Char('c') => self.clear_study_engine_options(),
             _ => return None,
         }
         Some(InputUpdate::handled())
@@ -196,19 +205,30 @@ impl ShellApp {
         let Some(picker) = self.study_engine_picker() else {
             return InputUpdate::handled();
         };
-        let mut input = picker.prepared_selection();
-        if let Err(error) = kuzushi_core::modules::validate_scan_scope_contract(&input) {
-            self.router
-                .campaign_mut()
-                .batch_scan_config
-                .as_mut()
-                .unwrap()
-                .engine_picker
-                .as_mut()
-                .unwrap()
-                .notice = Some(format!("Selection needs attention: {error:#}"));
-            return InputUpdate::handled();
+        let input = match option_cleanup::validated_engine_selection(picker) {
+            Ok(input) => input,
+            Err(error) => {
+                self.set_study_engine_notice(format!("Selection needs attention: {error:#}"));
+                return InputUpdate::handled();
+            }
+        };
+        self.apply_study_engine_input(input);
+        InputUpdate::handled()
+    }
+
+    fn set_study_engine_notice(&mut self, notice: String) {
+        if let Some(picker) = self
+            .router
+            .campaign_mut()
+            .batch_scan_config
+            .as_mut()
+            .and_then(|config| config.engine_picker.as_mut())
+        {
+            picker.notice = Some(notice);
         }
+    }
+
+    fn apply_study_engine_input(&mut self, mut input: Value) {
         let config = self
             .router
             .campaign_mut()
@@ -225,7 +245,6 @@ impl ShellApp {
         config.detail_scroll = 0;
         config.notice = Some(engine_selection_notice(changed).into());
         self.refresh_batch_worker_resolution();
-        InputUpdate::handled()
     }
 
     fn close_study_engine_picker(&mut self) {

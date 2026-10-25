@@ -3,7 +3,6 @@ import hashlib
 import json
 import os
 import shutil
-import sqlite3
 import subprocess
 import sys
 import time
@@ -11,6 +10,7 @@ from pathlib import Path
 from investigation_journey import seed as source_seed
 from rejected_context import execute
 from scoped_discovery import scope
+from secret_settings import ledger
 
 PRIOR = "resource-prior"
 NEXT = "resource-next"
@@ -22,10 +22,15 @@ def source_hashes(root):
             for path in root.glob("*/reader.rs")}
 
 
-def accounting(root):
-    with sqlite3.connect((root / ".kuzushi/v3/index.sqlite3").as_uri() + "?mode=ro", uri=True) as db:
+def accounting(root, evidence):
+    with ledger(root, evidence) as db:
         rows = db.execute("select count(*),sum(settled_at is null) from investigation_call_reservations").fetchone()
     return {"committed": rows[0], "unresolved": rows[1] or 0}
+
+
+def plan_digest(root):
+    path = root / ".kuzushi/v3/campaigns" / NEXT / "plan.json"
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def prepare(root, evidence, home):
@@ -53,7 +58,7 @@ def prepare(root, evidence, home):
                 "scanInput": {"taskMode": "manual", "tasks": ["agentic"], "maxIterations": 1,
                               "mcps": False, "threatModelRef": None, "scanContextRef": None}}
     prior = execute(root, home, evidence, "resource-prior", "campaign:study", {**selected, "campaignId": PRIOR})
-    execute(root, home, evidence, "resource-prior-approval", "campaign:approve-allowance", {
+    approval = execute(root, home, evidence, "resource-prior-approval", "campaign:approve-allowance", {
         "investigationId": INVESTIGATION, "expectedRevision": 0, "model": "openai-codex:gpt-5.5",
         "maxProviderCalls": 8, "protectedReviewCalls": 2, "reason": "Six owned intercepted passes, no live inference",
         "campaignId": PRIOR, "campaignPlanSha256": prior["planSha256"], "campaignJobs": 6, "maxJobAttempts": 1})
@@ -76,7 +81,9 @@ def prepare(root, evidence, home):
     assert len(quote["cases"]) == 2
     assert all(entry["callsPerPass"] == [1, 1] and len(entry["runIds"]) == 3 for entry in quote["cases"])
     assert all(entry["costPerPassUsd"] is None for entry in quote["cases"])
-    before = {"files": source_hashes(root), "accounting": accounting(root), "planSha256": next_plan["planSha256"]}
+    before = {"files": source_hashes(root), "accounting": accounting(root, evidence),
+              "planSha256": next_plan["planSha256"], "planFileSha256": plan_digest(root),
+              "approvedWorkPlan": approval["allowance"]["workPlan"]}
     assert before["accounting"] == {"committed": 6, "unresolved": 0}
     (evidence / "resource-before.json").write_text(json.dumps(before))
     (evidence / "resource-command.txt").write_text("campaign " + NEXT)
@@ -85,13 +92,29 @@ def prepare(root, evidence, home):
 def verify(root, evidence, stage):
     before = json.loads((evidence / "resource-before.json").read_text())
     assert source_hashes(root) == before["files"]
-    assert accounting(root) == before["accounting"]
+    assert accounting(root, evidence) == before["accounting"]
+    assert plan_digest(root) == before["planFileSha256"]
+    allowance = verify_allowance(root, evidence, stage, before)
     calls = (evidence / "large-scope-calls.jsonl").read_text().splitlines()
     assert len(calls) == 6
     campaign = root / ".kuzushi/v3/campaigns" / NEXT
     assert not (campaign / "queue.json").exists(), "Resource review must not start discovery"
     (evidence / (stage + "-check.json")).write_text(json.dumps({"committedCalls": 6, "newJobsStarted": 0,
-        "liveRequests": 0, "sourceExecuted": False, "knownCases": 2, "dollarScenario": None}))
+        "liveRequests": 0, "sourceExecuted": False, "knownCases": 2, "dollarScenario": None,
+        "allowanceRevision": allowance["revision"], "limits": allowance["limits"],
+        "approvedCampaign": allowance["workPlan"]["campaignId"], "planUnchanged": True}))
+
+
+def verify_allowance(root, evidence, stage, before):
+    data = execute(root, evidence / "home", evidence, "resource-allowance-" + stage,
+                   "campaign:allowance", {"investigationId": INVESTIGATION})
+    allowance = data["allowance"]
+    assert allowance["revision"] == 1
+    assert allowance["limits"] == {"maxProviderCalls": 8, "protectedReviewCalls": 2}
+    assert allowance["workPlan"] == before["approvedWorkPlan"]
+    assert allowance["committedCalls"] == 6
+    assert allowance["reviewCalls"] == allowance["unresolvedCalls"] == 0
+    return allowance
 
 
 if __name__ == "__main__":

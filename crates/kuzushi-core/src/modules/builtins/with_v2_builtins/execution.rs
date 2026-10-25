@@ -280,6 +280,12 @@ impl ModuleRegistry {
         ctx: &ToolExecutionContext<'_>,
         option_store: Option<&ToolOptionStore>,
     ) -> Result<Value> {
+        let option_store = crate::modules::allowance_dispatch::preparation_option_store(
+            name,
+            &input,
+            ctx,
+            option_store,
+        )?;
         let mut input = self.prepare_tool_input(name, input, option_store)?;
         normalize_workspace_path_options(self, name, &mut input, ctx, false, None)?;
         let input = input_with_declared_prompt_defaults(self, name, input, ctx)?;

@@ -1,6 +1,8 @@
 //! Reuse scanner selection validation before publishing a study draft.
 use anyhow::Result;
 use serde_json::Value;
+mod inactive_options;
+pub use inactive_options::{inactive_scan_task_options, InactiveScanTaskOptions};
 
 pub(crate) fn bind_dispatch_scan_scope(
     name: &str,

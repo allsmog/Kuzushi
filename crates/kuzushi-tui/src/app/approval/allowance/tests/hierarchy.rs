@@ -73,7 +73,7 @@ fn many_case_approval_shows_spending_before_all_context_receipts() {
     for required in [
         "24 fixed jobs",
         "1 worker(s)",
-        "Model: none (native engines)",
+        "Execution model: none; this frozen discovery uses native engines",
         "Calls already committed: 1",
         "unresolved: 1",
         "Total provider calls: 12",

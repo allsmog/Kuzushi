@@ -31,13 +31,23 @@ impl ToolOptionStore {
     }
 
     pub fn save_to_path(&self, path: &Path) -> Result<()> {
+        self.save_scoped_path(path, OptionScope::Workspace)
+    }
+
+    fn save_scoped_path(&self, path: &Path, scope: OptionScope) -> Result<()> {
         let body =
             serde_json::to_string_pretty(self).context("Could not serialize option store")?;
         if let Some(root) = standard_option_store_root(path).filter(|root| root.is_dir()) {
             let relative = path
                 .strip_prefix(root)
-                .context("Option store path escaped its workspace")?;
-            crate::workspace::write_workspace_state_file(root, relative, body.as_bytes())?;
+                .context("Option store path escaped its storage root")?;
+            if scope == OptionScope::Global {
+                // Operator state keeps containment and no-follow checks without
+                // applying repository tracking rules to the operator's home.
+                crate::workspace::write_workspace_file(root, relative, body.as_bytes())?;
+            } else {
+                crate::workspace::write_workspace_state_file(root, relative, body.as_bytes())?;
+            }
             return Ok(());
         }
         crate::fs_atomic::write_atomic(path, &body)
@@ -55,7 +65,7 @@ impl ToolOptionStore {
 
     pub fn save_persistent(&self, global_path: &Path, workspace_path: Option<&Path>) -> Result<()> {
         self.scope_only(OptionScope::Global)
-            .save_to_path(global_path)?;
+            .save_scoped_path(global_path, OptionScope::Global)?;
         if let Some(path) = workspace_path {
             self.scope_only(OptionScope::Workspace).save_to_path(path)?;
         }
@@ -97,3 +107,6 @@ fn standard_option_store_root(path: &Path) -> Option<&Path> {
 fn scope_binding(binding: &OptionBinding, scope: OptionScope) -> Option<OptionBinding> {
     (binding.scope == scope).then(|| binding.clone())
 }
+
+#[cfg(test)]
+mod tests;

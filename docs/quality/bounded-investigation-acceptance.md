@@ -1,5 +1,13 @@
 # Bounded investigation acceptance ledger
 
+The [approval and global-choice correction](../assessments/approval-reading-and-global-options-2026-10-24.md)
+keeps distinct model roles and complete frozen terms while reducing repeated
+body rows. Global options now use contained operator storage, while workspace
+tracking guards remain strict. All 95 focused Rust checks, four I/O contract
+checks, build and lint pass.
+Sequential J259/J121 have 296 machine passes, zero failures, 184 captures and
+25 pending operator judgments. No live request or broad delivery item closes.
+
 The [boundary-context reading correction](../assessments/boundary-context-reading-2026-10-24.md)
 makes association and preparation state visible before instructions at 40
 columns, retaining exact source and context provenance. Final J128 records 44

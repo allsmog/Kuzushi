@@ -5,6 +5,9 @@ use std::sync::Arc;
 
 const OPTION: &str = "allowanceRef";
 
+mod frozen_options;
+pub(super) use frozen_options::preparation_option_store;
+
 pub(super) fn declare_allowance_option(mut tool: ToolDescriptor) -> ToolDescriptor {
     if supports_allowance(&tool) && !tool.options.iter().any(|option| option.name == OPTION) {
         tool.options.push(opt(

@@ -2,8 +2,8 @@
 use super::context_wrap;
 use crate::app::{ContextComparisonView, StudyContextComparison};
 use kuzushi_core::capabilities::threat_model::{
-    ContextCollectionOrderDifference, ContextDifferenceSection, ContextTextDifference,
-    ContextValueDifference,
+    ContextCollectionOrderDifference, ContextDifferenceSection, ContextSourceClaims,
+    ContextTextDifference, ContextValueDifference,
 };
 use ratatui::layout::{Margin, Rect};
 mod content;
@@ -12,7 +12,7 @@ pub(crate) enum ComparisonEntry<'a> {
     Text(&'a ContextTextDifference),
     Field(&'a ContextValueDifference),
     Order(&'a ContextCollectionOrderDifference),
-    Source,
+    Source(&'a ContextSourceClaims),
 }
 
 pub(crate) struct ComparisonLayout {
@@ -90,13 +90,15 @@ pub(crate) fn entries(
     if view == ContextComparisonView::Text {
         return context
             .differences
-            .as_ref()
-            .unwrap()
             .iter()
+            .flatten()
             .map(ComparisonEntry::Text)
             .collect();
     }
-    structure_entries(context.structure.as_ref().unwrap(), view)
+    context
+        .structure
+        .as_ref()
+        .map_or_else(Vec::new, |structure| structure_entries(structure, view))
 }
 
 fn structure_entries(
@@ -105,7 +107,7 @@ fn structure_entries(
 ) -> Vec<ComparisonEntry<'_>> {
     let mut entries = Vec::new();
     if view == ContextComparisonView::Source {
-        entries.push(ComparisonEntry::Source);
+        entries.push(ComparisonEntry::Source(&structure.source_claims));
     }
     entries.extend(
         structure
@@ -144,7 +146,7 @@ pub(crate) fn title(entry: &ComparisonEntry<'_>) -> String {
         ComparisonEntry::Text(change) => change.label.clone(),
         ComparisonEntry::Field(change) => content::field_title(change),
         ComparisonEntry::Order(change) => format!("Order: {}", change.collection),
-        ComparisonEntry::Source => "Saved source and context identities".into(),
+        ComparisonEntry::Source(_) => "Saved source and context identities".into(),
     }
 }
 

@@ -11,7 +11,8 @@ submit: setg ui.auto_open_activity false
 submit: setg ui.auto_open_viz false
 submit: logs
 submit: run context:build {"enrichment":false}
-require-live-snap: 35 Build project context: | source-context
+require-live-snap: 35 context:build indexed 131 files | source-context
+expect-not: could not persist options
 submit: use threat-model
 submit: options threat-model:import
 submit: set path .kuzushi/manual-context.json
@@ -128,7 +129,7 @@ type: 1
 keys: Enter L Home
 require-live-snap: 25 REVIEW PLAN & ALLOWANCE | approval-first-page
 expect: 9 fixed jobs
-expect: Model: none (native engines)
+expect: Execution model: none; this frozen discovery uses native engines
 expect: Calls already committed: 0
 expect: Total provider calls: 1
 expect: Protected review calls: 1

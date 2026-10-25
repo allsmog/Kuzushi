@@ -8,11 +8,11 @@ launch: --target @TMP_TARGET
 require-live-snap: 30 KUZUSHI | ready
 paste-file: @ART/resource-command.txt
 keys: Enter
-require-live-snap: 25 6 job(s) | unapproved-jobs
+require-live-snap: 25 6 planned | unapproved-jobs
 nav-mode:
 keys: a
 require-live-snap: 25 PLAN A STUDY | resource-plan
-keys: Down Down Down Down Down Down Down
+keys: Home Down Down Down Down Down Down Down Down
 require-live-snap: 20 Full plan historical scenario | historical-scenario
 expect: 6 to 6 provider requests
 expect: Dollar estimate: unavailable
@@ -34,8 +34,10 @@ expect: Esc back
 resize: 40x12
 live-snap: picker-40x12
 expect: Esc back
-keys: PgDn PgDn PgDn PgDn
+keys: PgDn PgDn PgDn PgDn PgDn PgDn PgDn PgDn PgDn PgDn PgDn PgDn PgDn PgDn PgDn PgDn PgDn PgDn PgDn PgDn
 live-snap: picker-detail-tail
+expect: outside this window remains
+expect: available.
 ask: Can the operator inspect, page and cancel a named prior study without changing the plan, draft or spending?
 resize: 120x36
 keys: Escape
@@ -58,11 +60,11 @@ launch: --target @TMP_TARGET
 require-live-snap: 30 KUZUSHI | restarted
 paste-file: @ART/resource-command.txt
 keys: Enter
-require-live-snap: 25 6 job(s) | recovered-jobs
+require-live-snap: 25 6 planned | recovered-jobs
 nav-mode:
-keys: a Down Down Down Down Down Down Down
+keys: a Home Down Down Down Down Down Down Down Down
 require-live-snap: 25 Full plan historical scenario | recovered-scenario
 require-shell: python3 -B @REPO/scripts/devex/fixtures/resource_study.py @TMP_TARGET @ART restarted
-ask: Does restart retain the exact prior study and frozen per-case observations while leaving its six paid fixture calls and unapproved new work unchanged?
+ask: Does restart retain the exact prior study and frozen per-case observations while leaving its six recorded fixture calls and unapproved new work unchanged?
 keys: C-c
 require-exit: 10

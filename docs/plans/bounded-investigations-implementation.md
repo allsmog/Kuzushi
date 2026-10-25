@@ -1,5 +1,12 @@
 # Bounded investigations implementation
 
+The [approval and global-choice correction](../assessments/approval-reading-and-global-options-2026-10-24.md)
+puts frozen engine, scope and execution model ahead of spending details, removes
+duplicate body rows and repairs global saves under an ignored operator home.
+All 95 focused Rust checks, four I/O contract checks, build and lint pass. Sequential J259/J121 record
+296 machine passes, zero failures, 184 captures and 25 pending operator judgments.
+No live request, module promotion or broad delivery closure is added.
+
 The [owned study control correction](../assessments/owned-study-control-2026-10-24.md)
 uses the actual owned child for activity, cancellation and exit disclosure.
 The [Report retry correction](../assessments/report-retry-visibility-2026-10-24.md)

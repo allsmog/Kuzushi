@@ -9,6 +9,7 @@ use kuzushi_core::{
 };
 use ratatui::{backend::TestBackend, Terminal};
 use serde_json::json;
+mod native_cases;
 
 fn fixture() -> (tempfile::TempDir, BatchScanConfig) {
     fixture_with_engine("agentic")

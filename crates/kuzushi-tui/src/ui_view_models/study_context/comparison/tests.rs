@@ -113,3 +113,43 @@ fn conflicting_recorded_revisions_are_disclosed_without_choosing_one() {
     assert!(plain.contains("no source identity is selected automatically"));
     assert!(plain.contains("aaaaaaaa") && plain.contains("cccccccc"));
 }
+
+#[test]
+fn a_comparison_without_a_stored_result_reads_as_pending_in_every_view() {
+    for drop_structure in [false, true] {
+        let mut context = fixture();
+        context.differences = None;
+        if drop_structure {
+            context.structure = None;
+        }
+        for view in ContextComparisonView::ALL {
+            context.view = view;
+            assert!(entries(&context, view).is_empty(), "{view:?}");
+            assert!(
+                selected_lines(&context, 80)
+                    .join(" ")
+                    .contains("Reading the authenticated parent"),
+                "{view:?}"
+            );
+        }
+        assert!(all_lines(&context, 80)
+            .join(" ")
+            .contains("Reading the authenticated parent"));
+    }
+}
+
+#[test]
+fn the_source_entry_carries_the_claims_of_the_structure_it_came_from() {
+    let context = fixture();
+    let claims = entries(&context, ContextComparisonView::Source)
+        .into_iter()
+        .find_map(|entry| match entry {
+            ComparisonEntry::Source(claims) => Some(claims),
+            _ => None,
+        })
+        .expect("the source view lists the saved identities");
+    assert_eq!(claims, &context.structure.as_ref().unwrap().source_claims);
+    assert!(content::lines(&context, &ComparisonEntry::Source(claims))
+        .join(" ")
+        .contains("Saved source claims differ"));
+}
