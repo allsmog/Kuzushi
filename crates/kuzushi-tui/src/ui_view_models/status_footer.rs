@@ -5,7 +5,7 @@ use super::{
     routing_mode_segment, scan_status, status_footer_findings_summary_from_counts,
     status_footer_findings_summary_with_total, view_status_segment, FindingsNarrowing, ShellApp,
 };
-use crate::app::ReviewMode;
+use crate::app::{ProgramScopeState, ReviewMode};
 use crate::ShellView;
 
 mod investigation;
@@ -153,12 +153,19 @@ fn notification_availability_footer_segment(app: &ShellApp) -> Option<String> {
         .then(|| "notify:unavailable · focus unknown".to_string())
 }
 
+/// The program-scope chip. An unloadable `scope.toml` reads as
+/// `scope: load failed` rather than as no chip at all, so the one always-visible
+/// signifier of the bug-bounty boundary never presents a broken allow/deny list
+/// as an absent one. An empty scope stays chipless: its lists are a no-op.
 fn scope_footer_segment(app: &ShellApp) -> Option<String> {
-    let scope = app.domain().program_scope()?;
-    if scope.is_empty() {
-        return None;
+    if matches!(
+        app.domain().program_scope_state(),
+        ProgramScopeState::Unavailable
+    ) {
+        return Some("scope: load failed".to_string());
     }
-    Some("scope: on".to_string())
+    let scope = app.domain().program_scope()?;
+    (!scope.is_empty()).then(|| "scope: on".to_string())
 }
 
 fn project_scope_footer_segment(app: &ShellApp) -> Option<String> {

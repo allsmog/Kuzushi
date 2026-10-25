@@ -40,6 +40,23 @@ struct WorklistSnapshot {
     generation: u64,
 }
 
+/// How the active target's `.kuzushi/scope.toml` reads right now. A scope file
+/// that exists but cannot be loaded is not the same as no scope file: the
+/// scope-gated dispatchers refuse the first and run unrestricted under the
+/// second, so the two must never project the same footer. The reason stays in
+/// the transcript; this carries only which of the three states holds.
+#[derive(Debug)]
+pub(crate) enum ProgramScopeState {
+    /// No `scope.toml` under the active target, or no active target.
+    Unconfigured,
+    /// A parsed scope. An empty one is a documented no-op, not a failure.
+    Loaded(ProgramScope),
+    /// A scope boundary Kuzushi could not establish — an unreadable,
+    /// oversized, escaping or malformed `scope.toml`, or an unresolvable
+    /// target.
+    Unavailable,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct FindingLedgerCounts {
     pub(crate) total: usize,
@@ -154,7 +171,7 @@ pub struct DomainCache {
     /// memo invalidates on every re-run without hashing the snapshot body.
     worklist_snapshot_generation: u64,
     trace_expansion: Option<TraceExpansionSnapshot>,
-    program_scope: Option<ProgramScope>,
+    program_scope: ProgramScopeState,
     findings: Vec<Finding>,
     finding_aliases: Vec<String>,
     identity_fold_policy: IdentityFoldPolicy,
@@ -205,7 +222,7 @@ impl DomainCache {
             worklist_snapshot: None,
             worklist_snapshot_generation: 0,
             trace_expansion: None,
-            program_scope: None,
+            program_scope: ProgramScopeState::Unconfigured,
             findings: Vec::new(),
             finding_aliases: Vec::new(),
             identity_fold_policy: IdentityFoldPolicy::Legacy,
@@ -263,7 +280,7 @@ impl DomainCache {
         self.taint_flows.clear();
         self.worklist_snapshot = None;
         self.trace_expansion = None;
-        self.program_scope = None;
+        self.program_scope = ProgramScopeState::Unconfigured;
     }
 
     fn clear_target_findings(&mut self) {
@@ -617,12 +634,22 @@ impl DomainCache {
         })
     }
 
+    /// The loaded allow/deny list, if there is one. `None` covers both an
+    /// absent and an unloadable `scope.toml`, so a caller that projects the
+    /// boundary to the operator must consult `program_scope_state` first.
     pub(crate) fn program_scope(&self) -> Option<&ProgramScope> {
-        self.program_scope.as_ref()
+        match &self.program_scope {
+            ProgramScopeState::Loaded(scope) => Some(scope),
+            ProgramScopeState::Unconfigured | ProgramScopeState::Unavailable => None,
+        }
     }
 
-    pub(crate) fn set_program_scope(&mut self, scope: Option<ProgramScope>) {
-        self.program_scope = scope;
+    pub(crate) fn program_scope_state(&self) -> &ProgramScopeState {
+        &self.program_scope
+    }
+
+    pub(crate) fn set_program_scope_state(&mut self, state: ProgramScopeState) {
+        self.program_scope = state;
     }
 
     pub(crate) fn workspace_stale(&self) -> Option<&WorkspaceStaleSummary> {

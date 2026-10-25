@@ -42,25 +42,33 @@ impl ShellApp {
 
     /// Reload `.kuzushi/scope.toml` from the active target (M2 §2.1). Called
     /// when the target is set or changed so the footer chip and scope-gated
-    /// dispatchers see a fresh allow/deny list. Logs a transcript line on
-    /// load errors but does not panic — operators see "scope: load failed".
+    /// dispatchers see a fresh allow/deny list. A boundary Kuzushi cannot
+    /// establish is recorded as `Unavailable` rather than as an absent scope,
+    /// because the dispatchers refuse an unloadable file and run unrestricted
+    /// without one: the transcript carries the reason and operators keep
+    /// seeing "scope: load failed" until it is fixed.
     pub fn refresh_program_scope(&mut self) {
-        let Some(target) = self.target_path_buf() else {
-            self.domain_mut().set_program_scope(None);
-            return;
+        let state = self.resolve_program_scope_state();
+        self.domain_mut().set_program_scope_state(state);
+    }
+
+    fn resolve_program_scope_state(&mut self) -> ProgramScopeState {
+        let Some(target) = self.target_owned() else {
+            return ProgramScopeState::Unconfigured;
         };
-        let workspace = match kuzushi_core::WorkspaceTarget::new(target) {
+        let workspace = match kuzushi_core::WorkspaceTarget::new(&target) {
             Ok(workspace) => workspace,
-            Err(_) => {
-                self.domain_mut().set_program_scope(None);
-                return;
+            Err(error) => {
+                self.log("error", format!("scope.toml target unresolved: {error}"));
+                return ProgramScopeState::Unavailable;
             }
         };
         match kuzushi_core::load_program_scope(&workspace) {
-            Ok(scope) => self.domain_mut().set_program_scope(scope),
+            Ok(Some(scope)) => ProgramScopeState::Loaded(scope),
+            Ok(None) => ProgramScopeState::Unconfigured,
             Err(error) => {
-                self.domain_mut().set_program_scope(None);
                 self.log("error", format!("scope.toml load failed: {error}"));
+                ProgramScopeState::Unavailable
             }
         }
     }
@@ -650,6 +658,80 @@ mod workspace_initialization_tests {
         assert!(effects.is_empty());
         assert!(app.target().is_none());
         assert!(!target.path().join(".kuzushi/v3").exists());
+    }
+}
+
+#[cfg(test)]
+mod program_scope_refresh_tests {
+    use super::*;
+
+    fn workspace_with_scope_file(body: Option<&str>) -> (tempfile::TempDir, ShellApp) {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+        workspace.ensure_state_dir().unwrap();
+        if let Some(body) = body {
+            std::fs::write(target.path().join(".kuzushi/scope.toml"), body).unwrap();
+        }
+        let app = ShellApp::new(V2Config::default(), Some(&workspace));
+        (target, app)
+    }
+
+    #[test]
+    fn an_unloadable_scope_file_is_unavailable_and_not_an_absent_scope() {
+        let (_target, app) = workspace_with_scope_file(Some("[in_scope]\nhosts = [\"]\n"));
+
+        assert!(
+            matches!(
+                app.domain().program_scope_state(),
+                ProgramScopeState::Unavailable
+            ),
+            "{:?}",
+            app.domain().program_scope_state()
+        );
+        assert!(
+            app.log_lines()
+                .iter()
+                .any(|line| line.prefix == "error" && line.body.contains("scope.toml load failed")),
+            "the transcript must carry the parse reason"
+        );
+    }
+
+    #[test]
+    fn a_parsed_scope_file_loads_and_an_absent_one_stays_unconfigured() {
+        let (_target, app) =
+            workspace_with_scope_file(Some("[in_scope]\nhosts = [\"*.example.com\"]\n"));
+        assert!(matches!(
+            app.domain().program_scope_state(),
+            ProgramScopeState::Loaded(_)
+        ));
+
+        let (_absent_target, absent) = workspace_with_scope_file(None);
+        assert!(matches!(
+            absent.domain().program_scope_state(),
+            ProgramScopeState::Unconfigured
+        ));
+    }
+
+    #[test]
+    fn a_target_that_no_longer_resolves_reports_an_unavailable_boundary() {
+        let (target, mut app) = workspace_with_scope_file(None);
+        let not_a_directory = target.path().join("file.txt");
+        std::fs::write(&not_a_directory, "").unwrap();
+        app.set_target(Some(not_a_directory));
+
+        app.refresh_program_scope();
+
+        assert!(
+            matches!(
+                app.domain().program_scope_state(),
+                ProgramScopeState::Unavailable
+            ),
+            "{:?}",
+            app.domain().program_scope_state()
+        );
+        assert!(app.log_lines().iter().any(
+            |line| line.prefix == "error" && line.body.contains("scope.toml target unresolved")
+        ));
     }
 }
 
