@@ -2679,7 +2679,8 @@
         "__kuzushiPatchSourceCommit",
         "__kuzushiRepositoryTargetScope",
         "model",
-        "PATCH_PROMPT"
+        "PATCH_PROMPT",
+        "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
       "readinessVerdict": "not-assigned",
@@ -2705,7 +2706,7 @@
         "compatibilityDispatchRetained": true
       },
       "phaseResultDeclared": true,
-      "descriptorSha256": "sha256:1f282031b4ff5e76842f7ba79c32cf474ca806045d62f7dd3dbb27438eb6f031"
+      "descriptorSha256": "sha256:7e76d877b1b0afeeb939076ee6eeff6724f95429ed641338b927b980114f8318"
     },
     {
       "tool": "patch:reverify",
@@ -4804,7 +4805,8 @@
         "escalationModel",
         "mcps",
         "mcpToolTimeoutMs",
-        "maxModelTurns"
+        "maxModelTurns",
+        "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
       "readinessVerdict": "not-assigned",
@@ -4829,7 +4831,7 @@
         "reason": "Source-evidence review is distinct from excluded reproduction execution. Neither mode is qualified by this annotation."
       },
       "phaseResultDeclared": true,
-      "descriptorSha256": "sha256:717e7c3d524cd368f8720b8961b5eb430f7a34ed380c3819c97d741959c898cb"
+      "descriptorSha256": "sha256:fb18ec6f4d4f841b6a75e25f59cf98071d233913517a29045b8d755afc61a7af"
     },
     {
       "tool": "worklist:rank",

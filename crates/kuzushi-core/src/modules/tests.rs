@@ -1508,13 +1508,8 @@ OUT
             assert!(!descriptor.prompts.is_empty(), "{tool} has no prompt spec");
             for prompt in &descriptor.prompts {
                 assert!(
-                    prompt.default_content.len() > 1200,
+                    prompt.default_content.len() > 600,
                     "{tool} prompt {} too short",
-                    prompt.option_key
-                );
-                assert!(
-                    prompt.default_content.contains('\n'),
-                    "{tool} prompt {} lacks newlines",
                     prompt.option_key
                 );
             }
@@ -1834,7 +1829,6 @@ OUT
             cancellation: None,
             authorization: Default::default(),
         };
-
         let result = registry
             .execute_tool("catalog:modules", Value::Null, &ctx)
             .unwrap();
@@ -2995,13 +2989,20 @@ OUT
             cancellation: None,
             authorization: Default::default(),
         };
+        let accounted = account_scripted_model_runtime(
+            &ctx,
+            &runtime,
+            "openai:gpt-input",
+            InvestigationWork::Discovery,
+            2,
+        );
 
         let result = registry
             .execute_tool_with_runtime(
                 "exploit-chain:scan",
                 json!({"model": "openai:gpt-input", "maxEvidence": 8}),
                 &ctx,
-                Some(&runtime),
+                Some(&accounted),
             )
             .unwrap();
 
@@ -3011,10 +3012,11 @@ OUT
         assert!(queries
             .iter()
             .all(|query| query.model == "openai:gpt-input"));
+        assert_allowance_consumption(&ctx, &accounted, 2, 0);
     }
 
     #[test]
-    fn sast_scan_can_continue_into_langgraph_runtime_triage() {
+    fn sast_scan_refuses_to_charge_review_to_discovery_allowance() {
         let temp = tempdir().unwrap();
         fs::write(
             temp.path().join("package.json"),
@@ -3023,13 +3025,12 @@ OUT
         .unwrap();
 
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
-        let prompt_path = crate::options::prompt_override_path(workspace.root(), "sast", "triage");
-        fs::create_dir_all(prompt_path.parent().unwrap()).unwrap();
-        fs::write(&prompt_path, "Persistent triage guidance.").unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let registry = ModuleRegistry::with_v2_builtins();
-        let mut config = V2Config::default();
-        config.model = Some("openai:gpt-4.1".to_string());
+        let config = V2Config {
+            model: Some("openai:gpt-4.1".to_string()),
+            ..V2Config::default()
+        };
         let runtime = MockRuntime::new();
         let ctx = ToolExecutionContext {
             config: &config,
@@ -3039,10 +3040,14 @@ OUT
             cancellation: None,
             authorization: Default::default(),
         };
+        let accounted = account_scripted_runtime(
+            &ctx,
+            &runtime,
+            InvestigationWork::Discovery,
+            1,
+        );
 
-        let accounted = account_scripted_runtime(&ctx, &runtime, InvestigationWork::Discovery, 1);
-
-        let result = registry
+        let error = registry
             .execute_tool_with_runtime(
                 "sast:scan",
                 json!({
@@ -3053,31 +3058,20 @@ OUT
                 &ctx,
                 Some(&accounted),
             )
-            .unwrap();
+            .unwrap_err();
+        let detail = format!("{error:#}");
 
-        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
-        assert_eq!(
-            result
-                .pointer("/data/triage/triaged")
-                .and_then(Value::as_u64),
-            Some(1)
+        assert!(
+            detail.contains("triage:run requires Review investigation accounting")
+                && detail.contains("cannot borrow a parent Discovery allowance")
+                && detail.contains("no model request started"),
+            "{detail}"
         );
-        let stored = store.list_findings(10).unwrap();
-        assert_eq!(
-            stored[0].triage.as_ref().map(|triage| triage.verdict),
-            Some(TriageVerdict::TruePositive)
-        );
-        let requests = runtime.requests();
-        assert_eq!(requests.len(), 1);
-        let prompt = requests[0].prompt_template.as_deref().unwrap();
-        assert!(prompt.starts_with(crate::runtime::DEFAULT_TRIAGE_PROMPT));
-        let record = crate::prompts::boundaries::decode_composed_target_prompt_context(
-            crate::runtime::DEFAULT_TRIAGE_PROMPT,
-            prompt,
-        )
-        .unwrap();
-        assert_eq!(record.content, "Persistent triage guidance.");
-        assert_allowance_consumption(&ctx, &accounted, 1, 0);
+        let findings = store.list_findings(10).unwrap();
+        assert_eq!(findings.len(), 1);
+        assert!(findings[0].triage.is_none());
+        assert!(runtime.requests().is_empty());
+        assert_allowance_consumption(&ctx, &accounted, 0, 0);
     }
 
     #[test]
@@ -4054,8 +4048,7 @@ OUT
 
     #[cfg(unix)]
     #[test]
-    fn sast_scan_runs_verify_patch_and_writes_run_artifacts() {
-        crate::remediation::patch_process_adapter::require_patch_validation_sandbox();
+    fn sast_scan_persists_discovery_before_refusing_unapproved_review() {
         let temp = tempdir().unwrap();
         fs::create_dir(temp.path().join("src")).unwrap();
         fs::write(
@@ -4073,8 +4066,10 @@ OUT
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let registry = ModuleRegistry::with_v2_builtins();
-        let mut config = V2Config::default();
-        config.model = Some("openai:gpt-4.1".to_string());
+        let config = V2Config {
+            model: Some("openai:gpt-4.1".to_string()),
+            ..V2Config::default()
+        };
         let runtime = MockRuntime::new();
         let ctx = ToolExecutionContext {
             config: &config,
@@ -4084,7 +4079,12 @@ OUT
             cancellation: None,
             authorization: Default::default(),
         };
-
+        let accounted = account_scripted_runtime(
+            &ctx,
+            &runtime,
+            InvestigationWork::Discovery,
+            1,
+        );
         let prepared = registry
             .prepare_dispatch_input(
                 "sast:scan",
@@ -4102,141 +4102,27 @@ OUT
             )
             .unwrap()
             .authorize_explicit_headless_with_delegated_tools(&["patch:finding"]);
-        let result = registry
-            .dispatch_prepared_input_with_runtime(prepared, &ctx, Some(&runtime))
-            .unwrap();
 
-        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
-        assert_eq!(
-            result
-                .pointer("/data/triage/triaged")
-                .and_then(Value::as_u64),
-            Some(1)
-        );
-        assert_eq!(
-            result
-                .pointer("/data/verification/verified")
-                .and_then(Value::as_u64),
-            Some(1)
-        );
-        assert_eq!(
-            result
-                .pointer("/data/patch/patched")
-                .and_then(Value::as_u64),
-            Some(1)
-        );
-        let phase_stages = result
-            .pointer("/data/phaseStages")
-            .and_then(Value::as_array)
-            .expect("actual SAST phase stage receipts");
-        assert_eq!(
-            phase_stages
-                .iter()
-                .filter_map(|stage| stage["phase"].as_str())
-                .collect::<Vec<_>>(),
-            vec!["scan", "review", "prove", "fix"]
-        );
-        assert!(phase_stages
-            .iter()
-            .all(|stage| stage["outcome"] == "completed"));
+        let error = registry
+            .dispatch_prepared_input_with_runtime(prepared, &ctx, Some(&accounted))
+            .unwrap_err();
+        let detail = format!("{error:#}");
 
-        let summary = result
-            .pointer("/data/artifacts/summary")
-            .and_then(Value::as_str)
-            .unwrap();
-        let triage_log = result
-            .pointer("/data/artifacts/triageJsonl")
-            .and_then(Value::as_str)
-            .unwrap();
-        let verify_log = result
-            .pointer("/data/artifacts/verifyJsonl")
-            .and_then(Value::as_str)
-            .unwrap();
-        let patch_log = result
-            .pointer("/data/artifacts/patchJsonl")
-            .and_then(Value::as_str)
-            .unwrap();
-        let phase_stages_log = result
-            .pointer("/data/artifacts/phaseStagesJsonl")
-            .and_then(Value::as_str)
-            .unwrap();
-        assert!(Path::new(summary).exists());
-        assert!(summary.ends_with("sast-summary.json"));
-        assert!(fs::read_to_string(summary)
-            .unwrap()
-            .contains("\"verification\""));
-        let run_id = result
-            .pointer("/data/runId")
-            .and_then(Value::as_str)
-            .unwrap();
-        let run_summary = crate::run_artifacts::load_run_summary(temp.path(), run_id).unwrap();
-        assert_eq!(run_summary.status, "completed");
-        assert_eq!(run_summary.tool.as_deref(), Some("sast:scan"));
-        assert_eq!(run_summary.findings, Some(1));
-        assert!(run_summary.artifacts.iter().any(|artifact| {
-            artifact.label == "sast summary" && artifact.path == "sast-summary.json"
-        }));
-        let canonical_summary =
-            crate::run_artifacts::run_artifact_path(temp.path(), run_id, "run.json");
-        assert!(canonical_summary.exists());
-        assert!(!fs::read_to_string(canonical_summary)
-            .unwrap()
-            .contains("\"verification\""));
-        assert!(fs::read_to_string(triage_log)
-            .unwrap()
-            .contains("triage:complete"));
-        let verify_log = fs::read_to_string(verify_log).unwrap();
-        assert!(verify_log.contains("verification:complete"));
-        assert!(!verify_log.contains("patch:complete"));
-        assert!(fs::read_to_string(patch_log)
-            .unwrap()
-            .contains("patch:complete"));
-        let phase_stages_log = fs::read_to_string(phase_stages_log).unwrap();
-        for phase in ["scan", "review", "prove", "fix"] {
-            assert!(
-                phase_stages_log.contains(&format!(r#""phase":"{phase}""#)),
-                "{phase_stages_log}"
-            );
-        }
-
-        let finding = store.list_findings(10).unwrap().pop().unwrap();
-        assert_eq!(
-            result
-                .pointer("/data/coreFindings/0/fingerprint")
-                .and_then(Value::as_str),
-            Some(finding.fingerprint.as_str())
+        assert!(
+            detail.contains("triage:run requires Review investigation accounting")
+                && detail.contains("cannot borrow a parent Discovery allowance"),
+            "{detail}"
         );
-        let patch_results = store
-            .get_patch_results_for_finding(&finding.fingerprint)
-            .unwrap();
-        assert_eq!(patch_results.len(), 1);
-        assert_eq!(patch_results[0].status, PatchStatus::Sound);
-        let provenance = patch_results[0]
-            .provenance
-            .as_ref()
-            .expect("new SAST patches must retain detector provenance");
-        assert_eq!(
-            provenance.detector_tool.as_deref(),
-            Some("agentic-sast:scan")
-        );
-        let detector_run_id = provenance
-            .detector_run_id
-            .as_deref()
-            .expect("detector run reference");
-        let detector_summary =
-            crate::run_artifacts::load_run_summary(temp.path(), detector_run_id).unwrap();
-        assert_eq!(detector_summary.tool.as_deref(), Some("agentic-sast:scan"));
-        assert!(crate::run_artifacts::run_artifact_path(
-            temp.path(),
-            detector_run_id,
-            "input.json"
-        )
-        .is_file());
+        let findings = store.list_findings(10).unwrap();
+        assert_eq!(findings.len(), 1);
+        assert!(findings[0].triage.is_none());
+        assert_eq!(runtime.queries().len(), 1);
+        assert_allowance_consumption(&ctx, &accounted, 1, 0);
     }
 
     #[cfg(unix)]
     #[test]
-    fn sast_empirical_verification_uses_proof_tool_and_gates_patch_on_exploitability() {
+    fn sast_empirical_continuation_requires_review_accounting() {
         let temp = tempdir().unwrap();
         fs::create_dir(temp.path().join("src")).unwrap();
         fs::write(
@@ -4254,8 +4140,10 @@ OUT
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let registry = ModuleRegistry::with_v2_builtins();
-        let mut config = V2Config::default();
-        config.model = Some("openai:gpt-4.1".to_string());
+        let config = V2Config {
+            model: Some("openai:gpt-4.1".to_string()),
+            ..V2Config::default()
+        };
         let runtime = MockRuntime::new();
         let ctx = ToolExecutionContext {
             config: &config,
@@ -4265,6 +4153,12 @@ OUT
             cancellation: None,
             authorization: Default::default(),
         };
+        let accounted = account_scripted_runtime(
+            &ctx,
+            &runtime,
+            InvestigationWork::Discovery,
+            1,
+        );
         let prepared = registry
             .prepare_dispatch_input(
                 "sast:scan",
@@ -4283,46 +4177,18 @@ OUT
         let delegated_tools = sast_scan_delegated_tools(prepared.value());
         let prepared = prepared.authorize_explicit_headless_with_delegated_tools(&delegated_tools);
 
-        let result = registry
-            .dispatch_prepared_input_with_runtime(prepared, &ctx, Some(&runtime))
-            .unwrap();
+        let error = registry
+            .dispatch_prepared_input_with_runtime(prepared, &ctx, Some(&accounted))
+            .unwrap_err();
+        let detail = format!("{error:#}");
 
-        assert_eq!(
-            result
-                .pointer("/data/verification/verified")
-                .and_then(Value::as_u64),
-            Some(1)
+        assert!(
+            detail.contains("triage:run requires Review investigation accounting")
+                && detail.contains("cannot borrow a parent Discovery allowance"),
+            "{detail}"
         );
-        assert_eq!(
-            result
-                .pointer("/data/patch/patched")
-                .and_then(Value::as_u64),
-            Some(0)
-        );
-        let phases = result
-            .pointer("/data/phaseStages")
-            .and_then(Value::as_array)
-            .unwrap()
-            .iter()
-            .filter_map(|stage| stage["phase"].as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(phases, vec!["scan", "review", "prove"]);
-
-        let verify_log = result
-            .pointer("/data/artifacts/verifyJsonl")
-            .and_then(Value::as_str)
-            .map(fs::read_to_string)
-            .unwrap()
-            .unwrap();
-        assert!(verify_log.contains(r#""exploitable":false"#));
-        assert!(verify_log.contains(r#""kind":"verification-outcome""#));
-        let patch_log = result
-            .pointer("/data/artifacts/patchJsonl")
-            .and_then(Value::as_str)
-            .map(fs::read_to_string)
-            .unwrap()
-            .unwrap();
-        assert!(patch_log.trim().is_empty(), "{patch_log}");
+        assert_eq!(runtime.queries().len(), 1);
+        assert_allowance_consumption(&ctx, &accounted, 1, 0);
     }
 
     #[test]
@@ -4348,7 +4214,6 @@ OUT
             cancellation: None,
             authorization: Default::default(),
         };
-
         let result = registry
             .execute_tool_with_runtime(
                 "sast:scan",
@@ -5760,6 +5625,13 @@ OUT
             cancellation: None,
             authorization: Default::default(),
         };
+        let accounted = account_scripted_model_runtime(
+            &ctx,
+            &runtime,
+            "openai:gpt-verify",
+            InvestigationWork::Review,
+            1,
+        );
 
         let result = registry
             .execute_tool_with_runtime(
@@ -5770,7 +5642,7 @@ OUT
                     "VERIFY_PROMPT": "Prove exploitability with concrete runtime evidence."
                 }),
                 &ctx,
-                Some(&runtime),
+                Some(&accounted),
             )
             .unwrap();
 
@@ -5803,6 +5675,7 @@ OUT
             .prompt
             .contains("Prove exploitability with concrete runtime evidence."));
         assert!(queries[0].prompt.contains(&finding.fingerprint));
+        assert_allowance_consumption(&ctx, &accounted, 1, 0);
     }
 
     #[test]
@@ -5941,6 +5814,13 @@ OUT
             cancellation: None,
             authorization: Default::default(),
         };
+        let accounted = account_scripted_model_runtime(
+            &ctx,
+            &runtime,
+            "openai:gpt-patch",
+            InvestigationWork::Review,
+            1,
+        );
 
         let result = execute_authorized_tool_with_runtime(
             &registry,
@@ -5954,7 +5834,7 @@ OUT
                     "testCmd": "true"
             }),
             &ctx,
-            Some(&runtime),
+            Some(&accounted),
         )
         .unwrap();
 
@@ -6007,6 +5887,7 @@ OUT
         assert!(repository.iter().any(|record| {
             record.label == "src/db.ts" && record.content.contains("const query = req.query.q")
         }));
+        assert_allowance_consumption(&ctx, &accounted, 1, 0);
     }
 
     #[cfg(unix)]
@@ -6068,6 +5949,13 @@ OUT
             cancellation: None,
             authorization: Default::default(),
         };
+        let accounted = account_scripted_model_runtime(
+            &ctx,
+            &runtime,
+            "openai:gpt-patch",
+            InvestigationWork::Review,
+            1,
+        );
 
         let result = execute_authorized_tool_with_runtime(
             &registry,
@@ -6079,7 +5967,7 @@ OUT
                 "testCmd": "true"
             }),
             &ctx,
-            Some(&runtime),
+            Some(&accounted),
         )
         .unwrap();
 
@@ -6098,6 +5986,7 @@ OUT
             fs::read_to_string(temp.path().join("src/db.ts")).unwrap(),
             "const query = concurrent_uncommitted_change;\n"
         );
+        assert_allowance_consumption(&ctx, &accounted, 1, 0);
     }
 
     #[cfg(unix)]

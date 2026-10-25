@@ -15,8 +15,8 @@ Feature: Map-plan editing returns to aggregate Setup
     And the status segment shows "setup:map-plan"
     And "Gather repo context" is checked
     And "Map entry points" is checked
+    And "Attach reference files" is unchecked
     And "Build threat model" is unchecked
-    And "Build code property graph" is unchecked
 
   Scenario: Space keeps dependency-aware selection
     When I launch the shell

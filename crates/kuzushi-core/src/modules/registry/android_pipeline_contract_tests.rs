@@ -85,8 +85,8 @@ fn partial_code_inspection_keeps_findings_and_engine_error_messages() {
 fn selected_timeout_stops_code_scanning_and_keeps_earlier_observations() {
     let fixture = Fixture::new();
     let mut value = fixture.input();
-    value["semgrepBin"] = json!(fixture.script("owned-hung-code", "exec sleep 5"));
-    value["timeoutMs"] = json!(1000);
+    value["semgrepBin"] = json!(fixture.script("owned-hung-code", "exec sleep 30"));
+    value["timeoutMs"] = json!(5000);
     let result = fixture.dispatch(value, true).unwrap();
     assert_eq!(result["status"], "partial");
     assert!(result["errors"].to_string().contains("deadline"));

@@ -22,6 +22,7 @@ facets before search · severity critical:1 high:1
  -- SELECTED FINDING ---------------------------------------------------------------------------------------------------
 F-0001 · confirmed · critical
 Evidence: signal-only · sources:1
+apps/api/orders.rs:142
 claim · unverified scanner assertion
 sql injection via order_id concatenation
 

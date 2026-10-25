@@ -24,6 +24,11 @@ incremental = false
 [profile.dev.package."*"]
 debug = false
 
+# Shipped binaries do not need symbol tables. Removing them keeps platform
+# package downloads within the published size budget.
+[profile.release]
+strip = "symbols"
+
 # Full debugger metadata and incremental rebuilds remain an explicit opt-in:
 #   cargo build --profile debugging
 #   cargo test --profile debugging

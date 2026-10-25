@@ -8,7 +8,7 @@ Feature: Setup remains explicitly reachable
     And the env var "KUZUSHI_SKIP_ONBOARDING" is set to "1"
     And no model is configured
     When I launch the shell
-    Then the status segment shows "workbench"
+    Then I see "Viewing Map"
     And I see "PROJECT CONTEXT"
     And I do not see "SETUP · READY THE MAP RUN"
 
@@ -19,7 +19,7 @@ Feature: Setup remains explicitly reachable
     Then I see "SETUP · READY THE MAP RUN"
     When I press "Esc"
     Then I see "PROJECT CONTEXT"
-    And the status segment shows "workbench"
+    And I see "Viewing Map"
 
   Scenario: Setup can be reopened explicitly
     Given a fresh kuzushi workspace

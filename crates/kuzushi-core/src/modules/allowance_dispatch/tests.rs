@@ -60,6 +60,22 @@ fn external_actions_opt_into_allowance_without_weakening_authorization() {
 }
 
 #[test]
+fn model_backed_verify_and_patch_tools_accept_review_allowances() {
+    let registry = ModuleRegistry::with_v2_builtins();
+    for name in ["verify:finding", "patch:finding"] {
+        let tool = registry.resolve_tool(name).unwrap();
+        assert_eq!(descriptor_work(tool), Some(InvestigationWork::Review));
+        assert!(supports_allowance(tool), "{name}");
+        assert!(
+            tool.options
+                .iter()
+                .any(|option| option.name == "allowanceRef"),
+            "{name}"
+        );
+    }
+}
+
+#[test]
 fn categorized_external_actions_cannot_inherit_parent_review_capacity() {
     let root = tempfile::tempdir().unwrap();
     let workspace = WorkspaceTarget::new(root.path()).unwrap();

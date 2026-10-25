@@ -110,7 +110,7 @@ impl TmuxSession {
     /// `"Escape"`, or a literal string.
     pub fn send_keys(&self, keys: &[&str]) -> Result<()> {
         for key in keys {
-            let status = Command::new("tmux")
+            let status = tmux_command()
                 .args(["send-keys", "-t", &self.session_name, key])
                 .status()
                 .context("invoking tmux send-keys")?;
@@ -122,7 +122,7 @@ impl TmuxSession {
     }
 
     pub fn send_literal(&self, value: &str) -> Result<()> {
-        let status = Command::new("tmux")
+        let status = tmux_command()
             .args(["send-keys", "-l", "-t", &self.session_name, "--", value])
             .status()
             .context("invoking tmux send-keys -l")?;
@@ -153,7 +153,7 @@ impl TmuxSession {
     }
 
     pub fn pane_size(&self) -> Result<(u16, u16)> {
-        let output = Command::new("tmux")
+        let output = tmux_command()
             .args([
                 "display-message",
                 "-p",
@@ -172,7 +172,7 @@ impl TmuxSession {
     /// Resize the existing tmux window in place and wait for the shell to
     /// repaint its live alternate screen at the requested dimensions.
     pub fn resize_to(&self, width: u16, height: u16, timeout: Duration) -> Result<String> {
-        let manual = Command::new("tmux")
+        let manual = tmux_command()
             .args([
                 "set-option",
                 "-w",
@@ -191,7 +191,7 @@ impl TmuxSession {
         }
         let width_arg = width.to_string();
         let height_arg = height.to_string();
-        let resized = Command::new("tmux")
+        let resized = tmux_command()
             .args([
                 "resize-window",
                 "-t",
@@ -210,7 +210,7 @@ impl TmuxSession {
     }
 
     pub fn pane_pid(&self) -> Result<u32> {
-        let output = Command::new("tmux")
+        let output = tmux_command()
             .args([
                 "display-message",
                 "-p",
@@ -254,7 +254,7 @@ impl TmuxSession {
     }
 
     pub fn alternate_screen_active(&self) -> Result<bool> {
-        let output = Command::new("tmux")
+        let output = tmux_command()
             .args([
                 "display-message",
                 "-p",
@@ -359,7 +359,7 @@ impl TmuxSession {
     }
 
     fn pane_status(&self) -> Result<PaneStatus> {
-        let output = Command::new("tmux")
+        let output = tmux_command()
             .args([
                 "display-message",
                 "-p",
@@ -378,21 +378,23 @@ impl TmuxSession {
     fn diagnostics(&self) -> Result<String> {
         let status = self.pane_status()?;
         let alternate = self.alternate_screen_active()?;
-        let live = self.capture_pane(&["-p", "-S", "-200"])?;
+        let current = self.capture_pane(&["-p"])?;
+        let history = self.capture_pane(&["-p", "-S", "-200"])?;
         let saved = self.capture_pane(&["-a", "-q", "-p"])?;
         Ok(format!(
-            "pane_dead={} pane_dead_status={} command={} alternate_on={}\nlive pane:\n{}\nsaved pre-alternate buffer:\n{}",
+            "pane_dead={} pane_dead_status={} command={} alternate_on={}\ncurrent pane:\n{}\npane with history:\n{}\nsaved pre-alternate buffer:\n{}",
             status.dead,
             status.dead_status,
             status.command,
             u8::from(alternate),
-            String::from_utf8_lossy(&live.stdout),
+            String::from_utf8_lossy(&current.stdout),
+            String::from_utf8_lossy(&history.stdout),
             String::from_utf8_lossy(&saved.stdout)
         ))
     }
 
     fn capture_pane(&self, options: &[&str]) -> Result<std::process::Output> {
-        let mut command = Command::new("tmux");
+        let mut command = tmux_command();
         command.args(["capture-pane", "-t", &self.session_name]);
         command.args(options);
         command.output().context("invoking tmux capture-pane")
@@ -456,6 +458,7 @@ impl PaneStatus {
 fn interactive_frame_ready(snapshot: &str) -> bool {
     output_has_visible_text(snapshot.as_bytes())
         && (status_footer_line(snapshot).is_some()
+            || snapshot.contains("◇ MAP VIEW ›")
             || snapshot.contains("◇ MAP ›")
             || snapshot.contains("TARGET")
             || snapshot.contains("SETUP"))
@@ -520,7 +523,7 @@ fn shell_invocation(binary: &str, with_target: bool, target: &std::path::Path) -
 fn start_tmux_session(session_name: &str, (width, height): (u16, u16), cmd: &str) -> Result<()> {
     let width = width.to_string();
     let height = height.to_string();
-    let status = Command::new("tmux")
+    let status = tmux_command()
         .args([
             "new-session",
             "-d",
@@ -619,7 +622,7 @@ fn output_has_visible_text(bytes: &[u8]) -> bool {
 
 impl Drop for TmuxSession {
     fn drop(&mut self) {
-        let _ = Command::new("tmux")
+        let _ = tmux_command()
             .args(["kill-session", "-t", &self.session_name])
             .status();
     }
@@ -634,6 +637,14 @@ fn require_tmux() -> Result<()> {
         bail!("`tmux -V` returned {:?}", status.code());
     }
     Ok(())
+}
+
+fn tmux_command() -> Command {
+    let mut command = Command::new("tmux");
+    command
+        .arg("-L")
+        .arg(format!("kuzushi-bdd-{}", std::process::id()));
+    command
 }
 
 fn shell_escape(value: &str) -> String {
@@ -753,6 +764,9 @@ mod tests {
         assert!(!interactive_frame_ready("loading repository\n"));
         assert!(!interactive_frame_ready("   \n\t"));
         assert!(interactive_frame_ready("body\nroute:shell · 組 map 1/5\n"));
+        assert!(interactive_frame_ready(
+            "◇ MAP VIEW › describe what to map\n"
+        ));
         assert!(interactive_frame_ready("◇ MAP › describe what to map\n"));
     }
 

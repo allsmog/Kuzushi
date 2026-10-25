@@ -20,12 +20,11 @@ import {
   nativeRuntimeBinaries,
 } from "./native-runtime-contract.mjs";
 import { packedInventoryFailures } from "./npm-pack-inventory-contract.mjs";
+import { PLATFORM_PACKED_BUDGET, PLATFORM_UNPACKED_BUDGET } from "./release-artifact-contract.mjs";
 
 const root = process.cwd();
 const destination = path.resolve(root, process.env.KUZUSHI_NPM_PACK_DESTINATION ?? "dist/npm");
 const verifyReleaseAssembly = process.env.KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY === "1";
-const packedBudget = 60 * 1024 * 1024;
-const unpackedBudget = 160 * 1024 * 1024;
 
 mkdirSync(destination, { recursive: true });
 const packedPackages = [];
@@ -102,12 +101,12 @@ function stageNativeExecutables(platformPackage, packageDir, nativeDir, executab
 }
 
 function assertPackageBudgets(packageName, packed) {
-  if (packed.size > packedBudget) {
-    throw new Error(`${packageName} packed size ${packed.size} exceeds ${packedBudget}`);
+  if (packed.size > PLATFORM_PACKED_BUDGET) {
+    throw new Error(`${packageName} packed size ${packed.size} exceeds ${PLATFORM_PACKED_BUDGET}`);
   }
-  if (packed.unpackedSize > unpackedBudget) {
+  if (packed.unpackedSize > PLATFORM_UNPACKED_BUDGET) {
     throw new Error(
-      `${packageName} unpacked size ${packed.unpackedSize} exceeds ${unpackedBudget}`,
+      `${packageName} unpacked size ${packed.unpackedSize} exceeds ${PLATFORM_UNPACKED_BUDGET}`,
     );
   }
 }

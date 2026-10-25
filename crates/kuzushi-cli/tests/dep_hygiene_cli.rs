@@ -3,13 +3,19 @@ use std::process::Command;
 #[cfg(unix)]
 use kuzushi_core::ReconWorkspaceStore;
 use kuzushi_core::{
-    Finding, FindingStore, Severity, TriageOutcome, TriageVerdict, WorkspaceTarget,
+    allowance::{AllowanceApprovalV1, AllowanceLimits, AllowanceReferenceV1},
+    Finding, FindingStore, Severity, SpendLimiter, TriageOutcome, TriageVerdict, WorkspaceTarget,
 };
-use serde_json::Value;
+use serde_json::{json, Value};
 
 /// A placeholder credential: the fake bridges never contact a provider, but
 /// runtime policy still requires the selected OpenAI model to have a key.
 const FAKE_OPENAI_API_KEY: &str = "fake-openai-key-for-fake-bridge";
+const FAKE_OPENAI_MODEL: &str = "openai:gpt-4.1";
+
+fn synthetic_openai_secret() -> String {
+    ["sk-proj-", "abcdefghijklmnopqrstuvwxyzABCDEFGH"].concat()
+}
 
 fn kuzushi_command(home: &std::path::Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_kuzushi"));
@@ -43,7 +49,49 @@ fn latest_run_json(repo: &std::path::Path, leaf: &str) -> Value {
     run_json(repo, &latest_run_id(repo), leaf)
 }
 
-fn assert_latest_canonical_run_bundle(repo: &std::path::Path) {
+fn approved_model_input(repo: &std::path::Path, mut input: Value) -> String {
+    let workspace = WorkspaceTarget::new(repo).unwrap();
+    FindingStore::open(workspace.findings_db_path()).unwrap();
+    let ledger = SpendLimiter::open(workspace.findings_db_path()).unwrap();
+    let investigation_id = "cli-runtime-bridge";
+    ledger
+        .approve_allowance(&AllowanceApprovalV1 {
+            schema_version: 1,
+            investigation_id: investigation_id.into(),
+            expected_revision: 0,
+            model: FAKE_OPENAI_MODEL.into(),
+            limits: AllowanceLimits {
+                max_provider_calls: 64,
+                protected_review_calls: 16,
+            },
+            reason: "Explicit local bridge fixture with no provider transport".into(),
+            work_plan: None,
+        })
+        .unwrap();
+    input["allowanceRef"] = serde_json::to_value(AllowanceReferenceV1 {
+        schema_version: 1,
+        investigation_id: investigation_id.into(),
+        revision: 1,
+        work_id: "fixture-work".into(),
+    })
+    .unwrap();
+    serde_json::to_string(&input).unwrap()
+}
+
+fn assert_scan_requires_approved_study(output: &std::process::Output) {
+    assert!(
+        !output.status.success(),
+        "model-backed scan must fail closed"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("sast:scan needs an approved investigation allowance")
+            && stderr.contains("no model request started"),
+        "stderr: {stderr}"
+    );
+}
+
+fn assert_latest_run_bundle(repo: &std::path::Path, expected_status: &str) {
     let run_id = latest_run_id(repo);
     let run_dir = repo.join(".kuzushi/v3/runs").join(&run_id);
     for leaf in [
@@ -64,7 +112,6 @@ fn assert_latest_canonical_run_bundle(repo: &std::path::Path) {
         "attack-surface.json",
         "threat-model.json",
         "recommendations.json",
-        "findings.json",
         "proof.json",
     ] {
         assert!(
@@ -74,21 +121,34 @@ fn assert_latest_canonical_run_bundle(repo: &std::path::Path) {
     }
 
     let run = run_json(repo, &run_id, "run.json");
-    assert_eq!(run.get("status").and_then(Value::as_str), Some("completed"));
+    assert_eq!(
+        run.get("status").and_then(Value::as_str),
+        Some(expected_status)
+    );
 
     let failures = run_json(repo, &run_id, "failures.json");
     assert_eq!(
         failures.get("status").and_then(Value::as_str),
-        Some("completed")
+        Some(expected_status)
     );
-    assert!(failures
-        .get("failures")
-        .and_then(Value::as_array)
-        .is_some_and(Vec::is_empty));
+    if expected_status == "completed" {
+        assert!(failures
+            .get("failures")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty));
+    }
 }
 
 fn assert_latest_static_artifacts(repo: &std::path::Path, expected_tool: &str) {
-    assert_latest_canonical_run_bundle(repo);
+    assert_latest_static_artifacts_with_status(repo, expected_tool, "completed");
+}
+
+fn assert_latest_static_artifacts_with_status(
+    repo: &std::path::Path,
+    expected_tool: &str,
+    expected_status: &str,
+) {
+    assert_latest_run_bundle(repo, expected_status);
 
     let result = latest_run_json(repo, "result.json");
     let finding = result
@@ -310,312 +370,134 @@ OUT
 }
 
 #[cfg(unix)]
-fn fake_triage_bridge(dir: &std::path::Path) -> std::path::PathBuf {
+fn fake_admitted_bridge(dir: &std::path::Path, flavor: &str) -> std::path::PathBuf {
     use std::os::unix::fs::PermissionsExt;
 
-    let binary = dir.join("triage-bridge.sh");
+    let binary = dir.join("admitted-bridge.mjs");
+    std::fs::write(dir.join("bridge-flavor"), flavor).unwrap();
     std::fs::write(
         &binary,
-        r#"#!/bin/sh
-cat >/dev/null
-cat <<'JSON'
-{"ok":true,"structured":{"verdict":"true_positive","confidence":0.93,"rationale":"mock cli bridge"}}
-JSON
-"#,
+        r###"#!/usr/bin/env node
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { createInterface } from "node:readline";
+import { fileURLToPath } from "node:url";
+
+const root = dirname(fileURLToPath(import.meta.url));
+const flavor = readFileSync(join(root, "bridge-flavor"), "utf8").trim();
+const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
+const lines = input[Symbol.asyncIterator]();
+const request = JSON.parse((await lines.next()).value);
+const requestText = JSON.stringify(request);
+const frame = (value) => process.stdout.write(`\x1e${JSON.stringify(value)}\n`);
+const exchange = async (action) => {
+  frame({ type: "provider_admission", action });
+  return JSON.parse((await lines.next()).value);
+};
+
+if (request.providerAdmission !== "stdio-v1") throw new Error("missing admission protocol");
+const ready = await exchange({ type: "hello", protocol: 1 });
+if (ready.type !== "ready") throw new Error("admission handshake refused");
+const admitted = await exchange({ type: "reserve", model: request.model });
+if (admitted.type !== "admitted") throw new Error("model request refused");
+
+const findingFingerprint = requestText.match(/fp3_[0-9a-f]{64}/)?.[0];
+const triage = { verdict: "true_positive", confidence: 0.93, rationale: "local CLI bridge fixture" };
+const agentic = { findings: [{ ruleId: "agentic/sql-injection", filePath: "src/db.ts", startLine: 1, severity: "ERROR", message: "User input reaches SQL query", confidence: "HIGH", evidence: "Source: req.query.q -> sink: db.query" }] };
+const taint = { selectedCwes: [{ cwe: "CWE-89", reason: "raw query receives request data", catalogSignals: ["sink: query("], sourceSpec: "request query parameters", sinkSpec: "database query calls", sanitizerSpec: "parameterized query APIs", customCweRationale: "" }], findings: [{ title: "Request parameter reaches raw SQL query", cwe: "CWE-89", severity: "high", confidence: "medium", evidenceLevel: "linked", filePath: "src/routes.ts", startLine: 1, message: "The query uses request-controlled data in SQL construction.", sourceSinkTrace: "req.query.id -> db.query(sql)", catalogSignals: ["source: req.query", "sink: query("], customCweRationale: "", taintPath: [{ filePath: "src/routes.ts", line: 1, message: "source and SQL sink", snippet: "db.query(req.query.id)" }] }], triage: [{ status: "finding", cwe: "CWE-89", evidenceLevel: "linked", rationale: "request data reaches raw SQL query", filePath: "src/routes.ts", line: 1, catalogSignals: ["sink: query("] }], notes: [] };
+const patch = { diff: "--- a/src/db.ts\n+++ b/src/db.ts\n@@ -1 +1 @@\n-const query = req.query.q;\n+const query = String(req.query.q).replace(/[^a-z0-9]/gi, \"\");\n", explanation: "sanitize query input" };
+const threatModel = { document: { version: "2.0", dfd: { nodes: [{ id: "actor-user", type: "external-entity", name: "User", description: "External user", trustZone: "external" }, { id: "web", type: "process", name: "Web", description: "Web app", trustZone: "internal" }], flows: [{ id: "flow-1", description: "request", sourceId: "actor-user", targetId: "web", trustBoundaryIds: ["tb-1"] }], trustBoundaries: [{ id: "tb-1", name: "edge", innerZone: "internal", outerZone: "external", crossingFlowIds: ["flow-1"] }] }, threats: [{ id: "T-001", targetElementIds: ["web"], category: "spoofing", title: "Spoofed login", description: "stolen token", attackVector: "token theft", preconditions: [], impact: "high", likelihood: "medium", existingMitigations: [], missingMitigations: ["bind sessions"], relatedCwe: ["CWE-287"], affectedFiles: [{ filePath: "src/auth.ts", startLine: 1 }] }], summary: { total: 1, bySeverity: { high: 1 }, byCategory: { spoofing: 1 } } } };
+
+function structuredResponse() {
+  if (flavor === "triage") return triage;
+  if (flavor === "agentic") return agentic;
+  if (flavor === "taint") return taint;
+  if (flavor === "carlini") return { findings: [{ ruleId: "carlini-threat-hunt/actor-xss", filePath: "src/app.ts", startLine: 9, severity: "ERROR", message: "Actor-controlled input reaches HTML response", confidence: "HIGH", evidence: "Source: request query -> sink: response HTML" }] };
+  if (flavor === "verify") return { fingerprint: findingFingerprint, exploitable: true, poc_payload: "curl -X POST /admin", poc_description: "POST reaches admin sink", attack_vector: "curl POST /admin", preconditions: ["network access"], confidence: 0.84, proof_level: 3, proof_verdict: "exploited" };
+  if (flavor === "patch") return patch;
+  if (flavor === "x-ray") return { xRayMarkdown: "# X-Ray\n\n## X-Ray Verdict\nWATCH\nReview invariants before launch.\n", entryPointsMarkdown: "# Entry Points\n\n> App | 1 entry point | 1 permissionless | 0 role-gated | 0 admin-only\n", invariantsMarkdown: "# Invariants\n\n### G-1 Balance conservation\n", architectureSvg: "<svg xmlns=\"http://www.w3.org/2000/svg\" />\n" };
+  if (flavor === "threat-model") return threatModel;
+  if (flavor === "variant" && requestText.includes("pattern lifter")) return { source: "HTTP request body", sink: "child_process.exec", missingGuard: "no allowlist", languages: ["typescript"], keywords: ["exec", "child_process"], description: "Untrusted input reaches shell execution." };
+  if (flavor === "variant") return { variants: [{ filePath: "src/other.ts", startLine: 9, severity: "ERROR", message: "exec with untrusted input", confidence: "HIGH", rationale: "same source reaches exec", cwe: ["CWE-78"] }] };
+  if (flavor === "ndiff" && requestText.includes("fix-pattern extractor")) return { fixShape: "adds a bounds check before memcpy", vulnerableShape: "memcpy uses attacker-controlled length without a bounds check", cwe: ["CWE-787"], languages: ["c"], keywords: ["memcpy", "len"], detectionQuery: "rg 'memcpy\\('", description: "Search copies guarded by no length cap.", confidence: "HIGH" };
+  if (flavor === "ndiff") return { variants: [{ filePath: "src/parser.c", startLine: 7, severity: "ERROR", message: "memcpy without bounds check", confidence: "HIGH", rationale: "length reaches memcpy", cwe: ["CWE-787"] }] };
+  if (flavor === "systems" && requestText.includes("invariant extractor")) return { invariants: [{ id: "inv-1", surfaceId: "surface-1", kind: "length-buffer-coupling", summary: "packet length must fit the fixed buffer", statement: "length is checked before copy", rationale: "copy uses packet-controlled length", evidence: ["memcpy"], attackerControlledFields: ["len"], cheapVerifiable: true }] };
+  if (flavor === "systems" && requestText.includes("trigger synthesizer")) return { triggers: [{ id: "trig-1", surfaceId: "surface-1", orderedSteps: ["send oversized packet"], boundaryAssignments: { len: "4096" }, statePreconditions: ["connected"], attackerControlledFields: ["len"], expectedPrimitive: "stack overwrite", cheapVerifiable: true, rationale: "length reaches memcpy" }] };
+  if (flavor === "systems") return { findings: [{ title: "Oversized packet length reaches fixed buffer", cwe: "CWE-787", severity: "ERROR", filePath: "src/parser.c", startLine: 3, message: "packet length is copied into a 64-byte stack buffer", reasoning: "len comes from the packet header", triggerHypothesisIds: ["trig-1"], violatedInvariantIds: ["inv-1"], triggerSequence: ["send len=4096"], attackerControlledFields: ["len"], memoryPrimitive: "stack overwrite", cheapVerifiable: true }] };
+  if (flavor === "sast-full" && requestText.includes("security triage agent")) return triage;
+  if (flavor === "sast-full" && requestText.includes("exploitability verifier")) return { exploitable: true, poc_payload: "curl -X POST /admin", poc_description: "POST reaches admin sink", attack_vector: "curl POST /admin", preconditions: ["network access"], confidence: 0.84, proof_level: 3, proof_verdict: "exploited" };
+  if (flavor === "sast-full" && requestText.includes("security patch planner")) return patch;
+  if (flavor === "sast-full") return agentic;
+  throw new Error(`unexpected bridge flavor: ${flavor}`);
+}
+
+const result = { ok: true, structured: structuredResponse() };
+const settled = await exchange({ type: "settle", requestId: admitted.requestId, costUsd: 0 });
+if (settled.type !== "settled") throw new Error("provider receipt refused");
+frame({ type: "result", result });
+input.close();
+"###,
     )
     .unwrap();
     let mut permissions = std::fs::metadata(&binary).unwrap().permissions();
     permissions.set_mode(0o755);
     std::fs::set_permissions(&binary, permissions).unwrap();
     binary
+}
+
+#[cfg(unix)]
+fn fake_triage_bridge(dir: &std::path::Path) -> std::path::PathBuf {
+    fake_admitted_bridge(dir, "triage")
 }
 
 #[cfg(unix)]
 fn fake_agentic_bridge(dir: &std::path::Path) -> std::path::PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-
-    let binary = dir.join("agentic-bridge.sh");
-    std::fs::write(
-        &binary,
-        r#"#!/bin/sh
-cat >/dev/null
-cat <<'JSON'
-{"ok":true,"structured":{"findings":[{"ruleId":"agentic/sql-injection","filePath":"src/db.ts","startLine":1,"severity":"ERROR","message":"User input reaches SQL query","confidence":"HIGH","evidence":"Source: req.query.q -> sink: db.query"}]}}
-JSON
-"#,
-    )
-    .unwrap();
-    let mut permissions = std::fs::metadata(&binary).unwrap().permissions();
-    permissions.set_mode(0o755);
-    std::fs::set_permissions(&binary, permissions).unwrap();
-    binary
+    fake_admitted_bridge(dir, "agentic")
 }
 
 #[cfg(unix)]
 fn fake_variant_bridge(dir: &std::path::Path) -> std::path::PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-
-    let binary = dir.join("variant-bridge.sh");
-    std::fs::write(
-        &binary,
-        r#"#!/bin/sh
-request="$(cat)"
-case "$request" in
-  *"Variant Hunter pattern lifter"*)
-    cat <<'JSON'
-{"ok":true,"structured":{"source":"HTTP request body","sink":"child_process.exec","missingGuard":"no allowlist","languages":["typescript"],"keywords":["exec","child_process"],"description":"Untrusted input reaches shell execution."}}
-JSON
-    ;;
-  *"variant analysis agent"*)
-    cat <<'JSON'
-{"ok":true,"structured":{"variants":[{"filePath":"src/other.ts","startLine":9,"severity":"ERROR","message":"exec with untrusted input","confidence":"HIGH","rationale":"same source reaches exec","cwe":["CWE-78"]}]}}
-JSON
-    ;;
-  *)
-    echo '{"ok":false,"error":"unexpected variant request"}'
-    exit 1
-    ;;
-esac
-"#,
-    )
-    .unwrap();
-    let mut permissions = std::fs::metadata(&binary).unwrap().permissions();
-    permissions.set_mode(0o755);
-    std::fs::set_permissions(&binary, permissions).unwrap();
-    binary
+    fake_admitted_bridge(dir, "variant")
 }
 
 #[cfg(unix)]
 fn fake_ndiff_bridge(dir: &std::path::Path) -> std::path::PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-
-    let binary = dir.join("ndiff-bridge.sh");
-    std::fs::write(
-        &binary,
-        r#"#!/bin/sh
-request="$(cat)"
-case "$request" in
-  *"N-day fix-pattern extractor"*)
-    cat <<'JSON'
-{"ok":true,"structured":{"fixShape":"adds a bounds check before memcpy","vulnerableShape":"memcpy uses attacker-controlled length without a bounds check","cwe":["CWE-787"],"languages":["c"],"keywords":["memcpy","len"],"detectionQuery":"rg 'memcpy\\('","description":"Search copies guarded by no length cap.","confidence":"HIGH"}}
-JSON
-    ;;
-  *"N-day variant hunter"*)
-    cat <<'JSON'
-{"ok":true,"structured":{"variants":[{"filePath":"src/parser.c","startLine":7,"severity":"ERROR","message":"memcpy without bounds check","confidence":"HIGH","rationale":"length reaches memcpy","cwe":["CWE-787"]}]}}
-JSON
-    ;;
-  *)
-    echo '{"ok":false,"error":"unexpected ndiff request"}'
-    exit 1
-    ;;
-esac
-"#,
-    )
-    .unwrap();
-    let mut permissions = std::fs::metadata(&binary).unwrap().permissions();
-    permissions.set_mode(0o755);
-    std::fs::set_permissions(&binary, permissions).unwrap();
-    binary
+    fake_admitted_bridge(dir, "ndiff")
 }
 
 #[cfg(unix)]
 fn fake_taint_iris_next_bridge(dir: &std::path::Path) -> std::path::PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-
-    let binary = dir.join("taint-iris-next-bridge.sh");
-    std::fs::write(
-        &binary,
-        r#"#!/bin/sh
-request="$(cat)"
-case "$request" in
-  *"Taint IRIS Next agent"*)
-    cat <<'JSON'
-{"ok":true,"structured":{"selectedCwes":[{"cwe":"CWE-89","reason":"raw query receives request data","catalogSignals":["sink: query("],"sourceSpec":"request query parameters","sinkSpec":"database query calls","sanitizerSpec":"parameterized query APIs","customCweRationale":""}],"findings":[{"title":"Request parameter reaches raw SQL query","cwe":"CWE-89","severity":"high","confidence":"medium","evidenceLevel":"linked","filePath":"src/routes.ts","startLine":1,"message":"The query uses request-controlled data in SQL construction.","sourceSinkTrace":"req.query.id -> db.query(sql)","catalogSignals":["source: req.query","sink: query("],"customCweRationale":"","taintPath":[{"filePath":"src/routes.ts","line":1,"message":"source and SQL sink","snippet":"db.query(req.query.id)"}]}],"triage":[{"status":"finding","cwe":"CWE-89","evidenceLevel":"linked","rationale":"request data reaches raw SQL query","filePath":"src/routes.ts","line":1,"catalogSignals":["sink: query("]}],"notes":[]}}
-JSON
-    ;;
-  *)
-    echo '{"ok":false,"error":"unexpected taint-iris-next request"}'
-    exit 1
-    ;;
-esac
-"#,
-    )
-    .unwrap();
-    let mut permissions = std::fs::metadata(&binary).unwrap().permissions();
-    permissions.set_mode(0o755);
-    std::fs::set_permissions(&binary, permissions).unwrap();
-    binary
+    fake_admitted_bridge(dir, "taint")
 }
 
 #[cfg(unix)]
 fn fake_carlini_bridge(dir: &std::path::Path) -> std::path::PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-
-    let binary = dir.join("carlini-bridge.sh");
-    std::fs::write(
-        &binary,
-        r#"#!/bin/sh
-cat >/dev/null
-cat <<'JSON'
-{"ok":true,"structured":{"findings":[{"ruleId":"carlini-threat-hunt/actor-xss","filePath":"src/app.ts","startLine":9,"severity":"ERROR","message":"Actor-controlled input reaches HTML response","confidence":"HIGH","evidence":"Source: request query -> sink: response HTML"}]}}
-JSON
-"#,
-    )
-    .unwrap();
-    let mut permissions = std::fs::metadata(&binary).unwrap().permissions();
-    permissions.set_mode(0o755);
-    std::fs::set_permissions(&binary, permissions).unwrap();
-    binary
+    fake_admitted_bridge(dir, "carlini")
 }
 
 #[cfg(unix)]
 fn fake_systems_hunt_bridge(dir: &std::path::Path) -> std::path::PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-
-    let binary = dir.join("systems-hunt-bridge.sh");
-    std::fs::write(
-        &binary,
-        r#"#!/bin/sh
-request="$(cat)"
-case "$request" in
-  *"Systems Hunt invariant extractor"*)
-    cat <<'JSON'
-{"ok":true,"structured":{"invariants":[{"id":"inv-1","surfaceId":"surface-1","kind":"length-buffer-coupling","summary":"packet length must fit the fixed buffer","statement":"length is checked before copy","rationale":"copy uses packet-controlled length","evidence":["memcpy"],"attackerControlledFields":["len"],"cheapVerifiable":true}]}}
-JSON
-    ;;
-  *"Systems Hunt trigger synthesizer"*)
-    cat <<'JSON'
-{"ok":true,"structured":{"triggers":[{"id":"trig-1","surfaceId":"surface-1","orderedSteps":["send oversized packet"],"boundaryAssignments":{"len":"4096"},"statePreconditions":["connected"],"attackerControlledFields":["len"],"expectedPrimitive":"stack overwrite","cheapVerifiable":true,"rationale":"length reaches memcpy"}]}}
-JSON
-    ;;
-  *"Systems Hunt low-level vulnerability hunter"*)
-    cat <<'JSON'
-{"ok":true,"structured":{"findings":[{"title":"Oversized packet length reaches fixed buffer","cwe":"CWE-787","severity":"ERROR","filePath":"src/parser.c","startLine":3,"message":"packet length is copied into a 64-byte stack buffer","reasoning":"len comes from the packet header","triggerHypothesisIds":["trig-1"],"violatedInvariantIds":["inv-1"],"triggerSequence":["send len=4096"],"attackerControlledFields":["len"],"memoryPrimitive":"stack overwrite","cheapVerifiable":true}]}}
-JSON
-    ;;
-  *)
-    echo '{"ok":false,"error":"unexpected systems-hunt request"}'
-    exit 1
-    ;;
-esac
-"#,
-    )
-    .unwrap();
-    let mut permissions = std::fs::metadata(&binary).unwrap().permissions();
-    permissions.set_mode(0o755);
-    std::fs::set_permissions(&binary, permissions).unwrap();
-    binary
+    fake_admitted_bridge(dir, "systems")
 }
 
 #[cfg(unix)]
 fn fake_verify_bridge(dir: &std::path::Path) -> std::path::PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-
-    let binary = dir.join("verify-bridge.sh");
-    std::fs::write(
-        &binary,
-        r#"#!/bin/sh
-request="$(cat)"
-fingerprint="$(printf '%s\n' "$request" | grep -Eo 'fp3_[0-9a-f]{64}' | head -n 1)"
-if [ -z "$fingerprint" ]; then
-  echo '{"ok":false,"error":"verification request omitted its finding fingerprint"}'
-  exit 1
-fi
-printf '%s\n' "{\"ok\":true,\"structured\":{\"fingerprint\":\"$fingerprint\",\"exploitable\":true,\"poc_payload\":\"curl -X POST /admin\",\"poc_description\":\"POST reaches admin sink\",\"attack_vector\":\"curl POST /admin\",\"preconditions\":[\"network access\"],\"confidence\":0.84,\"proof_level\":3,\"proof_verdict\":\"exploited\"}}"
-"#,
-    )
-    .unwrap();
-    let mut permissions = std::fs::metadata(&binary).unwrap().permissions();
-    permissions.set_mode(0o755);
-    std::fs::set_permissions(&binary, permissions).unwrap();
-    binary
+    fake_admitted_bridge(dir, "verify")
 }
 
 #[cfg(unix)]
 fn fake_patch_bridge(dir: &std::path::Path) -> std::path::PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-
-    let binary = dir.join("patch-bridge.sh");
-    std::fs::write(
-        &binary,
-        r#"#!/bin/sh
-cat >/dev/null
-cat <<'JSON'
-{"ok":true,"structured":{"diff":"--- a/src/db.ts\n+++ b/src/db.ts\n@@ -1 +1 @@\n-const query = req.query.q;\n+const query = String(req.query.q).replace(/[^a-z0-9]/gi, \"\");\n","explanation":"sanitize query input"}}
-JSON
-"#,
-    )
-    .unwrap();
-    let mut permissions = std::fs::metadata(&binary).unwrap().permissions();
-    permissions.set_mode(0o755);
-    std::fs::set_permissions(&binary, permissions).unwrap();
-    binary
+    fake_admitted_bridge(dir, "patch")
 }
 
 #[cfg(unix)]
 fn fake_sast_full_bridge(dir: &std::path::Path) -> std::path::PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-
-    let binary = dir.join("sast-full-bridge.sh");
-    std::fs::write(
-        &binary,
-        r#"#!/bin/sh
-request="$(cat)"
-case "$request" in
-  *"agentic SAST scanner"*)
-    cat <<'JSON'
-{"ok":true,"structured":{"findings":[{"ruleId":"agentic/sql-injection","filePath":"src/db.ts","startLine":1,"severity":"ERROR","message":"User input reaches SQL query","confidence":"HIGH","evidence":"Source: req.query.q -> sink: db.query"}]}}
-JSON
-    ;;
-  *"security triage agent"*)
-    cat <<'JSON'
-{"ok":true,"structured":{"verdict":"true_positive","confidence":0.93,"rationale":"mock cli bridge"}}
-JSON
-    ;;
-  *"exploitability verifier"*)
-    cat <<'JSON'
-{"ok":true,"structured":{"exploitable":true,"poc_payload":"curl -X POST /admin","poc_description":"POST reaches admin sink","attack_vector":"curl POST /admin","preconditions":["network access"],"confidence":0.84,"proof_level":3,"proof_verdict":"exploited"}}
-JSON
-    ;;
-  *"security patch planner"*)
-    cat <<'JSON'
-{"ok":true,"structured":{"diff":"--- a/src/db.ts\n+++ b/src/db.ts\n@@ -1 +1 @@\n-const query = req.query.q;\n+const query = String(req.query.q).replace(/[^a-z0-9]/gi, \"\");\n","explanation":"sanitize query input"}}
-JSON
-    ;;
-  *)
-    echo '{"ok":false,"error":"unexpected request"}'
-    exit 1
-    ;;
-esac
-"#,
-    )
-    .unwrap();
-    let mut permissions = std::fs::metadata(&binary).unwrap().permissions();
-    permissions.set_mode(0o755);
-    std::fs::set_permissions(&binary, permissions).unwrap();
-    binary
+    fake_admitted_bridge(dir, "sast-full")
 }
 
 #[cfg(unix)]
 fn fake_x_ray_bridge(dir: &std::path::Path) -> std::path::PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-
-    let binary = dir.join("x-ray-bridge.sh");
-    std::fs::write(
-        &binary,
-        r##"#!/bin/sh
-cat >/dev/null
-cat <<'JSON'
-{"ok":true,"structured":{"xRayMarkdown":"# X-Ray\n\n## X-Ray Verdict\nWATCH\nReview invariants before launch.\n","entryPointsMarkdown":"# Entry Points\n\n> App | 1 entry point | 1 permissionless | 0 role-gated | 0 admin-only\n","invariantsMarkdown":"# Invariants\n\n### G-1 Balance conservation\n","architectureSvg":"<svg xmlns=\"http://www.w3.org/2000/svg\" />\n"}}
-JSON
-"##,
-    )
-    .unwrap();
-    let mut permissions = std::fs::metadata(&binary).unwrap().permissions();
-    permissions.set_mode(0o755);
-    std::fs::set_permissions(&binary, permissions).unwrap();
-    binary
+    fake_admitted_bridge(dir, "x-ray")
 }
 
 fn write_x_ray_fixture(repo: &std::path::Path) {
@@ -655,23 +537,7 @@ fn write_carlini_threat_model_fixture(repo: &std::path::Path) {
 
 #[cfg(unix)]
 fn fake_threat_model_bridge(dir: &std::path::Path) -> std::path::PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-
-    let binary = dir.join("threat-model-bridge.sh");
-    std::fs::write(
-        &binary,
-        r#"#!/bin/sh
-cat >/dev/null
-cat <<'JSON'
-{"ok":true,"structured":{"document":{"version":"2.0","dfd":{"nodes":[{"id":"actor-user","type":"external-entity","name":"User","description":"External user","trustZone":"external"},{"id":"web","type":"process","name":"Web","description":"Web app","trustZone":"internal"}],"flows":[{"id":"flow-1","description":"request","sourceId":"actor-user","targetId":"web","trustBoundaryIds":["tb-1"]}],"trustBoundaries":[{"id":"tb-1","name":"edge","innerZone":"internal","outerZone":"external","crossingFlowIds":["flow-1"]}]},"threats":[{"id":"T-001","targetElementIds":["web"],"category":"spoofing","title":"Spoofed login","description":"stolen token","attackVector":"token theft","preconditions":[],"impact":"high","likelihood":"medium","existingMitigations":[],"missingMitigations":["bind sessions"],"relatedCwe":["CWE-287"],"affectedFiles":[{"filePath":"src/auth.ts","startLine":1}]}],"summary":{"total":1,"bySeverity":{"high":1},"byCategory":{"spoofing":1}}}}}
-JSON
-"#,
-    )
-    .unwrap();
-    let mut permissions = std::fs::metadata(&binary).unwrap().permissions();
-    permissions.set_mode(0o755);
-    std::fs::set_permissions(&binary, permissions).unwrap();
-    binary
+    fake_admitted_bridge(dir, "threat-model")
 }
 
 #[test]
@@ -971,7 +837,7 @@ fn run_secret_scan_reaches_native_executor_and_writes_canonical_findings() {
     std::fs::create_dir_all(&home).unwrap();
     std::fs::write(
         repo.join("config.env"),
-        "OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyzABCDEFGH",
+        format!("OPENAI_API_KEY={}", synthetic_openai_secret()),
     )
     .unwrap();
 
@@ -1145,7 +1011,7 @@ fn run_sast_scan_reaches_scan_runner_executor_and_persists() {
     .unwrap();
     std::fs::write(
         repo.join("config.env"),
-        "OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyzABCDEFGH",
+        format!("OPENAI_API_KEY={}", synthetic_openai_secret()),
     )
     .unwrap();
 
@@ -1200,7 +1066,7 @@ fn run_agentic_sast_scan_reaches_langgraph_runtime_bridge_and_persists() {
         .arg("run")
         .arg("agentic-sast:scan")
         .arg("--input")
-        .arg(r#"{"maxFindings":5}"#)
+        .arg(approved_model_input(&repo, json!({"maxFindings": 5})))
         .output()
         .unwrap();
 
@@ -1232,7 +1098,7 @@ fn run_agentic_sast_scan_reaches_langgraph_runtime_bridge_and_persists() {
 
 #[cfg(unix)]
 #[test]
-fn scan_tasks_agentic_reaches_same_agentic_executor() {
+fn scan_tasks_agentic_requires_an_approved_study() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
@@ -1252,19 +1118,11 @@ fn scan_tasks_agentic_reaches_same_agentic_executor() {
         .output()
         .unwrap();
 
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let body: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(body.get("findingsCount").and_then(Value::as_u64), Some(1));
+    assert_scan_requires_approved_study(&output);
 
     let workspace = WorkspaceTarget::new(&repo).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
-    let findings = store.list_findings(10).unwrap();
-    assert_eq!(findings.len(), 1);
-    assert_eq!(findings[0].tool, "agentic");
+    assert!(store.list_findings(10).unwrap().is_empty());
 }
 
 #[cfg(unix)]
@@ -1287,7 +1145,10 @@ fn run_variant_lift_pattern_reaches_langgraph_runtime_bridge() {
         .arg("run")
         .arg("variant:lift-pattern")
         .arg("--input")
-        .arg(format!(r#"{{"fingerprint":"{fingerprint}"}}"#))
+        .arg(approved_model_input(
+            &repo,
+            json!({"fingerprint": fingerprint}),
+        ))
         .output()
         .unwrap();
 
@@ -1325,19 +1186,17 @@ fn run_variant_hunt_reaches_langgraph_runtime_bridge_and_persists() {
         .arg("run")
         .arg("variant:hunt")
         .arg("--input")
-        .arg(format!(
-            r#"{{"fingerprint":"{fingerprint}","maxFindings":5}}"#
+        .arg(approved_model_input(
+            &repo,
+            json!({"fingerprint": fingerprint, "maxFindings": 5}),
         ))
         .output()
         .unwrap();
 
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert_eq!(output.status.code(), Some(4));
     let body: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(body.get("ok").and_then(Value::as_bool), Some(true));
+    assert_eq!(body.get("status").and_then(Value::as_str), Some("partial"));
     assert_eq!(
         body.pointer("/data/variants")
             .and_then(Value::as_array)
@@ -1377,7 +1236,10 @@ fn run_ndiff_extract_fix_pattern_reaches_langgraph_runtime_bridge() {
         .arg("run")
         .arg("ndiff:extract-fix-pattern")
         .arg("--input")
-        .arg(r#"{"patchText":"--- a/parser.c\n+++ b/parser.c\n+if (len > cap) return -1;\n"}"#)
+        .arg(approved_model_input(
+            &repo,
+            json!({"patchText": "--- a/parser.c\n+++ b/parser.c\n+if (len > cap) return -1;\n"}),
+        ))
         .output()
         .unwrap();
 
@@ -1414,17 +1276,29 @@ fn run_ndiff_hunt_variants_reaches_langgraph_runtime_bridge_and_persists() {
         .arg("run")
         .arg("ndiff:hunt-variants")
         .arg("--input")
-        .arg(r#"{"advisoryId":"CVE-2024-1234","pattern":{"fixShape":"adds a bounds check before memcpy","vulnerableShape":"memcpy uses attacker-controlled length without a bounds check","cwe":["CWE-787"],"languages":["c"],"keywords":["memcpy","len"],"detectionQuery":"rg 'memcpy\\('","description":"Search copies guarded by no length cap.","confidence":"HIGH"}}"#)
+        .arg(approved_model_input(
+            &repo,
+            json!({
+                "advisoryId": "CVE-2024-1234",
+                "pattern": {
+                    "fixShape": "adds a bounds check before memcpy",
+                    "vulnerableShape": "memcpy uses attacker-controlled length without a bounds check",
+                    "cwe": ["CWE-787"],
+                    "languages": ["c"],
+                    "keywords": ["memcpy", "len"],
+                    "detectionQuery": "rg 'memcpy\\('",
+                    "description": "Search copies guarded by no length cap.",
+                    "confidence": "HIGH"
+                }
+            }),
+        ))
         .output()
         .unwrap();
 
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert_eq!(output.status.code(), Some(4));
     let body: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(body.get("ok").and_then(Value::as_bool), Some(true));
+    assert_eq!(body.get("status").and_then(Value::as_str), Some("partial"));
     assert_eq!(
         body.pointer("/data/findings")
             .and_then(Value::as_array)
@@ -1562,7 +1436,10 @@ fn run_taint_iris_hunt_reaches_langgraph_runtime_bridge_and_persists() {
         .arg("run")
         .arg("taint-iris:hunt")
         .arg("--input")
-        .arg(r#"{"maxFindings":5,"mcps":false}"#)
+        .arg(approved_model_input(
+            &repo,
+            json!({"maxFindings": 5, "mcps": false}),
+        ))
         .output()
         .unwrap();
 
@@ -1602,7 +1479,7 @@ fn run_taint_iris_hunt_reaches_langgraph_runtime_bridge_and_persists() {
 
 #[cfg(unix)]
 #[test]
-fn scan_tasks_taint_iris_reaches_same_taint_iris_executor() {
+fn scan_tasks_taint_iris_requires_an_approved_study() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
@@ -1632,19 +1509,11 @@ fn scan_tasks_taint_iris_reaches_same_taint_iris_executor() {
         .output()
         .unwrap();
 
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let body: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(body.get("findingsCount").and_then(Value::as_u64), Some(1));
+    assert_scan_requires_approved_study(&output);
 
     let workspace = WorkspaceTarget::new(&repo).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
-    let findings = store.list_findings(10).unwrap();
-    assert_eq!(findings.len(), 1);
-    assert_eq!(findings[0].tool, "taint-iris-next");
+    assert!(store.list_findings(10).unwrap().is_empty());
 }
 
 #[cfg(unix)]
@@ -1676,9 +1545,16 @@ fn run_taint_iris_next_hunt_reaches_langgraph_runtime_bridge_and_persists() {
         .arg("run")
         .arg("taint-iris-next:hunt")
         .arg("--input")
-        .arg(
-            r#"{"mode":"hunt","maxCatalogEntries":3,"maxAgentFindings":5,"minEvidenceLevel":"candidate","mcps":false}"#,
-        )
+        .arg(approved_model_input(
+            &repo,
+            json!({
+                "mode": "hunt",
+                "maxCatalogEntries": 3,
+                "maxAgentFindings": 5,
+                "minEvidenceLevel": "candidate",
+                "mcps": false
+            }),
+        ))
         .output()
         .unwrap();
 
@@ -1718,7 +1594,7 @@ fn run_taint_iris_next_hunt_reaches_langgraph_runtime_bridge_and_persists() {
 
 #[cfg(unix)]
 #[test]
-fn scan_tasks_taint_iris_next_reaches_same_taint_iris_next_executor() {
+fn scan_tasks_taint_iris_next_requires_an_approved_study() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
@@ -1748,19 +1624,11 @@ fn scan_tasks_taint_iris_next_reaches_same_taint_iris_next_executor() {
         .output()
         .unwrap();
 
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let body: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(body.get("findingsCount").and_then(Value::as_u64), Some(1));
+    assert_scan_requires_approved_study(&output);
 
     let workspace = WorkspaceTarget::new(&repo).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
-    let findings = store.list_findings(10).unwrap();
-    assert_eq!(findings.len(), 1);
-    assert_eq!(findings[0].tool, "taint-iris-next");
+    assert!(store.list_findings(10).unwrap().is_empty());
 }
 
 #[cfg(unix)]
@@ -1787,18 +1655,18 @@ fn run_carlini_threat_hunt_reaches_langgraph_runtime_bridge_and_persists() {
         .arg("run")
         .arg("carlini-threat-hunt:run")
         .arg("--input")
-        .arg(r#"{"maxActors":1,"runsPerActor":1}"#)
+        .arg(approved_model_input(
+            &repo,
+            json!({"maxActors": 1, "runsPerActor": 1}),
+        ))
         .output()
         .unwrap();
 
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert_eq!(output.status.code(), Some(4));
     let body: Value = serde_json::from_slice(&output.stdout).unwrap();
 
     assert_eq!(body.get("ok").and_then(Value::as_bool), Some(true));
+    assert_eq!(body.get("status").and_then(Value::as_str), Some("partial"));
     assert_eq!(body.pointer("/data/count").and_then(Value::as_u64), Some(1));
     assert_eq!(
         body.pointer("/data/findings/0/rule_id")
@@ -1824,7 +1692,7 @@ fn run_carlini_threat_hunt_reaches_langgraph_runtime_bridge_and_persists() {
 
 #[cfg(unix)]
 #[test]
-fn scan_tasks_carlini_reaches_same_carlini_executor() {
+fn scan_tasks_carlini_requires_an_approved_study() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
@@ -1849,19 +1717,11 @@ fn scan_tasks_carlini_reaches_same_carlini_executor() {
         .output()
         .unwrap();
 
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let body: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(body.get("findingsCount").and_then(Value::as_u64), Some(1));
+    assert_scan_requires_approved_study(&output);
 
     let workspace = WorkspaceTarget::new(&repo).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
-    let findings = store.list_findings(10).unwrap();
-    assert_eq!(findings.len(), 1);
-    assert_eq!(findings[0].tool, "carlini-threat-hunt");
+    assert!(store.list_findings(10).unwrap().is_empty());
 }
 
 #[cfg(unix)]
@@ -1882,7 +1742,7 @@ fn run_systems_hunt_reaches_langgraph_runtime_bridge_and_persists() {
         .arg("run")
         .arg("systems-hunt:systems-hunt")
         .arg("--input")
-        .arg(r#"{"maxFindings":5}"#)
+        .arg(approved_model_input(&repo, json!({"maxFindings": 5})))
         .output()
         .unwrap();
 
@@ -1914,7 +1774,7 @@ fn run_systems_hunt_reaches_langgraph_runtime_bridge_and_persists() {
 
 #[cfg(unix)]
 #[test]
-fn scan_tasks_systems_hunt_reaches_same_executor() {
+fn scan_tasks_systems_hunt_requires_an_approved_study() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
@@ -1933,19 +1793,11 @@ fn scan_tasks_systems_hunt_reaches_same_executor() {
         .output()
         .unwrap();
 
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let body: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(body.get("findingsCount").and_then(Value::as_u64), Some(1));
+    assert_scan_requires_approved_study(&output);
 
     let workspace = WorkspaceTarget::new(&repo).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
-    let findings = store.list_findings(10).unwrap();
-    assert_eq!(findings.len(), 1);
-    assert_eq!(findings[0].tool, "systems-hunt");
+    assert!(store.list_findings(10).unwrap().is_empty());
 }
 
 #[test]
@@ -2093,7 +1945,7 @@ fn run_taint_iris_next_without_model_fails_without_silent_fallback() {
 
 #[cfg(unix)]
 #[test]
-fn run_sast_scan_verify_autopatch_writes_run_artifacts() {
+fn run_sast_scan_refuses_to_borrow_discovery_allowance_for_review() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
@@ -2111,56 +1963,29 @@ fn run_sast_scan_verify_autopatch_writes_run_artifacts() {
         .arg("run")
         .arg("sast:scan")
         .arg("--input")
-        .arg(
-            r#"{"taskMode":"manual","tasks":["agentic"],"verify":true,"autoPatch":true,"maxIterations":1,"buildCmd":"true","testCmd":"true"}"#,
-        )
+        .arg(approved_model_input(
+            &repo,
+            json!({
+                "taskMode": "manual",
+                "tasks": ["agentic"],
+                "verify": true,
+                "autoPatch": true,
+                "maxIterations": 1,
+                "buildCmd": "true",
+                "testCmd": "true"
+            }),
+        ))
         .output()
         .unwrap();
 
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
+        stderr.contains("triage:run requires Review investigation accounting")
+            && stderr.contains("cannot borrow a parent Discovery allowance")
+            && stderr.contains("no model request started"),
+        "stderr: {stderr}"
     );
-    let body: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(
-        body.pointer("/data/verification/verified")
-            .and_then(Value::as_u64),
-        Some(1)
-    );
-    assert_eq!(
-        body.pointer("/data/patch/patched").and_then(Value::as_u64),
-        Some(1)
-    );
-    let summary = body
-        .pointer("/data/artifacts/summary")
-        .and_then(Value::as_str)
-        .unwrap();
-    let triage_log = body
-        .pointer("/data/artifacts/triageJsonl")
-        .and_then(Value::as_str)
-        .unwrap();
-    let verify_log = body
-        .pointer("/data/artifacts/verifyJsonl")
-        .and_then(Value::as_str)
-        .unwrap();
-    let patch_log = body
-        .pointer("/data/artifacts/patchJsonl")
-        .and_then(Value::as_str)
-        .unwrap();
-    assert!(std::path::Path::new(summary).exists());
-    assert!(std::fs::read_to_string(summary)
-        .unwrap()
-        .contains("\"patch\""));
-    assert!(std::fs::read_to_string(triage_log)
-        .unwrap()
-        .contains("triage:complete"));
-    assert!(!std::fs::read_to_string(verify_log)
-        .unwrap()
-        .contains("patch:complete"));
-    assert!(std::fs::read_to_string(patch_log)
-        .unwrap()
-        .contains("patch:complete"));
 }
 
 #[cfg(unix)]
@@ -2269,14 +2094,11 @@ fn run_codeql_scan_reaches_subprocess_executor_and_persists() {
         .output()
         .unwrap();
 
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert_eq!(output.status.code(), Some(4));
     let body: Value = serde_json::from_slice(&output.stdout).unwrap();
 
     assert_eq!(body.get("ok").and_then(Value::as_bool), Some(true));
+    assert_eq!(body.get("status").and_then(Value::as_str), Some("partial"));
     assert_eq!(body.pointer("/data/count").and_then(Value::as_u64), Some(1));
     assert_eq!(
         body.pointer("/data/findings/0/rule_id")
@@ -2291,7 +2113,7 @@ fn run_codeql_scan_reaches_subprocess_executor_and_persists() {
     let workspace = WorkspaceTarget::new(&repo).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     assert_eq!(store.list_findings(10).unwrap().len(), 1);
-    assert_latest_static_artifacts(&repo, "codeql");
+    assert_latest_static_artifacts_with_status(&repo, "codeql", "partial");
     let run_id = latest_run_id(&repo);
     let sarif_path = repo
         .join(".kuzushi/v3/runs")
@@ -2405,12 +2227,9 @@ fn run_recon_nmap_reaches_subprocess_executor_and_persists() {
         .output()
         .unwrap();
 
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert_eq!(output.status.code(), Some(4));
     let body: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(body.get("status").and_then(Value::as_str), Some("partial"));
     assert_eq!(body.get("ok").and_then(Value::as_bool), Some(true));
     assert_eq!(
         body.pointer("/data/hosts/0/address")
@@ -2456,12 +2275,9 @@ fn run_recon_http_fingerprint_reaches_subprocess_executor_and_persists() {
         .output()
         .unwrap();
 
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert_eq!(output.status.code(), Some(4));
     let body: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(body.get("status").and_then(Value::as_str), Some("partial"));
     assert_eq!(body.get("ok").and_then(Value::as_bool), Some(true));
     assert_eq!(
         body.pointer("/data/hosts/0/address")
@@ -2507,12 +2323,9 @@ fn run_recon_subdomain_reaches_subprocess_executor_and_persists() {
         .output()
         .unwrap();
 
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert_eq!(output.status.code(), Some(4));
     let body: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(body.get("status").and_then(Value::as_str), Some("partial"));
     assert_eq!(body.get("ok").and_then(Value::as_bool), Some(true));
     assert_eq!(
         body.pointer("/data/subdomains/0").and_then(Value::as_str),
@@ -2649,7 +2462,10 @@ fn run_triage_reaches_langgraph_runtime_bridge_and_persists() {
         .arg("run")
         .arg("triage:run")
         .arg("--input")
-        .arg(format!(r#"{{"fingerprint":"{}"}}"#, finding.fingerprint))
+        .arg(approved_model_input(
+            &repo,
+            json!({"fingerprint": finding.fingerprint}),
+        ))
         .output()
         .unwrap();
 
@@ -2728,7 +2544,10 @@ fn run_verify_finding_reaches_langgraph_runtime_bridge() {
         .arg("run")
         .arg("verify:finding")
         .arg("--input")
-        .arg(format!(r#"{{"fingerprint":"{}"}}"#, finding.fingerprint))
+        .arg(approved_model_input(
+            &repo,
+            json!({"fingerprint": finding.fingerprint}),
+        ))
         .output()
         .unwrap();
 
@@ -2803,9 +2622,14 @@ fn run_patch_finding_reaches_langgraph_runtime_bridge_and_persists() {
         .arg("run")
         .arg("patch:finding")
         .arg("--input")
-        .arg(format!(
-            r#"{{"fingerprint":"{}","maxIterations":1,"buildCmd":"true","testCmd":"true"}}"#,
-            finding.fingerprint
+        .arg(approved_model_input(
+            &repo,
+            json!({
+                "fingerprint": finding.fingerprint,
+                "maxIterations": 1,
+                "buildCmd": "true",
+                "testCmd": "true"
+            }),
         ))
         .output()
         .unwrap();
@@ -2895,7 +2719,10 @@ fn run_threat_model_build_reaches_langgraph_runtime_bridge_and_persists() {
         .arg("run")
         .arg("threat-model:build")
         .arg("--input")
-        .arg(r#"{"outputDir":".kuzushi/tm","methodology":"stride"}"#)
+        .arg(approved_model_input(
+            &repo,
+            json!({"outputDir": ".kuzushi/tm", "methodology": "stride"}),
+        ))
         .output()
         .unwrap();
 
@@ -3058,6 +2885,8 @@ fn run_x_ray_run_reaches_langgraph_runtime_bridge_and_writes_artifacts() {
         .arg(&repo)
         .arg("run")
         .arg("x-ray:run")
+        .arg("--input")
+        .arg(approved_model_input(&repo, json!({})))
         .output()
         .unwrap();
 
@@ -3071,7 +2900,7 @@ fn run_x_ray_run_reaches_langgraph_runtime_bridge_and_writes_artifacts() {
     assert_eq!(body.get("ok").and_then(Value::as_bool), Some(true));
     assert_eq!(
         body.pointer("/data/runtimeMode").and_then(Value::as_str),
-        Some("LangGraph")
+        Some("agent-runtime")
     );
     assert_eq!(
         body.pointer("/data/verdict/tier").and_then(Value::as_str),
@@ -3107,7 +2936,7 @@ fn run_x_ray_run_without_model_fails_without_silent_fallback() {
 
 #[cfg(unix)]
 #[test]
-fn scan_triage_uses_same_registry_executor_path() {
+fn scan_triage_requires_an_approved_study() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
@@ -3128,27 +2957,11 @@ fn scan_triage_uses_same_registry_executor_path() {
         .output()
         .unwrap();
 
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let body: Value = serde_json::from_slice(&output.stdout).unwrap();
-
-    assert_eq!(body.get("findingsCount").and_then(Value::as_u64), Some(1));
-    assert_eq!(
-        body.pointer("/triage/triaged").and_then(Value::as_u64),
-        Some(1)
-    );
+    assert_scan_requires_approved_study(&output);
 
     let workspace = WorkspaceTarget::new(&repo).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
-    let findings = store.list_findings(10).unwrap();
-    assert_eq!(findings.len(), 1);
-    assert_eq!(
-        findings[0].triage.as_ref().map(|triage| triage.verdict),
-        Some(TriageVerdict::TruePositive)
-    );
+    assert!(store.list_findings(10).unwrap().is_empty());
 }
 
 fn seed_untriaged_finding(repo: &std::path::Path) -> Finding {
