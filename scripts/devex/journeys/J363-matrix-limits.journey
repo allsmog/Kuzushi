@@ -1,0 +1,237 @@
+name: Context experiments retain failed attempts and stop at protected limits
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR NODE_OPTIONS KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/matrix_limits.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/study-command.txt
+keys: Enter
+require-live-snap: 25 6 planned | approved-fixed-matrix
+expect: Jobs: 6
+require-shell: python3 -B @REPO/scripts/devex/fixtures/matrix_limits.py @TMP_TARGET @ART draft
+nav-mode:
+keys: a
+require-live-snap: 25 APPROVED STUDY | approved-matrix-terms
+expect: 2 contexts · 6 fixed jobs · 1 worker(s)
+ask: Does the approved six-job matrix name the two context cases, three passes each, one worker and finite allowance before a separate launch?
+keys: Escape
+require-live-snap: 25 6 planned | launch-origin
+keys: L
+require-live-snap: 25 dispatcher pid | first-dispatch
+require-shell: python3 -B @REPO/scripts/devex/fixtures/matrix_limits.py @TMP_TARGET @ART partial
+keys: r
+require-live-snap: 25 Allowance reached | partial-jobs
+expect: 4 completed
+expect: 1 failed
+expect: 1 parked
+expect: Allowance reached
+expect: R report
+expect: a plan/allowance
+ask: Is the failed pass distinct from the unstarted pass, with a truthful partial outcome and visible Report and allowance choices?
+resize: 40x12
+wait: 1
+require-live-snap: 25 Allowance reached | mixed-stop-40x12
+expect: R report
+expect: a plan/allowance
+resize: 120x36
+wait: 1
+keys: a Home Down Down Down Down Down Down Down Down Down Down Enter
+require-live-snap: 25 CONTEXT CASES | retained-context-cases
+keys: v
+require-live-snap: 25 observed 2 / 2 | partial-alpha-results
+keys: Down
+require-live-snap: 25 observed 1 / 2 | partial-beta-results
+keys: Up
+live-snap: partial-results
+ask: Are the two contexts' completed-pass denominators distinct from three planned passes, with failures and remaining work disclosed without changing confidence?
+resize: 40x12
+wait: 1
+live-snap: partial-results-40x12
+keys: NPage
+wait: 0.3
+live-snap: partial-evidence-40x12
+resize: 120x36
+wait: 1
+keys: Escape Escape Escape
+submit: open F-0001
+require-live-snap: 25 Labeled synthetic bounded matrix signal | one-finding
+submit: dismiss false_positive J363 operator decision: owned greeting is intentional
+require-live-snap: 25 rejected_false_positive | human-fp
+require-shell: python3 -B @REPO/scripts/devex/fixtures/matrix_limits.py @TMP_TARGET @ART reviewed
+paste-file: @ART/study-command.txt
+keys: Enter
+require-live-snap: 25 4 completed | existing-partial-matrix
+nav-mode:
+keys: R
+require-live-snap: 25 Context cases: 2 | partial-scoped-report
+expect: 5 committed / 7 calls
+expect: 3 raw observations
+expect: Recorded attempts: 5 · 4 completed, 1 failed
+keys: j j j
+require-live-snap: 25 format json (4/6) | partial-json-format
+keys: Enter
+require-live-snap: 25 EXPORTED | partial-export
+require-shell: python3 -B @REPO/scripts/devex/fixtures/matrix_limits.py @TMP_TARGET @ART partial-report
+ask: Does the partial export keep the failed and pending work, separate case recurrence, all three raw observations and the human FP decision while protecting Review capacity?
+keys: Escape
+require-live-snap: 25 4 completed | partial-report-origin
+keys: a Home Down Down Down Down Down Enter
+require-live-snap: 25 Total calls | edit-specific-total
+type: 9
+keys: Enter Home Down Down Down Down Down Down Down Enter
+require-live-snap: 25 Attempts per job | edit-specific-attempts
+type: 2
+keys: Enter L End
+require-live-snap: 25 y approve | explicit-revision
+expect: Total provider calls: 9
+expect: Protected review calls: 2
+expect: 6 fixed jobs
+expect: Recorded calls: 5 committed
+expect: Left under proposed limits: 2 context/scan · 2 protected Review
+resize: 40x12
+wait: 1
+keys: End
+require-live-snap: 25 Used 5 · left Scan 2 Review 2 | explicit-revision-40x12
+resize: 120x36
+wait: 1
+keys: End
+require-live-snap: 25 y approve | explicit-revision-restored
+ask: Does the revision retain the five spent calls, same six jobs and two protected Review calls while explicitly permitting two remaining discovery calls and a second attempt?
+keys: y
+require-live-snap: 25 Approval saved | revised-approved
+keys: L
+require-live-snap: 25 Plan approved | same-jobs-approved
+keys: L
+require-live-snap: 25 dispatcher pid | remaining-dispatch
+require-shell: python3 -B @REPO/scripts/devex/fixtures/matrix_limits.py @TMP_TARGET @ART finished
+keys: r
+require-live-snap: 25 6 completed | original-six-completed
+expect: 2 total attempts
+keys: Down Enter
+require-live-snap: 25 Current attempt counter: 1 | retried-job-details
+expect: 2 total attempts
+keys: q
+require-live-snap: 25 Fixed jobs | retried-job-origin
+keys: a Home Down Down Down Down Down Down Down Down Down Down Enter
+require-live-snap: 25 CONTEXT CASES | completed-context-cases
+keys: v
+require-live-snap: 25 observed 3 / 3 | completed-alpha-results
+keys: Down
+require-live-snap: 25 observed 1 / 3 | completed-beta-results
+keys: b Enter Enter Down Down
+require-live-snap: 25 Pass 3 | missed-candidate-pass
+keys: Enter
+require-live-snap: 25 RUN DIFF | completed-pass-comparison
+require-live-snap: 25 1 not observed | missed-is-not-fixed
+keys: Tab
+require-live-snap: 25 Recorded content fingerprints match | exact-source-comparison
+keys: Escape Escape
+require-live-snap: 25 CONTEXT CASES | comparison-origin
+resize: 160x48
+wait: 1
+live-snap: completed-results-160x48
+resize: 96x89
+wait: 1
+live-snap: completed-results-96x89
+resize: 80x24
+wait: 1
+live-snap: completed-results-80x24
+resize: 60x20
+wait: 1
+live-snap: completed-results-60x20
+resize: 40x12
+wait: 1
+live-snap: completed-results-40x12
+keys: NPage NPage NPage NPage NPage NPage NPage NPage End
+wait: 0.3
+live-snap: completed-evidence-end-40x12
+resize: 120x36
+wait: 1
+keys: R
+require-live-snap: 25 Context cases: 2 | completed-scoped-report
+expect: 7 committed / 9 calls
+expect: 4 raw observations
+expect: Recorded attempts: 7 · 6 completed, 1 failed
+expect: 1 pending · TP: 0 · FP: 0
+keys: Escape Escape Escape Escape
+submit: open F-0001
+require-live-snap: 25 Labeled synthetic bounded matrix signal | reappeared-finding
+require-live-snap: 25 Conflicting decisions: | prior-fp-retained
+expect: scanner reported
+expect: J363 operator decision
+ask: Does the new observation retain the earlier operator FP and clearly request reassessment, without silently deleting that decision or starting paid Review work?
+submit: dismiss false_positive J363 explicit reaffirmation: latest owned greeting is intentional
+require-live-snap: 25 rejected_false_positive | explicitly-reaffirmed-fp
+require-shell: python3 -B @REPO/scripts/devex/fixtures/matrix_limits.py @TMP_TARGET @ART reaffirmed
+paste-file: @ART/study-command.txt
+keys: Enter
+require-live-snap: 25 6 completed | completed-triage-origin
+nav-mode:
+keys: R
+require-live-snap: 25 0 pending · TP: 0 · FP: 1 | completed-reviewed-report
+keys: p Home
+require-live-snap: 25 Attempt: matrix-limits-alpha-trial-002-a1 · failed | retained-failed-attempt
+resize: 160x48
+wait: 1
+live-snap: report-attempts-160x48
+resize: 96x89
+wait: 1
+live-snap: report-attempts-96x89
+resize: 80x24
+wait: 1
+live-snap: report-attempts-80x24
+resize: 60x20
+wait: 1
+live-snap: report-attempts-60x20
+resize: 40x12
+wait: 1
+keys: Home
+live-snap: report-attempts-40x12
+keys: NPage
+live-snap: report-attempts-page-1
+keys: NPage
+live-snap: report-attempts-page-2
+keys: NPage
+live-snap: report-attempts-page-3
+keys: NPage
+live-snap: report-attempts-page-4
+keys: NPage
+live-snap: report-attempts-page-5
+keys: NPage
+live-snap: report-attempts-page-6
+keys: NPage
+live-snap: report-attempts-page-7
+keys: NPage
+live-snap: report-attempts-page-8
+keys: End
+live-snap: report-attempts-end-40x12
+keys: PPage
+live-snap: report-attempts-back-40x12
+resize: 120x36
+wait: 1
+keys: p Home
+require-live-snap: 25 format json (4/6) | final-json-format
+keys: Enter
+require-live-snap: 25 EXPORTED | final-export
+require-shell: python3 -B @REPO/scripts/devex/fixtures/matrix_limits.py @TMP_TARGET @ART exported
+ask: Does the completed result preserve the failed historical attempt, honest per-case recurrence and FP decision, with readable evidence and faithful export at every viewport?
+keys: Escape Escape Escape Escape
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/study-command.txt
+keys: Enter
+require-live-snap: 25 6 completed | recovered-original-jobs
+nav-mode:
+keys: R
+require-live-snap: 25 Context cases: 2 | recovered-scoped-report
+expect: 7 committed / 9 calls
+require-shell: python3 -B @REPO/scripts/devex/fixtures/matrix_limits.py @TMP_TARGET @ART restarted
+ask: Does no-color restart recover the same fixed jobs, seven attempts including the failure, four observations, exact context and source, the retained FP decision and unchanged spending without another request?
+keys: C-c
+require-exit: 10

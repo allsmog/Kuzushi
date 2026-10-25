@@ -95,22 +95,33 @@ fn is_canceled_park(
 
 fn recorded_allowance_pause(target: &Path, campaign: &str, cause: &str) -> Option<String> {
     let snapshot = load_campaign_snapshot(target, campaign).ok()?;
-    let completed = snapshot
-        .jobs
-        .iter()
-        .filter(|job| job.state == "completed")
-        .count();
+    let summary = allowance_pause_summary(&snapshot)?;
+    // An old parked queue must not hide a new source, approval or execution error.
+    let expected = format!("campaign {campaign}: {summary}");
+    (cause == expected).then(|| format!("Allowance reached: {summary}.\nFinish and report partial work with R, or press a to review the remaining plan and allowance. Review unfinished passes before approving retries. No extra work has been approved."))
+}
+
+fn allowance_pause_summary(
+    snapshot: &kuzushi_core::capabilities::campaign::snapshot::CampaignSnapshot,
+) -> Option<String> {
+    let counts = snapshot.state_counts();
+    let completed = counts.get("completed").copied().unwrap_or(0);
+    let failed = counts.get("failed").copied().unwrap_or(0);
     let parked = snapshot
         .jobs
         .iter()
         .filter(|job| is_allowance_park(job))
         .count();
-    if parked == 0 || completed + parked != snapshot.jobs.len() {
+    if parked == 0 || completed + failed + parked != snapshot.jobs.len() {
         return None;
     }
-    // An old parked queue must not hide a new source, approval or execution error.
-    let expected = format!("campaign {campaign}: {completed} completed, {parked} parked");
-    (cause == expected).then(|| format!("Allowance reached: {completed} completed, {parked} parked.\nFinish and report partial work with R, or press a to review the remaining plan and allowance. No extra work has been approved."))
+    Some(
+        counts
+            .iter()
+            .map(|(state, count)| format!("{count} {state}"))
+            .collect::<Vec<_>>()
+            .join(", "),
+    )
 }
 
 fn is_allowance_park(

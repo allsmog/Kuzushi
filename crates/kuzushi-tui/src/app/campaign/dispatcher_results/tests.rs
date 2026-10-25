@@ -89,6 +89,83 @@ fn park_for_allowance(root: &Path) {
 }
 
 #[test]
+fn failed_pass_does_not_hide_the_recorded_allowance_stop() {
+    let (root, mut app) = deck_app();
+    park_with_failure(root.path());
+    app.open_campaign_view(Some("camp1".into()));
+    app.set_input("retained draft");
+    let origin = app.shell_view();
+    failed_dispatcher(
+        &mut app,
+        root.path(),
+        Some("Error: campaign camp1: 1 failed, 1 parked\n"),
+    );
+
+    assert!(app.poll_campaign_completion());
+    let notice = app.router.campaign().notice.clone().unwrap();
+    assert!(
+        notice.contains("Allowance reached: 1 failed, 1 parked"),
+        "{notice}"
+    );
+    assert!(notice.contains("Finish and report partial work with R"));
+    assert!(notice.contains("press a"));
+    assert!(notice.contains("Review unfinished passes before approving retries"));
+    app.refresh_campaign_deck();
+    assert_eq!(app.router.campaign().notice, Some(notice));
+    assert_eq!(app.input(), "retained draft");
+    assert_eq!(app.shell_view(), origin);
+}
+
+fn park_with_failure(root: &Path) {
+    park_for_allowance(root);
+    let path = kuzushi_core::capabilities::campaign::campaign_queue_path(root, "camp1");
+    let mut queue: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    queue["jobs"]["j1"]["state"] = serde_json::json!("failed");
+    std::fs::write(path, serde_json::to_vec(&queue).unwrap()).unwrap();
+}
+
+#[test]
+fn mixed_old_allowance_park_does_not_mask_a_new_source_failure() {
+    let (root, mut app) = deck_app();
+    park_with_failure(root.path());
+    app.open_campaign_view(Some("camp1".into()));
+    failed_dispatcher(
+        &mut app,
+        root.path(),
+        Some("Error: prepared on different source\n"),
+    );
+
+    assert!(app.poll_campaign_completion());
+    let notice = app.router.campaign().notice.as_deref().unwrap();
+    assert!(notice.contains("different source"));
+    assert!(!notice.contains("Allowance reached"));
+}
+
+#[test]
+fn allowance_summary_requires_all_other_work_to_be_terminal() {
+    let (root, _) = deck_app();
+    park_with_failure(root.path());
+    let mut snapshot = load_campaign_snapshot(root.path(), "camp1").unwrap();
+    assert_eq!(
+        allowance_pause_summary(&snapshot).as_deref(),
+        Some("1 failed, 1 parked")
+    );
+    snapshot.jobs[1].reason = Some("canceled".into());
+    assert_eq!(allowance_pause_summary(&snapshot), None);
+    snapshot.jobs[1].reason = Some("allowance-exhausted".into());
+    snapshot.jobs[0].state = "running".into();
+    assert_eq!(allowance_pause_summary(&snapshot), None);
+    snapshot.jobs[0].state = "completed".into();
+    assert_eq!(
+        allowance_pause_summary(&snapshot).as_deref(),
+        Some("1 completed, 1 parked")
+    );
+    snapshot.jobs.clear();
+    assert_eq!(allowance_pause_summary(&snapshot), None);
+}
+
+#[test]
 fn a_failure_notice_follows_its_campaign_and_target_only() {
     let (root, mut app) = deck_app();
     app.open_campaign_view(Some("camp1".into()));

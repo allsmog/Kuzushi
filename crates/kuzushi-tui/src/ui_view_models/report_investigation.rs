@@ -3,6 +3,7 @@ use crate::app::{ShellApp, ViewDataState};
 use kuzushi_core::workspace::InvestigationReportDocument;
 use kuzushi_core::workspace::InvestigationReportReceipt;
 
+mod attempt_history;
 mod context_evidence;
 mod context_guidance;
 mod matrix;
@@ -145,6 +146,7 @@ fn append_document_engine_details(
         engine_details.extend(engine_detail_lines(document));
     }
     insert_engine_details(lines, engine_details);
+    attempt_history::insert_after_scope(lines, attempts, details);
 }
 
 fn operator_brief_lines(document: &InvestigationReportDocument) -> Vec<String> {
@@ -198,7 +200,7 @@ fn summarize_engine_details(lines: impl IntoIterator<Item = String>) -> Vec<Stri
             if count == 1 {
                 line
             } else {
-                format!("{line} Recorded in {count} attempted jobs.")
+                format!("{line} Recorded in {count} attempts.")
             }
         })
         .collect()
@@ -217,7 +219,7 @@ fn scan_detail_lines(recorded: usize, attempted: usize) -> Vec<String> {
     }
     let missing = attempted.saturating_sub(recorded);
     let mut lines = vec![format!(
-        "Engine details: {recorded} / {attempted} attempted jobs recorded; {missing} unavailable."
+        "Engine details: {recorded} / {attempted} attempts recorded; {missing} unavailable."
     )];
     if missing > 0 {
         lines.push("Missing engine details do not establish coverage. Inspect incomplete run records before further work.".into());
@@ -370,10 +372,17 @@ mod tests;
 mod receipt_detail_tests {
     use super::*;
     #[test]
+    fn retried_work_is_counted_as_attempts_without_inventing_more_jobs() {
+        let lines = scan_detail_lines(7, 7).join("\n");
+        assert!(lines.contains("7 / 7 attempts recorded"), "{lines}");
+        assert!(!lines.contains("jobs"), "{lines}");
+    }
+
+    #[test]
     fn absent_engine_details_are_disclosed_without_claiming_attempts_or_coverage() {
         assert!(scan_detail_lines(0, 0).is_empty());
         let lines = scan_detail_lines(0, 1).join("\n");
-        assert!(lines.contains("0 / 1 attempted jobs recorded; 1 unavailable"));
+        assert!(lines.contains("0 / 1 attempts recorded; 1 unavailable"));
         assert!(lines.contains("do not establish coverage"));
         assert_eq!(scan_detail_lines(1, 1).len(), 1);
     }
@@ -405,7 +414,7 @@ mod receipt_detail_tests {
         ]);
         assert_eq!(lines.len(), 2);
         assert!(lines[0].contains("Preparation is partial"));
-        assert!(lines[0].contains("Recorded in 2 attempted jobs"));
+        assert!(lines[0].contains("Recorded in 2 attempts"));
         assert!(lines[1].contains("Missing coverage receipt"));
     }
 }
