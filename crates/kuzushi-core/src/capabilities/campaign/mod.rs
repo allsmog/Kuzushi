@@ -33,7 +33,9 @@ mod dispatcher_lease;
 pub use dispatcher_control::{
     read_campaign_dispatcher_error, request_campaign_dispatcher_stop, CampaignDispatcherControl,
 };
+mod lesson_followup;
 mod map_allowance;
+pub use lesson_followup::{load_lesson_followup_context, LessonFollowupContext};
 mod parallel_safety;
 mod plan;
 mod prior_runs;

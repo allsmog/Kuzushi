@@ -2,6 +2,7 @@ use super::*;
 use crate::app::BatchScanConfigRow;
 use kuzushi_core::V2Config;
 use ratatui::{backend::TestBackend, Terminal};
+mod discovery;
 mod inactive_options;
 mod readiness;
 

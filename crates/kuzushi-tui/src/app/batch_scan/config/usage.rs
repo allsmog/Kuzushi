@@ -1,7 +1,7 @@
 use super::*;
 
 impl BatchPriorRun {
-    pub(super) fn pending(run_id: &str) -> Self {
+    pub(in crate::app::batch_scan) fn pending(run_id: &str) -> Self {
         Self {
             run_id: run_id.into(),
             evidence: ViewDataState::NotRequested,

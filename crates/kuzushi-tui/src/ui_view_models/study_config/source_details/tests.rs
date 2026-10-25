@@ -41,6 +41,37 @@ fn source_overview_keeps_identity_and_omissions_without_the_options_document() {
 }
 
 #[test]
+fn selected_draft_context_is_identified_before_source_details_without_claiming_approval() {
+    let root = tempfile::tempdir().unwrap();
+    let mut config = BatchScanConfig::load(root.path(), None);
+    let reference = kuzushi_core::ThreatModelRef {
+        model_id: kuzushi_core::ThreatModelId::new(),
+        revision_id: kuzushi_core::ThreatModelRevisionId::new(),
+        sha256: "a".repeat(64),
+    };
+    config.study.scan_input = Some(json!({"threatModelRef":reference}));
+    let text = source_lines(&config).join("\n");
+    assert!(text.contains(reference.model_id.as_str()));
+    assert!(text.contains(reference.revision_id.as_str()));
+    assert!(text.find("Draft context:").unwrap() < text.find("Target:").unwrap());
+    assert!(text.contains("not frozen or approved"));
+    assert!(!text.contains("JSON has the exact content hash"));
+    config.study.scan_input = Some(json!({"threatModelRef":null}));
+    assert!(source_lines(&config)
+        .join("\n")
+        .contains("Draft context: explicitly omitted"));
+}
+
+#[test]
+fn frozen_source_overview_uses_its_receipt_instead_of_unfrozen_choices() {
+    let (_root, mut config) = planned_study();
+    config.study.scan_input = Some(json!({"threatModelRef":{"modelId":"unfrozen"}}));
+    let text = source_lines(&config).join("\n");
+    assert!(!text.contains("Draft context:") && !text.contains("unfrozen"));
+    assert!(text.contains("Context: explicitly omitted"));
+}
+
+#[test]
 fn explicit_options_preserve_the_complete_prepared_input_and_context_text() {
     let (_root, mut config) = planned_study();
     config.source_view.selected = StudySourceView::Options;

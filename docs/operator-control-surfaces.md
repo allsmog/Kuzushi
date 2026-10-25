@@ -1095,6 +1095,15 @@ separately. Generation uses Learning calls, preserving the protected Review
 allocation. It returns a draft; `a`, `r` and `t` still require a reason and an
 explicit confirmation. Acceptance and inclusion in a context copy are separate.
 
+After `u` creates an inactive context copy, `s` plans a follow-up using that
+exact copy. Review its source scope, engines and allowance before preparing
+and approving the fixed jobs. The initial draft has three passes, one worker
+and one attempt per job. Existing spending and unresolved requests are retained;
+no earlier approval authorizes new work. Back restores Lessons and its draft.
+An open study or pending context write must be finished or closed first. Retired
+or changed lessons block reuse. Model-guided engines read the lesson text;
+native scanners use their rules. Planning itself makes no provider request.
+
 `findings:lesson-generate` declares `findingId`, optional frozen `originRef`,
 `guidance`, `maxSourceBytes`, `maxOutputTokens`, `thinkingLevel`, `model` and
 required `allowanceRef`. It uses recorded captured source, discloses omissions,

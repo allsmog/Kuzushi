@@ -11,7 +11,17 @@ pub(super) fn owned_bindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
     if app.input_mode() != InputMode::Navigate {
         return None;
     }
-    Some(browser_bindings(app))
+    Some(with_saved_context_action(app, browser_bindings(app)))
+}
+
+fn with_saved_context_action(
+    app: &ShellApp,
+    mut bindings: Vec<FooterKeybinding>,
+) -> Vec<FooterKeybinding> {
+    if app.router.lessons.saved_context.is_some() {
+        bindings.insert(0, bind("s", "plan follow-up"));
+    }
+    bindings
 }
 
 fn browser_bindings(app: &ShellApp) -> Vec<FooterKeybinding> {

@@ -3,7 +3,9 @@ use crate::app::ShellApp;
 use crate::renderer::shared::text::wrap_text;
 use ratatui::layout::Rect;
 use serde_json::{json, Value};
+mod layout;
 mod readiness;
+pub(crate) use layout::{engine_layout, engine_window};
 pub(crate) use readiness::selected_engine_requirements;
 
 pub(crate) struct StudyEngineRow {
@@ -70,25 +72,6 @@ fn selection_support(original: &Value, task: Option<&str>) -> Option<String> {
     kuzushi_core::modules::validate_scan_scope_contract(&input)
         .err()
         .map(|error| format!("{error:#}"))
-}
-
-pub(crate) fn engine_layout(
-    columns: u16,
-    rows: u16,
-    count: usize,
-) -> super::study_config::StudyConfigLayout {
-    let area = super::study_config::study_config_area(columns, rows);
-    let mut layout = super::study_config::study_config_layout(area);
-    if layout.list.x == layout.detail.x {
-        let spare = layout
-            .list
-            .height
-            .saturating_sub(count.min(u16::MAX as usize) as u16);
-        layout.list.height -= spare;
-        layout.detail.y -= spare;
-        layout.detail.height += spare;
-    }
-    layout
 }
 
 pub(crate) fn engine_detail(app: &ShellApp, width: usize) -> Vec<String> {

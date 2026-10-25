@@ -1,6 +1,7 @@
 use super::*;
 mod draft_preservation;
 mod fixture;
+mod followup;
 mod reader;
 mod replacement;
 

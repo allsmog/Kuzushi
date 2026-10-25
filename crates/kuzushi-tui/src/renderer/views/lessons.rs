@@ -38,13 +38,30 @@ fn modal_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'static>>> {
 
 fn browser_document_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = vec![Line::styled("REUSABLE LESSONS", theme::accent())];
-    lines.extend(browser_actions(area.width));
+    lines.extend(browser_actions(app, area.width));
     lines.extend(browser_lines(app, area));
     lines.extend(notice_lines(app, area.width));
     lines
 }
 
-fn browser_actions(width: u16) -> Vec<Line<'static>> {
+fn browser_actions(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
+    let mut lines = saved_context_action(app, width);
+    lines.extend(lesson_management_actions(width));
+    lines
+}
+
+fn saved_context_action(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
+    if app.router.lessons.saved_context.is_none() {
+        return Vec::new();
+    }
+    wrapped(
+        "s Plan follow-up with saved context",
+        width,
+        theme::accent(),
+    )
+}
+
+fn lesson_management_actions(width: u16) -> Vec<Line<'static>> {
     if width < 60 {
         return wrapped(
             "n draft · g model · a/r/t review\nu copy · e edit · d draft · c clear",

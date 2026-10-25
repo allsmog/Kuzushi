@@ -58,3 +58,12 @@ fn preview_retains_exact_opt_in_and_never_expands_standalone_stages() {
     assert!(preview.runtime_required);
     assert!(!preview.deferred_checks.is_empty());
 }
+
+#[test]
+fn legacy_taint_task_and_replacement_select_one_actual_engine() {
+    let selected = requested_scope_contracts(
+        &json!({"taskMode":"manual","tasks":["taint-iris","taint-iris-next"]}),
+    )
+    .unwrap();
+    assert_eq!(selected.planned_engine_ids(), vec!["taint-iris-next"]);
+}

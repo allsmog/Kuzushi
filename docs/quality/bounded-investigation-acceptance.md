@@ -1,5 +1,20 @@
 # Bounded investigation acceptance ledger
 
+The [reviewed-context follow-up](../assessments/lesson-context-followup-2026-10-24.md)
+connects an inactive lesson copy to the existing finite planner and retains
+spent calls, protected limits and unresolved reservations. Fifty reported Rust
+checks, build, lint and risk pass. Final J357 has 66 machine passes, zero failures,
+53 captures and seven pending operator judgments through exact-context scanning,
+export, retirement and restart. All twelve planner choices fit the tall layout.
+No live request, general variant qualification or broad delivery checkbox follows.
+
+The [engine choice discovery correction](../assessments/engine-choice-discovery-2026-10-24.md)
+closes the reproduced tall-list and continuation gap while preserving compact
+reading and controls. J356 records 30 machine passes, zero failures, 21 capture
+pairs and four pending operator judgments through all six sizes and no-color
+restart. All 42 focused checks, build, lint and risk pass. No model request,
+default change or broad delivery closure follows.
+
 The [study engine readiness correction](../assessments/study-engine-readiness-2026-10-24.md)
 retains catalog maturity and distinguishes unsupported scope, missing dependency,
 missing model and deferred checks without starting work. Final native J355 has

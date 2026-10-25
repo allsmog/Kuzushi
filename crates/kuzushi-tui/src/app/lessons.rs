@@ -70,8 +70,16 @@ impl ShellApp {
         if self.input_mode() != InputMode::Navigate {
             return None;
         }
-        self.handle_lesson_browse_key(key.code)
+        (self.handle_lesson_followup_key(key) || self.handle_lesson_browse_key(key.code))
             .then(state_transitions::InputUpdate::handled)
+    }
+
+    fn handle_lesson_followup_key(&mut self, key: KeyEvent) -> bool {
+        if key.code != KeyCode::Char('s') || !key.modifiers.is_empty() {
+            return false;
+        }
+        self.plan_lesson_context_scan();
+        true
     }
 
     fn handle_lesson_owned_input(

@@ -6,6 +6,7 @@ mod context_checkpoint;
 mod context_edit;
 pub(crate) use context_checkpoint::ContextCheckpointRuntime;
 mod context_generation;
+mod lesson_followup;
 mod lesson_generation;
 mod review_study;
 pub(crate) use context_generation::StudyContextGeneration;

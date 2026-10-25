@@ -1,5 +1,20 @@
 # Bounded investigations implementation
 
+The [reviewed-context follow-up](../assessments/lesson-context-followup-2026-10-24.md)
+opens a finite study directly from Lessons, preserving exact context, declared
+engine choices and durable spending. Fifty reported Rust checks, build, lint
+and risk pass. Final J357 has 66 machine passes, zero failures, 53 captures and
+seven pending operator judgments through three candidate passes, export,
+retirement and restart. Tall planners show all twelve choices. No live provider
+request, automatic follow-up or broad delivery closure is added.
+
+The [engine choice discovery correction](../assessments/engine-choice-discovery-2026-10-24.md)
+shows all fourteen choices in a tall stacked terminal, adds truthful compact
+continuation and identifies the legacy taint task's replacement. Final J356 has
+30 machine passes, zero failures and four pending operator judgments. All 42
+focused Rust checks, build, lint and risk pass. No model request or broad
+delivery milestone is added; the previous staged checkpoint remains intact.
+
 The [study engine readiness correction](../assessments/study-engine-readiness-2026-10-24.md)
 retains experimental catalog labels, separates scope, dependency and model
 states, and prioritizes actionable compact guidance. Final J355 records 38

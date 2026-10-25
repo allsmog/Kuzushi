@@ -1,0 +1,174 @@
+name: Saved reviewed context opens a bounded follow-up with retained investigation accounting
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR NODE_OPTIONS KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE SEMGREP_APP_TOKEN SEMGREP_AGENT_TOKEN
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0
+require-shell: python3 -B @REPO/scripts/devex/fixtures/learning_loop.py seed @TMP_TARGET @ART @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+paste-file: @ART/open.txt
+keys: Enter
+require-live-snap: 25 F-0001 · FINDING | baseline-observation
+submit: decision confirmed Confirmed the owned literal policy marker only; no vulnerability is asserted
+require-live-snap: 25 recorded: confirmed | human-policy-decision
+require-shell: python3 -B @REPO/scripts/devex/fixtures/learning_loop.py confirmed @TMP_TARGET @ART
+submit: lessons
+require-live-snap: 25 REUSABLE LESSONS | empty-lessons
+keys: n
+require-live-snap: 20 LESSON DRAFT | lesson-title
+paste-file: @ART/title.txt
+keys: Tab
+paste-file: @ART/text.txt
+require-live-snap: 20 Unicode café | lesson-text
+keys: Tab
+paste-file: @ART/applies.txt
+keys: Tab
+paste-file: @ART/limits.txt
+keys: Enter
+require-live-snap: 20 CONFIRM LESSON DRAFT | draft-confirmation
+keys: Enter
+require-live-snap: 25 Draft · Owned greeting | saved-draft
+require-shell: python3 -B @REPO/scripts/devex/fixtures/learning_loop.py draft @TMP_TARGET @ART
+keys: a
+paste-file: @ART/reason.txt
+keys: Enter
+require-live-snap: 20 CONFIRM ACCEPTED LESSON | acceptance
+keys: Enter
+require-live-snap: 25 Accepted · Owned greeting | accepted-lesson
+require-shell: python3 -B @REPO/scripts/devex/fixtures/learning_loop.py accepted @TMP_TARGET @ART
+keys: Space u
+require-live-snap: 25 LESSONS INTO CONTEXT | explicit-base
+expect: Selected lessons: 1.
+keys: Enter
+require-live-snap: 20 Enter creates copy | copy-confirmation
+ask: Does context reuse name the exact reviewed lesson and base, require a separate copy confirmation and keep the active context unchanged?
+keys: Enter
+require-live-snap: 25 Saved context: | inactive-copy
+require-shell: python3 -B @REPO/scripts/devex/fixtures/learning_loop.py copy @TMP_TARGET @ART
+submit: use sast
+submit: options sast:scan
+submit: set taskMode manual
+submit: set tasks semgrep,agentic
+paste-file: @ART/rule-setting.txt
+keys: Enter
+submit: set semgrepTimeoutMs 60000
+submit: lessons
+require-live-snap: 25 s Plan follow-up | visible-followup
+resize: 40x12
+require-live-snap: 20 s Plan follow-up | compact-followup-action
+ask: Does the compact Lessons browser expose the follow-up action with its saved context, without treating copied guidance as scan approval?
+resize: 120x36
+keys: s
+require-live-snap: 25 PLAN A STUDY | followup-study
+expect: ▸ Source and context
+resize: 160x48
+live-snap: followup-study-160x48
+resize: 96x89
+live-snap: followup-study-96x89
+expect: Usage evidence
+expect: Context comparison
+expect: Context cases
+expect: Next action
+resize: 80x24
+live-snap: followup-study-80x24
+resize: 60x20
+live-snap: followup-study-60x20
+resize: 40x12
+live-snap: followup-study-40x12
+ask: Can the operator identify the selected context, finite workload and next action at all six sizes, without losing engine choices or spending history?
+resize: 120x36
+require-live-snap: 20 ▸ Source and context | settled-return-origin
+keys: Escape
+require-live-snap: 20 REUSABLE LESSONS | returned-to-lessons
+expect: s Plan follow-up
+require-shell: python3 -B @REPO/scripts/devex/fixtures/learning_loop.py copy @TMP_TARGET @ART
+keys: s
+require-live-snap: 25 PLAN A STUDY | restored-followup
+keys: Down Down Down Down Down Down
+require-live-snap: 20 ▸ Context comparison | explicit-comparison-row
+keys: Enter
+require-live-snap: 25 Baseline allowance read. | retained-accounting
+keys: Up Up Up Up Up Up
+require-live-snap: 20 ▸ Source and context | saved-context-row
+keys: Enter
+require-live-snap: 20 CHOOSE STUDY CONTEXT | exact-saved-context
+keys: Enter
+require-live-snap: 25 CONTEXT SUMMARY | inspect-copy
+keys: p
+require-live-snap: 25 THREAT-MODEL TEXT INCLUDED | scanner-context
+keys: NPage
+require-live-snap: 20 Owned greeting review lesson | supplied-lesson
+ask: Is the exact reviewed lesson supplied to the model-guided engine while the native scanner keeps its own rules, with no global context replacement?
+keys: a
+require-live-snap: 20 Context selected for this study | selected-copy
+keys: L
+require-live-snap: 30 Draft ready | finite-candidate
+require-shell: python3 -B @REPO/scripts/devex/fixtures/learning_loop.py candidate-draft @TMP_TARGET @ART
+keys: L
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | candidate-approval
+expect: Total provider calls: 6
+expect: Protected review calls: 0
+keys: End
+require-live-snap: 20 y approve | approval-tail
+expect: 3 fixed jobs
+ask: Does the experiment retain its baseline and six-request intercepted allowance, approving exactly three candidate jobs with no live request or expanded source, engines or limit?
+keys: y
+require-live-snap: 25 Approval saved | candidate-approved
+keys: L
+require-live-snap: 25 Plan approved | candidate-jobs
+keys: L
+require-live-snap: 25 dispatcher pid | candidate-running
+require-shell: python3 -B @REPO/scripts/devex/fixtures/learning_loop.py candidate-complete @TMP_TARGET @ART
+keys: r
+require-live-snap: 25 3 completed | completed-experiment
+submit: report
+require-live-snap: 25 1 finding · 1 pending · TP: 0 | experiment-report
+expect: 3 completed / 3 planned
+expect: no complete coverage claim
+expect: source review needed: 1
+expect: Earlier decisions remain recorded.
+keys: Home
+keys: j j j
+require-live-snap: 20 format json (4/6) | json-format
+keys: Enter
+require-live-snap: 25 EXPORTED | exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/learning_loop.py exported @TMP_TARGET @ART
+submit: lessons
+require-live-snap: 25 Accepted · Owned greeting | retained-lesson
+keys: t
+paste-file: @ART/retire.txt
+keys: Enter
+require-live-snap: 20 CONFIRM RETIRED LESSON | retire-confirmation
+keys: Enter
+require-live-snap: 25 Retired · Owned greeting | retired-lesson
+require-shell: python3 -B @REPO/scripts/devex/fixtures/learning_loop.py retired @TMP_TARGET @ART
+paste-file: @ART/candidate-open.txt
+keys: Enter
+require-live-snap: 25 PLAN A STUDY | future-study
+keys: Down Down Down Enter
+require-live-snap: 20 CHOOSE STUDY CONTEXT | retired-context-choice
+keys: Down Enter
+require-live-snap: 25 Lesson context needs review | retired-context-read
+keys: a
+require-live-snap: 20 changed or retired lesson | future-use-blocked
+ask: Does retirement preserve the six observations and original human decision while making the copied context ineligible for new work?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: lessons
+require-live-snap: 25 Retired · Owned greeting | restarted-lesson
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 3 completed | restarted-experiment
+submit: report
+require-live-snap: 25 source review needed: 1 | restarted-source-review-report
+expect: Earlier decisions remain recorded.
+require-shell: python3 -B @REPO/scripts/devex/fixtures/learning_loop.py restarted @TMP_TARGET @ART
+ask: Does no-color restart retain the retired guidance, completed experiment and six settled intercepted requests without another job or live provider request?
+keys: C-c
+require-exit: 10

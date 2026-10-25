@@ -13,12 +13,37 @@ pub(super) fn source_lines(config: &BatchScanConfig) -> Vec<String> {
 
 fn overview_lines(config: &BatchScanConfig) -> Vec<String> {
     let mut lines = vec!["SOURCE OVERVIEW".into()];
+    lines.extend(draft_context_lines(config));
     lines.extend(super::context_description_body(config));
     lines.push("Recorded source and configuration are checked again before approval and execution. Missing a finding in a later pass does not establish a fix.".into());
     lines.push(
         "Tab shows recorded engine inputs, readable settings, then exact JSON and supplemental context.".into(),
     );
     lines
+}
+
+fn draft_context_lines(config: &BatchScanConfig) -> Vec<String> {
+    if config.study.plan_identity().is_some() {
+        return Vec::new();
+    }
+    let Some(input) = config.study.scan_input.as_ref() else {
+        return Vec::new();
+    };
+    vec![
+        format!("Draft context: {}", draft_context_summary(input)),
+        "This selection is not frozen or approved. Enter inspects its exact content before planning.".into(),
+    ]
+}
+
+fn draft_context_summary(input: &Value) -> String {
+    let Some(reference) = input.get("threatModelRef") else {
+        return context_reference_summary(input);
+    };
+    if reference.is_null() {
+        return "explicitly omitted".into();
+    }
+    reference_identity(reference)
+        .unwrap_or_else(|_| "malformed reference; choose a valid context before planning".into())
 }
 
 pub(crate) fn context_reference_summary(input: &Value) -> String {
@@ -35,15 +60,20 @@ fn reference_summary(reference: &Value) -> String {
     if reference.is_null() {
         return "explicitly omitted".into();
     }
-    match recorded_reference(reference) {
-        Ok(reference) => format!(
-            "{} · revision {}. JSON has the exact content hash.",
-            reference.model_id, reference.revision_id
-        ),
+    match reference_identity(reference) {
+        Ok(identity) => format!("{identity}. JSON has the exact content hash."),
         Err(_) => {
             "recorded reference is malformed; inspect JSON before preparing a new draft".into()
         }
     }
+}
+
+fn reference_identity(value: &Value) -> anyhow::Result<String> {
+    let reference = recorded_reference(value)?;
+    Ok(format!(
+        "{} · revision {}",
+        reference.model_id, reference.revision_id
+    ))
 }
 
 fn recorded_reference(value: &Value) -> anyhow::Result<kuzushi_core::ThreatModelRef> {

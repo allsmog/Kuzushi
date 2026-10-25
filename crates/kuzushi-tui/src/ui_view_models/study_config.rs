@@ -99,7 +99,7 @@ pub(crate) fn study_config_layout(area: Rect) -> StudyConfigLayout {
             controls,
         };
     }
-    let list_rows = (body.height / 2).clamp(1, 8).min(body.height);
+    let list_rows = study_config_list_rows(body.height);
     StudyConfigLayout {
         list: Rect::new(body.x, body.y, body.width, list_rows),
         detail: Rect::new(
@@ -110,6 +110,14 @@ pub(crate) fn study_config_layout(area: Rect) -> StudyConfigLayout {
         ),
         controls,
     }
+}
+
+fn study_config_list_rows(body_height: u16) -> u16 {
+    let full_list = BatchScanConfigRow::ALL.len() as u16;
+    if body_height > full_list * 2 {
+        return full_list;
+    }
+    (body_height / 2).clamp(1, 8).min(body_height)
 }
 
 pub(crate) fn study_allowance_summary(config: &BatchScanConfig, width: usize) -> String {

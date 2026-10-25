@@ -1,0 +1,83 @@
+name: Complete tall engine lists, honest compact continuation and compatibility guidance
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR SEMGREP_APP_TOKEN SEMGREP_AGENT_TOKEN
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/engine_readiness.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+submit: run context:build {"enrichment":false}
+require-live-snap: 35 context:build indexed | source-indexed
+submit: use sast
+submit: options sast:scan
+submit: setg taskMode manual
+submit: setg tasks semgrep
+paste-file: @ART/binary-setting.txt
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/engine_readiness.py @TMP_TARGET @ART globals
+submit: scan batch
+require-live-snap: 25 PLAN A STUDY | study
+keys: Home Down Down Enter
+require-live-snap: 25 DEPENDENCY MISSING: semgrepBinary | initial-selection
+resize: 96x89
+require-live-snap: 15 systems-hunt | complete-tall-list
+expect: Automatic selection
+expect: [Labs] codeql
+expect: [Labs] taint-iris-next
+require-shell: python3 -B @REPO/scripts/devex/fixtures/engine_choice_visibility.py @TMP_TARGET @ART tall
+keys: Down Down Down Down Down Down Down Down Down Down Down Down
+require-live-snap: 20 systems-hunt · model required | tall-bottom-selection
+resize: 40x12
+require-live-snap: 15 systems-hunt · model required | bottom-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/engine_choice_visibility.py @TMP_TARGET @ART bottom
+keys: Up Up Up Up
+require-live-snap: 15 agentic · model required | middle-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/engine_choice_visibility.py @TMP_TARGET @ART middle
+keys: Up Up Up Up Up Up Up Up
+require-live-snap: 15 DEPENDENCY MISSING: semgrepBinary | top-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/engine_choice_visibility.py @TMP_TARGET @ART top
+expect: r check
+ask: Do the scrollbar and directional markers expose hidden choices at both ends, with the selected engine and its actionable detail still readable at 40 columns?
+resize: 60x20
+require-live-snap: 15 DEPENDENCY MISSING: semgrepBinary | list-60x20
+resize: 80x24
+require-live-snap: 15 DEPENDENCY MISSING: semgrepBinary | list-80x24
+resize: 120x36
+require-live-snap: 15 systems-hunt | list-120x36
+resize: 160x48
+require-live-snap: 15 systems-hunt | list-160x48
+ask: Are all choices discoverable across six sizes, with all fourteen rows visible in the tall terminal and selection, detail paging and controls preserved through resize?
+keys: Down Down Down Down Down Down Down Down Down Down
+require-live-snap: 20 compatibility task alias for taint-iris-next | legacy-alias
+expect: taint-iris-next:hunt
+keys: Down
+require-live-snap: 20 next taint workflow | recommended-replacement
+expect: taint-iris-next:hunt
+keys: Escape
+require-live-snap: 20 Discovery engines  current settings | cancelled
+require-shell: python3 -B @REPO/scripts/devex/fixtures/engine_choice_visibility.py @TMP_TARGET @ART cancelled
+ask: Does compatibility guidance identify the replacement without implying an extra engine or coverage, while Cancel retains the original study and global settings without creating work?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: scan batch
+require-live-snap: 25 PLAN A STUDY | restarted-study
+keys: Home Down Down Enter
+require-live-snap: 25 DEPENDENCY MISSING: semgrepBinary | restarted-selection
+resize: 96x89
+require-live-snap: 15 systems-hunt | restarted-tall-list
+keys: Down Down Down Down Down Down Down Down Down Down Down Down
+resize: 40x12
+require-live-snap: 15 systems-hunt · model required | restarted-bottom-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/engine_choice_visibility.py @TMP_TARGET @ART restarted-bottom
+keys: Escape
+require-shell: python3 -B @REPO/scripts/devex/fixtures/engine_choice_visibility.py @TMP_TARGET @ART restarted
+ask: Does no-color restart keep the original choices and honest continuation at the bottom, with no source change, plan, attempt, reservation or model request?
+keys: C-c
+require-exit: 10

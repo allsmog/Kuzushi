@@ -4064,6 +4064,17 @@ inspection remains available with `lessonState.usable=false` and the reason so
 the operator can create a replacement copy. The active context and original
 immutable objects remain unchanged.
 
+After copying accepted lessons in the shell, `s` opens the existing finite Scan
+planner with that exact saved context. It keeps declared engine, source-scope
+and prompt choices, defaults to three passes, one worker and one attempt per
+job, and returns to Lessons on Back. No plan or approval is inherited. Existing
+investigation limits, spent calls and unresolved reservations remain recorded;
+missing recorded accounting blocks the handoff. Historical runs without
+accounting are disclosed as unknown. Lessons spanning multiple investigations
+need a deliberate current investigation. Model-guided engines receive lesson
+text as context; native scanners continue using their declared rules. This
+shortcut creates no recursive jobs or automatic variant search.
+
 Lesson action runs are excluded from automatic artifact context. Saved run
 documents carrying reviewed lesson snapshots, and the shared reviewed-lesson
 digest, are excluded too. The active compatibility mirror is indexed without
