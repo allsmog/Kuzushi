@@ -1161,6 +1161,15 @@ phase. File exports retain descriptor authorization. The Report phase permits
 read, workspace-write and target-write effects; repository-execute and
 external-action descriptors are rejected. Phase metadata never schedules work.
 
+Report and TUI origin labels share `FindingEvidence::origin_class()`. Generic
+`reasoning` is a reasoning assertion with unspecified authorship. Explicit
+`model-claim-unscored` remains model reasoning, including when source or capture
+fields are present. Both stay excluded from observed-code and capture counts.
+Export summaries expose the separate `reasoningAssertionCount`; a reasoning-only
+record uses state `reasoning_assertion`. Existing findings and human decisions
+stay intact. See [the migration notes](../RELEASING.md#evidence-origin-classification-in-reports)
+for CSV ordering, SARIF, bundle manifests and Rust struct construction.
+
 `workspace:export-findings` accepts optional `campaignId` (`campaign_id` alias).
 The CLI equivalent is `kuzushi export --campaign-id <id>`. This selects the
 study's authenticated parent and engine observations, including retained partial

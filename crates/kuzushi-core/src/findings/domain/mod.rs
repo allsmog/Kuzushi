@@ -10,6 +10,7 @@ mod dedupe_input;
 mod deterministic_scanners;
 pub(crate) use dedupe_input::{DedupeLedgerLimits, DedupeLedgerRead};
 mod evidence_kind;
+pub use evidence_kind::FindingEvidenceOrigin;
 mod extract_cwe;
 mod finding_identity;
 mod finding_record;

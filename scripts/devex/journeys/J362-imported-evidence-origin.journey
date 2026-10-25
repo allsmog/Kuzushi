@@ -1,0 +1,82 @@
+name: Review and report exports agree on assertion origins and unverified status
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE KUZUSHI_AGENT_MCPS NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NODE_OPTIONS=--import=@REPO/scripts/devex/fixtures/deny_provider_transport.mjs KUZUSHI_TEST_DENIED_FETCH_LOG=@ART/denied-fetch.jsonl
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dfd_literal_links.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: map
+require-live-snap: 20 SYSTEM SUMMARY | map-summary
+nav-mode:
+keys: Tab z f
+require-live-snap: 20 FILTER files:["src/a\\b.rs"] | imported-assertion
+expect: 1 of 1
+expect: reasoning assertion
+expect: claim · unverified scanner assertion
+expect-not: model-generated reasoning
+keys: Enter Z
+require-live-snap: 20 ZOOM SELECTED FINDING | reading-detail
+resize: 160x48
+wait: 1
+require-live-snap: 20 reasoning assertion | complete-detail
+expect: observed code evidence
+expect: unverified
+ask: Does the detail distinguish an imported reasoning assertion from grounded source evidence without inventing model authorship or implying verification?
+resize: 40x12
+wait: 1
+keys: Home
+live-snap: narrow-start
+keys: NPage
+wait: 1
+live-snap: narrow-page-1
+keys: NPage
+wait: 1
+live-snap: narrow-page-2
+keys: NPage
+wait: 1
+live-snap: narrow-page-3
+keys: NPage
+wait: 1
+live-snap: narrow-page-4
+keys: NPage
+wait: 1
+live-snap: narrow-page-5
+keys: NPage
+wait: 1
+live-snap: narrow-page-6
+keys: NPage
+wait: 1
+live-snap: narrow-page-7
+keys: NPage
+wait: 1
+live-snap: narrow-page-8
+ask: Can a keyboard operator reach both evidence origins in the narrow detail reader while retaining the same finding and clear navigation?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/evidence_origin.py @TMP_TARGET @ART navigation
+resize: 120x36
+wait: 1
+submit: report
+require-live-snap: 20 2 findings | report-before-exports
+require-shell: python3 -B @REPO/scripts/devex/fixtures/evidence_origin.py @TMP_TARGET @ART export @TMP_HOME
+wait: 1
+require-live-snap: 20 2 findings | report-files-ready
+ask: Does Report retain both unreviewed observations and explicit export controls while the five generated formats preserve the same assertion and source-evidence distinction?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NODE_OPTIONS=--import=@REPO/scripts/devex/fixtures/deny_provider_transport.mjs KUZUSHI_TEST_DENIED_FETCH_LOG=@ART/denied-fetch.jsonl NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: map
+require-live-snap: 20 SYSTEM SUMMARY | restarted-map
+nav-mode:
+keys: Tab z f
+require-live-snap: 20 FILTER files:["src/a\\b.rs"] | restarted-literal
+expect: reasoning assertion
+expect: 1 of 1
+expect: unverified
+expect-not: model-generated reasoning
+require-shell: python3 -B @REPO/scripts/devex/fixtures/evidence_origin.py @TMP_TARGET @ART restarted
+ask: Does no-color restart retain the honest assertion label, exact selected finding and unchanged observations without adding provider usage or human decisions?
+keys: C-c
+require-exit: 10

@@ -8,6 +8,7 @@ use kuzushi_core::{
 };
 use std::collections::BTreeMap;
 
+mod evidence_origin;
 mod observation_reference;
 
 #[test]
@@ -1219,7 +1220,7 @@ fn selected_finding_detail_model_bounds_evidence_and_message() {
 }
 
 #[test]
-fn selected_finding_detail_labels_observed_and_model_generated_evidence() {
+fn selected_finding_detail_labels_observed_evidence_and_reasoning_assertions() {
     let mut app = ShellApp::new(V2Config::default(), None);
     let finding = Finding::new_tool(
         "agentic-sast",
@@ -1255,7 +1256,7 @@ fn selected_finding_detail_labels_observed_and_model_generated_evidence() {
     let model = selected_finding_detail_model(&app).expect("selected finding");
 
     assert_eq!(model.evidence[0].origin, "observed code evidence");
-    assert_eq!(model.evidence[1].origin, "model-generated reasoning");
+    assert_eq!(model.evidence[1].origin, "reasoning assertion");
 }
 
 #[test]

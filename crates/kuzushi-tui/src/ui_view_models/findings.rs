@@ -2215,34 +2215,14 @@ impl FindingEvidenceRow {
 
     fn from_evidence(evidence: &kuzushi_core::FindingEvidence) -> Self {
         Self {
-            origin: evidence_origin_label(evidence).to_string(),
+            origin: kuzushi_core::findings::presentation::evidence_origin_label(evidence)
+                .to_string(),
             header: evidence_row_header(evidence),
             snippet: evidence.snippet.clone(),
             rationale: evidence.rationale.clone(),
             capture: evidence_capture_summary(evidence),
         }
     }
-}
-
-fn evidence_origin_label(evidence: &kuzushi_core::FindingEvidence) -> &'static str {
-    if evidence.is_model_generated_reasoning() {
-        return "model-generated reasoning";
-    }
-    if evidence_has_capture(evidence) {
-        return "observed capture evidence";
-    }
-    if evidence_has_source_location(evidence) {
-        return "observed code evidence";
-    }
-    "observed evidence"
-}
-
-fn evidence_has_capture(evidence: &kuzushi_core::FindingEvidence) -> bool {
-    evidence.request_blob.is_some() || evidence.response_blob.is_some()
-}
-
-fn evidence_has_source_location(evidence: &kuzushi_core::FindingEvidence) -> bool {
-    !evidence.file_path.trim().is_empty() || !evidence.snippet.trim().is_empty()
 }
 
 fn evidence_row_header(evidence: &kuzushi_core::FindingEvidence) -> String {

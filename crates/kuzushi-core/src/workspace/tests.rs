@@ -2251,6 +2251,7 @@ mod tests {
                 observed_other_count: 1,
                 model_generated_reasoning_present: true,
                 model_generated_reasoning_count: 2,
+                reasoning_assertion_count: 5,
                 derived_source_present: true,
                 source_count: 4,
                 raw_http_blob_present: true,

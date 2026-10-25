@@ -918,6 +918,7 @@ const CSV_FINDINGS_HEADER: &[&str] = &[
     "observation_event_hash",
     "observation_last_seen_run_id",
     "observation_compared_run_id",
+    "reasoning_assertion_count",
 ];
 
 fn write_csv_header(writer: &mut csv::Writer<Vec<u8>>) -> Result<()> {
@@ -1005,6 +1006,7 @@ fn csv_finding_row(record: &WorkspaceFindingExportRecord, metadata: &[String; 4]
     row.extend(csv_remediation_fields(record));
     row.extend(metadata.iter().cloned());
     row.extend(csv_observation_fields(record));
+    row.push(record.evidence.reasoning_assertion_count.to_string());
     row
 }
 

@@ -198,13 +198,14 @@ fn push_bundle_evidence_summary(out: &mut String, record: &WorkspaceFindingExpor
         record.evidence.observed_count
     ));
     out.push_str(&format!(
-        "- **Evidence origin:** observed={} code={} capture={} other={} model-generated-reasoning={} derived-source={}\n",
+        "- **Evidence origin:** observed={} code={} capture={} other={} model-generated-reasoning={} derived-source={} reasoning assertions={}\n",
         record.evidence.observed_evidence_present,
         record.evidence.observed_code_count,
         record.evidence.observed_capture_count,
         record.evidence.observed_other_count,
         record.evidence.model_generated_reasoning_count,
-        record.evidence.derived_source_present
+        record.evidence.derived_source_present,
+        record.evidence.reasoning_assertion_count
     ));
 }
 

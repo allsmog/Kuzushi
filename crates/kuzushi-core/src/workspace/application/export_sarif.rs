@@ -525,6 +525,7 @@ fn sarif_evidence_properties(record: &WorkspaceFindingExportRecord) -> serde_jso
         "kuzushiObservedOtherEvidenceCount": record.evidence.observed_other_count,
         "kuzushiModelGeneratedReasoningPresent": record.evidence.model_generated_reasoning_present,
         "kuzushiModelGeneratedReasoningCount": record.evidence.model_generated_reasoning_count,
+        "kuzushiReasoningAssertionCount": record.evidence.reasoning_assertion_count,
         "kuzushiDerivedSourcePresent": record.evidence.derived_source_present,
         "kuzushiEvidenceSourceCount": record.evidence.source_count,
         "kuzushiRawHttpBlobPresent": record.evidence.raw_http_blob_present,

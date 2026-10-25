@@ -281,6 +281,7 @@ fn evidence_summary(finding: &Finding) -> WorkspaceEvidenceExportSummary {
         observed_other_count: counts.observed_other_count,
         model_generated_reasoning_present: counts.model_generated_reasoning_count > 0,
         model_generated_reasoning_count: counts.model_generated_reasoning_count,
+        reasoning_assertion_count: counts.reasoning_assertion_count,
         derived_source_present: derived_source_present(finding),
         source_count: crate::findings::distinct_recorded_source_count(&finding.sources),
         raw_http_blob_present: counts.observed_capture_count > 0,
@@ -335,8 +336,7 @@ impl WorkspaceReviewExportSummary {
 
 fn evidence_state(finding: &Finding, counts: &EvidenceOriginCounts) -> &'static str {
     evidence_state_label(
-        counts.observed_count > 0,
-        counts.model_generated_reasoning_count > 0,
+        counts,
         finding.corroboration_count > 1
             || crate::findings::distinct_recorded_source_count(&finding.sources) > 1,
         derived_source_present(finding),

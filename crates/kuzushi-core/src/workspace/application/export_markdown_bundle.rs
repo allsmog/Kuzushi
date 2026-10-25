@@ -189,6 +189,7 @@ fn append_manifest_evidence(entry: &mut serde_json::Value, record: &WorkspaceFin
     entry["modelGeneratedReasoningPresent"] =
         json!(record.evidence.model_generated_reasoning_present);
     entry["modelGeneratedReasoningCount"] = json!(record.evidence.model_generated_reasoning_count);
+    entry["reasoningAssertionCount"] = json!(record.evidence.reasoning_assertion_count);
     entry["derivedSourcePresent"] = json!(record.evidence.derived_source_present);
 }
 

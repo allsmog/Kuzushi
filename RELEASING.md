@@ -1,5 +1,30 @@
 # Releasing Kuzushi
 
+## Evidence origin classification in reports
+
+Generic `reasoning` evidence now displays as `reasoning assertion`. Explicit
+`model-claim-unscored` evidence retains its model-generated classification and
+stays excluded from observed-code and capture counts, including when it carries
+a filepath or capture reference. The TUI and export projections share the
+findings-domain classification. Existing stored observations and human decisions
+are preserved.
+
+Workspace JSON/JSONL evidence summaries add `reasoningAssertionCount`.
+Its presence identifies the corrected classification in v2 exports.
+`modelGeneratedReasoningCount` and its presence flag now describe explicit model
+claims; generic reasoning no longer establishes automated analysis. A record
+with only generic reasoning uses evidence state `reasoning_assertion`. Treat
+this state as an unverified assertion. Strict state consumers must accept the
+new value. Existing v2 export markers and finding-store formats are retained.
+
+CSV appends `reasoning_assertion_count` after all existing columns. SARIF adds
+`kuzushiReasoningAssertionCount`; Markdown bundle manifests add the matching
+camel-case count and their detail text shows the shared origin labels. Rust
+consumers constructing `WorkspaceEvidenceExportSummary` with a struct literal
+must supply `reasoning_assertion_count` or use `..Default::default()`. Historical
+exports keep their recorded counts; inspect original evidence kinds before
+interpreting older model-origin or observed-evidence totals.
+
 ## Literal diagram links and exact finding filters
 
 On Unix, `findings:list` `filePaths` and shell `files:[...]` filters now keep

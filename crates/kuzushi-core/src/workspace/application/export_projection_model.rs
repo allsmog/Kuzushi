@@ -167,6 +167,8 @@ pub struct WorkspaceEvidenceExportSummary {
     pub observed_other_count: usize,
     pub model_generated_reasoning_present: bool,
     pub model_generated_reasoning_count: usize,
+    /// Generic reasoning carries no reliable model-authorship claim.
+    pub reasoning_assertion_count: usize,
     pub derived_source_present: bool,
     pub source_count: usize,
     pub raw_http_blob_present: bool,

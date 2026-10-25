@@ -196,7 +196,7 @@ fn constructor_identity_metadata_does_not_claim_source_grounding() {
 }
 
 #[test]
-fn export_record_excludes_model_generated_reasoning_from_observed_evidence_count() {
+fn export_record_keeps_generic_reasoning_separate_from_model_authorship() {
     let mut finding = basic_finding(Severity::High);
     finding.evidence.push(FindingEvidence {
         kind: "reasoning".to_string(),
@@ -209,12 +209,32 @@ fn export_record_excludes_model_generated_reasoning_from_observed_evidence_count
     let records = workspace_finding_export_records_with_reviews(&[finding], &[]);
     let evidence = &records[0].evidence;
 
-    assert_eq!(evidence.state, "model_generated_reasoning");
+    assert_eq!(evidence.state, "reasoning_assertion");
     assert!(!evidence.observed_evidence_present);
     assert_eq!(evidence.observed_count, 0);
-    assert_eq!(evidence.model_generated_reasoning_count, 1);
-    assert!(evidence.model_generated_reasoning_present);
-    assert!(records[0].analysis.automated_reasoning_present);
+    assert_eq!(evidence.model_generated_reasoning_count, 0);
+    assert_eq!(evidence.reasoning_assertion_count, 1);
+    assert!(!evidence.model_generated_reasoning_present);
+    assert!(!records[0].analysis.automated_reasoning_present);
+}
+
+#[test]
+fn explicit_model_claims_do_not_gain_observed_evidence_from_location_or_capture() {
+    let mut finding = basic_finding(Severity::Info);
+    finding.evidence.push(FindingEvidence {
+        kind: FindingEvidence::UNSCORED_MODEL_CLAIM.into(),
+        file_path: "owned.rs".into(),
+        line: 1,
+        request_blob: Some("owned-request".into()),
+        ..Default::default()
+    });
+    let record = workspace_finding_export_records_with_reviews(&[finding], &[]).remove(0);
+    assert_eq!(record.evidence.state, "model_generated_reasoning");
+    assert_eq!(record.evidence.observed_count, 0);
+    assert_eq!(record.evidence.reasoning_assertion_count, 0);
+    assert_eq!(record.evidence.model_generated_reasoning_count, 1);
+    assert!(!record.evidence.raw_http_blob_present);
+    assert!(record.analysis.automated_reasoning_present);
 }
 
 #[test]
