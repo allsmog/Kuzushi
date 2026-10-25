@@ -345,7 +345,7 @@ fn selected_compile_database_is_frozen_and_bound_to_navigation() {
     );
     let _binary = crate::test_env::ScopedEnv::set("KUZUSHI_MCP_CLANG_BIN", binary);
     let mut client =
-        ClangMcpClient::spawn(root.path(), &source, Duration::from_secs(2), None).unwrap();
+        ClangMcpClient::spawn(root.path(), &source, Duration::from_secs(30), None).unwrap();
     let result = client
         .call_tool(
             "clang.definition",

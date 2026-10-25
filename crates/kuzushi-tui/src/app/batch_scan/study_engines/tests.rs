@@ -3,6 +3,7 @@ use crate::app::BatchScanConfigRow;
 use kuzushi_core::V2Config;
 use ratatui::{backend::TestBackend, Terminal};
 mod inactive_options;
+mod readiness;
 
 fn fixture(scoped: bool) -> (tempfile::TempDir, ShellApp) {
     let root = tempfile::tempdir().unwrap();
@@ -246,13 +247,11 @@ fn task_order_survives_unchanged_selection_and_deliberate_edits() {
         picker.prepared_selection()["tasks"],
         json!(["secret-scan", "semgrep"])
     );
-    let row = crate::ui_view_models::study_engines::StudyEngineRow {
-        id: Some("secret-scan".into()),
-        label: "secret-scan".into(),
-        notes: String::new(),
-        selected: true,
-        unsupported: None,
-    };
+    let (_root, app) = fixture(false);
+    let row = crate::ui_view_models::study_engines::engine_rows(&app)
+        .into_iter()
+        .find(|row| row.id.as_deref() == Some("secret-scan"))
+        .unwrap();
     toggle_explicit_engine(&mut picker, &row);
     assert_eq!(picker.prepared_selection()["tasks"], json!(["semgrep"]));
     toggle_explicit_engine(&mut picker, &row);

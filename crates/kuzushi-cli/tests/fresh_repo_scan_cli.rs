@@ -123,7 +123,12 @@ fn explicitly_requested_missing_cargo_audit_fails_closed_for_rust_repo() {
     let text = output_text(&output);
 
     assert!(!output.status.success(), "{text}");
-    assert!(text.contains("`cargo audit` was not found"), "{text}");
+    assert!(
+        text.contains("cargo-audit preflight failed")
+            && text.contains("cargo-audit executable \"cargo-audit\" is unavailable")
+            && text.contains("no Cargo shim or replacement is used"),
+        "{text}"
+    );
     let run_id = latest_run_id(repo.path());
     assert!(text.contains(&format!("persisted run {run_id}")), "{text}");
 }

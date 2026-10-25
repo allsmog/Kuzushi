@@ -1,5 +1,12 @@
 # Bounded investigations implementation
 
+The [study engine readiness correction](../assessments/study-engine-readiness-2026-10-24.md)
+retains experimental catalog labels, separates scope, dependency and model
+states, and prioritizes actionable compact guidance. Final J355 records 38
+machine passes, zero failures and four pending operator judgments; 35 focused
+Rust checks, build, lint and risk pass. No model request or broad delivery
+closure is added. Tall-list discoverability remains follow-up craft work.
+
 The [approval and global-choice correction](../assessments/approval-reading-and-global-options-2026-10-24.md)
 puts frozen engine, scope and execution model ahead of spending details, removes
 duplicate body rows and repairs global saves under an ignored operator home.

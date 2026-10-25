@@ -38,4 +38,4 @@ Feature: Explicit target consent enters aggregate Setup
     And no model is configured
     When I launch the shell without a target
     Then I do not see "CHOOSE A TARGET"
-    And the status segment shows "workbench"
+    And I see "no target"

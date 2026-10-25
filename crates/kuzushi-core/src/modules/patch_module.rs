@@ -66,6 +66,7 @@ fn patch_finding_tool() -> ToolDescriptor {
         RuntimeRequirement::Always,
         FindingStoreRequirement::Required,
     ))
+    .with_allowance_category(AllowanceCategory::Review)
 }
 
 fn patch_finding_options() -> Vec<OptionSpec> {

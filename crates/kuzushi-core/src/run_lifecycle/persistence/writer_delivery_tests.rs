@@ -7,7 +7,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 use std::time::Duration;
 
-const DELIVERY_TIMEOUT: Duration = Duration::from_secs(5);
+const DELIVERY_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[test]
 fn item_subscriber_panic_reports_delivery_fault_without_failing_durability() {

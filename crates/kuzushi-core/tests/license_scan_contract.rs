@@ -125,7 +125,11 @@ fn external_license_symlink_is_excluded_instead_of_manufacturing_mismatch_eviden
         result["data"]["findings"][0]["ruleId"],
         "license-scan/missing-license-file"
     );
-    assert!(!result.to_string().contains("license-file-mismatch"));
+    assert!(result["data"]["findings"]
+        .as_array()
+        .is_some_and(|findings| findings
+            .iter()
+            .all(|finding| { finding["ruleId"] != "license-scan/license-file-mismatch" })));
 }
 
 #[test]

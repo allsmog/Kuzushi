@@ -3,6 +3,8 @@ use crate::app::ShellApp;
 use crate::renderer::shared::text::wrap_text;
 use ratatui::layout::Rect;
 use serde_json::{json, Value};
+mod readiness;
+pub(crate) use readiness::selected_engine_requirements;
 
 pub(crate) struct StudyEngineRow {
     pub id: Option<String>,
@@ -10,6 +12,7 @@ pub(crate) struct StudyEngineRow {
     pub notes: String,
     pub selected: bool,
     pub unsupported: Option<String>,
+    pub readiness: readiness::EngineReadiness,
 }
 
 pub(crate) fn engine_rows(app: &ShellApp) -> Vec<StudyEngineRow> {
@@ -21,6 +24,7 @@ pub(crate) fn engine_rows(app: &ShellApp) -> Vec<StudyEngineRow> {
         notes: "Retain automatic engine resolution. Availability is checked during preparation; no engines are silently substituted.".into(),
         selected: picker.automatic,
         unsupported: selection_support(&picker.prepared_selection(), None),
+        readiness: readiness::automatic(),
     }];
     rows.extend(app.sast_task_rows().into_iter().map(|task| StudyEngineRow {
         id: Some(task.id.into()),
@@ -28,6 +32,7 @@ pub(crate) fn engine_rows(app: &ShellApp) -> Vec<StudyEngineRow> {
         notes: task.notes.into(),
         selected: !picker.automatic && picker.selected.contains(task.id),
         unsupported: selection_support(&picker.input, Some(task.id)),
+        readiness: readiness::task_readiness(app, task.id, &picker.input),
     }));
     append_unknown_engines(&mut rows, &picker.selected);
     rows
@@ -48,6 +53,7 @@ fn append_unknown_engines(
                 .into(),
             selected: true,
             unsupported: Some("Unregistered engine".into()),
+            readiness: readiness::unregistered(),
         });
     }
 }
@@ -97,23 +103,30 @@ pub(crate) fn engine_detail(app: &ShellApp, width: usize) -> Vec<String> {
     lines.extend(path_conflict_lines(picker));
     lines.extend(inactive_option_lines(picker));
     if let Some(row) = rows.get(picker.cursor) {
-        lines.push(row.label.clone());
-        lines.push(row.unsupported.as_ref().map_or_else(
-            || {
-                "Supports this scope. Execution still requires dependency and allowance checks."
-                    .into()
-            },
-            |reason| format!("UNSUPPORTED: {reason}"),
-        ));
-        lines.push(row.notes.clone());
+        lines.extend(selected_engine_detail(row));
     }
     lines.extend([String::new(), "Space or Enter toggles an engine. The first explicit choice replaces automatic selection. Unsupported saved choices can be removed.".into(),
         "a applies this draft; Esc cancels. A changed selection requires a new immutable plan and approval. Existing spending is retained. No jobs start.".into(),
-        "Provider cost is uncertain for model-backed engines. Native tools still consume time and subprocess resources; this picker supplies no cost guarantee.".into()]);
+        "r rechecks executable presence without running commands. Provider cost is uncertain for model-backed engines. Native tools still consume time and subprocess resources; this picker supplies no cost guarantee.".into()]);
     lines
         .into_iter()
         .flat_map(|line| wrap_text(&line, width.max(1)))
         .collect()
+}
+
+fn selected_engine_detail(row: &StudyEngineRow) -> Vec<String> {
+    let mut lines = vec![format!("{}{}", row.label, row.readiness.suffix)];
+    if let Some(reason) = &row.unsupported {
+        lines.push(format!("UNSUPPORTED: {reason}"));
+    }
+    lines.extend(row.readiness.details.clone());
+    if row.unsupported.is_none() {
+        lines.push(
+            "Scope contract supported. Source membership is checked during preparation.".into(),
+        );
+    }
+    lines.push(row.notes.clone());
+    lines
 }
 
 fn path_conflict_lines(picker: &crate::app::StudyEnginePicker) -> Vec<String> {
@@ -195,7 +208,10 @@ pub(crate) fn engine_line(row: &StudyEngineRow, focused: bool) -> String {
     } else {
         ""
     };
-    format!("{cursor} {selected} {}{state}", row.label)
+    format!(
+        "{cursor} {selected} {}{}{state}{}",
+        row.readiness.badge, row.label, row.readiness.suffix
+    )
 }
 
 pub(crate) fn engine_area(frame: Rect) -> Rect {

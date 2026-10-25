@@ -7,6 +7,7 @@ assertion_line: 307
  -- OPTIONS ------------------------------------------------------------------------------------------------------------
 tool: sast:scan
 view: options
+purpose: Run the full SAST pipeline for the current target.
 
 option            value...    default    req    type   aliases           description
 mode              -           standard   no     ch...  preset            Analysis mode or preset. Choices:...
@@ -14,7 +15,7 @@ taskMode          -           auto       no     ch...  task_mode         Task-se
 tasks             -           -          no     co...  taskIds, task...  Manual task allowlist. Use /tasks to edit.
 disabledTasks     -           -          no     co...  disabled_tasks    Auto-mode task denylist. Use /tasks to edit.
 severity          -           -          no     co...  -                 Optional severity filter: critical, high...
-paths             -           -          no     co...  includePaths...   Optional workspace-relative path roots to scan.
+paths             -           -          no     co...  includePaths...   Optional workspace-relative path roots to...
 triage            -           no         no     ye...  aiTriage...       Run model-backed triage after static scanners.
 
 set <key> <value> · session only, lost on exit · setg saves it

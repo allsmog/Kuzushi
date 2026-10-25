@@ -171,7 +171,18 @@ impl ShellApp {
         match code {
             KeyCode::Char('x') => self.clear_study_path_conflict(),
             KeyCode::Char('m') => self.choose_study_scoped_file_tools(),
+            _ => return self.handle_engine_option_control(code),
+        }
+        Some(InputUpdate::handled())
+    }
+
+    fn handle_engine_option_control(&mut self, code: KeyCode) -> Option<InputUpdate> {
+        match code {
             KeyCode::Char('c') => self.clear_study_engine_options(),
+            KeyCode::Char('r') => self
+                .workbench_cache()
+                .borrow_mut()
+                .invalidate_executable_options(),
             _ => return None,
         }
         Some(InputUpdate::handled())

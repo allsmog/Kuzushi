@@ -7,6 +7,7 @@ import {
   artifactSizeFailures,
   createArtifactRecord,
   expectedArtifactSpecifications,
+  PLATFORM_UNPACKED_BUDGET,
   releaseManifestFailures,
   verifyReleaseManifest,
   writeReleaseManifest,
@@ -36,6 +37,24 @@ test("manifest paths and established package budgets fail closed", () => {
   assert.ok(failures.some((failure) => failure.includes("unsafe path")));
   assert.notDeepEqual(
     artifactSizeFailures({ kind: "root-npm", file: "root.tgz", size: 10 * 1024 * 1024 + 1 }),
+    [],
+  );
+  assert.deepEqual(
+    artifactSizeFailures({
+      kind: "platform-npm",
+      file: "platform.tgz",
+      size: 0,
+      unpackedSize: PLATFORM_UNPACKED_BUDGET,
+    }),
+    [],
+  );
+  assert.notDeepEqual(
+    artifactSizeFailures({
+      kind: "platform-npm",
+      file: "platform.tgz",
+      size: 0,
+      unpackedSize: PLATFORM_UNPACKED_BUDGET + 1,
+    }),
     [],
   );
 });

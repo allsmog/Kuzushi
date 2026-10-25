@@ -11,11 +11,12 @@ Feature: Report is a durable exit surface
     Then I see "SETUP · READY THE MAP RUN"
     When I press "Esc"
     And I type command "report"
-    Then I see "── REPORT ──"
-    And I see "sarif · markdown-bundle · jsonl · json · csv · vuln-findings"
+    Then I see "REPORT ·"
+    When I press "p"
+    Then I see "sarif · markdown-bundle · jsonl · json · csv · vuln-findings"
     And I see "format sarif (1/6)"
     And I see "all"
-    And the status segment shows "report"
+    And I see "Esc/q return"
 
   Scenario: Completeness cycles without leaving Report
     When I launch the shell
@@ -24,7 +25,7 @@ Feature: Report is a durable exit surface
     And I type command "report"
     And I press "c"
     Then I see "open"
-    And the status segment shows "report"
+    And I see "Esc/q return"
 
   Scenario: Empty-workspace export returns a durable receipt on Report
     When I launch the shell
@@ -33,9 +34,9 @@ Feature: Report is a durable exit surface
     And I type command "report"
     And I press "Enter"
     Then I see "── EXPORTED ──"
-    And I see "timestamp"
+    When I press "p"
+    Then I see "timestamp"
     And I see "reports/report.sarif"
-    And the status segment shows "report"
     When I press "Esc"
     Then I see "PROJECT CONTEXT"
-    And the status segment shows "workbench"
+    And I see "Viewing Map"

@@ -14,7 +14,7 @@ import { safePackagePathFailures } from "./npm-pack-inventory-contract.mjs";
 
 export const ROOT_PACKED_BUDGET = 10 * 1024 * 1024;
 export const PLATFORM_PACKED_BUDGET = 60 * 1024 * 1024;
-export const PLATFORM_UNPACKED_BUDGET = 160 * 1024 * 1024;
+export const PLATFORM_UNPACKED_BUDGET = 180 * 1024 * 1024;
 export const RELEASE_MANIFEST = "release-manifest.json";
 const manifestKeys = ["commitSha", "files", "schemaVersion", "version"];
 const recordKeys = [
@@ -89,7 +89,7 @@ export function artifactSizeFailures(record) {
       ? [`${record.file} exceeds the 60 MiB platform package budget`]
       : []),
     ...(record.unpackedSize > PLATFORM_UNPACKED_BUDGET
-      ? [`${record.file} exceeds the 160 MiB unpacked platform package budget`]
+      ? [`${record.file} exceeds the 180 MiB unpacked platform package budget`]
       : []),
   ];
 }

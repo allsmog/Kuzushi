@@ -60,6 +60,7 @@ mod scan_planning;
 pub(crate) use scan_planning::validate_study_scan_selection;
 pub use scan_planning::{
     inactive_scan_task_options, validate_scan_scope_contract, InactiveScanTaskOptions,
+    ScanTaskPreview,
 };
 pub mod autonomy;
 mod builtins;

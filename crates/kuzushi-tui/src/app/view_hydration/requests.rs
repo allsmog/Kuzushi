@@ -115,6 +115,7 @@ fn append_catalog_executable_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKey
 
 fn append_study_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
     keys.push(ViewHydrationKey::ThreatModelStore);
+    append_study_engine_executable_key(app, keys);
     let Some(config) = &app.router.campaign().batch_scan_config else {
         return;
     };
@@ -128,6 +129,18 @@ fn append_study_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
         });
     }
     append_resource_usage_keys(config, keys);
+}
+
+fn append_study_engine_executable_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
+    let requirements = crate::ui_view_models::study_engines::selected_engine_requirements(app);
+    if requirements.is_empty() {
+        return;
+    }
+    keys.push(
+        app.workbench_cache()
+            .borrow()
+            .executable_options_key(requirements),
+    );
 }
 
 fn append_scene_worklist_key(app: &ShellApp, view: ShellView, keys: &mut Vec<ViewHydrationKey>) {

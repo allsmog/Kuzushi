@@ -208,7 +208,7 @@ fn taint_next_fixture(calls: u32) -> SourceEngineFixture {
 }
 
 #[test]
-fn missing_model_catalog_cannot_borrow_the_final_hunt_allowance() {
+fn hunt_without_saved_catalog_uses_built_in_catalog_under_discovery_allowance() {
     let _env_lock = env_test_lock();
     let _api_key = EnvVarGuard::set("OPENAI_API_KEY", "test-key");
     let fixture = taint_next_fixture(1);
@@ -222,16 +222,18 @@ fn missing_model_catalog_cannot_borrow_the_final_hunt_allowance() {
         },
     );
     drain_chain_with_auto_reuse(&mut app);
-    assert!(app.log_lines().iter().any(|line| line.prefix == "result"
-        && line
-            .body
-            .contains("taint-iris-next:catalog needs an approved investigation allowance")));
-    assert!(!app.log_lines().iter().any(
-        |line| line.prefix == "tool" && line.body.starts_with("running taint-iris-next:hunt ")
-    ));
+    assert!(app
+        .log_lines()
+        .iter()
+        .any(|line| line.prefix == "result" && line.body.contains("candidate discovery finished")));
+    assert!(!fixture
+        .workspace
+        .root()
+        .join(".kuzushi/taint-iris-next-catalog.json")
+        .exists());
     let store = FindingStore::open(fixture.workspace.findings_db_path()).unwrap();
-    assert!(store.list_all_findings().unwrap().is_empty());
-    fixture.assert_consumption(0);
+    assert_eq!(store.list_all_findings().unwrap().len(), 1);
+    fixture.assert_consumption(1);
 }
 
 #[test]
@@ -251,7 +253,14 @@ fn run_command_dispatches_legacy_taint_iris_next_hunt_through_langgraph_runtime_
     );
     drain_chain_with_auto_reuse(&mut app);
     fixture.assert_consumption(1);
-    assert!(fixture
+    assert!(
+        app.log_lines()
+            .iter()
+            .any(|line| line.prefix == "result" && line.body.contains("TAINT CATALOG DRAFT")),
+        "{:?}",
+        app.log_lines()
+    );
+    assert!(!fixture
         .workspace
         .root()
         .join(".kuzushi/taint-iris-next-catalog.json")
@@ -267,7 +276,7 @@ fn run_command_dispatches_legacy_taint_iris_next_hunt_through_langgraph_runtime_
     assert!(
         app.log_lines().iter().any(|line| line.prefix == "result"
             && line.body.contains("Taint IRIS Next")
-            && line.body.contains("hunt complete")),
+            && line.body.contains("candidate discovery finished")),
         "{:?}",
         app.log_lines()
     );

@@ -23,7 +23,8 @@ pub(crate) fn verify_module() -> BuiltinModule {
                 ToolPhase::Prove,
                 RuntimeRequirement::InputAware,
                 FindingStoreRequirement::Required,
-            )),
+            ))
+            .with_allowance_category(AllowanceCategory::Review),
             hidden_tool_with_options(
                 "verify:exploit",
                 "Empirically verify a finding with an isolated proof harness.",

@@ -15,7 +15,7 @@ Feature: Conditional MCP attachment plan
 
   Scenario: Empty target shows only the constant MCPs
     When I launch the shell
-    Then the status segment shows "workbench"
+    Then I see "Viewing Map"
     When I type command "logs"
     Then the log contains "MCP plan: treesitter"
     And I do not see "cpg,"
@@ -24,7 +24,7 @@ Feature: Conditional MCP attachment plan
   Scenario: Pre-seeded context snapshot attaches the context MCP
     Given the artifact ".kuzushi/context-snapshot.json" is seeded with "{\"target\":\"x\"}"
     When I launch the shell
-    Then the status segment shows "workbench"
+    Then I see "Viewing Map"
     When I type command "logs"
     Then the log contains "MCP plan: treesitter, context"
 
@@ -33,7 +33,7 @@ Feature: Conditional MCP attachment plan
     # (<lang>.v<GRAPH_SHAPE_VERSION>.cpg) under .kuzushi/cpg-rs/.
     Given the artifact ".kuzushi/cpg-rs/rust.v11.cpg" is seeded with "CPGSTUB"
     When I launch the shell
-    Then the status segment shows "workbench"
+    Then I see "Viewing Map"
     When I type command "logs"
     Then the log contains "cpg"
     And I do not see "codeql,"
@@ -41,7 +41,7 @@ Feature: Conditional MCP attachment plan
   Scenario: Legacy marker-only CodeQL DB fails closed
     Given the artifact ".kuzushi/codeql-db/codeql-database.yml" is seeded with "primaryLanguage: rust"
     When I launch the shell
-    Then the status segment shows "workbench"
+    Then I see "Viewing Map"
     When I type command "logs"
     Then the log contains "MCP plan error: legacy CodeQL database"
     And I do not see "codeql,"

@@ -1,5 +1,12 @@
 # Bounded investigation acceptance ledger
 
+The [study engine readiness correction](../assessments/study-engine-readiness-2026-10-24.md)
+retains catalog maturity and distinguishes unsupported scope, missing dependency,
+missing model and deferred checks without starting work. Final native J355 has
+38 machine passes, zero failures, 23 capture pairs and four pending operator
+judgments. All 35 focused Rust checks, build, lint and risk pass. No provider
+request, module promotion or broad delivery milestone is added.
+
 The [approval and global-choice correction](../assessments/approval-reading-and-global-options-2026-10-24.md)
 keeps distinct model roles and complete frozen terms while reducing repeated
 body rows. Global options now use contained operator storage, while workspace

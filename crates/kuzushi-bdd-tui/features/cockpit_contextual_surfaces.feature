@@ -16,7 +16,7 @@ Feature: Contextual surfaces restore the workflow origin
     And the status segment shows "help"
     When I press "Esc"
     Then I see "PROJECT CONTEXT"
-    And the status segment shows "workbench"
+    And I see "Viewing Map"
 
   Scenario: Jobs restores the Map origin
     When I launch the shell
@@ -26,7 +26,7 @@ Feature: Contextual surfaces restore the workflow origin
     And the status segment shows "jobs"
     When I press "Esc"
     Then I see "PROJECT CONTEXT"
-    And the status segment shows "workbench"
+    And I see "Viewing Map"
 
   Scenario: The DFD remains available as a contextual visualization deck
     Given the artifact ".kuzushi/threat-model.json" is seeded with "{\"version\":\"2.0\",\"dfd\":{\"nodes\":[{\"id\":\"client\",\"type\":\"external-entity\",\"name\":\"Client\",\"trustZone\":\"external\"},{\"id\":\"api\",\"type\":\"process\",\"name\":\"API\",\"trustZone\":\"application\"},{\"id\":\"db\",\"type\":\"data-store\",\"name\":\"Orders DB\",\"trustZone\":\"data\"}],\"flows\":[{\"id\":\"f1\",\"sourceId\":\"client\",\"targetId\":\"api\",\"description\":\"HTTPS request\",\"trustBoundaryIds\":[\"edge\"]},{\"id\":\"f2\",\"sourceId\":\"api\",\"targetId\":\"db\",\"description\":\"SQL query\",\"trustBoundaryIds\":[\"data-boundary\"]}],\"trustBoundaries\":[]},\"threats\":[]}"
@@ -36,7 +36,5 @@ Feature: Contextual surfaces restore the workflow origin
     Then I see "DATA-FLOW DIAGRAM"
     And I see "Client"
     And I see "Orders DB"
-    And the status segment shows "viz:dfd"
     When I press "Esc"
     Then I see "Viewing Map"
-    And the status segment shows "workbench"

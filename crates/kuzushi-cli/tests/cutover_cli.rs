@@ -1045,7 +1045,6 @@ fn modules_and_tools_list_visible_executable_rust_surfaces() {
         "context",
         "sast",
         "semgrep",
-        "codeql",
         "agentic-sast",
         "findings",
         "secret-scan",
@@ -1058,6 +1057,7 @@ fn modules_and_tools_list_visible_executable_rust_surfaces() {
         );
     }
     for hidden in [
+        "codeql",
         "context-lite",
         "exploit-chain",
         "module-recommender",
@@ -1078,7 +1078,6 @@ fn modules_and_tools_list_visible_executable_rust_surfaces() {
         "context:build",
         "sast:scan",
         "semgrep:scan",
-        "codeql:scan",
         "agentic-sast:scan",
         "findings:list",
         "secret-scan:scan",
@@ -1094,9 +1093,36 @@ fn modules_and_tools_list_visible_executable_rust_surfaces() {
         );
     }
     assert!(
+        !tool_names.contains(&"codeql:scan"),
+        "Labs tools must stay out of default discovery"
+    );
+    assert!(
         !tool_names.contains(&"module-recommender:recommend"),
         "exact-only compatibility tools must stay out of discovery"
     );
+
+    let all_modules_raw = stdout(
+        kuzushi()
+            .args(["modules", "--all", "--json"])
+            .output()
+            .unwrap(),
+    );
+    let all_tools_raw = stdout(
+        kuzushi()
+            .args(["tools", "--all", "--json"])
+            .output()
+            .unwrap(),
+    );
+    let all_modules: Vec<Value> = serde_json::from_str(&all_modules_raw).unwrap();
+    let all_tools: Vec<Value> = serde_json::from_str(&all_tools_raw).unwrap();
+    assert!(all_modules.iter().any(|module| {
+        module.get("id").and_then(Value::as_str) == Some("codeql")
+            && module.get("maturity").and_then(Value::as_str) == Some("labs")
+    }));
+    assert!(all_tools.iter().any(|tool| {
+        tool.get("name").and_then(Value::as_str) == Some("codeql:scan")
+            && tool.get("maturity").and_then(Value::as_str) == Some("labs")
+    }));
 }
 
 #[test]
@@ -2008,7 +2034,9 @@ fn sast_scan_missing_cargo_audit_writes_failure_handoff_context() {
     assert!(!output.status.success(), "cargo-audit should fail closed");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("cargo-audit: `cargo audit` was not found"),
+        stderr.contains("cargo-audit preflight failed")
+            && stderr.contains("cargo-audit executable \"cargo-audit\" is unavailable")
+            && stderr.contains("no Cargo shim or replacement is used"),
         "stderr: {stderr}"
     );
     let run_dir = fs::read_dir(repo.join(".kuzushi/v3/runs"))

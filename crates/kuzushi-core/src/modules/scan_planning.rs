@@ -2,7 +2,9 @@
 use anyhow::Result;
 use serde_json::Value;
 mod inactive_options;
+mod task_preview;
 pub use inactive_options::{inactive_scan_task_options, InactiveScanTaskOptions};
+pub use task_preview::ScanTaskPreview;
 
 pub(crate) fn bind_dispatch_scan_scope(
     name: &str,

@@ -1334,9 +1334,9 @@ case "$request" in
 {"ok":true,"structured":{"selectedCwes":[{"cwe":"CWE-89","reason":"raw query receives request data","catalogSignals":["sink: query("],"sourceSpec":"request query parameters","sinkSpec":"database query calls","sanitizerSpec":"parameterized query APIs","customCweRationale":""}],"findings":[{"title":"Request parameter reaches raw SQL query","cwe":"CWE-89","severity":"high","confidence":"medium","evidenceLevel":"linked","filePath":"src/routes.ts","startLine":1,"message":"The query uses request-controlled data in SQL construction.","sourceSinkTrace":"req.query.id -> db.query(sql)","catalogSignals":["source: req.query","sink: query("],"customCweRationale":"","taintPath":[{"filePath":"src/routes.ts","line":1,"message":"source and SQL sink","snippet":"db.query(req.query.id)"}]}],"triage":[{"status":"finding","cwe":"CWE-89","evidenceLevel":"linked","rationale":"request data reaches raw SQL query","filePath":"src/routes.ts","line":1,"catalogSignals":["sink: query("]}],"notes":[]}}
 JSON
     ;;
-  *"Taint IRIS Next catalog architect"*)
+  *"Draft a taint-analysis catalog"*)
     cat <<'JSON'
-{"ok":true,"structured":{"catalog":[{"cwe":"CWE-89","name":"SQL Injection","taintClass":"sql-injection","languages":["typescript"],"sourceSignals":["req.query"],"sinkSignals":["db.query"],"sanitizerSignals":["parameterized query"],"structuralQueries":["db.query"],"regexMarkers":[],"score":90,"reasons":["fixture route builds SQL from request input"]}]}}
+{"ok":true,"structured":{"catalog":[{"cwe":"CWE-89","name":"SQL Injection","taintClass":"sql-injection","languages":["typescript"],"sourceSignals":["req.query"],"sinkSignals":["db.query"],"sanitizerSignals":[],"structuralQueries":["db.query"],"regexMarkers":[],"score":90,"reasons":["fixture route builds SQL from request input"]}]}}
 JSON
     ;;
   *)
@@ -1450,7 +1450,7 @@ JSON
     let mut permissions = fs::metadata(&binary).unwrap().permissions();
     permissions.set_mode(0o755);
     fs::set_permissions(&binary, permissions).unwrap();
-    binary
+    prepared_dispatch::admitted_fixture_script_bridge(dir, "verify", &binary)
 }
 
 #[cfg(unix)]
@@ -1471,7 +1471,7 @@ JSON
     let mut permissions = fs::metadata(&binary).unwrap().permissions();
     permissions.set_mode(0o755);
     fs::set_permissions(&binary, permissions).unwrap();
-    binary
+    prepared_dispatch::admitted_fixture_script_bridge(dir, "patch", &binary)
 }
 
 /// Stands in for bubblewrap so patch validation does not depend on the host.
@@ -9871,21 +9871,29 @@ fn run_command_dispatches_verify_through_langgraph_runtime_bridge() {
         anthropic_oauth: None,
     };
 
+    let allowance = prepared_dispatch::approve_model_work(&config, &workspace);
     let mut app = ShellApp::new(config, Some(&workspace));
     run_command(&mut app, ShellCommand::Use("verify".to_string()));
     run_command(
         &mut app,
         ShellCommand::RunTool {
             tool: None,
-            input: Some(format!(r#"{{"fingerprint":"{}"}}"#, finding.fingerprint)),
+            input: Some(
+                serde_json::json!({"fingerprint":finding.fingerprint,"allowanceRef":allowance})
+                    .to_string(),
+            ),
         },
     );
     drain_tool(&mut app);
 
     assert_eq!(app.shell_view(), ShellView::Activity);
-    assert!(app.log_lines().iter().any(|line| {
-        line.prefix == "result" && line.body.contains("likely-exploitable (model assessment)")
-    }));
+    assert!(
+        app.log_lines().iter().any(|line| {
+            line.prefix == "result" && line.body.contains("likely-exploitable (model assessment)")
+        }),
+        "{:?}",
+        app.log_lines()
+    );
     assert!(!app
         .log_lines()
         .iter()
@@ -9951,6 +9959,7 @@ fn run_command_dispatches_patch_through_langgraph_runtime_bridge_and_persists() 
         anthropic_oauth: None,
     };
 
+    let allowance = prepared_dispatch::approve_model_work(&config, &workspace);
     let mut app = ShellApp::new(config, Some(&workspace));
     run_command(&mut app, ShellCommand::Use("patch".to_string()));
     assert_git_repo_clean(&tmp.path().to_path_buf());
@@ -9958,10 +9967,16 @@ fn run_command_dispatches_patch_through_langgraph_runtime_bridge_and_persists() 
         &mut app,
         ShellCommand::RunTool {
             tool: None,
-            input: Some(format!(
-                r#"{{"fingerprint":"{}","maxIterations":1,"buildCmd":"true","testCmd":"true"}}"#,
-                finding.fingerprint
-            )),
+            input: Some(
+                serde_json::json!({
+                    "fingerprint":finding.fingerprint,
+                    "maxIterations":1,
+                    "buildCmd":"true",
+                    "testCmd":"true",
+                    "allowanceRef":allowance
+                })
+                .to_string(),
+            ),
         },
     );
     press_key(
@@ -9970,7 +9985,7 @@ fn run_command_dispatches_patch_through_langgraph_runtime_bridge_and_persists() 
     );
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view(), ShellView::Patch);
+    assert_eq!(app.shell_view(), ShellView::Patch, "{:?}", app.log_lines());
     assert_eq!(
         app.engagement.pending_patch().map(|patch| patch.status),
         Some(PatchStatus::Sound)

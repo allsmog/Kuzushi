@@ -3,6 +3,8 @@ use crate::OnboardingWorld;
 use cucumber::{given, when};
 use std::time::Duration;
 
+const INITIAL_FRAME_TIMEOUT: Duration = Duration::from_secs(10);
+
 #[given("a fresh kuzushi workspace")]
 async fn fresh_workspace(world: &mut OnboardingWorld) {
     world.ensure_binary();
@@ -74,7 +76,7 @@ async fn launch_shell(world: &mut OnboardingWorld) {
     let session = TmuxSession::launch_with_seeds_sized(&binary, world.env.clone(), &seeds, size)
         .expect("tmux session must launch — install tmux and rebuild the CLI if this fails");
     session
-        .wait_for_interactive_frame(Duration::from_secs(10))
+        .wait_for_interactive_frame(INITIAL_FRAME_TIMEOUT)
         .expect("shell must paint its first alternate-screen frame");
     world.shell_pane_pid = Some(
         session
@@ -93,7 +95,7 @@ async fn launch_shell_without_target(world: &mut OnboardingWorld) {
     let session = TmuxSession::launch_targetless_sized(&binary, world.env.clone(), size)
         .expect("tmux session must launch — install tmux and rebuild the CLI if this fails");
     session
-        .wait_for_interactive_frame(Duration::from_secs(10))
+        .wait_for_interactive_frame(INITIAL_FRAME_TIMEOUT)
         .expect("targetless shell must paint its first alternate-screen frame");
     world.shell_pane_pid = Some(
         session

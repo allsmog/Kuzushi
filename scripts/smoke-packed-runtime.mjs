@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { nativeExecutableName, nativePlatformPackage } from "./native-runtime-contract.mjs";
+import { PLATFORM_PACKED_BUDGET, PLATFORM_UNPACKED_BUDGET } from "./release-artifact-contract.mjs";
 
 const root = process.cwd();
 const temp = mkdtempSync(path.join(tmpdir(), "kuzushi-packed-runtime-"));
@@ -107,7 +108,7 @@ function installPackedPlatformPackage(packageRoot, temp) {
   );
   cpSync(nativeDir, path.join(staging, "bin"), { recursive: true });
   const packed = createPackageArchive(staging, temp);
-  if (packed.size > 60 * 1024 * 1024 || packed.unpackedSize > 160 * 1024 * 1024) {
+  if (packed.size > PLATFORM_PACKED_BUDGET || packed.unpackedSize > PLATFORM_UNPACKED_BUDGET) {
     throw new Error(`${platformPackage.packageName} exceeds its package size budget`);
   }
 

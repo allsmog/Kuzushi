@@ -20,7 +20,7 @@ pub(super) fn render_engine_picker(frame: &mut Frame<'_>, app: &ShellApp) {
         Paragraph::new(vec![
             Line::styled(
                 format!(
-                    "↑↓ · Space · PgUp/Dn {}",
+                    "↑↓ Space PgUp/Dn r check {}",
                     engine_read_position(app, layout.detail)
                 ),
                 theme::muted(),
