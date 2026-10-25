@@ -106,3 +106,68 @@ fn referenced_import_maps_share_the_same_aggregate_allowance() {
         config.len()
     );
 }
+
+#[test]
+fn unsupported_package_shapes_fail_without_inventing_an_empty_inventory() {
+    for text in [
+        "[]",
+        "null",
+        r#"{"dependencies":["owned"]}"#,
+        r#"{"devDependencies":null}"#,
+        r#"{"peerDependencies":{"owned":42}}"#,
+        r#"{"optionalDependencies":{"owned":{"version":false}}}"#,
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("package.json"), text).unwrap();
+        let result = dispatch(root.path(), json!({}));
+        assert_eq!(result["status"], "failed", "{text}: {result}");
+        assert!(result.to_string().contains("package.json"));
+        assert_eq!(result["data"]["inspection"]["capturedBytes"], text.len());
+        assert!(result.pointer("/data/components").is_none());
+        assert!(result.pointer("/data/dependencies").is_none());
+        assert_eq!(std::fs::read_to_string(root.path().join("package.json")).unwrap(), text);
+    }
+}
+
+#[test]
+fn string_specs_and_legacy_version_objects_keep_matching_components_and_edges() {
+    let root = tempfile::tempdir().unwrap();
+    let text = json!({
+        "dependencies": {"empty": "", "alias": "npm:owned@^1", "local": "file:../shared"},
+        "devDependencies": {"git": "git+https://example.test/owned.git#main"},
+        "peerDependencies": {"web": "https://example.test/owned.tgz"},
+        "optionalDependencies": {"compat": {"version": "^2", "optional": true}}
+    }).to_string();
+    std::fs::write(root.path().join("package.json"), &text).unwrap();
+    let result = dispatch(root.path(), json!({}));
+    assert_eq!(result["status"], "completed", "{result}");
+    let components = result["data"]["components"].as_array().unwrap();
+    let edges = result["data"]["dependencies"].as_array().unwrap();
+    assert_eq!(components.len(), 6);
+    assert_eq!(edges.len(), 6);
+    for component in components {
+        assert!(edges.iter().any(|edge| edge["to"] == component["name"]));
+    }
+    assert!(components.iter().any(|row| row["name"] == "empty" && row["version"] == ""));
+    assert!(components.iter().any(|row| row["name"] == "compat" && row["version"] == "^2"));
+}
+
+#[test]
+fn an_unsupported_child_does_not_publish_parent_packages_and_can_be_corrected() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("package.json"), r#"{"dependencies":{"parent":"1"}}"#).unwrap();
+    let child = root.path().join("packages/child/package.json");
+    std::fs::create_dir_all(child.parent().unwrap()).unwrap();
+    std::fs::write(&child, r#"{"devDependencies":{"child":42}}"#).unwrap();
+    let result = dispatch(root.path(), json!({}));
+    assert_eq!(result["status"], "failed", "{result}");
+    assert!(result.to_string().contains("packages/child/package.json: devDependencies.child"));
+    assert_eq!(result["data"]["inspection"]["capturedFiles"], 2);
+    assert!(result.pointer("/data/components").is_none());
+    assert!(result.pointer("/data/cycloneDx").is_none());
+    assert!(result.pointer("/data/spdx").is_none());
+    std::fs::write(&child, r#"{"devDependencies":{"child":"2"}}"#).unwrap();
+    let corrected = dispatch(root.path(), json!({}));
+    assert_eq!(corrected["status"], "completed", "{corrected}");
+    assert_eq!(corrected["data"]["componentCount"], 2);
+}

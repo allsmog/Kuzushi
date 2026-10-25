@@ -659,6 +659,17 @@ source content, not parser allocation, CPU time or all filesystem metadata IO.
 Exceeding a limit fails without publishing components. Ignored and unsupported
 material remains outside the dependency inventory.
 
+For `package.json`, the document must be an object. Present `dependencies`,
+`devDependencies`, `peerDependencies` and `optionalDependencies` fields must be
+objects mapping package names to string specifications. The existing
+compatibility form `{ "version": "..." }` remains accepted for a dependency.
+Empty strings, aliases, URLs and local or Git specifications remain declared
+strings; inventory does not install or resolve them. Unsupported shapes fail
+with the relative manifest path and field instead of becoming an empty SBOM
+or an edge without a component. One unsupported nested manifest fails the
+inventory without publishing parent packages or SBOM documents. Available
+captured-input inspection remains attached to the failed result.
+
 Direct tool results add `data.inspection`: configured limits, reserved source
 bytes, actual source bytes read, captured files/bytes, per-input content hashes
 and a combined captured-input hash. Failed results retain available inspection

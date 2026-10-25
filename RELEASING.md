@@ -1,5 +1,21 @@
 # Releasing Kuzushi
 
+## Unsupported dependency metadata
+
+`sbom-scan:scan` now fails when a `package.json` document is not an object,
+when one of its four supported dependency sections is not an object, or when
+a dependency lacks a supported string specification. These inputs previously
+could return a completed empty inventory or dependency edges without packages.
+Failure names the manifest and field, retains available byte/hash inspection,
+and publishes no components, dependency edges, CycloneDX or SPDX document.
+
+Correct the source metadata and explicitly rerun the tool. Strings, including
+empty ranges, aliases, URLs, local paths and Git specifications, remain accepted.
+The existing object with a string `version` is retained for compatibility.
+This is shape validation, not complete package-manager validation or resolution.
+Tool names, options, output schemas and existing run receipts are unchanged.
+The shell clears stale package claims on failure and recollects facts on restart.
+
 ## Evidence origin classification in reports
 
 Generic `reasoning` evidence now displays as `reasoning assertion`. Explicit
