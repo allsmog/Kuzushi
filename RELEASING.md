@@ -1,5 +1,37 @@
 # Releasing Kuzushi
 
+## Bounded duplicate proposal inputs
+
+`triage:dedupe` keeps its name, existing result fields and reversible proposal
+behavior. Five additive advanced options govern ledger preparation and supplied
+source: `maxLedgerObservations` (10,000), `maxLedgerBytes` (8 MiB),
+`maxLedgerReadMs` (10,000), `maxJudgePromptBytes` (128 KiB) and
+`maxConfirmationBytes` (256 KiB). Matching snake-case aliases are supported.
+
+Excess ledger or metadata prompt input now refuses before inference instead of
+materializing the entire history. No observation is removed or silently omitted
+from that read. A successful candidate selection discloses whole-file buckets
+omitted by `maxCandidates`. Confirmation source reads share one invocation-local
+allowance, reject symlinks, retain literal paths and report current-file digests.
+Unavailable source, missing citations or oversized confirmation prompts drop the
+proposal without a confirmation request. Failed source reads conservatively
+retain their allowance; unknown bytes remain unknown.
+
+`maxCandidates` values below two now select no complete duplicate bucket; the old implicit increase to two is removed.
+
+New JSONL imports also preserve literal file aliases in findings and evidence.
+Previously imported rows are retained as recorded. Replaying a completed import
+keeps its old run; it cannot recover stripped characters. If original payloads
+exist, use a separately reviewed import with a distinct tool label to record
+corrected observations, and review their relationships explicitly.
+
+Ordinary ledgers need no schema migration. Existing exports and full-history
+readers are unchanged. Automatic dedupe prepasses use conservative defaults;
+revise these limits through a separately reviewed `triage:dedupe` action.
+Previously frozen work may need a fresh plan because declared defaults are part
+of prepared input. Existing approvals do not authorize revised work or spending. Malformed model output fails without an automatic repair request.
+
+
 ## Historical baseline read limits and timestamp ties
 
 Coverage ledger readers now enforce an 8 MiB aggregate retained-text limit in

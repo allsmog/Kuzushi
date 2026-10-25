@@ -1,4 +1,5 @@
 use super::*;
+mod dedupe_input_options;
 
 pub(crate) fn triage_module() -> BuiltinModule {
     builtin_module(
@@ -57,7 +58,7 @@ fn triage_dedupe_tool() -> ToolDescriptor {
 }
 
 fn dedupe_options() -> Vec<OptionSpec> {
-    vec![
+    let mut options = vec![
         opt(
             "maxGroups",
             OptionType::Int,
@@ -90,7 +91,9 @@ fn dedupe_options() -> Vec<OptionSpec> {
         .default(json!(false)),
         opt("legacyRekey",OptionType::Bool,"Compatibility: use legacy identity rekeys and duplicate verdicts instead of reversible proposals.").default(json!(false)).advanced(),
         model_option(),
-    ]
+    ];
+    options.splice(2..2, dedupe_input_options::options());
+    options
 }
 
 fn chain_hunt_options() -> Vec<OptionSpec> {

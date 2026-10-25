@@ -1,31 +1,67 @@
 //! Deterministic, cost-bounded candidate selection for the dedupe judge.
 //!
 //! The judge only ever sees findings that could plausibly duplicate each
-//! other: same normalized file, at least two members from different
+//! other: the same literal recorded path, at least two members from different
 //! `(tool, run)` origins (same-run same-tool near-misses are already handled
 //! by ingest `dedup_key` collision and triage clustering). Settled rows —
 //! suppressed, already rekeyed, already verdicted as a duplicate — and attack
 //! chains never enter the pool.
 
-use super::normalized_path;
-use crate::findings::{is_attack_chain_finding, Finding, FindingStore, Severity};
+use crate::findings::{
+    is_attack_chain_finding, DedupeLedgerLimits, Finding, FindingStore, Severity,
+};
 use anyhow::Result;
 use std::collections::{BTreeMap, BTreeSet};
+
+pub(super) struct DedupeCandidates {
+    pub findings: Vec<Finding>,
+    pub coverage: CandidateCoverage,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct CandidateCoverage {
+    pub schema_version: u32,
+    pub observations_read: usize,
+    pub encoded_bytes_read: usize,
+    pub projected_findings: usize,
+    pub eligible_candidates: usize,
+    pub selected_candidates: usize,
+    pub omitted_candidates: usize,
+    pub omitted_file_buckets: usize,
+    pub effective_candidate_limit: usize,
+    pub max_ledger_observations: usize,
+    pub max_ledger_bytes: usize,
+    pub max_ledger_read_ms: u64,
+}
 
 pub(super) fn dedupe_candidates(
     store: &FindingStore,
     max_candidates: usize,
-) -> Result<Vec<Finding>> {
-    let rekeyed = store.rekeyed_stable_keys()?;
-    let eligible = store
-        .list_all_findings()?
-        .into_iter()
-        .filter(|finding| is_eligible(finding, &rekeyed))
-        .collect();
-    Ok(flatten_prioritized(
-        file_buckets(collapse_by_identity(eligible)),
-        max_candidates,
-    ))
+    limits: DedupeLedgerLimits,
+    cancellation: Option<&crate::ScanCancellation>,
+) -> Result<DedupeCandidates> {
+    let ledger = store.read_dedupe_ledger(limits, cancellation)?;
+    let projected_findings = ledger.findings.len();
+    let eligible = ledger.findings.into_iter().filter(is_eligible).collect();
+    let buckets = file_buckets(collapse_by_identity(eligible));
+    let eligible_candidates = buckets.iter().map(Vec::len).sum::<usize>();
+    let (findings, omitted_file_buckets) = flatten_prioritized(buckets, max_candidates);
+    let coverage = CandidateCoverage {
+        schema_version: 1,
+        observations_read: ledger.observations_read,
+        encoded_bytes_read: ledger.encoded_bytes_read,
+        projected_findings,
+        eligible_candidates,
+        selected_candidates: findings.len(),
+        omitted_candidates: eligible_candidates - findings.len(),
+        omitted_file_buckets,
+        effective_candidate_limit: max_candidates,
+        max_ledger_observations: limits.max_observations,
+        max_ledger_bytes: limits.max_bytes,
+        max_ledger_read_ms: limits.read_ms,
+    };
+    Ok(DedupeCandidates { findings, coverage })
 }
 
 /// Rows that already share a durable identity ARE the same finding — a
@@ -40,11 +76,8 @@ fn collapse_by_identity(findings: Vec<Finding>) -> Vec<Finding> {
     by_key.into_values().collect()
 }
 
-fn is_eligible(finding: &Finding, rekeyed: &BTreeSet<String>) -> bool {
-    !finding.suppressed
-        && !is_attack_chain_finding(finding)
-        && !rekeyed.contains(&stable_key(finding))
-        && !already_marked_duplicate(finding)
+fn is_eligible(finding: &Finding) -> bool {
+    !finding.suppressed && !is_attack_chain_finding(finding) && !already_marked_duplicate(finding)
 }
 
 pub(super) fn stable_key(finding: &Finding) -> String {
@@ -61,13 +94,13 @@ fn already_marked_duplicate(finding: &Finding) -> bool {
         .is_some_and(|triage| triage.rationale.contains("duplicate_of="))
 }
 
-/// Buckets keyed by normalized path, kept only when at least two members come
+/// Buckets keyed by literal recorded path, kept only when at least two members come
 /// from different `(tool, run)` origins.
 fn file_buckets(findings: Vec<Finding>) -> Vec<Vec<Finding>> {
     let mut buckets: BTreeMap<String, Vec<Finding>> = BTreeMap::new();
     for finding in findings {
         buckets
-            .entry(normalized_path(&finding.file_path))
+            .entry(finding.file_path.clone())
             .or_default()
             .push(finding);
     }
@@ -92,20 +125,25 @@ fn distinct_origins(members: &[Finding]) -> usize {
 
 /// Highest-stakes buckets first, whole buckets only (a split bucket can't be
 /// grouped by the judge), until the candidate cap is reached.
-fn flatten_prioritized(mut buckets: Vec<Vec<Finding>>, max_candidates: usize) -> Vec<Finding> {
+fn flatten_prioritized(
+    mut buckets: Vec<Vec<Finding>>,
+    max_candidates: usize,
+) -> (Vec<Finding>, usize) {
     buckets.sort_by(|left, right| {
         bucket_rank(right)
             .cmp(&bucket_rank(left))
             .then_with(|| left[0].file_path.cmp(&right[0].file_path))
     });
     let mut candidates = Vec::new();
+    let mut omitted = 0;
     for bucket in buckets {
-        if candidates.len() + bucket.len() > max_candidates.max(2) {
+        if candidates.len() + bucket.len() > max_candidates {
+            omitted += 1;
             continue;
         }
         candidates.extend(bucket);
     }
-    candidates
+    (candidates, omitted)
 }
 
 /// Cross-tool buckets outrank same-tool ones: independent tools describing

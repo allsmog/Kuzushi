@@ -84,6 +84,8 @@ mod chunked_input_contract_tests;
 #[cfg(test)]
 mod classifier_contract_tests;
 #[cfg(test)]
+mod dedupe_input_contract_tests;
+#[cfg(test)]
 mod external_recon_contract_tests;
 #[cfg(test)]
 mod map_source_identity_tests;

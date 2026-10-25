@@ -4,10 +4,30 @@ use super::{link::LinkReport, ConfirmedGroups, DuplicateGroup};
 use crate::runtime::RuntimeCostReport;
 use serde_json::{json, Value};
 
-pub(super) fn empty_dedupe_result(candidate_count: usize) -> Value {
-    let summary = format!(
+pub(super) fn with_input_coverage(
+    mut result: Value,
+    coverage: &super::candidates::CandidateCoverage,
+) -> anyhow::Result<Value> {
+    result["data"]["inputCoverage"] = serde_json::to_value(coverage)?;
+    let text = format!("Ledger read: {} observations · {} encoded bytes across raw and projected input.\nJudge candidates: {} selected · {} omitted across {} file buckets.\nRead limits: maxLedgerObservations={} · maxLedgerBytes={} · maxLedgerReadMs={} (cooperative).",
+        coverage.observations_read, coverage.encoded_bytes_read, coverage.selected_candidates,
+        coverage.omitted_candidates, coverage.omitted_file_buckets, coverage.max_ledger_observations,
+        coverage.max_ledger_bytes, coverage.max_ledger_read_ms);
+    result["output"] = json!(format!(
+        "{}\n\n{text}",
+        result["output"].as_str().unwrap_or_default()
+    ));
+    Ok(result)
+}
+
+pub(super) fn empty_dedupe_result(candidate_count: usize, omitted: usize) -> Value {
+    let summary = if omitted > 0 {
+        format!("triage:dedupe: candidate allowance omitted {omitted} eligible observations; no judge request was made. Explicitly revise maxCandidates or use a smaller engagement.")
+    } else {
+        format!(
         "triage:dedupe: {candidate_count} candidate(s); need at least 2 co-located findings from different runs or tools"
-    );
+    )
+    };
     crate::module_result::skipped_output_result(
         summary.clone(),
         summary.clone(),
@@ -29,6 +49,8 @@ pub(super) fn dedupe_result(
         "candidateCount": candidate_count,
         "groups": confirmed.groups.iter().map(group_json).collect::<Vec<_>>(),
         "escalated": confirmed.escalated,
+        "confirmationInputs": confirmed.confirmation_inputs,
+        "confirmationRefusals": confirmed.confirmation_refusals,
         "droppedProposals": confirmed.dropped,
         "linked": report.linked,
         "alreadyLinked": report.already_linked,
@@ -39,10 +61,20 @@ pub(super) fn dedupe_result(
         "relationshipIds": report.relationship_ids,
     });
     crate::module_result::apply_runtime_cost_report(&mut data, cost);
-    let output = dedupe_output(&summary, &confirmed.groups);
+    let output = confirmation_output(dedupe_output(&summary, &confirmed.groups), confirmed);
     let mut result = crate::module_result::completed_output_result(summary, output, data);
     crate::module_result::apply_runtime_cost_report(&mut result, cost);
     result
+}
+
+fn confirmation_output(output: String, confirmed: &ConfirmedGroups) -> String {
+    if confirmed.escalated == 0 {
+        return output;
+    }
+    format!("{output}\nConfirmation attempts: {}. Current workspace source: {} / {} bytes reserved; historical source may differ. Dropped proposals: {:?}. Confirmation refusals: {}. Inspect confirmationInputs for unavailable files and unknown reads.",
+        confirmed.escalated, confirmed.confirmation_inputs["reservedBytes"],
+        confirmed.confirmation_inputs["maxConfirmationBytes"], confirmed.dropped,
+        serde_json::to_string(&confirmed.confirmation_refusals).unwrap_or_default())
 }
 
 fn dedupe_summary(

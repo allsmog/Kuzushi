@@ -1,9 +1,16 @@
-use super::candidates::{dedupe_candidates, stable_key};
+mod bounded_inputs;
+mod closed_queries;
+mod literal_paths;
+use super::candidates::stable_key;
 use super::link::link_groups;
 use super::{fingerprint_index, DuplicateGroup};
 use crate::findings::{
     Finding, FindingStore, ReviewDecision, ReviewDecisionVerdict, Severity, TriageAuthor,
 };
+
+fn dedupe_candidates(store: &FindingStore, maximum: usize) -> anyhow::Result<Vec<Finding>> {
+    Ok(super::candidates::dedupe_candidates(store, maximum, Default::default(), None)?.findings)
+}
 
 fn seeded_store() -> (tempfile::TempDir, FindingStore) {
     let tmp = tempfile::tempdir().unwrap();

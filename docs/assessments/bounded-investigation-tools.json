@@ -1857,7 +1857,7 @@
       "module": "fuzz",
       "declaredMaturity": "labs",
       "declaredPhase": "scan",
-      "purpose": "Replay one engine target's corpus through N implementations (fork vs upstream, or one command as a metamorphic self-check) and rank the divergences: crash-split first, then validity- and output-splits — the silent-wrong-data oracle the crash lane never fires on.",
+      "purpose": "Replay one engine target's corpus through N implementations (fork vs upstream, or one command as a metamorphic self-check) and rank the divergences: crash-split first, then validity- and output-splits \u2014 the silent-wrong-data oracle the crash lane never fires on.",
       "scope": "excluded-work",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -4604,13 +4604,18 @@
       "declaredOptions": [
         "maxGroups",
         "maxCandidates",
+        "maxLedgerObservations",
+        "maxLedgerBytes",
+        "maxLedgerReadMs",
+        "maxJudgePromptBytes",
+        "maxConfirmationBytes",
         "maxEscalations",
         "dryRun",
         "legacyRekey",
         "model",
         "allowanceRef"
       ],
-      "executionEvidence": "Shared prepared dispatch and native owned J114 fixture exercise one intercepted model proposal, reason-required human acceptance and unlinking; identities, observations and finding verdicts remain separate. See reversible-relationships-2026-10-07.md for retained failures and final verification.",
+      "executionEvidence": "Shared prepared dispatch and native owned J114 fixture exercise one intercepted model proposal, reason-required human acceptance and unlinking; identities, observations and finding verdicts remain separate. See reversible-relationships-2026-10-07.md for retained failures and final verification. Bounded input and literal-path behavior has focused reader, shared dispatch, confirmation and SQL-interruption checks; see dedupe-input-bounds-2026-10-25.md. No general duplicate-quality or full investigation qualification is implied.",
       "readinessVerdict": "narrow-relationship-review-evidence; full investigation pending",
       "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
       "auditDimensions": {
@@ -4620,7 +4625,7 @@
         "sharedDispatchExecution": "Prepared registry dispatch tested; native dedupe executor creates a proposal and TUI writes use the shared workspace service.",
         "artifactConsumption": "Audit events feed the paged reader and additive export projection; no finding rekey or auto false-positive verdict by default.",
         "failureAndRecovery": "Empty reasons and stale revisions refuse writes; target switches preserve original note/endpoint binding; no-color restart recovers metadata.",
-        "approvedResources": "One intercepted request reserved in a four-call allowance with two protected review calls. Human reader/decisions invoke no model. Candidate preparation materializes the full findings ledger and rekey set before the prompt candidate cap. Local read volume and memory remain unbounded here; large-ledger behavior needs a dedicated bounded reader without silently truncating export or alias consumers.",
+        "approvedResources": "Shared prepared-dispatch refusal precedes inference and reservations when ledger or prompt limits are exceeded. One consistent snapshot streams at most maxLedgerObservations plus an overflow sentinel, shares maxLedgerBytes across raw and projected JSON, and uses cooperative maxLedgerReadMs interruption. Candidate omissions are disclosed by whole literal-path bucket. Optional confirmations share maxConfirmationBytes through contained, cached file reads, retain unknown failed-read reservations, and obey maxJudgePromptBytes. Requests declare no tools and one model turn; invalid model output fails without a repair call. Existing durable provider accounting remains authoritative. These bounds do not establish all SQLite memory, lock-wait latency, filesystem wall-clock IO, transport framing or output-token limits.",
         "scopeEnforcement": "Metadata is bound to captured finding ids/fingerprints/runs. No discovery scope or new jobs created. Current-source applicability is not inferred.",
         "interfaceParity": "CLI dedupe and shared prepared relationship dispatch plus native TUI evidence. Full scan/shell/run parity pending."
       },
@@ -4628,7 +4633,7 @@
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
       "phaseResultDeclared": true,
-      "descriptorSha256": "sha256:b7bd90c1cb7a00966eb7e0c88458772902d88d7ae1b70b69a572f464985d9dee"
+      "descriptorSha256": "sha256:12957ca2d2d58b3eaab158a0107004599a0eb8948b28cdd925d818068db37fa4"
     },
     {
       "tool": "triage:run",

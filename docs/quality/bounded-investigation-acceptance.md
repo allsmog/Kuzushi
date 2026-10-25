@@ -1,5 +1,14 @@
 # Bounded investigation acceptance ledger
 
+The [bounded duplicate input correction](../assessments/dedupe-input-bounds-2026-10-25.md)
+removes full-ledger materialization before candidate selection and preserves literal
+paths in selection, source confirmation and JSONL import. Forty-eight focused Rust
+checks, Core Clippy, workspace build and risk pass. Final J359 has 23 machine
+passes, zero failures and four pending formal operator judgments through explicit
+limit correction, bounded source confirmation and no-color restart. Two requests
+are intercepted; no live inference or finding verdict is added. Broad module,
+relationship usefulness and reference-level TUI qualification remain open.
+
 The [reviewed-context follow-up](../assessments/lesson-context-followup-2026-10-24.md)
 connects an inactive lesson copy to the existing finite planner and retains
 spent calls, protected limits and unresolved reservations. Fifty reported Rust

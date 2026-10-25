@@ -1098,6 +1098,15 @@ duplicates false positive by default. `dryRun` writes no proposal;
 default proposals. Remaining per-finding triage can therefore cost more than
 the old identity-rekey path and stays subject to the approved allowance.
 
+`triage:dedupe` prepares its ledger through a bounded snapshot reader before
+candidate selection. The five advanced [input limits](operator-control-surfaces.md#duplicate-proposal-input-limits-triagededupe)
+apply through shared prepared dispatch. Excess ledger and metadata prompt input
+refuses before inference; candidate omissions and confirmation-source limits stay
+in the result. Whole-file buckets use exact recorded paths, including case and
+whitespace. Optional confirmation reads reject symlink components and disclose
+current workspace digests, without claiming those bytes match a historical SHA.
+No full-history export or identity alias reader inherits these input caps.
+
 `triage:run` distinguishes classification from applying a review decision.
 Storage policy can retain an existing human decision while the run records the
 model's opinion with `decisionApplied=false`, `applicationStatus=not_applied`

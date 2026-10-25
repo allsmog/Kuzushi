@@ -10,6 +10,7 @@ pub(crate) use domain::normalize_reported_source_path;
 pub(crate) use domain::FINDING_LESSON_SUBJECT;
 pub(crate) use domain::GOAL_RELEVANCE_SUBJECT;
 pub(crate) use domain::{validate_relationship_selection, FINDING_RELATIONSHIP_BATCH_SUBJECT};
+pub(crate) use domain::{DedupeLedgerLimits, DedupeLedgerRead};
 pub use domain::{FindingGoalAssessment, FindingGoalBasis, GoalRelevance};
 pub use domain::{
     FindingLesson, LessonContent, LessonGeneration, LessonOrigin, LessonRef, LessonState,

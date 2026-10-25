@@ -54,6 +54,41 @@ authority. Use inline one-shot input, shell `set`, or home-scoped `setg` when a
 full prompt replacement is intentional. This rule applies identically to
 scan, shell, and run because all three use canonical registry preparation.
 
+### Duplicate proposal input limits (`triage:dedupe`)
+
+Advanced options distinguish ledger inspection from candidate selection:
+
+| Option | Default | Allowed range |
+| --- | --- | --- |
+| `maxLedgerObservations` | 10,000 | 1 to 100,000 |
+| `maxLedgerBytes` | 8 MiB | 1 to 128 MiB |
+| `maxLedgerReadMs` | 10,000 ms | 1 to 60,000 ms |
+| `maxJudgePromptBytes` | 128 KiB | 1 to 512 KiB |
+| `maxConfirmationBytes` | 256 KiB | 1 to 8 MiB |
+
+All have snake-case aliases and share prepared dispatch, stored-option precedence
+and unknown-key rejection. The ledger byte budget counts raw observations and
+projected finding/source JSON together. The SQL deadline is cooperative; lock
+waits and bounded decoding may finish later. These limits do not bound all SQLite
+memory, wall-clock IO, output tokens or provider transport framing.
+
+The prompt limit counts system and user UTF-8 text for each request. All metadata
+batches are checked before the first request. Optional low-confidence
+confirmations use complete, contained UTF-8 files under one aggregate source
+allowance, cached once per literal path. A read can probe one extra byte.
+Unavailable or oversized files, missing citations and oversized confirmation
+prompts drop that group without confirmation. Failed reads retain their reserved
+bytes and disclose unknown consumption. Receipts identify current workspace
+source, which can differ from historical findings. Neither model request can
+invoke tools; both allow one model turn. Existing durable request accounting and
+same-model transport retry policy still apply. Malformed model output fails without an automatic repair request.
+
+A read refusal preserves observations and decisions. Correct the declared limit
+explicitly before retrying; the action never expands it. `inputCoverage` reports
+eligible, selected and omitted candidates. `confirmationInputs` records source
+availability and digests without embedding source text. A proposal still requires
+human acceptance and never demonstrates complete repository coverage.
+
 ### Deep-auditor dataflow tools (`taintTools`)
 
 `triage:run` and `deep-audit:run` expose a non-advanced `taintTools` enum
