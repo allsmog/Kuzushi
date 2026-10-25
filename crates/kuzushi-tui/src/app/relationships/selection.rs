@@ -18,6 +18,7 @@ impl ShellApp {
             self.router.relationships.selection.remove(index);
             return;
         }
+        self.pin_relationship(record.clone());
         self.extend_relationship_selection(vec![record]);
     }
 

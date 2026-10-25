@@ -1546,6 +1546,54 @@ generating a draft. Explicit `emitScopes` keeps its existing scope-tree output,
 but refuses partial inventory; emitted child scopes inherit parent context and
 threat-model sections. No proposal launches a scan or performs model calls.
 
+## Native observation source receipts
+
+Aggregate native execution authenticates its pre-execution repository snapshot
+before persisting cited source. SAST passes its existing snapshot into the native
+executor. Standalone native orchestration captures one snapshot before discovery.
+Cited files must match the captured tree and all cited locations must be valid.
+Retained files share a 64 MiB batch limit. Cancellation, source drift, invalid
+citations and retention failures preserve raw observations with unavailable
+grounding, without substituting bytes from the live checkout.
+Nontext or unavailable cited files remain unbound. This qualifies text-source
+retention in native orchestration, not every engine's citation quality.
+
+`NativeScanCoverage` writes schema version 3 and reads versions 1, 2 and 3.
+Optional `sourceBinding` records the source snapshot and tree, authentication,
+retained file/byte counts, retention limit and any limitation. Source-binding
+limitations make the result partial separately from engine coverage errors.
+Successful inspection alone does not establish retained source evidence.
+
+`FindingStore::recorded_observation_source` reads the exact stored generation.
+Its version-1 `RecordedObservationSource` names the generation, run and snapshot,
+with nullable tree, blob, Git commit, branch and dirty hash. It never fills
+unknown source metadata from a run summary or the current checkout. Existing
+observations are not backfilled.
+
+Workspace exports retain matching run-checkout metadata as `provenance.runGit`,
+the exact generation as `provenance.observationSource`, and distinct relationship
+endpoint generations as `provenance.relationshipSources`. Older endpoints remain
+available after all current findings are observed again. These endpoint sources
+are not the complete raw observation log. JSON/JSONL, SARIF, CSV and Markdown
+bundles carry these references. See `RELEASING.md` for additive format fields,
+CSV column order and Rust struct-literal migrations. A source reference records
+where an observation came from; it does not determine current applicability or
+whether a finding was fixed.
+
+Every saved generation selected in Review reads its retained source. While that
+copy is unavailable or loading, the reader discloses the gap and does not display
+current checkout bytes in its place. Unsaved previews compare the whole displayed
+window, including neighboring lines and spacing. A retained-source caption labels
+saved run-checkout metadata separately from observation source metadata. A live
+preview with absent or unchecked retained source is labeled as current file text,
+not recorded evidence.
+
+Review keeps a durable identity decision visible when an earlier generation is
+selected. Its source check names the different supporting observation without
+asserting which came first. Existing conflict tokens remain compatibility values;
+`reappeared_after_rejection` alone is not evidence of event order. Verdict
+authority, source reassessment and stored decisions are unchanged.
+
 ## Source-bound model Scan results
 
 ### Bounded native secret inspection

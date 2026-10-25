@@ -19,7 +19,7 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · 
 │  Template input reaches renderer  │verdict: needs_review
 │  sources:1 · @– · open            │source: none
 │  src/web/template.rs:8            │
-│ F-0003 H unverified               │── SOURCE · observation (on-disk excerpt) ──
+│ F-0003 H unverified               │── SOURCE · retained · run checkout unknown ──
 │  Order identifier crosses trust   │    14 │ }
 │  boundary                         │    15 │
 │  sources:1 · @– · open            │    16 │ pub fn login(attempt: &LoginAttempt) ->...
@@ -63,7 +63,7 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · 
 │                                   │source signature:
 │                                   │login.rs:17:sql-injection-reaches-query
 │                                   │corroboration: 1
-│                                   │identity: phase-findi…
+│                                   │identity: FI-00000001
 │                                   │fingerprint: fp3_ed97bede6bddb852…
 │                                   │
 │                                   │

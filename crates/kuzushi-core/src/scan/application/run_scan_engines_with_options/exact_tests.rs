@@ -94,6 +94,7 @@ fn exact_native_pipeline_refuses_outside_observations_and_preserves_the_failed_r
         &options,
         &["included.py".into()],
         &Default::default(),
+        None,
     )
     .unwrap_err();
     assert!(format!("{error:#}").contains("outside accepted file membership"));
@@ -121,6 +122,7 @@ fn exact_native_skipped_binary_source_reports_partial_coverage() {
         &Default::default(),
         &["selected.bin".into()],
         &Default::default(),
+        None,
     )
     .unwrap();
     assert_eq!(report.run.findings_count, 0);
@@ -146,6 +148,7 @@ fn canceled_exact_discovery_keeps_partial_observations_and_never_starts_another_
         &Default::default(),
         &["included.py".into()],
         &Default::default(),
+        None,
     )
     .unwrap_err();
     let failure = native_scan_failure(&error).unwrap();

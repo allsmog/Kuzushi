@@ -1442,7 +1442,7 @@ fn scanned_fold_finding() -> Finding {
 fn store_scanned_window(app: &ShellApp, finding: &Finding, state: crate::ScannedSnippetState) {
     app.workbench_cache().borrow_mut().store_scanned_snippet(
         app.target().unwrap(),
-        &finding.fingerprint,
+        kuzushi_core::findings::finding_observation_identity(finding),
         finding.scan_id.as_deref(),
         finding.start_line,
         state,
@@ -1505,12 +1505,12 @@ fn snippet_falls_back_to_the_scanned_copy_when_the_live_line_drifts() {
     let snippet = source_snippet_model(&app, &finding).expect("snippet");
 
     assert_eq!(snippet.lines, vec!["let x = 1;"]);
-    let note = snippet.note.expect("as-scanned note");
-    assert!(note.starts_with("as scanned @ unknown"), "{note}");
+    assert_eq!(snippet.retained_run_checkout.as_deref(), Some("unknown"));
+    assert!(snippet.note.is_none());
 }
 
 #[test]
-fn snippet_keeps_the_live_source_when_it_matches_the_scanned_copy() {
+fn snippet_preserves_scanned_spacing_when_live_spacing_changes() {
     let (temp, app) = scanned_fold_app();
     std::fs::create_dir_all(temp.path().join("src")).unwrap();
     std::fs::write(temp.path().join("src/app.rs"), "let x = 2;\n").unwrap();
@@ -1528,8 +1528,8 @@ fn snippet_keeps_the_live_source_when_it_matches_the_scanned_copy() {
 
     let snippet = source_snippet_model(&app, &finding).expect("snippet");
 
-    assert_eq!(snippet.lines, vec!["let x = 2;"]);
-    assert_eq!(snippet.note, None);
+    assert_eq!(snippet.lines, vec!["let  x  =  2;"]);
+    assert_eq!(snippet.retained_run_checkout.as_deref(), Some("unknown"));
 }
 
 #[test]
@@ -1550,7 +1550,7 @@ fn missing_live_source_renders_the_scanned_copy() {
     let snippet = source_snippet_model(&app, &finding).expect("snippet");
 
     assert_eq!(snippet.lines, vec!["let x = 1;"]);
-    assert!(snippet.note.unwrap().starts_with("as scanned @"));
+    assert_eq!(snippet.retained_run_checkout.as_deref(), Some("unknown"));
 }
 
 #[test]
@@ -1597,3 +1597,5 @@ fn unscored_model_evidence_and_source_citations_keep_distinct_origins() {
         .header
         .contains("conf 0"));
 }
+
+mod source_history;

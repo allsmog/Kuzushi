@@ -19,7 +19,7 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · 
 │  Template input reaches renderer             │verdict: needs_review                                                       │ 6 findings · 1 C · 2 H · 2 M
 │  sources:1 · @– · open                       │source: none                                                                │ 0/6 reviewed · 0 confirmed
 │  src/web/template.rs:8                       │                                                                            │
-│ F-0003 H unverified                          │── SOURCE · observation (on-disk excerpt) ──                                │ SESSION COST
+│ F-0003 H unverified                          │── SOURCE · retained · run checkout unknown ──                              │ SESSION COST
 │  Order identifier crosses trust boundary     │    14 │ }                                                                  │ $0.37 of $2.00
 │  sources:1 · @– · open                       │    15 │                                                                    │ 19% of budget
 │  src/api/orders.rs:31                        │    16 │ pub fn login(attempt: &LoginAttempt) -> Response {                 │ report · prior usage

@@ -28,6 +28,24 @@ pub(crate) struct NativeScanCoverage {
     #[serde(deserialize_with = "coverage_schema_version")]
     pub schema_version: u32,
     pub engines: Vec<NativeEngineCoverage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_binding: Option<NativeSourceBindingReceipt>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NativeSourceBindingReceipt {
+    pub snapshot_hash: String,
+    pub tree_hash: String,
+    pub authenticated: bool,
+    pub captured_files: usize,
+    pub captured_bytes: usize,
+    pub max_capture_bytes: usize,
+    pub limitation: Option<String>,
+}
+
+fn native_engine_has_gaps(engine: &NativeEngineCoverage) -> bool {
+    engine.disposition != NativeEngineDisposition::Complete || !engine.scan_errors.is_empty()
 }
 
 fn coverage_schema_version<'de, D: serde::Deserializer<'de>>(
@@ -35,7 +53,7 @@ fn coverage_schema_version<'de, D: serde::Deserializer<'de>>(
 ) -> std::result::Result<u32, D::Error> {
     let version = u32::deserialize(deserializer)?;
     match version {
-        1 | 2 => Ok(version),
+        1..=3 => Ok(version),
         _ => Err(serde::de::Error::custom(
             "unsupported native coverage schema version",
         )),
@@ -45,27 +63,68 @@ fn coverage_schema_version<'de, D: serde::Deserializer<'de>>(
 impl Default for NativeScanCoverage {
     fn default() -> Self {
         Self {
-            schema_version: 2,
+            schema_version: 3,
             engines: Vec::new(),
+            source_binding: None,
         }
     }
 }
 
 impl NativeScanCoverage {
     pub(crate) fn has_gaps(&self) -> bool {
-        self.engines.iter().any(|engine| {
-            engine.disposition != NativeEngineDisposition::Complete
-                || !engine.scan_errors.is_empty()
-        })
+        self.has_source_gap() || self.engines.iter().any(native_engine_has_gaps)
+    }
+
+    pub(crate) fn has_source_gap(&self) -> bool {
+        self.source_binding
+            .as_ref()
+            .is_some_and(|source| !source.authenticated)
+    }
+
+    pub(crate) fn require_source_binding(&self) -> Result<()> {
+        anyhow::ensure!(
+            !self.has_source_gap(),
+            "Native observation source binding unavailable: {}. Raw observations retained.",
+            self.source_binding
+                .as_ref()
+                .and_then(|source| source.limitation.as_deref())
+                .unwrap_or("No authenticated captured source")
+        );
+        Ok(())
     }
 
     pub(crate) fn engine_has_gaps(&self, id: &str) -> bool {
         self.engines
             .iter()
-            .any(|engine| engine.engine == id && !engine.scan_errors.is_empty())
+            .filter(|engine| engine.engine == id)
+            .any(|engine| !engine.scan_errors.is_empty() || self.has_source_gap())
+    }
+
+    fn source_detail(&self, id: &str) -> Option<String> {
+        self.source_binding
+            .as_ref()
+            .filter(|source| !source.authenticated)
+            .filter(|_| self.engines.iter().any(|engine| engine.engine == id))
+            .map(|source| {
+                format!(
+                    "Observation source binding unavailable: {}",
+                    source
+                        .limitation
+                        .as_deref()
+                        .unwrap_or("No authenticated captured source was retained")
+                )
+            })
     }
 
     pub(crate) fn engine_detail(&self, id: &str) -> Option<String> {
+        let details = [self.engine_coverage_detail(id), self.source_detail(id)]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        (!details.is_empty()).then(|| details.join("; "))
+    }
+
+    fn engine_coverage_detail(&self, id: &str) -> Option<String> {
         let count = self.engine_gap_count(id);
         let unstarted = self.engine_unstarted_detail(id);
         if count == 0 {

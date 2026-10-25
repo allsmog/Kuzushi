@@ -56,35 +56,7 @@ pub(in crate::modules) fn prepare_sast_task_selection(input: &Value) -> Result<S
     Ok(selected)
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(in crate::modules) fn run_selected_sast_pipeline_reports(
-    registry: &ModuleRegistry,
-    input: &Value,
-    ctx: &ToolExecutionContext<'_>,
-    runtime: Option<&dyn AgentRuntime>,
-    option_store: &crate::options::ToolOptionStore,
-    workspace: &crate::workspace::WorkspaceTarget,
-    store: &crate::findings::FindingStore,
-    options: &SastScanOptions,
-    selected: &SastTaskSelection,
-) -> Result<SastPipelineReports> {
-    selected.ensure_non_empty()?;
-    selected.ensure_scoped_input(input, workspace.root())?;
-    let native = selected.run_native(workspace, store, options, ctx)?;
-    let mut reports = initial_sast_pipeline_reports(selected, native);
-    fill_agentic_reports(
-        registry,
-        option_store,
-        &mut reports,
-        selected,
-        input,
-        ctx,
-        runtime,
-    )?;
-    Ok(reports)
-}
-
-fn initial_sast_pipeline_reports(
+pub(super) fn initial_sast_pipeline_reports(
     selected: &SastTaskSelection,
     native: Option<NativeScanReport>,
 ) -> SastPipelineReports {

@@ -9,6 +9,7 @@ mod form;
 mod generation;
 mod reader;
 mod replacement;
+mod selection;
 pub(crate) use reader::lesson_reader_scroll;
 
 pub(super) fn lesson_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
@@ -38,6 +39,7 @@ fn modal_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'static>>> {
 
 fn browser_document_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = vec![Line::styled("REUSABLE LESSONS", theme::accent())];
+    lines.extend(selection::recorded_heading(app, area.width));
     lines.extend(browser_actions(app, area.width));
     lines.extend(browser_lines(app, area));
     lines.extend(notice_lines(app, area.width));
@@ -64,7 +66,7 @@ fn saved_context_action(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
 fn lesson_management_actions(width: u16) -> Vec<Line<'static>> {
     if width < 60 {
         return wrapped(
-            "n draft · g model · a/r/t review\nu copy · e edit · d draft · c clear",
+            "Space select · [/] pages · R refresh\nn draft · g model · a/r/t review\nu copy · e edit · d draft · c clear",
             width,
             theme::accent(),
         );
@@ -87,7 +89,7 @@ fn browser_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         _ => return vec![Line::raw("Loading saved lessons...")],
     };
     let mut lines = vec![Line::raw(format!(
-        "{} saved · {} selected · page {}{}",
+        "{} on this page · {} selected · page {}{}",
         page.rows.len(),
         app.router.lessons.selected.len(),
         page.offset / 50 + 1,
@@ -98,7 +100,7 @@ fn browser_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         }
     ))];
     if page.rows.is_empty() {
-        lines.extend(wrapped("No saved lessons. Open a confirmed finding in Review, then use lessons and n to draft from that exact generation.",area.width,theme::muted()));
+        lines.extend(selection::empty_page_lines(app, area.width));
         return lines;
     }
     lines.extend(lesson_rows(app, area, &page));
@@ -110,8 +112,11 @@ fn lesson_rows(
     area: Rect,
     page: &kuzushi_core::findings::FindingLessonPage,
 ) -> Vec<Line<'static>> {
+    if let Some(lines) = selection::recorded_detail_lines(app, area.width) {
+        return lines;
+    }
     let Some(selected) = app.lesson_cursor(page) else {
-        return wrapped(&format!("Requested lesson {} is outside this page. Refresh or choose a page before review. j/k explicitly selects another visible lesson.",app.router.lessons.pinned_id.as_deref().unwrap_or("unrecorded")),area.width,theme::warn());
+        return selection::missing_selection_lines(app, area.width);
     };
     let capacity = usize::from(area.height).saturating_sub(10).clamp(1, 5);
     let start = selected

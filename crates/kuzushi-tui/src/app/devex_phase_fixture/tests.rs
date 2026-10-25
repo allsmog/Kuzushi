@@ -275,3 +275,37 @@ fn persisted_reference_projection_survives_workspace_refresh() {
     };
     assert!(prove.proof.is_some_and(|proof| proof.has_replay()));
 }
+
+#[test]
+fn reference_findings_use_the_stores_real_generation_and_source_identity() {
+    let target = tempfile::tempdir().unwrap();
+    let mut app = fixture_app(target.path());
+    seed_pdf_phase_reference_fixture(&mut app, target.path(), PhaseFixtureLifecycle::Settled)
+        .unwrap();
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    let store = kuzushi_core::FindingStore::open_read_only(workspace.findings_db_path()).unwrap();
+    for finding in app.findings() {
+        let generation = finding.id.unwrap();
+        let stored = store
+            .get_finding_by_reference(&format!("generation:{generation}"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(finding.identity_id, stored.identity_id);
+        assert_eq!(finding.scan_id, stored.scan_id);
+        let source = store
+            .latest_observation_source(
+                kuzushi_core::findings::finding_observation_identity(finding),
+                finding.scan_id.as_deref(),
+            )
+            .unwrap();
+        if target.path().join(&finding.file_path).is_file() {
+            let source = source.expect("Seeded source must be retained");
+            assert!(store
+                .read_observation_blob(&source.blob_hash)
+                .unwrap()
+                .is_some());
+        } else {
+            assert!(source.is_none(), "Unseeded source must stay unavailable");
+        }
+    }
+}

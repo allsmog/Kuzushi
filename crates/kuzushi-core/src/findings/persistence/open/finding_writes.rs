@@ -1,5 +1,13 @@
 use super::*;
 mod source_binding;
+
+#[derive(Clone, Copy)]
+enum ObservationSourceWrite<'a> {
+    Live,
+    Captured(&'a CapturedFindingSources),
+    Unavailable,
+}
+
 use crate::content_store::ContentStore;
 use crate::event_log::EventKind;
 use crate::identity::{compute_observation_hash_v3, hash_parts, ObservationHashInput};
@@ -182,7 +190,7 @@ impl FindingStore {
         finding: &Finding,
         writer: &mut StorageWriterSession,
     ) -> Result<i64> {
-        self.insert_finding_at_source(scan_id, finding, writer, None)
+        self.insert_finding_at_source(scan_id, finding, writer, ObservationSourceWrite::Live)
     }
 
     fn insert_finding_at_source(
@@ -190,7 +198,7 @@ impl FindingStore {
         scan_id: &str,
         finding: &Finding,
         writer: &mut StorageWriterSession,
-        source: Option<&CapturedFindingSources>,
+        source: ObservationSourceWrite<'_>,
     ) -> Result<i64> {
         // Identity bookkeeping stays transactional while the mutable finding
         // view is projected by the v3 writer after the observation event is
@@ -210,7 +218,7 @@ impl FindingStore {
         tx: &Connection,
         scan_id: &str,
         finding: &Finding,
-        source: Option<&CapturedFindingSources>,
+        source: ObservationSourceWrite<'_>,
     ) -> Result<FindingInsertOutcome> {
         // Cross-channel dedup is scoped to one scan run. A rediscovered
         // vulnerability in a later run must still get its own row under that
@@ -250,7 +258,7 @@ impl FindingStore {
         existing: Finding,
         scan_id: &str,
         finding: &Finding,
-        source: Option<&CapturedFindingSources>,
+        source: ObservationSourceWrite<'_>,
     ) -> Result<FindingInsertOutcome> {
         let merge_id = existing.id.expect("existing finding always has id");
         let existing_had_identity = existing.identity_id.is_some();
@@ -287,7 +295,7 @@ impl FindingStore {
         scan_id: &str,
         existing: &Finding,
         finding: &Finding,
-        source: Option<&CapturedFindingSources>,
+        source: ObservationSourceWrite<'_>,
     ) -> Result<FindingIdentityAssignment> {
         match collision_identity_assignment(existing) {
             Some(identity) => Ok(identity),
@@ -306,7 +314,7 @@ impl FindingStore {
         scan_id: &str,
         existing: &Finding,
         incoming: &Finding,
-        source: Option<&CapturedFindingSources>,
+        source: ObservationSourceWrite<'_>,
     ) -> Result<Vec<FindingEvidence>> {
         let incoming_evidence = self.evidence_at_source(tx, scan_id, &incoming.evidence, source)?;
         merge_collision_evidence(existing, incoming, incoming_evidence)
@@ -347,7 +355,7 @@ impl FindingStore {
         finding: &Finding,
         outcome: FindingInsertOutcome,
         writer: &mut StorageWriterSession,
-        source: Option<&CapturedFindingSources>,
+        source: ObservationSourceWrite<'_>,
     ) -> Result<i64> {
         let commit = self.v3_observation_commit(scan_id, finding, outcome, source)?;
         let reopen = self.reopen_write_for(scan_id, &commit.observation)?;
@@ -385,13 +393,14 @@ impl FindingStore {
         scan_id: &str,
         finding: &Finding,
         outcome: FindingInsertOutcome,
-        source: Option<&CapturedFindingSources>,
+        source: ObservationSourceWrite<'_>,
     ) -> Result<ObservationCommit> {
         let identity_link = outcome.identity_link.clone();
         let projected = self.projected_observation_finding(scan_id, finding, outcome, source)?;
         let provenance = match source {
-            Some(source) => Some(source.provenance(&projected)?),
-            None => self.observation_provenance(scan_id, &projected)?,
+            ObservationSourceWrite::Captured(source) => Some(source.provenance(&projected)?),
+            ObservationSourceWrite::Live => self.observation_provenance(scan_id, &projected)?,
+            ObservationSourceWrite::Unavailable => None,
         };
         let stable_fp = projected
             .identity_id
@@ -410,7 +419,7 @@ impl FindingStore {
         scan_id: &str,
         finding: &Finding,
         outcome: FindingInsertOutcome,
-        source: Option<&CapturedFindingSources>,
+        source: ObservationSourceWrite<'_>,
     ) -> Result<Finding> {
         let mut projected = outcome.projected;
         projected.corroboration_count = projected.corroboration_count.max(1);
@@ -420,12 +429,15 @@ impl FindingStore {
             self.projected_finding_sources(previous_projection.as_ref(), scan_id, finding);
         apply_projected_sources(&mut projected, sources);
         projected.evidence = outcome.evidence;
-        if let Some(source) = source {
+        if let ObservationSourceWrite::Captured(source) = source {
             projected.evidence = source.evidence(&projected.evidence)?;
         }
         projected.grounding = Some(match source {
-            Some(source) => source.grounding(&projected)?,
-            None => {
+            ObservationSourceWrite::Captured(source) => source.grounding(&projected)?,
+            ObservationSourceWrite::Unavailable => crate::findings::GroundingStatus::Unavailable {
+                reason: "Native source snapshot could not be authenticated".into(),
+            },
+            ObservationSourceWrite::Live => {
                 super::finding_evidence::ground_primary_anchor(&self.conn, scan_id, &projected)?
             }
         });
@@ -447,11 +459,14 @@ impl FindingStore {
         tx: &Connection,
         scan_id: &str,
         rows: &[FindingEvidence],
-        source: Option<&CapturedFindingSources>,
+        source: ObservationSourceWrite<'_>,
     ) -> Result<Vec<FindingEvidence>> {
         match source {
-            Some(source) => source.evidence(rows),
-            None => self.verified_finding_evidence(tx, scan_id, rows),
+            ObservationSourceWrite::Captured(source) => source.evidence(rows),
+            ObservationSourceWrite::Live => self.verified_finding_evidence(tx, scan_id, rows),
+            ObservationSourceWrite::Unavailable => {
+                Ok(super::finding_evidence::unbound_native_evidence(rows))
+            }
         }
     }
 
@@ -1035,10 +1050,12 @@ mod evidence_union_tests {
 }
 
 fn captured_identity_text<'a>(
-    source: Option<&'a CapturedFindingSources>,
+    source: ObservationSourceWrite<'a>,
     finding: &Finding,
 ) -> Result<Option<&'a str>> {
-    source
-        .map(|source| source.text(&finding.file_path))
-        .transpose()
+    match source {
+        ObservationSourceWrite::Captured(source) => source.text(&finding.file_path).map(Some),
+        ObservationSourceWrite::Live => Ok(None),
+        ObservationSourceWrite::Unavailable => Ok(Some("")),
+    }
 }

@@ -59,7 +59,7 @@ pub use application::{
 };
 pub(crate) use application::{
     normalized_scan_path, parse_semgrep_report, require_directory_scope, resolve_scan_scopes,
-    run_native_scan_files_with_cancellation, run_native_scan_with_cancellation,
+    run_native_scan_at_source, run_native_scan_files_with_cancellation,
     select_default_scan_engines_checked, semgrep_error_summaries, semgrep_findings_from_report,
     DefaultScanEngineSelection, ScanScope, SkippedDefaultScanEngine,
 };

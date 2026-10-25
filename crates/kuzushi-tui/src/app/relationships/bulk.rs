@@ -16,6 +16,7 @@ impl ShellApp {
             );
             return;
         }
+        self.pin_current_relationship();
         self.router.relationships.bulk = Some(RelationshipBulkReview {
             target,
             records,

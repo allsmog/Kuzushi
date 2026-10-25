@@ -9,9 +9,9 @@ use crate::findings::IdentityFoldPolicy;
 use crate::findings::StaticProofState;
 use crate::proof::whitebox_policy::{apply_whitebox_static_sast_policy, WhiteboxStaticPolicy};
 use crate::scan::{
-    run_native_scan_files_with_cancellation, run_native_scan_with_cancellation,
-    scan_engines_for_tasks, select_default_scan_engines_checked, DefaultScanEngineSelection,
-    NativeScanReport, ScanEngine, ScanRunOptions,
+    run_native_scan_at_source, run_native_scan_files_with_cancellation, scan_engines_for_tasks,
+    select_default_scan_engines_checked, DefaultScanEngineSelection, NativeScanReport, ScanEngine,
+    ScanRunOptions,
 };
 use anyhow::{Context, Result};
 pub(in crate::modules) use findings_count::*;

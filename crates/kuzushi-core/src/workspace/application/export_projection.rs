@@ -390,6 +390,9 @@ fn provenance_summary(
         kuzushi_version: run_context.and_then(|context| context.kuzushi_version.clone()),
         model: run_context.and_then(|context| context.model.clone()),
         runtime_platform: run_context.and_then(|context| context.runtime_platform.clone()),
+        run_git: run_context.and_then(|context| context.run_git.clone()),
+        observation_source: None,
+        relationship_sources: Vec::new(),
     }
 }
 

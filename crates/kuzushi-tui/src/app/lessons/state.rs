@@ -6,6 +6,7 @@ pub(crate) struct LessonsRouteState {
     pub(crate) finding_id: Option<i64>,
     pub(crate) cursor: usize,
     pub(crate) pinned_id: Option<String>,
+    pub(crate) pinned_snapshot: Option<FindingLesson>,
     pub(crate) offset: usize,
     pub(crate) selected: Vec<SelectedLesson>,
     pub(crate) form: Option<LessonForm>,

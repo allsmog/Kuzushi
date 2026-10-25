@@ -1,0 +1,95 @@
+name: Native observations retain exact source revisions through historical review and exports
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE KUZUSHI_AGENT_MCPS NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NODE_OPTIONS=--import=@REPO/scripts/devex/fixtures/deny_provider_transport.mjs KUZUSHI_TEST_DENIED_FETCH_LOG=@ART/denied-fetch.jsonl
+require-shell: python3 -B @REPO/scripts/devex/fixtures/native_source_history.py @TMP_TARGET @ART prepare
+require-wrapper-flow:
+launch: --target @TMP_TARGET/owned
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/open-original.txt
+keys: Enter
+require-live-snap: 25 Owned baseline public example 0 | baseline-source
+expect: AKIAIOSFODNN7EXAMPLE
+expect: Owned baseline public example 0
+expect-not: Owned later public example 0
+require-shell: python3 -B @REPO/scripts/devex/fixtures/native_source_history.py @TMP_TARGET @ART later
+require-shell: python3 -B @REPO/scripts/devex/fixtures/native_source_history.py @TMP_TARGET @ART remove
+paste-file: @ART/open-original.txt
+keys: Enter
+require-live-snap: 25 Owned baseline public example 0 | original-source-after-removal
+expect: AKIAIOSFODNN7EXAMPLE
+expect: Owned baseline public example 0
+expect-not: Owned later public example 0
+resize: 160x48
+require-live-snap: 20 receipts/first.env:2 | retained-source-160x48
+resize: 96x89
+require-live-snap: 20 receipts/first.env:2 | retained-source-96x89
+resize: 80x24
+require-live-snap: 20 receipts/first.env:2 | retained-source-80x24
+resize: 60x20
+require-live-snap: 20 receipts/first.env:2 | retained-source-60x20
+resize: 40x12
+require-live-snap: 20 receipts/first.env:2 | retained-source-40x12
+keys: NPage
+live-snap: retained-source-detail-1-40x12
+keys: NPage
+live-snap: retained-source-detail-2-40x12
+keys: NPage
+live-snap: retained-source-detail-3-40x12
+keys: NPage
+live-snap: retained-source-detail-4-40x12
+keys: NPage
+live-snap: retained-source-detail-5-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/native_source_history.py @TMP_TARGET @ART narrow
+ask: Does the exact older generation remain identifiable and readable at every size after the source SHA changes and its live file is removed, without substituting current bytes or claiming a fix?
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/native_source_history.py @TMP_TARGET @ART restore
+submit: runs diff source-baseline source-later
+require-live-snap: 25 SEEN AGAIN | source-comparison
+expect: Absence does not establish a fix.
+keys: Tab
+require-live-snap: 25 7cac9e253984 | source-revisions
+expect: c557cdbf94b9
+expect: dirty
+ask: Does comparison disclose both recorded Git revisions and dirty state while separating recurrence from current applicability?
+keys: Escape
+paste-file: @ART/open-current-0.txt
+keys: Enter
+require-live-snap: 25 receipts/first.env:2 | current-first
+submit: decision fp Owned public credential example is intentional inert text
+require-live-snap: 25 recorded: rejected_false_positive | first-fp
+paste-file: @ART/open-current-1.txt
+keys: Enter
+require-live-snap: 25 receipts/second.env:2 | current-second
+submit: decision deferred Owner will review this second public example separately
+require-live-snap: 25 recorded: deferred | second-deferred
+submit: report
+require-live-snap: 25 Scope: workspace history | report
+keys: j j j
+require-live-snap: 20 format json (4/6) | json-format
+keys: Enter
+require-live-snap: 30 EXPORTED | report-export
+require-shell: python3 -B @REPO/scripts/devex/fixtures/native_source_history.py @TMP_TARGET @ART export
+require-shell: python3 -B @REPO/scripts/devex/fixtures/native_source_history.py @TMP_TARGET @ART final
+ask: Does Report preserve both explicit decisions and export current source identities plus older relationship endpoint sources in all five formats without model work or inferred fixes?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NODE_OPTIONS=--import=@REPO/scripts/devex/fixtures/deny_provider_transport.mjs KUZUSHI_TEST_DENIED_FETCH_LOG=@ART/denied-fetch.jsonl NO_COLOR=1
+launch: --target @TMP_TARGET/owned
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/open-original.txt
+keys: Enter
+require-live-snap: 25 Owned baseline public example 0 | restarted-original-source
+expect: AKIAIOSFODNN7EXAMPLE
+expect: Owned baseline public example 0
+expect-not: Owned later public example 0
+expect: Decision source check
+expect: different recorded observation
+expect-not: after an earlier false-positive decision
+submit: report
+require-live-snap: 25 Scope: workspace history | restarted-report
+require-shell: python3 -B @REPO/scripts/devex/fixtures/native_source_history.py @TMP_TARGET @ART restarted
+ask: Does no-color restart retain exact historical source reading, all four observations, both decisions and the exported source history without changing focus unexpectedly?
+keys: C-c
+require-exit: 10

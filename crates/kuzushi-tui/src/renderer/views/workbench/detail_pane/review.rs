@@ -73,6 +73,7 @@ mod literal_header_tests {
                 focus_line: 2,
                 lines: vec!["// owned source".into(), "// selected source line".into()],
                 note: None,
+                retained_run_checkout: None,
             }),
             ..Default::default()
         };
@@ -98,7 +99,7 @@ fn push_review_decision(lines: &mut Vec<Line<'static>>, detail: &FindingDetailMo
         let note = crate::ui_view_models::review_conflicts::review_conflict_detail_label(conflict);
         push_wrapped(
             lines,
-            &format!("Conflicting decisions: {note}"),
+            &format!("Decision source check: {note}"),
             width,
             "  ",
             theme::warn(),

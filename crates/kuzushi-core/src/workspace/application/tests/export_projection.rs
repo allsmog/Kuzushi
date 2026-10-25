@@ -320,6 +320,7 @@ fn export_record_uses_run_context_when_available() {
             kuzushi_version: Some("0.24.0-test".to_string()),
             model: Some("openai:gpt-test".to_string()),
             runtime_platform: Some("darwin-arm64".to_string()),
+            run_git: None,
         },
     );
 

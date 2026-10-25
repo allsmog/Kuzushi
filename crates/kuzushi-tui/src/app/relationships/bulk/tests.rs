@@ -133,7 +133,6 @@ fn failed_batch_preserves_the_note_and_captured_versions_for_an_honest_refresh()
             note: draft.field.text().into(),
         },
     )
-    .map(|_| ())
     .map_err(|error| format!("{error:#}"));
     assert!(result.is_err());
     app.finish_relationship_write(

@@ -1,0 +1,113 @@
+name: Exact relationship selection and grouping across two Git revisions
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/relationship_book.py @TMP_TARGET @ART prepare
+require-wrapper-flow:
+launch: --target @TMP_TARGET/owned
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/open-center.txt
+keys: Enter
+require-live-snap: 20 Viewing Review | opened-center
+submit: relationships
+require-live-snap: 30 50 relationships | first-page
+keys: Escape
+resize: 40x12
+require-live-snap: 20 n/p pages | compact-browser-40x12
+expect: n/p pages
+expect: R refresh
+ask: Can an operator discover paging, refresh and relationship review in the compact browser without treating a duplicate link as a finding verdict?
+resize: 120x36
+keys: n
+require-live-snap: 20 page 2 | second-page
+keys: Down Down Down Down Down Down Down Down Down
+require-live-snap: 20 Labeled book pair 001 | selected-primary
+keys: a
+paste-file: @ART/accept-note.txt
+keys: Enter
+require-live-snap: 20 outside this page | accepted-recorded-selection
+expect: Accepted
+require-shell: python3 -B @REPO/scripts/devex/fixtures/relationship_book.py @TMP_TARGET @ART accepted
+resize: 160x48
+require-live-snap: 20 outside this page | saved-pair-160x48
+resize: 96x89
+require-live-snap: 20 outside this page | saved-pair-96x89
+resize: 80x24
+require-live-snap: 20 outside this page | saved-pair-80x24
+resize: 60x20
+require-live-snap: 20 outside this page | saved-pair-60x20
+resize: 40x12
+require-live-snap: 20 outside this page | saved-pair-40x12
+keys: PageDown
+live-snap: saved-details-1-40x12
+keys: PageDown
+live-snap: saved-details-2-40x12
+keys: PageDown
+live-snap: saved-details-3-40x12
+keys: PageDown
+live-snap: saved-details-4-40x12
+keys: PageDown
+live-snap: saved-details-5-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/relationship_book.py @TMP_TARGET @ART narrow
+ask: Does saving the oldest pair retain that exact accepted revision after it moves off page two, with its recorded IDs, runs and reason reachable at every size?
+resize: 120x36
+keys: Home
+require-shell: python3 -B @REPO/scripts/devex/fixtures/relationship_book.py @TMP_TARGET @ART later
+keys: R
+require-live-snap: 20 outside this page | baseline-pair-after-source-change
+keys: Space A
+require-live-snap: 20 REVIEW 1 RELATIONSHIPS | recorded-pair-inspection
+keys: ] Enter
+require-live-snap: 20 G return | recorded-generation
+expect: Viewing Review
+keys: PageDown
+live-snap: recorded-source-page-1
+keys: PageDown
+live-snap: recorded-source-page-2
+keys: PageDown
+live-snap: recorded-source-page-3
+keys: PageDown
+live-snap: recorded-source-page-4
+keys: G
+require-live-snap: 20 REVIEW 1 RELATIONSHIPS | returned-to-pair
+keys: Escape
+require-live-snap: 20 FINDING RELATIONSHIPS | returned-browser
+keys: Home u
+paste-file: @ART/old-unlink-note.txt
+keys: Enter
+require-live-snap: 20 Duplicate · Removed | baseline-unlinked
+expect: outside this page
+require-shell: python3 -B @REPO/scripts/devex/fixtures/relationship_book.py @TMP_TARGET @ART old-unlinked
+keys: p
+require-live-snap: 20 page 1 | returned-first-page
+keys: Down
+require-live-snap: 20 Labeled book pair 001 | fresh-pair-selected
+expect: Proposed
+keys: a
+paste-file: @ART/fresh-accept-note.txt
+keys: Enter
+require-live-snap: 20 Reviewed only the fresh pair | fresh-pair-accepted
+require-shell: python3 -B @REPO/scripts/devex/fixtures/relationship_book.py @TMP_TARGET @ART fresh-accepted
+keys: u
+paste-file: @ART/fresh-unlink-note.txt
+keys: Enter
+require-live-snap: 20 Unlink only the fresh pair | fresh-pair-unlinked
+require-shell: python3 -B @REPO/scripts/devex/fixtures/relationship_book.py @TMP_TARGET @ART finished
+ask: Can the operator inspect the original recorded generation, unlink only the old pair, and separately accept then unlink a fresh pair without losing observations or inventing fixed status after the SHA change?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+launch: --target @TMP_TARGET/owned
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/open-center.txt
+keys: Enter
+require-live-snap: 20 Viewing Review | recovered-center
+submit: relationships
+require-live-snap: 20 Removed | recovered-pairs-prompt
+keys: Escape
+require-live-snap: 20 Removed | recovered-pairs
+require-shell: python3 -B @REPO/scripts/devex/fixtures/relationship_book.py @TMP_TARGET @ART restarted
+ask: Does no-color restart retain both exact historical pair decisions, all 121 observations and usable paging, with no model work or finding-verdict changes?
+keys: C-c
+require-exit: 10

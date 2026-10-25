@@ -15,6 +15,7 @@ pub(crate) use state::{
     RelationshipWriteDraft, RelationshipsRouteState,
 };
 mod bulk;
+mod focus;
 mod selection;
 mod write;
 
@@ -49,13 +50,6 @@ impl ShellApp {
             finding_id: self.router.relationships.finding_id,
             offset: self.router.relationships.offset,
         }
-    }
-
-    pub(crate) fn selected_relationship(&self) -> Option<FindingRelationship> {
-        let ViewDataState::Ready(Ok(page)) = self.relationship_page() else {
-            return None;
-        };
-        page.rows.get(self.router.relationships.cursor).cloned()
     }
 
     pub(crate) fn handle_relationship_key(
@@ -159,34 +153,6 @@ impl ShellApp {
         true
     }
 
-    fn move_relationship(&mut self, delta: isize) {
-        let ViewDataState::Ready(Ok(page)) = self.relationship_page() else {
-            return;
-        };
-        let route = &mut self.router.relationships;
-        route.cursor = route
-            .cursor
-            .saturating_add_signed(delta)
-            .min(page.rows.len().saturating_sub(1));
-        self.router.default_scroll_mut().set(0);
-    }
-
-    fn next_relationship_page(&mut self) {
-        let ViewDataState::Ready(Ok(page)) = self.relationship_page() else {
-            return;
-        };
-        if !page.has_more {
-            return;
-        }
-        self.router.relationships.offset += 50;
-        self.router.relationships.cursor = 0;
-    }
-
-    fn previous_relationship_page(&mut self) {
-        self.router.relationships.offset = self.router.relationships.offset.saturating_sub(50);
-        self.router.relationships.cursor = 0;
-    }
-
     fn begin_relationship_note(&mut self, state: FindingRelationshipState) {
         if self.runtime_state.relationship_write.is_some() {
             return;
@@ -197,6 +163,7 @@ impl ShellApp {
         let Some(target) = self.target_owned() else {
             return;
         };
+        self.pin_relationship(relationship.clone());
         self.router.relationships.notice = None;
         self.router.relationships.note = Some(RelationshipNote {
             target,
@@ -266,6 +233,7 @@ impl ShellApp {
     }
 
     fn refresh_relationships(&mut self) {
+        self.pin_current_relationship();
         self.workbench_cache()
             .borrow_mut()
             .relationship_pages
@@ -275,10 +243,19 @@ impl ShellApp {
 }
 
 fn relationship_hotkey(mut key: KeyEvent) -> KeyEvent {
+    key.code = relationship_navigation_key(key);
     if key.code == KeyCode::Char('*') && key.modifiers == KeyModifiers::SHIFT {
         key.modifiers = KeyModifiers::NONE;
     }
     key
+}
+
+fn relationship_navigation_key(key: KeyEvent) -> KeyCode {
+    match (key.modifiers, key.code) {
+        (KeyModifiers::NONE, KeyCode::Down) => KeyCode::Char('j'),
+        (KeyModifiers::NONE, KeyCode::Up) => KeyCode::Char('k'),
+        (_, code) => code,
+    }
 }
 
 #[cfg(test)]

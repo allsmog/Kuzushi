@@ -753,7 +753,7 @@ mod tests {
     }
 
     #[test]
-    fn row_names_reappeared_rejection_conflict() {
+    fn row_names_a_decision_from_another_observation() {
         let mut row = review_row();
         row.decision = "rejected_false_positive".to_string();
         row.decision_conflict = Some("reappeared_after_rejection".to_string());
@@ -761,7 +761,7 @@ mod tests {
         let text = line_text(review_queue_row_line(&row, 160));
 
         assert!(text.contains("decision:rejected_fp"), "{text}");
-        assert!(text.contains("conflict:scanner-reappeared"), "{text}");
+        assert!(text.contains("conflict:other-observation"), "{text}");
     }
 
     #[test]

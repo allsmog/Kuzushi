@@ -5,6 +5,7 @@ impl ShellApp {
         if self.runtime_state.lesson_write.is_some() {
             return;
         }
+        self.pin_current_lesson();
         let Some(selection) = self.selected_accepted_lesson() else {
             return;
         };

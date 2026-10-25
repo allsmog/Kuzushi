@@ -563,6 +563,9 @@ fn sarif_provenance_properties(record: &WorkspaceFindingExportRecord) -> serde_j
         "kuzushiVersion": record.provenance.kuzushi_version,
         "kuzushiModel": record.provenance.model,
         "kuzushiRuntimePlatform": record.provenance.runtime_platform,
+        "kuzushiRunGit": record.provenance.run_git,
+        "kuzushiObservationSource": record.provenance.observation_source,
+        "kuzushiRelationshipSources": record.provenance.relationship_sources,
     })
 }
 

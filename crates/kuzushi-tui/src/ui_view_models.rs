@@ -220,6 +220,8 @@ pub(crate) use finding_summary::{
     status_footer_findings_summary_with_total, FindingsNarrowing, SeverityCounts,
 };
 #[cfg(test)]
+pub(crate) use findings::finding_identity_label;
+#[cfg(test)]
 pub(crate) use findings::projected_visible_finding_pairs;
 pub(crate) use findings::{
     baseline_sorted_finding_alias_indices, current_finding_for_detail,

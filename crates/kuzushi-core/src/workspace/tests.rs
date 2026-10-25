@@ -2305,6 +2305,9 @@ mod tests {
                 kuzushi_version: Some("sentinel-provenance-kuzushi-version".to_string()),
                 model: Some("sentinel-provenance-model".to_string()),
                 runtime_platform: Some("sentinel-provenance-runtime-platform".to_string()),
+                run_git: None,
+                observation_source: None,
+                relationship_sources: Vec::new(),
             },
             remediation: Some(WorkspaceRemediationExportSummary {
                 application_id: "sentinel-remediation-application-id".to_string(),

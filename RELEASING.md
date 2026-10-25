@@ -1,5 +1,61 @@
 # Releasing Kuzushi
 
+## Native observation sources and exported revisions
+
+The aggregate native scan now binds observations to the authenticated source
+snapshot captured before execution and retains cited files as content-addressed
+blobs. SAST reuses its existing snapshot. Standalone native orchestration captures
+one snapshot before discovery. Native source retention has a 64 MiB aggregate
+limit per batch. Changed source, invalid citations, cancellation or exhausted
+retention leave observations unbound and disclose a source-binding limitation.
+Nontext or unavailable cited files cannot receive this source binding.
+This path does not reread live files to manufacture substitute source evidence.
+Previously recorded observations are preserved, including unknown Git metadata.
+
+Native coverage writers use schema version 3 and add optional `sourceBinding`.
+Readers continue accepting versions 1 and 2. A source-binding limitation makes
+coverage partial independently of scanner errors; it does not assert that the
+scanner failed to inspect the cited file. Strict coverage consumers must accept
+version 3 and distinguish these two limitations.
+
+Workspace export provenance adds `runGit`, `observationSource` and
+`relationshipSources`. The first describes the matching saved run checkout.
+The second identifies the exact observation generation, run, snapshot, tree,
+blob and recorded Git metadata. The third contains the distinct generations
+referenced by exported relationships, including older endpoints after every
+current finding has been observed again. It is not a full observation-history
+export. Unknown source metadata remains null even when run metadata is known.
+Neither a later checkout nor a missing later observation proves a fix.
+
+JSON and JSONL include these fields in provenance. SARIF adds `kuzushiRunGit`,
+`kuzushiObservationSource` and `kuzushiRelationshipSources`. Markdown bundle
+manifests include the same camel-case fields and finding documents display their
+recorded identities. CSV appends `run_git`, `observation_source` and
+`relationship_sources` after all prior columns; each cell is JSON. Existing
+column positions and workspace export markers remain unchanged.
+
+Rust consumers constructing `WorkspaceRunExportContext` must initialize
+`run_git`; consumers constructing `WorkspaceFindingProvenanceSummary` must also
+initialize `observation_source` and `relationship_sources`, or use
+`..Default::default()`. The additive `RecordedObservationSource` reader accepts
+schema version 1 only. Re-export to obtain these fields; historical exports are
+not rewritten or assigned missing SHAs.
+
+Review now uses retained source for every saved observation, including the
+current generation. Missing or loading retained source never substitutes current
+bytes. Unsaved previews compare the entire displayed excerpt, including spacing,
+before choosing live text. Retained-source captions identify saved run-checkout
+metadata explicitly; they do not relabel it as authenticated observation Git
+metadata. A current file preview with missing or unchecked retained source is
+explicitly labeled as a current preview.
+
+A decision carried through a durable finding identity can belong to either an
+earlier or later observation than the selected generation. Review labels this
+as a decision source check without asserting chronological order. Existing
+conflict tokens and review authority remain unchanged. In particular, the legacy
+`reappeared_after_rejection` token identifies a check against another observation;
+its name alone does not establish that a scan happened after a human decision.
+
 ## Unsupported dependency metadata
 
 `sbom-scan:scan` now fails when a `package.json` document is not an object,

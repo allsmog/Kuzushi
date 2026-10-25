@@ -71,11 +71,24 @@ impl ShellApp {
                 return;
             }
         };
-        self.refresh_lessons();
         if action == "threat-model:reuse-lessons" {
+            self.refresh_lessons();
             self.finish_lesson_context(&output);
             return;
         }
+        self.finish_saved_lesson(&output);
+    }
+
+    fn finish_saved_lesson(&mut self, output: &serde_json::Value) {
+        let record = match saved_lesson_record(output) {
+            Ok(record) => record,
+            Err(error) => {
+                self.router.lessons.notice = Some(format!("Lesson action receipt is not confirmed: {error}. Draft retained. Inspect saved history before retrying."));
+                return;
+            }
+        };
+        self.refresh_lessons();
+        self.pin_lesson_record(record);
         self.router.lessons.form_visible = false;
         self.router.lessons.form = None;
         self.router.lessons.notice = Some(
@@ -86,4 +99,15 @@ impl ShellApp {
         );
         self.router.lessons.selected.clear();
     }
+}
+
+fn saved_lesson_record(output: &serde_json::Value) -> anyhow::Result<FindingLesson> {
+    let record: FindingLesson = serde_json::from_value(output["data"]["lesson"].clone())?;
+    record.validate()?;
+    let reference: LessonRef = serde_json::from_value(output["data"]["lessonRef"].clone())?;
+    anyhow::ensure!(
+        record.reference()? == reference,
+        "Saved lesson reference does not match its record"
+    );
+    Ok(record)
 }

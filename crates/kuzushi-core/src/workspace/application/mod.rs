@@ -20,6 +20,7 @@ mod export_projection_model;
 mod export_relationships;
 mod export_review_context;
 mod export_sarif;
+mod export_source;
 mod export_vuln_findings;
 mod export_workspace_findings;
 mod finding_goals;

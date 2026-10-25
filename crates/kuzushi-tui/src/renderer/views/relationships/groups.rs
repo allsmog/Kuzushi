@@ -21,14 +21,11 @@ pub(super) fn group_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 }
 
 pub(crate) fn finding_group_page_rows(app: &ShellApp) -> Option<usize> {
-    if app.shell_view() == crate::ShellView::Relationships {
-        if let Some(review) = &app.router.relationships.bulk {
-            return Some(super::bulk::page_rows(app, review));
-        }
-    }
-    if app.shell_view() != crate::ShellView::Relationships || !app.router.relationships.show_groups
-    {
+    if app.shell_view() != crate::ShellView::Relationships {
         return None;
+    }
+    if let Some(rows) = super::browser_or_batch_page_rows(app) {
+        return Some(rows);
     }
     let ViewDataState::Ready(Ok(page)) = app.finding_groups_page() else {
         return None;

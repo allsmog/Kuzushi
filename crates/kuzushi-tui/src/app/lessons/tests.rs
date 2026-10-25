@@ -2,6 +2,7 @@ use super::*;
 mod draft_preservation;
 mod fixture;
 mod followup;
+mod pagination;
 mod reader;
 mod replacement;
 

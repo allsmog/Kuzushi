@@ -190,7 +190,8 @@ pub(crate) struct DecisionHistoryRow {
     pub(crate) rationale: String,
 }
 
-/// On-disk source context around the finding's `file_path:start_line`,
+/// Retained observation source or an explicitly labeled current-file preview.
+/// Source context surrounds the finding's `file_path:start_line`,
 /// read through the workbench cache so browsing findings never re-reads
 /// the same file per frame. `lines` is empty when `note` explains why the
 /// snippet is unavailable (unreadable file, line beyond EOF).
@@ -200,6 +201,7 @@ pub(crate) struct SourceSnippetModel {
     pub(crate) focus_line: usize,
     pub(crate) lines: Vec<String>,
     pub(crate) note: Option<String>,
+    pub(crate) retained_run_checkout: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -574,14 +576,51 @@ fn resolve_snippet_with_scanned_copy(
     finding: &Finding,
     live: SourceSnippetModel,
 ) -> SourceSnippetModel {
+    let source = cached_scanned_window(app, finding);
+    if finding.id.is_some_and(|id| id > 0) {
+        return retained_observation_snippet(app, finding, source);
+    }
+    resolve_current_source_snippet(app, finding, live, source)
+}
+
+fn retained_observation_snippet(
+    app: &ShellApp,
+    finding: &Finding,
+    source: ScannedSnippetLookup,
+) -> SourceSnippetModel {
+    match source {
+        ScannedSnippetLookup::Window(window) => {
+            scanned_snippet_fallback_model(app, finding, window)
+        }
+        ScannedSnippetLookup::Absent => snippet_note(
+            finding.start_line as usize,
+            "Retained source unavailable for this observation".into(),
+        ),
+        ScannedSnippetLookup::Unknown => snippet_note(
+            finding.start_line as usize,
+            "Retained source not available yet for this observation".into(),
+        ),
+    }
+}
+
+fn resolve_current_source_snippet(
+    app: &ShellApp,
+    finding: &Finding,
+    live: SourceSnippetModel,
+    source: ScannedSnippetLookup,
+) -> SourceSnippetModel {
     let live_ok = live.note.is_none();
-    match cached_scanned_window(app, finding) {
+    match source {
         ScannedSnippetLookup::Window(window) if !live_ok || snippet_is_stale(&live, &window) => {
             scanned_snippet_fallback_model(app, finding, window)
         }
-        ScannedSnippetLookup::Absent if !live_ok => {
-            append_snippet_note(live, "no scanned copy recorded")
+        ScannedSnippetLookup::Absent => {
+            append_snippet_note(live, "current file preview · no scanned copy recorded")
         }
+        ScannedSnippetLookup::Unknown => append_snippet_note(
+            live,
+            "current file preview · retained observation source not checked",
+        ),
         _ => live,
     }
 }
@@ -609,26 +648,17 @@ fn cached_scanned_window(app: &ShellApp, finding: &Finding) -> ScannedSnippetLoo
     }
 }
 
-/// Stale when the on-disk focus line no longer matches the scanned copy's
-/// focus line under whitespace normalization. An out-of-window comparison
-/// (either side missing its focus line) is not judged stale.
+/// Compare the entire displayed excerpt, including neighboring lines. Matching
+/// only the cited line can silently show a different revision's surrounding code.
 fn snippet_is_stale(live: &SourceSnippetModel, scanned: &ScannedSnippetWindow) -> bool {
-    let live_line = snippet_focus_text(&live.lines, live.start_line, live.focus_line);
-    let scanned_line = snippet_focus_text(&scanned.lines, scanned.start_line, scanned.focus_line);
-    match (live_line, scanned_line) {
-        (Some(live_line), Some(scanned_line)) => {
-            normalized_snippet_line(&live_line) != normalized_snippet_line(&scanned_line)
-        }
-        _ => false,
-    }
-}
-
-fn snippet_focus_text(lines: &[String], start_line: usize, focus_line: usize) -> Option<String> {
-    lines.get(focus_line.checked_sub(start_line)?).cloned()
-}
-
-fn normalized_snippet_line(line: &str) -> String {
-    line.split_whitespace().collect::<Vec<_>>().join(" ")
+    let captured = scanned
+        .lines
+        .iter()
+        .map(|line| line.replace('\t', "  "))
+        .collect::<Vec<_>>();
+    live.start_line != scanned.start_line
+        || live.focus_line != scanned.focus_line
+        || live.lines != captured
 }
 
 fn scanned_snippet_fallback_model(
@@ -636,7 +666,7 @@ fn scanned_snippet_fallback_model(
     finding: &Finding,
     window: ScannedSnippetWindow,
 ) -> SourceSnippetModel {
-    let sha = scanned_revision_sha(app, finding);
+    let sha = scanned_run_checkout(app, finding);
     SourceSnippetModel {
         start_line: window.start_line,
         focus_line: window.focus_line,
@@ -645,13 +675,12 @@ fn scanned_snippet_fallback_model(
             .iter()
             .map(|line| line.replace('\t', "  "))
             .collect(),
-        note: Some(format!(
-            "as scanned @ {sha} — live source missing or changed"
-        )),
+        note: None,
+        retained_run_checkout: Some(sha),
     }
 }
 
-fn scanned_revision_sha(app: &ShellApp, finding: &Finding) -> String {
+fn scanned_run_checkout(app: &ShellApp, finding: &Finding) -> String {
     let runs = run_summary_index(app);
     finding
         .scan_id
@@ -706,6 +735,7 @@ fn snippet_from_content(content: &str, focus_line: usize) -> SourceSnippetModel 
             .map(|line| line.replace('\t', "  "))
             .collect(),
         note: None,
+        retained_run_checkout: None,
     }
 }
 
@@ -715,6 +745,7 @@ fn snippet_note(focus_line: usize, note: String) -> SourceSnippetModel {
         focus_line,
         lines: Vec::new(),
         note: Some(note),
+        retained_run_checkout: None,
     }
 }
 
@@ -803,6 +834,15 @@ pub(crate) fn selected_finding_out_of_window_notice(app: &ShellApp) -> Option<St
 }
 
 pub(super) fn current_observation_alias(app: &ShellApp, pinned: &Finding) -> Option<String> {
+    use kuzushi_core::findings::finding_page_anchor;
+    let current_anchor = finding_page_anchor(newer_observation(app, pinned)?);
+    projected_visible_findings(app)
+        .iter()
+        .find(|row| finding_page_anchor(&row.finding) == current_anchor)
+        .map(|row| row.alias.clone())
+}
+
+fn newer_observation<'a>(app: &'a ShellApp, pinned: &Finding) -> Option<&'a Finding> {
     use kuzushi_core::findings::{
         finding_page_anchor, finding_page_anchor_index, finding_page_continuity_anchor,
     };
@@ -810,14 +850,7 @@ pub(super) fn current_observation_alias(app: &ShellApp, pinned: &Finding) -> Opt
     let current = app
         .findings()
         .get(finding_page_anchor_index(app.findings(), &anchor)?)?;
-    let current_anchor = finding_page_anchor(current);
-    if current_anchor == finding_page_anchor(pinned) {
-        return None;
-    }
-    projected_visible_findings(app)
-        .iter()
-        .find(|row| finding_page_anchor(&row.finding) == current_anchor)
-        .map(|row| row.alias.clone())
+    (finding_page_anchor(current) != finding_page_anchor(pinned)).then_some(current)
 }
 
 fn finding_rows(

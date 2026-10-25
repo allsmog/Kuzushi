@@ -39,7 +39,7 @@ def verify_json_formats(report):
 def verify_csv(report):
     with (report / "origins.csv").open(newline="") as stream:
         reader = csv.DictReader(stream)
-        assert reader.fieldnames[-1] == "reasoning_assertion_count"
+        assert reader.fieldnames[-4:] == ["reasoning_assertion_count", "run_git", "observation_source", "relationship_sources"]
         records = list(reader)
     assert len(records) == 2 and {row["file"] for row in records} == set(PATHS)
     for row in records:
