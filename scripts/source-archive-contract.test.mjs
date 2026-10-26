@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -18,6 +19,7 @@ test("source export is complete, commit-bound, export-aware, and atomic", () => 
   writeFileSync(path.join(repo, "package.json"), "{}\n");
   mkdirSync(path.join(repo, "src"));
   writeFileSync(path.join(repo, "src", "lib.rs"), "pub fn ready() {}\n");
+  writeFileSync(path.join(repo, "src", "large.bin"), randomBytes(2 * 1024 * 1024));
   mkdirSync(path.join(repo, "private"));
   writeFileSync(path.join(repo, "private", "note.txt"), "not exported\n");
   mkdirSync(path.join(repo, "crate", ".kuzushi"), { recursive: true });
