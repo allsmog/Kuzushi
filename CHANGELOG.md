@@ -60,6 +60,18 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- A Workbench page digit the keymap does not bind now says so instead of
+  becoming prompt text. The Workbench binds page digits for the investigation
+  pages only, so `4` and `5` — the digits that name the visible Prove and Fix
+  readers — reached no binding and fell through to Navigate's printable
+  fallback: the shell silently left Navigate, entered Prompt mode and inserted
+  the digit as a draft. Those digits are now withheld from the fallback when
+  the composer is empty and no current binding claims them, and the existing
+  unhandled-navigation handler reports the page and its verb, as `` `4` does
+  not open Prove here — type `prove` ``. A non-empty composer still extends the
+  draft, so no keystroke is dropped, and every other printable keeps its
+  type-ahead.
+
 - A findings export folds by the policy the operator's ledger resolved. The
   Review ledger resolves its identity fold from operator state and the
   identity-audit approval, the scan-scoped export hardcoded the conservative
