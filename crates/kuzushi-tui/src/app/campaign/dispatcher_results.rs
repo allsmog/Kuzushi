@@ -83,8 +83,11 @@ fn recorded_operator_stop(target: &Path, campaign: &str, cause: &str) -> Option<
     if parked == 0 || completed + parked != snapshot.jobs.len() {
         return None;
     }
-    let expected = format!("campaign {campaign}: {completed} completed, {parked} parked");
-    (cause == expected).then(|| format!("Stopped by operator: {completed} completed, {parked} parked.\nConsumed attempts and unresolved spending remain recorded. Finish and report partial work with R, or press a to review the remaining plan and attempt allowance."))
+    let expected = format!(
+        "campaign {campaign}: {}",
+        campaign_state_summary(&snapshot.state_counts())
+    );
+    (cause == expected).then(|| format!("Stopped by operator: {completed} completed, {parked} parked.\nConsumed attempts and unresolved spending remain recorded. Type report to finish partial work. Open campaign {campaign} to review the remaining plan and attempt allowance."))
 }
 
 fn is_canceled_park(
@@ -115,13 +118,15 @@ fn allowance_pause_summary(
     if parked == 0 || completed + failed + parked != snapshot.jobs.len() {
         return None;
     }
-    Some(
-        counts
-            .iter()
-            .map(|(state, count)| format!("{count} {state}"))
-            .collect::<Vec<_>>()
-            .join(", "),
-    )
+    Some(campaign_state_summary(&counts))
+}
+
+fn campaign_state_summary(counts: &std::collections::BTreeMap<String, usize>) -> String {
+    counts
+        .iter()
+        .map(|(state, count)| format!("{count} {state}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn is_allowance_park(

@@ -644,6 +644,23 @@ covered absence establishes a fix or a compliance verdict.
 `sbom-scan:scan` is an auxiliary Map inventory action. It reads declared
 dependencies and lockfile versions, emits dependency edges plus CycloneDX and
 SPDX documents, and creates no vulnerability findings or phase checkpoint.
+SPDX package identifiers are opaque and distinguish the complete recorded
+component identity, including source, scope and version. Dependency endpoints
+must be unique within the edge's recorded source. Missing and ambiguous
+endpoints are omitted from SPDX relationships and disclosed in the output,
+document annotations and additive `data.spdxExport` diagnostics. The canonical
+components and raw dependency graph remain intact. Export timestamps and a
+fresh namespace identify the document, not authenticated repository freshness.
+Consumers must join actual package identifiers rather than reconstructing them.
+See [the compatibility notes](../RELEASING.md#source-qualified-spdx-package-references).
+Both formats now consume one source-qualified export graph. CycloneDX `bom-ref`
+values identify recorded components independently of their package URLs;
+consumers must join actual reference values. Its additive `data.cycloneDxExport`
+and standalone metadata preserve omissions. Dependency compositions are
+`incomplete` when observed links cannot be mapped and `unknown` otherwise.
+Missing outgoing evidence does not establish a dependency-free component.
+Fresh serial numbers identify generated documents, not source revisions. See
+[the CycloneDX compatibility notes](../RELEASING.md#source-qualified-cyclonedx-references).
 The `context:build` DAG dependency is display metadata; shared dispatch does
 not require a prior context snapshot. The selected target is the inventory
 root. This adapter does not accept an exact-file discovery scope.

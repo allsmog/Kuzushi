@@ -291,7 +291,10 @@ fn compact_selected_detail_lines(
         return vec![action];
     }
     let location = Line::styled(
-        format!("  {}", fit_path(&row.location, width.saturating_sub(2))),
+        format!(
+            "  {}",
+            fit_location_label(&row.location, width.saturating_sub(2))
+        ),
         theme::muted(),
     );
     if budget == 2 {

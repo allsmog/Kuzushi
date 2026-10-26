@@ -9,7 +9,26 @@ pub(super) mod styled_wrap;
 pub(crate) fn wrap_document_lines(lines: Vec<Line<'static>>, width: u16) -> Vec<Line<'static>> {
     lines
         .into_iter()
-        .flat_map(|line| styled_wrap::document_line(line, width as usize))
+        .flat_map(|line| styled_wrap::document_line(line, width as usize, width as usize))
+        .collect()
+}
+
+pub(crate) fn wrap_document_text(
+    value: &str,
+    first_width: usize,
+    next_width: usize,
+) -> Vec<String> {
+    if first_width == 0 || next_width == 0 {
+        return vec![String::new()];
+    }
+    styled_wrap::document_line(Line::raw(value.to_string()), first_width, next_width)
+        .into_iter()
+        .map(|line| {
+            line.spans
+                .into_iter()
+                .map(|span| span.content.into_owned())
+                .collect()
+        })
         .collect()
 }
 

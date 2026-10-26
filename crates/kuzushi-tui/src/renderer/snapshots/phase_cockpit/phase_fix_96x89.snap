@@ -89,7 +89,7 @@ KUZUSHI · Viewing Fix · next required Review · target ./phase-target · ● L
 │                                   │
 │                                   │
 │                                   │
-⛭ autonomy:fix · run route · ⠋ context:build · 42s ·...     6 findings / 1 crit / 2 high / 2 med
+⛭ autonomy:fix · Run active · ⠋ context:build · 42s ·...    6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt
 ◆ FIX VIEW › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt

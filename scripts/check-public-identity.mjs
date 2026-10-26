@@ -79,7 +79,7 @@ const requiredIdentityReferences = [
   {
     label: "TUI cockpit header",
     file: "crates/kuzushi-tui/src/renderer/chrome/status/context_strip.rs",
-    needles: ['Span::styled("KUZUSHI"', "`KUZUSHI route:<m>"],
+    needles: ['Span::styled("KUZUSHI"', 'let brand = fit("KUZUSHI", width);'],
   },
   {
     label: "Rust CLI binary identity",

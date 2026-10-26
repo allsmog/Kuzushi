@@ -108,7 +108,13 @@ def verify(root, evidence, stage):
     early = stage in ["map-completed", "map-accepted", "scan-draft", "scan-approved"]
     expected_calls = 0 if stage == "map-draft" else 1 if early else (4 if complete else 3) + int(canceled)
     if stage == "map-completed":
-        wait_jobs(root, context, {"completed"})
+        jobs = wait_jobs(root, context, {"completed"})
+        writer = jobs[context["jobs"][0]["jobId"]]
+        indexed = json.loads((root / ".kuzushi/v3/runs" / writer["runId"] / "result.json").read_text())["data"]
+        assert indexed["root"] == str(root)
+        assert indexed["snapshotPath"] == str(root / ".kuzushi/context-snapshot.json")
+        assert (root / ".kuzushi/context-snapshot.json").is_file()
+        assert indexed["snapshot"]["filesIndexed"] == 3
     scans = [plan for plan in plans(root) if plan["kind"] == "scan-batch"]
     if stage not in ["map-draft", "map-completed", "map-accepted"]:
         assert len(scans) == 1

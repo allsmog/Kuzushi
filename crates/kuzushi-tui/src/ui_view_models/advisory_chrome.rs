@@ -64,15 +64,29 @@ pub(crate) fn cost_cap_halt_model(app: &ShellApp) -> Option<CostCapHaltModel> {
         app.session().session_cost_report(),
         app.session().cost_accounting_error(),
     );
-    let (compact, actions) = budget_halt_actions(app.advisory().budget_halt_acknowledged);
+    let owned_study = app.runtime_state.has_owned_dispatcher();
+    let (compact, actions) =
+        budget_halt_actions(app.advisory().budget_halt_acknowledged, owned_study);
+    let label = budget_halt_label(owned_study);
     Some(CostCapHaltModel {
-        header: format!("■ COST CAP HALT · {spent} / cap ${:.4}", halt.limit_usd),
+        header: format!("■ {label} · {spent} / cap ${:.4}", halt.limit_usd),
         compact,
         actions,
     })
 }
 
-fn budget_halt_actions(acknowledged: bool) -> (&'static str, &'static str) {
+fn budget_halt_label(owned_study: bool) -> &'static str {
+    if owned_study {
+        "SESSION COST CAP HALT"
+    } else {
+        "COST CAP HALT"
+    }
+}
+
+fn budget_halt_actions(acknowledged: bool, owned_study: bool) -> (&'static str, &'static str) {
+    if owned_study {
+        return owned_study_budget_actions(acknowledged);
+    }
     if acknowledged {
         (
             "SPENDING HALTED · cost / report",
@@ -82,6 +96,20 @@ fn budget_halt_actions(acknowledged: bool) -> (&'static str, &'static str) {
         (
             "COST CAP · Esc inspect · c cap · a abort",
             "Esc inspect/report   c review cap   a abort work",
+        )
+    }
+}
+
+fn owned_study_budget_actions(acknowledged: bool) -> (&'static str, &'static str) {
+    if acknowledged {
+        (
+            "SESSION HALT · cost / report",
+            "Type cost or report. Session spending is halted; the study uses its own allowance.",
+        )
+    } else {
+        (
+            "SESSION CAP · a local · Ctrl+C study",
+            "Study allowance is separate. Esc inspect · c cap · a stop session work · Ctrl+C study",
         )
     }
 }

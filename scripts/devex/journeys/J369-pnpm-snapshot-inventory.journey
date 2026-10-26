@@ -1,0 +1,116 @@
+name: Modern pnpm snapshot graph survives failure correction and Components restart
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_pnpm.py @TMP_TARGET @ART prepare
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+require-live-snap: 20 LOGS | inventory-origin
+submit: run sbom-scan:scan
+require-live-snap: 30 sbom-scan: 5 components | first-inventory
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_pnpm.py @TMP_TARGET @ART initial
+submit: scene
+require-live-snap: 20 KUZUSHI VIZ | initial-gallery
+keys: Tab
+require-live-snap: 20 COMPONENT STACK | initial-components
+expect: outer
+expect: inner
+expect: @scope/plugin
+keys: Escape
+submit: logs
+require-live-snap: 20 LOGS | invalid-input-origin
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_pnpm.py @TMP_TARGET @ART break
+submit: run sbom-scan:scan
+require-live-snap: 30 snapshot dependency versions must be strings | invalid-input-result
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_pnpm.py @TMP_TARGET @ART failed
+submit: scene
+require-live-snap: 20 Component inventory failed | failed-components
+expect: pnpm-lock.yaml
+expect: snapshot dependency versions must be strings
+expect-not: outer
+expect-not: inner
+expect-not: @scope/plugin
+resize: 160x48
+live-snap: failed-160x48
+resize: 96x89
+live-snap: failed-96x89
+resize: 80x24
+live-snap: failed-80x24
+resize: 60x20
+live-snap: failed-60x20
+resize: 40x12
+live-snap: failed-40x12
+keys: NPage
+live-snap: failure-page-1-40x12
+keys: NPage
+live-snap: failure-page-2-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_pnpm.py @TMP_TARGET @ART failure-pages
+ask: Does the malformed snapshot identify its lockfile and unsupported version field, with keyboard-reachable recovery at every size and previous package claims cleared?
+resize: 120x36
+keys: Escape
+submit: logs
+require-live-snap: 20 LOGS | correction-origin
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_pnpm.py @TMP_TARGET @ART correct
+submit: run sbom-scan:scan
+require-live-snap: 30 sbom-scan: 5 components | corrected-inventory
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_pnpm.py @TMP_TARGET @ART corrected
+submit: scene
+require-live-snap: 20 COMPONENT STACK | corrected-components
+expect: outer
+expect: inner
+expect: @scope/plugin
+expect: declared ^1.0.0
+expect: optional
+expect: 4 resolved
+expect: Source freshness is unverified
+expect-not: Map ✓
+expect-not: Scan ✓
+resize: 160x48
+live-snap: corrected-160x48
+resize: 96x89
+live-snap: corrected-96x89
+resize: 80x24
+live-snap: corrected-80x24
+resize: 60x20
+live-snap: corrected-60x20
+resize: 40x12
+live-snap: corrected-40x12
+keys: NPage
+live-snap: corrected-page-1-40x12
+keys: NPage
+live-snap: corrected-page-2-40x12
+keys: NPage
+live-snap: corrected-page-3-40x12
+keys: NPage
+live-snap: corrected-page-4-40x12
+keys: NPage
+live-snap: corrected-page-5-40x12
+keys: NPage
+live-snap: corrected-page-6-40x12
+ask: Is the corrected five-entry inventory readable across the viewport matrix, with manifest constraints distinct from observed lock versions, unverified source and no phase-completion claim?
+resize: 120x36
+keys: Escape
+keys: C-c
+require-exit: 10
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: scene
+require-live-snap: 20 KUZUSHI VIZ | restart-gallery
+keys: Tab
+require-live-snap: 20 declared ^1.0 | restarted-components
+expect: outer
+expect: inner
+expect: @scope/plugin
+expect-not: Map ✓
+expect-not: Scan ✓
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_pnpm.py @TMP_TARGET @ART restarted
+ask: Does no-color restart recollect the corrected pnpm inventory while retaining two successful results, one failure and all five recorded dependency links without model calls, installation or invented workflow progress?
+keys: C-c
+require-exit: 10

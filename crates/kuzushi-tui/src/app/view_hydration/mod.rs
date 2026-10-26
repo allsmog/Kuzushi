@@ -17,6 +17,9 @@ mod reader_tests;
 mod recovery_tests;
 #[cfg(test)]
 mod report_refresh_tests;
+pub(super) mod repository_index;
+#[cfg(test)]
+mod repository_index_tests;
 mod requests;
 mod runtime;
 mod scan_study;
@@ -315,6 +318,7 @@ pub(crate) enum ViewHydrationKey {
     },
     TargetProfile,
     MapArtifacts,
+    RepositoryIndex,
     CpgArtifacts,
     ScanRecommendations,
     TargetBase,
@@ -373,6 +377,7 @@ pub(crate) enum ViewHydrationValue {
     HealthChecks(ViewHealthChecks),
     TargetProfile(TargetProfile),
     MapArtifacts(bool),
+    RepositoryIndex(Arc<ContextSnapshotView>),
     CpgArtifacts(bool),
     ScanRecommendations(ScanRecommendationsState),
     TargetBase(String),
@@ -444,6 +449,22 @@ pub(crate) trait ViewArtifactReader: std::fmt::Debug + Send + Sync {
     ) -> Option<ViewHydrationValue> {
         (!cancellation.is_canceled()).then(|| self.read(target, key))
     }
+}
+
+fn recovered_runs_from_hydration(
+    results: &[ViewHydrationResult],
+) -> Vec<kuzushi_core::RecoveredRun> {
+    results
+        .iter()
+        .filter_map(|result| match &result.value {
+            ViewHydrationValue::RunSummaryEntries(hydration) => {
+                Some(hydration.newly_recovered.as_slice())
+            }
+            _ => None,
+        })
+        .flatten()
+        .cloned()
+        .collect()
 }
 
 impl ShellApp {
@@ -524,6 +545,7 @@ impl ShellApp {
 
     fn apply_view_hydration_drain(&mut self, drain: ViewHydrationDrain) {
         let drain = self.apply_findings_projection_drain(drain);
+        let refresh_repository_index = repository_index::drain_updates_index(&drain);
         let refresh_file_picker = drain
             .results
             .iter()
@@ -537,18 +559,7 @@ impl ShellApp {
                 )
             )
         });
-        let recovered_runs = drain
-            .results
-            .iter()
-            .filter_map(|result| match &result.value {
-                ViewHydrationValue::RunSummaryEntries(hydration) => {
-                    Some(hydration.newly_recovered.as_slice())
-                }
-                _ => None,
-            })
-            .flatten()
-            .cloned()
-            .collect::<Vec<_>>();
+        let recovered_runs = recovered_runs_from_hydration(&drain.results);
         {
             let mut cache = self.workbench_cache().borrow_mut();
             for result in drain.results {
@@ -561,6 +572,9 @@ impl ShellApp {
         }
         if refresh_target_profile {
             self.apply_ready_target_profile();
+        }
+        if refresh_repository_index {
+            self.apply_ready_repository_index();
         }
         self.disclose_returning_workspace_drift();
         self.announce_recovered_runs(&recovered_runs);

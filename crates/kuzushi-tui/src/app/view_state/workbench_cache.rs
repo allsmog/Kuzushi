@@ -23,6 +23,7 @@ use kuzushi_core::{
 use map_artifacts_cache::MapArtifactsCache;
 use prompt_override_cache::PromptOverrideCache;
 use remediation_projection::FindingPatchTruthCache;
+use repository_index_cache::RepositoryIndexCache;
 use scanned_snippet::ScannedSnippetCache;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -57,6 +58,7 @@ mod prompt_override_cache;
 mod relationships;
 mod remediation_projection;
 mod report_reads;
+mod repository_index_cache;
 mod review_source;
 mod scan_study;
 use report_reads::ReportReadCache;
@@ -139,6 +141,7 @@ pub(crate) struct WorkbenchCache {
         Result<kuzushi_core::findings::ContextMatrixOccurrenceReport, String>,
     >,
     map_artifacts: MapArtifactsCache,
+    repository_index: RepositoryIndexCache,
     cpg_artifacts: CpgArtifactsCache,
     scan_recommendations: Option<ScanRecommendationsCache>,
     prompt_overrides: PromptOverrideCache,
@@ -493,6 +496,7 @@ impl WorkbenchCache {
     }
 
     pub(crate) fn invalidate_workspace_files(&mut self) {
+        self.repository_index.invalidate();
         self.lesson_pages.clear();
         self.investigation_report.invalidate();
         self.workspace_report_review.invalidate();
@@ -535,6 +539,7 @@ impl WorkbenchCache {
     /// evidence oscillate through Loading even though those files did not
     /// change.
     pub(crate) fn invalidate_source_file_changes(&mut self) {
+        self.repository_index.invalidate();
         self.source_file = None;
         self.mark_git_metadata_stale();
         self.file_completion_values = None;
@@ -664,6 +669,7 @@ impl WorkbenchCache {
     }
 
     fn invalidate_named_artifact(&mut self, relative: &Path) {
+        self.repository_index.invalidate_path(relative);
         if is_project_scope_tree_path(relative) {
             self.scope_tree = None;
         }
@@ -765,6 +771,7 @@ impl WorkbenchCache {
     }
 
     fn invalidate_state_root(&mut self, state_root: &Path) {
+        self.repository_index.invalidate_path(state_root);
         self.json_files
             .retain(|cached, _| !cached.starts_with(state_root));
         self.path_states

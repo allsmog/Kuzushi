@@ -35,7 +35,8 @@ impl ShellApp {
     }
 
     pub(crate) fn request_active_abort_with_reason(&mut self, reason: AbortReason) -> bool {
-        let had_running_work = self.has_running_work();
+        let had_running_work = self.has_local_running_work()
+            || (reason == AbortReason::Operator && self.runtime_state.has_owned_dispatcher());
         let requested = self.request_domain_aborts(reason);
         self.cancel_active_tokens();
         if !had_running_work {
@@ -51,7 +52,9 @@ impl ShellApp {
 
     fn request_domain_aborts(&mut self, reason: AbortReason) -> bool {
         let mut requested = false;
-        requested |= self.request_owned_dispatcher_abort();
+        if reason == AbortReason::Operator {
+            requested |= self.request_owned_dispatcher_abort();
+        }
         requested |= self.request_scan_abort_for(reason);
         requested |= self.request_tool_abort_for(reason);
         requested |= self.request_agent_abort();

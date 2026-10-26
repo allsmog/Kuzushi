@@ -28,6 +28,7 @@ mod dependency_graph;
 mod dotnet_project;
 mod edge_readers;
 mod elm_json;
+mod export_graph;
 mod gemfile;
 mod gemfile_lock;
 mod gleam_toml;

@@ -194,13 +194,13 @@ fn scope_navigation_controls(state: &ScopeReviewState) -> [&'static str; 2] {
 fn boundary_controls(review: &kuzushi_core::workspace::ScanScopeReview) -> [&'static str; 2] {
     if review.record.acceptance.is_none() {
         return [
-            "↑↓↔  Space mark · a accept · f files",
-            "p plan · Enter menu · Esc back",
+            "↑↓↔ Space mark · f files · PgUp/Dn",
+            "a accept · p plan · Enter menu · Esc",
         ];
     }
     [
-        "↑↓ →/← tree · Space mark · p plan",
-        "Enter menu · f files · Esc back",
+        "↑↓↔ Space mark · f files · PgUp/Dn",
+        "p plan · Enter menu · Esc back",
     ]
 }
 

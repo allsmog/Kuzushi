@@ -2693,7 +2693,7 @@ fn active_context_build_view_shows_live_feedback() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("run route"));
+    assert!(rendered.contains("Run active"));
     assert!(rendered.contains("context:build"));
     assert!(rendered.contains("indexing repository context"));
     assert!(rendered.contains("request abort"));
@@ -3634,12 +3634,12 @@ fn recommend_view_renders_latest_recommendations_artifact() {
 #[test]
 fn renders_shell_module_plan_and_run_routing_modes() {
     let cases: [(&str, &str, fn(&mut ShellApp)); 6] = [
-        ("shell route", "kuzushi>", |_| {}),
-        ("module route", "kuzushi/sast>", |app| {
+        ("Commands", "kuzushi>", |_| {}),
+        ("Module selected", "kuzushi/sast>", |app| {
             app.set_focused_module(Some("sast".to_string()));
             app.set_shell_view(ShellView::Module);
         }),
-        ("plan route", "kuzushi/plan>", |app| {
+        ("Plan", "kuzushi/plan>", |app| {
             app.set_pending_plan(crate::app::PlanProposal {
                 goal: "tighten SAST options".to_string(),
                 summary: "set scanner controls".to_string(),
@@ -3647,7 +3647,7 @@ fn renders_shell_module_plan_and_run_routing_modes() {
                 unsupported: Vec::new(),
             });
         }),
-        ("run route", "kuzushi/run>", |app| {
+        ("Run active", "kuzushi/run>", |app| {
             app.set_scan_panel(Some(crate::app::ScanPanelState {
                 run_id: Some("run-1".to_string()),
                 target: std::path::PathBuf::from("."),
@@ -3659,11 +3659,11 @@ fn renders_shell_module_plan_and_run_routing_modes() {
             }));
             app.set_shell_view(ShellView::ModuleRun);
         }),
-        ("module route", "kuzushi/context>", |app| {
+        ("Module selected", "kuzushi/context>", |app| {
             app.set_focused_module(Some("context".to_string()));
             app.set_shell_view(ShellView::ModuleRun);
         }),
-        ("run route", "kuzushi/context/run>", |app| {
+        ("Run active", "kuzushi/context/run>", |app| {
             app.set_focused_module(Some("context".to_string()));
             app.set_running_tool_for_test("context:build");
             app.set_shell_view(ShellView::ModuleRun);
@@ -3681,16 +3681,12 @@ fn renders_shell_module_plan_and_run_routing_modes() {
         assert!(rendered.contains(mode), "missing {mode} in {rendered}");
         assert!(rendered.contains("KUZUSHI"), "missing brand in {rendered}");
         assert!(
-            rendered.contains(" route"),
-            "missing mode chip in {rendered}"
-        );
-        assert!(
             rendered.contains("target:"),
             "missing target chip in {rendered}"
         );
         assert!(
-            rendered.contains("context"),
-            "missing context chip in {rendered}"
+            rendered.contains("repo index"),
+            "missing repository index status in {rendered}"
         );
         assert!(
             rendered.contains("model:"),
@@ -3864,7 +3860,7 @@ fn assert_strict_plain_width(rendered: &str, width: usize) {
 }
 
 #[test]
-fn header_hides_cost_at_zero_and_compacts_at_higher_amounts() {
+fn header_qualifies_session_dollars_at_zero_and_positive_amounts() {
     // The design chrome reserves a cost chip on every screen. Keep exact zero
     // tidy while preserving four decimals for tiny nonzero model spend, then
     // compact larger values.
@@ -3881,15 +3877,15 @@ fn header_hides_cost_at_zero_and_compacts_at_higher_amounts() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
     assert!(
-        rendered.contains("cost:$0.00"),
-        "header should render zero-cost chip: {rendered}"
+        rendered.contains("session:$0.00"),
+        "header should qualify the zero session amount: {rendered}"
     );
 
     // Once a real cost is reported we expect the compact spend value.
     app.session_mut().set_session_cost_usd_for_test(0.42);
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
-    assert!(rendered.contains("cost:$0.42"));
+    assert!(rendered.contains("session:$0.42"));
 }
 
 #[test]
@@ -5011,7 +5007,7 @@ fn idle_activity_is_coherent_and_actionable_at_minimum_size() {
     assert!(rendered.contains("no active run"), "{rendered}");
     assert!(rendered.contains("scan"), "{rendered}");
     assert!(rendered.contains("run <tool>"), "{rendered}");
-    assert!(rendered.contains("shell route"), "{rendered}");
+    assert!(rendered.contains("Commands"), "{rendered}");
     assert!(!rendered.contains("logs appear here du"), "{rendered}");
 }
 
@@ -6139,9 +6135,8 @@ fn compact_finding_row_renders_alias_severity_and_location() {
     assert!(text.contains("apps/api/orders.rs:142"));
 }
 
-/// Information hierarchy: the title says what the finding IS and must own
-/// the row; a deep path yields, keeping its useful `file.rs:line` tail
-/// (left-truncated) instead of its repo-root prefix.
+/// The title and filename remain readable while the location identifies its
+/// source group within the same row budget.
 #[test]
 fn compact_finding_row_title_survives_a_deep_path() {
     let line = compact_finding_row(
@@ -6162,13 +6157,13 @@ fn compact_finding_row_title_survives_a_deep_path() {
         "location tail must survive: {text}"
     );
     assert!(
-        !text.contains("crates/kuzushi-core"),
-        "root prefix yields before the tail does: {text}"
+        text.contains("crates/kuzushi-core"),
+        "source group must remain distinguishable when it fits: {text}"
     );
     assert!(
-        text.chars().count() <= 100,
+        display_width(&text) <= 100,
         "row must not overflow its width: {}",
-        text.chars().count()
+        display_width(&text)
     );
 }
 

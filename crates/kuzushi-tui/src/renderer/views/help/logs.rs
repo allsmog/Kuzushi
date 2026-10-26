@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg(test)]
+#[path = "logs/tests.rs"]
+mod tests;
+
 /// Full-screen scrollable transcript view (M1 §1.1). Unlike the embedded
 /// 2-row transcript strip at the bottom of every other view, this paints
 /// the entire log buffer; `j`/`k`/`g`/`G`/`PgUp`/`PgDn` page through it.
@@ -48,7 +52,9 @@ fn logs_header(app: &ShellApp, area: Rect, summary: &str) -> Vec<Line<'static>> 
         ))];
     }
     let mut lines = context_strip(app, area);
-    lines.push(blank());
+    if lines.len() == 1 {
+        lines.push(blank());
+    }
     lines.push(divider("LOGS", area.width));
     let hint = format!(
         "{} · {follow} · z expand · / filter · j/k scroll · g/G jump · back to return",
@@ -127,20 +133,11 @@ fn wrapped_log_lines(
 }
 
 fn wrapped_log_body(body: &str, first_width: usize, next_width: usize) -> Vec<String> {
-    let mut initial = wrap_text(body, first_width).into_iter();
-    let Some(first) = initial.next() else {
-        return vec![String::new()];
-    };
-    let remainder = initial.collect::<Vec<_>>().join(" ");
-    let mut lines = vec![first];
-    if !remainder.is_empty() {
-        lines.extend(wrap_text(&remainder, next_width));
-    }
-    lines
+    wrap_document_text(body, first_width, next_width)
 }
 
 fn line_width(line: &Line<'_>) -> usize {
-    line_text(line).chars().count()
+    display_width(&line_text(line))
 }
 
 fn line_text(line: &Line<'_>) -> String {

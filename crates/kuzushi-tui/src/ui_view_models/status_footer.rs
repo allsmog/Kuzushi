@@ -60,7 +60,7 @@ fn compact_status_footer_left_segments(app: &ShellApp, has_allowance: bool) -> V
     if let Some(attention) = attention_footer_segment(app) {
         segments.push(attention);
     }
-    if let Some(notify) = notification_availability_footer_segment(app) {
+    if let Some(notify) = compact_notification_availability_footer_segment(app) {
         segments.push(notify);
     }
     segments.push(view_status_segment(app));
@@ -149,8 +149,15 @@ fn attention_footer_segment(app: &ShellApp) -> Option<String> {
 }
 
 fn notification_availability_footer_segment(app: &ShellApp) -> Option<String> {
-    (app.ui().notify_enabled() && app.ui().terminal_focus() == crate::app::FocusState::Unknown)
-        .then(|| "notify:unavailable · focus unknown".to_string())
+    desktop_alerts_unavailable(app).then(|| "Desktop alerts unavailable".to_string())
+}
+
+fn compact_notification_availability_footer_segment(app: &ShellApp) -> Option<String> {
+    desktop_alerts_unavailable(app).then(|| "No desktop alerts".to_string())
+}
+
+fn desktop_alerts_unavailable(app: &ShellApp) -> bool {
+    app.ui().notify_enabled() && app.ui().terminal_focus() == crate::app::FocusState::Unknown
 }
 
 /// The program-scope chip. An unloadable `scope.toml` reads as

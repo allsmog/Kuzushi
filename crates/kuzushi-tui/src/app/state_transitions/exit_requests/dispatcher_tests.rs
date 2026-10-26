@@ -76,6 +76,21 @@ fn owned_study_is_live_without_treating_a_recorded_pid_as_owned_work() {
 }
 
 #[test]
+fn held_dispatcher_is_not_stopped_by_an_unrelated_session_budget_abort() {
+    let mut study = OwnedStudy::new();
+    assert!(!study
+        .app
+        .request_active_abort_with_reason(AbortReason::Budget));
+    assert!(!study.stop_path().exists());
+    assert!(study.app.has_running_work());
+    assert!(!study.app.router.campaign().dispatcher_stop_requested);
+    assert_eq!(
+        (study.app.input(), study.app.cursor()),
+        ("retained study draft λ", 7)
+    );
+}
+
+#[test]
 fn quit_chords_stop_the_owned_study_and_wait_without_losing_the_draft() {
     for letter in ['c', 'd'] {
         let mut study = OwnedStudy::new();

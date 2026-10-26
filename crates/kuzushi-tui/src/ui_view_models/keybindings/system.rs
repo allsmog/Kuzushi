@@ -6,7 +6,14 @@ pub(super) fn budget_halt_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
         bind("Esc", "inspect"),
         super::interrupt_binding(app),
         bind("c", "review cap"),
-        bind("a", "abort work"),
+        bind(
+            "a",
+            if app.runtime_state.has_owned_dispatcher() {
+                "stop session work"
+            } else {
+                "abort work"
+            },
+        ),
     ]
 }
 

@@ -579,7 +579,8 @@ fn scope_review_viewports_keep_controls_and_plain_output_keeps_recorded_source()
             .map(|cell| cell.symbol())
             .collect::<String>();
         assert!(text.contains("SCOPES"), "{width}x{height}");
-        assert!(text.contains("Esc back"), "{width}x{height}");
+        assert!(text.contains("Enter menu · Esc"), "{width}x{height}");
+        assert!(text.contains("PgUp/Dn"), "{width}x{height}");
         assert!(text.contains("Enter menu"), "{width}x{height}");
         assert!(text.contains("p plan"), "{width}x{height}");
         assert!(text.contains("a accept"), "{width}x{height}");

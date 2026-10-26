@@ -34,8 +34,11 @@ pub(super) fn component_tree_rows(width: usize, model: &ComponentStack) -> LineP
 fn append_summary(rows: &mut LinePageRows, width: usize, model: &ComponentStack) {
     rows.push_wrapped(styled_wrapped_lines(
         &format!(
-            "COMPONENT STACK · {} manifests · {} lockfiles",
-            model.manifest_count, model.lockfile_count
+            "COMPONENT STACK · {} manifest{} · {} lockfile{}",
+            model.manifest_count,
+            count_suffix(model.manifest_count),
+            model.lockfile_count,
+            count_suffix(model.lockfile_count)
         ),
         width,
         theme::accent(),
@@ -56,6 +59,14 @@ fn append_summary(rows: &mut LinePageRows, width: usize, model: &ComponentStack)
             width,
             theme::muted(),
         ));
+    }
+}
+
+fn count_suffix(count: usize) -> &'static str {
+    if count == 1 {
+        ""
+    } else {
+        "s"
     }
 }
 

@@ -270,7 +270,10 @@ fn expanded_tree_keeps_file_identity_and_controls_reachable_at_every_size() {
             .collect::<String>();
         assert!(text.contains("README.md"), "{width}x{height}: {text}");
         assert!(
-            text.contains("Enter menu") && text.contains("p plan") && text.contains("Esc back"),
+            text.contains("Enter menu · Esc")
+                && text.contains("p plan")
+                && text.contains("PgUp/Dn")
+                && text.contains("f files"),
             "{text}"
         );
         assert_eq!(app.scope_review().unwrap().selected_row(), selected);

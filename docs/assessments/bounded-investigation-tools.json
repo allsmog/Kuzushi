@@ -3177,19 +3177,19 @@
         "maxTotalBytes",
         "allowanceRef"
       ],
-      "executionEvidence": "Six real prepared-dispatch integration tests, 69 existing engine tests, actual plain native run and J158 shell dispatch with three completed and one failed receipts. See docs/assessments/sbom-inventory-audit-2026-10-10.md. October 14 follow-up: 82 focused Core tests cover aggregate admission, captured-input reuse, referenced import maps and chunk cancellation; see docs/assessments/sbom-source-budget-2026-10-14.md. October 25: 89 Core and 37 TUI checks, five real headless probes with matching exit/sentinel states, and J364 recovery with 39 machine passes, zero failures and three formal judgments pending. See docs/assessments/sbom-metadata-shapes-2026-10-25.md.",
-      "readinessVerdict": "bounded captured-input inventory with supported package metadata validation and native recovery; authenticated source identity and full ecosystem/interface acceptance remain open",
+      "executionEvidence": "Six real prepared-dispatch integration tests, 69 existing engine tests, actual plain native run and J158 shell dispatch with three completed and one failed receipts. See docs/assessments/sbom-inventory-audit-2026-10-10.md. October 14 follow-up: 82 focused Core tests cover aggregate admission, captured-input reuse, referenced import maps and chunk cancellation; see docs/assessments/sbom-source-budget-2026-10-14.md. October 25: 89 Core and 37 TUI checks, five real headless probes with matching exit/sentinel states, and J364 recovery with 39 machine passes, zero failures and three formal judgments pending. See docs/assessments/sbom-metadata-shapes-2026-10-25.md. pnpm snapshot follow-up: nine prepared-dispatch inventory tests pass; actual copied lock metadata recovers 350 missing links with no prior links lost. J369 has 39 machine passes, zero failures and three formal judgments pending. See docs/assessments/sbom-pnpm-snapshots-2026-10-25.md. SPDX follow-up: 106 focused Core checks pass. The same metadata retains all 427 raw links, with 285 unique package identifiers, 384 mapped dependency relationships and 43 explicit omissions. The released SPDX 2.3 JSON schema and reference checks pass. Final J371 has 25 machine passes, zero failures, 28 no-color captures and two formal judgments pending. See docs/assessments/sbom-spdx-source-references-2026-10-25.md. Shared export graph follow-up: all 113 focused Core checks pass. The actual 285-record probe now has unique CycloneDX references and no undefined links; all 427 raw links reconcile to 384 mapped pairs and 43 omissions. Corrected SPDX identifiers and relationships remain exactly stable. J372 has 25 machine passes, zero failures, 27 no-color captures and two visual review items judged PASS_WITH_FINDINGS. See docs/assessments/sbom-cyclonedx-source-references-2026-10-26.md.",
+      "readinessVerdict": "bounded captured-input inventory, pnpm snapshot links and shared source-qualified export references with disclosed omissions; authenticated source identity, complete semantic/ecosystem validation and general interface/UX acceptance remain open",
       "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
       "auditDimensions": {
         "purposeAndValue": "Useful package/version and manifest provenance for Components. Declared constraints stay distinct from repository-wide lockfile observations. No finding precision or security verdict claim.",
         "phaseAgreement": "Auxiliary Map with phase_result false; real dispatch and native lifecycle create no phase attempts. DAG context dependency is metadata and adds no prerequisite.",
         "requiredInputs": "Explicit or active target root through shared preparation. No model, credentials or context snapshot required; findings store optional.",
-        "sharedDispatchExecution": "Real executor through prepared registry in integration, native headless run and shell. Unknown options rejected; no separate TUI parser or model path.",
-        "artifactConsumption": "Components consumes the returned typed report for the active target. Canonical result.json preserves components, dependency edges, lockfile metadata, CycloneDX and SPDX. Restart recollects facts. Additive data.inspection preserves configured limits, reserved/read bytes, captured-input sizes and content hashes on success and available failure paths; these hashes do not authenticate Git freshness.",
-        "failureAndRecovery": "Malformed syntax and unsupported package document, section or version shapes fail without component, edge or SBOM-document claims. Failed results retain available capture inspection. File/aggregate caps, chunk cancellation, early EOF, symlinks and replaced roots retain prior evidence. Current component checks cover stale-data clearing, foreign targets and explicit results surviving late inspection. Arbitrary concurrent external refresh and other ecosystem contracts remain open.",
+        "sharedDispatchExecution": "Real executor through prepared registry in integration, native headless run and shell. Unknown options rejected; no separate TUI parser or model path. The export-summary regression proves the shared adapter preserves omission warnings before appending resource inspection; CLI and shell use that boundary.",
+        "artifactConsumption": "Components consumes the returned typed report for the active target. Canonical result.json preserves components, dependency edges, lockfile metadata, CycloneDX and SPDX. Restart recollects facts. Additive data.inspection preserves configured limits, reserved/read bytes, captured-input sizes and content hashes on success and available failure paths; these hashes do not authenticate Git freshness. Both corrected formats have 285 distinct record references and no undefined links. One graph maps 384 dependency pairs and discloses 43 omissions while retaining all 427 raw links. Standalone annotations/properties and data.spdxExport/data.cycloneDxExport preserve omission evidence. CycloneDX compositions state unknown or incomplete graph coverage. Independent source membership and reference closure pass; schema validation retains unsupported IRI/contact-format warnings. Full semantic conformance, authenticated source identity and version-specific resolution remain unqualified.",
+        "failureAndRecovery": "Malformed syntax and unsupported package document, section or version shapes fail without component, edge or SBOM-document claims. Failed results retain available capture inspection. File/aggregate caps, chunk cancellation, early EOF, symlinks and replaced roots retain prior evidence. Current component checks cover stale-data clearing, foreign targets and explicit results surviving late inspection. Arbitrary concurrent external refresh and other ecosystem contracts remain open. Present pnpm snapshots reject unsupported entry, section and dependency-version shapes without publishing package claims; J369 covers correction and no-color restart.",
         "approvedResources": "Runtime-free in-process parsing with zero provider calls. Traversal caps 100000 entries, 50000 files and 64 levels. Declared maxFileBytes defaults to its 64 MiB maximum; maxTotalBytes defaults to 64 MiB with a 512 MiB upper limit. Unique inputs are captured once and retained in RAM across parser stages. Source-byte limits are not process memory, CPU or metadata-IO ceilings.",
         "scopeEnforcement": "Selected child target excludes malformed parent and symlink cycle. Exact-file discovery membership is not supported by this adapter. Report has no authenticated source identity; shell discloses unverified freshness.",
-        "interfaceParity": "Shared prepared dispatch and native run/shell outcomes verified narrowly. No SBOM discovery engine in SAST scheduling; no scan-mode engine claim. Six TUI sizes, complete narrow paging, visible page keys and no-color restart covered. Current five headless probes verify exit 0/3 and matching durable sentinels; J364 retains two completed and one failed canonical result through correction, six sizes and no-color restart."
+        "interfaceParity": "Shared prepared dispatch and native run/shell outcomes verified narrowly. No SBOM discovery engine in SAST scheduling; no scan-mode engine claim. Six TUI sizes, complete narrow paging, visible page keys and no-color restart covered. Current five headless probes verify exit 0/3 and matching durable sentinels; J364 retains two completed and one failed canonical result through correction, six sizes and no-color restart. Current J371 covers the omission warning, expanded transcript, unchanged Components and explicitly declared no-color restart through six sizes, with two formal operator judgments pending. J372 now verifies the shared omission warning, retained raw inventory, both incomplete exports and explicit no-color restart through the six-size matrix. Its two visual items are reviewed with findings; the raw harness remains REVIEW_REQUIRED and broad reference UX is not claimed."
       },
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
@@ -11063,5 +11063,26 @@
     "maturityChanges": [],
     "broadMilestonesClosed": 0,
     "limits": "Historical source metadata only. No complete coverage, finding fix, detector usefulness, formal operator approval or reference UX parity claim."
+  },
+  "sbomPnpmSnapshotAudit": {
+    "date": "2026-10-25",
+    "assessment": "docs/assessments/sbom-pnpm-snapshots-2026-10-25.md",
+    "focusedInventoryTests": 9,
+    "actualComponents": 285,
+    "actualDependencyLinksBefore": 77,
+    "actualDependencyLinksAfter": 427,
+    "missingSnapshotLinksAfter": 0,
+    "duplicateSpdxIdsRemaining": 30,
+    "journey": "J369",
+    "machinePasses": 39,
+    "machineFailures": 0,
+    "authenticatedCaptures": 32,
+    "agentReviewAnswers": 3,
+    "humanJudgmentsPending": 3,
+    "rawStatus": "REVIEW_REQUIRED",
+    "operatorApproval": false,
+    "providerRequests": 0,
+    "maturityPromotions": [],
+    "retiredModules": []
   }
 }

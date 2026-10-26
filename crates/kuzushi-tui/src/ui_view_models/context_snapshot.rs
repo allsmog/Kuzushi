@@ -77,7 +77,7 @@ impl PlainContextModel {
                 format!("status: {}", model.status),
             ],
             body_rows: plain_context_body_rows(model.state, &model.status, model.details),
-            next_hint: "Next: context build, context status, context regen repo",
+            next_hint: context_next_hint(model.state),
         }
     }
 }
@@ -89,8 +89,17 @@ fn plain_context_body_rows(
 ) -> Vec<String> {
     match (state, details) {
         ("malformed", _) => malformed_context_rows(status),
+        ("unavailable", _) => vec![status.to_string()],
         (_, Some(details)) => plain_context_detail_rows(details),
         (_, None) => missing_context_rows(),
+    }
+}
+
+fn context_next_hint(state: &str) -> &'static str {
+    if state == "unavailable" {
+        "Next: context status retries the index read."
+    } else {
+        "Next: context build, context status, context regen repo"
     }
 }
 
@@ -173,6 +182,9 @@ fn context_status(app: &ShellApp, running: Option<&ContextSnapshotRunning>) -> S
 
 pub(crate) fn context_snapshot_state(app: &ShellApp) -> &'static str {
     let view = app.domain().context_view();
+    if view.status.starts_with("unavailable:") {
+        return "unavailable";
+    }
     if let Some(freshness) = view.freshness.as_ref() {
         return match freshness {
             kuzushi_core::context::ContextSnapshotFreshness::Current => "current",

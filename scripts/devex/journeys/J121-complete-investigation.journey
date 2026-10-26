@@ -9,31 +9,43 @@ env: NO_COLOR=1
 launch: --target @TMP_TARGET
 require-live-snap: 30 READY THE MAP RUN | setup-no-color-120x36
 expect-not: shell route
+expect-not: Commands · view:
+expect-not: · Commands · target:
 expect-not: notify:
 expect-not: focus unknown
 resize: 160x48
 live-snap: setup-no-color-160x48
 expect-not: shell route
+expect-not: Commands · view:
+expect-not: · Commands · target:
 expect-not: notify:
 expect-not: focus unknown
 resize: 96x89
 live-snap: setup-no-color-96x89
 expect-not: shell route
+expect-not: Commands · view:
+expect-not: · Commands · target:
 expect-not: notify:
 expect-not: focus unknown
 resize: 80x24
 live-snap: setup-no-color-80x24
 expect-not: shell route
+expect-not: Commands · view:
+expect-not: · Commands · target:
 expect-not: notify:
 expect-not: focus unknown
 resize: 60x20
 live-snap: setup-no-color-60x20
 expect-not: shell route
+expect-not: Commands · view:
+expect-not: · Commands · target:
 expect-not: notify:
 expect-not: focus unknown
 resize: 40x12
 live-snap: setup-no-color-40x12
 expect-not: shell route
+expect-not: Commands · view:
+expect-not: · Commands · target:
 expect-not: notify:
 expect-not: focus unknown
 resize: 120x36
@@ -44,31 +56,43 @@ env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
 launch: --target @TMP_TARGET
 require-live-snap: 30 READY THE MAP RUN | fresh-setup
 expect-not: shell route
+expect-not: Commands · view:
+expect-not: · Commands · target:
 expect-not: notify:
 expect-not: focus unknown
 resize: 160x48
 live-snap: setup-160x48
 expect-not: shell route
+expect-not: Commands · view:
+expect-not: · Commands · target:
 expect-not: notify:
 expect-not: focus unknown
 resize: 96x89
 live-snap: setup-96x89
 expect-not: shell route
+expect-not: Commands · view:
+expect-not: · Commands · target:
 expect-not: notify:
 expect-not: focus unknown
 resize: 80x24
 live-snap: setup-80x24
 expect-not: shell route
+expect-not: Commands · view:
+expect-not: · Commands · target:
 expect-not: notify:
 expect-not: focus unknown
 resize: 60x20
 live-snap: setup-60x20
 expect-not: shell route
+expect-not: Commands · view:
+expect-not: · Commands · target:
 expect-not: notify:
 expect-not: focus unknown
 resize: 40x12
 live-snap: setup-40x12
 expect-not: shell route
+expect-not: Commands · view:
+expect-not: · Commands · target:
 expect-not: notify:
 expect-not: focus unknown
 resize: 120x36
@@ -138,10 +162,14 @@ require-live-snap: 20 Owned greeting application | context-result-returned
 keys: m
 require-live-snap: 30 RESULT READY | map-result-loading
 require-live-snap: 30 Rust greeting writer | pending-map
+require-live-snap: 20 repo index ready | pending-map-index-ready
+expect-not: repo index not built
 ask: Does the executed producer chain reach a source-grounded Map for explicit acceptance, with no injected completed queue, finding or global context activation?
 keys: u
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 1/6 workbench
 require-live-snap: 25 Map ✓ | accepted-map
+require-live-snap: 20 repo index ready | accepted-map-index-ready
+expect-not: repo index not built
 expect-not: workspace:stale inventory
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART map-accepted
 submit: scan batch
@@ -244,6 +272,11 @@ require-live-snap: 20 Stop requested || Stopped by operator | cancellation-reque
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART canceled
 keys: r
 require-live-snap: 25 Stopped by operator | canceled-partial-work
+require-live-snap: 20 repo index ready | canceled-partial-work-index-ready
+expect-not: repo index not built
+expect: session:$0.00
+expect: cost unavailable
+expect-not: cost:$0.00
 expect: 2 parked
 expect: 1 completed
 expect-not: Review the recorded failure
@@ -279,6 +312,11 @@ require-live-snap: 25 dispatcher pid | retry-running
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART partial
 keys: r
 require-live-snap: 25 2 completed | stopped-at-limit
+require-live-snap: 20 repo index ready | stopped-at-limit-index-ready
+expect-not: repo index not built
+expect: session:$0.00
+expect: cost unavailable
+expect-not: cost:$0.00
 expect: 1 parked
 expect: Allowance reached
 expect-not: Review the recorded failure
@@ -419,6 +457,11 @@ require-live-snap: 25 dispatcher pid | remaining-job-running
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART completed
 keys: r
 require-live-snap: 25 3 completed | original-plan-completed
+require-live-snap: 20 repo index ready | original-plan-completed-index-ready
+expect-not: repo index not built
+expect: session:$0.00
+expect: cost unavailable
+expect-not: cost:$0.00
 ask: Does explicit resume run only the original remaining pass, preserve prior attempts and decisions, and keep a missed nondeterministic observation separate from a fix?
 keys: Escape
 submit: workbench
@@ -437,6 +480,8 @@ paste-file: @ART/open-later-only.txt
 keys: Enter
 require-live-snap: 25 Labeled later-only observation | rediscovered-finding
 require-live-snap: 25 Later source identity is unverified | rediscovered-source-unverified
+require-live-snap: 20 repo index ready | rediscovered-source-unverified-index-ready
+expect-not: repo index not built
 ask: Does the rediscovered observation retain the prior deferral but request reassessment because a dirty commit alone cannot establish unchanged source?
 submit: decision deferred Reassessed the owned fixture after pass 3
 require-live-snap: 25 deferred | reassessed-deferral

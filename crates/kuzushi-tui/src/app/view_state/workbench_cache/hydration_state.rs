@@ -33,6 +33,7 @@ impl WorkbenchCache {
             self.record_failed_allowance_read(failure);
             self.record_failed_scan_study(failure);
             self.record_failed_report_read(failure);
+            self.record_failed_repository_index(failure);
             if let ViewHydrationKey::RunRequestContext { run_id } = &failure.key {
                 self.store_run_request_context(
                     failure.target.clone(),
@@ -237,6 +238,9 @@ impl WorkbenchCache {
             ViewHydrationKey::MapArtifacts => self
                 .cached_map_artifacts_built(Some(target))
                 .is_not_requested(),
+            ViewHydrationKey::RepositoryIndex => {
+                self.cached_repository_index(target).is_not_requested()
+            }
             ViewHydrationKey::CpgArtifacts => self
                 .cached_cpg_artifacts_built(Some(target))
                 .is_not_requested(),
@@ -747,6 +751,20 @@ impl WorkbenchCache {
             ) => {
                 self.scan_recommendations = Some(ScanRecommendationsCache { target, state });
             }
+            (key, value) => self.apply_target_metadata_hydration(target, key, value),
+        }
+    }
+
+    fn apply_target_metadata_hydration(
+        &mut self,
+        target: PathBuf,
+        key: ViewHydrationKey,
+        value: ViewHydrationValue,
+    ) {
+        match (key, value) {
+            (ViewHydrationKey::RepositoryIndex, ViewHydrationValue::RepositoryIndex(view)) => {
+                self.repository_index.store(target, view);
+            }
             (ViewHydrationKey::TargetProfile, ViewHydrationValue::TargetProfile(profile)) => {
                 self.target_profile = Some(TargetProfileCache { target, profile });
             }
@@ -827,6 +845,7 @@ fn artifact_hydration_group(key: &ViewHydrationKey) -> HydrationGroup {
         | Key::HealthChecks { .. }
         | Key::TargetProfile
         | Key::MapArtifacts
+        | Key::RepositoryIndex
         | Key::CpgArtifacts
         | Key::ScanRecommendations
         | Key::TargetBase => HydrationGroup::Status,

@@ -106,7 +106,7 @@ impl ShellApp {
     }
 
     fn external_findings_store_effects(&mut self, now: Instant) -> Vec<ShellEffect> {
-        let work_running = self.has_running_work();
+        let work_running = self.has_local_running_work();
         if !self
             .runtime_state
             .findings_store_probe()
@@ -229,5 +229,25 @@ mod tests {
 
         let next = due + FINDINGS_STORE_PROBE_INTERVAL;
         assert!(!app.refresh_findings_after_external_store_write(next));
+    }
+
+    #[test]
+    fn held_dispatcher_keeps_external_findings_refresh_live() {
+        let (_temp, workspace) = store_with_one_finding();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.refresh_findings(false);
+        let mut held = crate::app::owned_dispatcher_test_support::HeldDispatcher::hold(&mut app);
+        let start = Instant::now();
+        assert!(!held.refresh_findings_after_external_store_write(start));
+        let external = FindingStore::open(workspace.findings_db_path()).unwrap();
+        insert_finding(&external, "external.during.study", 2);
+        drop(external);
+
+        assert!(
+            held.refresh_findings_after_external_store_write(start + FINDINGS_STORE_PROBE_INTERVAL)
+        );
+        assert_eq!(held.findings().len(), 2);
+        assert!(held.has_running_work());
+        assert!(!held.directory().join("dispatcher-stop.json").exists());
     }
 }

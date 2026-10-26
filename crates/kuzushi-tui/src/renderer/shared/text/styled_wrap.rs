@@ -26,10 +26,14 @@ pub(in crate::renderer::shared) fn lines(
     } else {
         BreakMode::Characters
     };
-    wrapped_lines(spans, width, mode)
+    wrapped_lines(spans, width, width, mode)
 }
 
-pub(super) fn document_line(line: Line<'static>, width: usize) -> Vec<Line<'static>> {
+pub(super) fn document_line(
+    line: Line<'static>,
+    first_width: usize,
+    width: usize,
+) -> Vec<Line<'static>> {
     let spans = line
         .spans
         .into_iter()
@@ -38,18 +42,23 @@ pub(super) fn document_line(line: Line<'static>, width: usize) -> Vec<Line<'stat
             span
         })
         .collect();
-    let mut lines = wrapped_lines(spans, width, BreakMode::PreserveWords);
+    let mut lines = wrapped_lines(spans, first_width, width, BreakMode::PreserveWords);
     for row in &mut lines {
         row.alignment = line.alignment;
     }
     lines
 }
 
-fn wrapped_lines(spans: Vec<Span<'static>>, width: usize, mode: BreakMode) -> Vec<Line<'static>> {
+fn wrapped_lines(
+    spans: Vec<Span<'static>>,
+    first_width: usize,
+    width: usize,
+    mode: BreakMode,
+) -> Vec<Line<'static>> {
     let mut result = Vec::new();
     let glyphs = glyphs(spans);
     for paragraph in glyphs.split(|glyph| glyph.text == "\n") {
-        result.extend(wrap_line(paragraph, width.max(1), mode));
+        result.extend(wrap_line(paragraph, first_width.max(1), width.max(1), mode));
     }
     result
 }
@@ -82,11 +91,21 @@ fn safe_character(ch: char) -> String {
     }
 }
 
-fn wrap_line(glyphs: &[Glyph], width: usize, mode: BreakMode) -> Vec<Line<'static>> {
+fn wrap_line(
+    glyphs: &[Glyph],
+    first_width: usize,
+    width: usize,
+    mode: BreakMode,
+) -> Vec<Line<'static>> {
     let mut result = Vec::new();
     let mut remaining = glyphs;
     while !remaining.is_empty() {
-        let end = fitting_end(remaining, width);
+        let available = if result.is_empty() {
+            first_width
+        } else {
+            width
+        };
+        let end = fitting_end(remaining, available);
         let (draw, next) = word_boundary(remaining, end, mode);
         result.push(glyph_line(&remaining[..draw]));
         remaining = &remaining[next..];

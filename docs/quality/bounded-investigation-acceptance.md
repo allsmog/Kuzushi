@@ -1,5 +1,80 @@
 # Bounded investigation acceptance ledger
 
+The [current complete keyboard repeat](../assessments/repository-index-refresh-2026-10-26.md)
+repairs stale index presentation after an owned producer and distinguishes
+session dollars from unknown study cost. Final J121 has 331 machine passes,
+zero failures and 154 authenticated capture pairs. All 21 visual questions are
+answered with an agent verdict of `PASS_WITH_FINDINGS`; the two preceding failed
+visual audits remain recorded. There are 443 distinct focused TUI passes, two
+serial performance tests, passing build, Clippy and risk gates, and zero new live
+provider requests. This qualifies the named integrated flow; monorepo scope,
+experiments, learning usefulness and full reference-level experience remain open.
+
+The [literal-result correction](../assessments/operator-status-2026-10-26.md#literal-result-wrapping)
+preserves complete paths and printable whitespace in Logs and long plain rows.
+Startup and launch copy use compact labels while canonical evidence stays exact.
+All 387 focused TUI checks and three serial performance gates pass. Final J375
+has 50 machine passes, zero failures, 21 no-color captures and three agent reviews
+with findings. Seven compact reader captures match the full raw result, including
+two spaces in the repository name. Earlier failed observer runs remain recorded.
+Drafts, source bindings and one auxiliary run survive resize and restart without
+provider work. Short-screen status, diagnostic density and overall reference UX
+remain open; this does not close broad workflow or model-quality acceptance.
+
+The [compact-header followup](../assessments/operator-status-2026-10-26.md#compact-header-followup)
+keeps cost, index and model whole at 80 and 96 columns, preserves the short-area
+order and Logs reading height, and synchronizes interactive frame output.
+All 332 focused checks and three serial performance gates pass. Final J374 has
+49 machine passes, zero failures, fourteen no-color captures and two agent
+reviews with findings. Both earlier failed audits remain recorded. Log density,
+short-screen status and broader reference UX remain open; no provider work occurs.
+
+The [operator-status correction](../assessments/operator-status-2026-10-26.md)
+keeps the full header's optional repository-index state consistent with its
+compact view model and clarifies routing, desktop alerts and singular counts.
+All 61 focused TUI checks pass. J373 has 33 machine passes, zero failures,
+thirteen no-color captures and two agent-reviewed visual items with findings.
+Narrow status visibility, log density and reference-level UX remain open.
+This runtime-free correction creates no provider request or accepted Map.
+
+The [shared dependency-export correction](../assessments/sbom-cyclonedx-source-references-2026-10-26.md)
+removes duplicate CycloneDX references, undefined links and cross-source guesses.
+Both formats retain all 427 raw links, map 384 and disclose 43 omissions. SPDX
+identifiers and relationships remain stable. One combined warning reaches the
+operator, and CycloneDX leaves graph completeness explicitly unknown or
+incomplete. All 113 focused Core checks, build, Clippy and risk pass. J372 has
+25 machine passes, zero failures, 27 no-color captures and two visual review
+items judged `PASS_WITH_FINDINGS`. Schema/reference evidence is scoped; unsupported format validators,
+full semantic conformance, source freshness and reference UX remain open.
+No provider request, maturity change or broad acceptance closure follows.
+
+The [SPDX reference correction](../assessments/sbom-spdx-source-references-2026-10-25.md)
+gives all 285 captured package records distinct identifiers and removes undefined
+references. All 427 raw dependency links remain; 43 missing or ambiguous export
+links are disclosed. The shared adapter preserves this warning before its
+resource receipt. All 106 focused Core checks, build, Clippy and risk pass.
+Final J371 has 25 machine passes, zero failures, 28 no-color captures and two
+pending formal judgments. Full semantic conformance, CycloneDX, authenticated
+source identity and reference UX remain open. No provider request or broad
+acceptance closure follows.
+
+The [owned-study liveness correction](../assessments/owned-study-liveness-2026-10-25.md)
+keeps external findings refresh, local tool dispatch and foreground draft return
+working during a finite owned study. Session-budget Stop stays separate from
+operator study Stop, and early cancellation retains honest partial-work guidance.
+Eighty-one distinct TUI checks, build, lint and formatting pass. Final J370 has
+20 machine passes, zero failures, fourteen no-color captures and four pending
+formal operator judgments. Its single intercepted request produces no model
+response or live inference. No broad delivery or reference UX item closes.
+
+The [pnpm snapshot correction](../assessments/sbom-pnpm-snapshots-2026-10-25.md)
+recovers all 350 missing links in copied actual dependency metadata while
+preserving all prior links. Nine Core integration tests pass. J369 has 39 machine
+passes, zero failures and three pending formal judgments through Components
+failure, correction and restart. SPDX identifier uniqueness remains defective;
+complete SBOM conformance, source freshness and general module usefulness remain
+unqualified. No provider request or maturity change follows from this evidence.
+
 The [literal diagram-link correction](../assessments/dfd-literal-links-2026-10-25.md)
 keeps literal Unix backslashes distinct in both diagram navigation and shared
 exact-file queries. All 55 focused Rust checks, build, lint and risk pass. Final

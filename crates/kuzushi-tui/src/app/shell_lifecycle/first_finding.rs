@@ -19,7 +19,7 @@ impl ShellApp {
     pub(crate) fn startup_summary_line(&self) -> String {
         let target = self
             .target()
-            .map(|path| path.display().to_string())
+            .map(|path| crate::ui_view_models::compact_target_path(&path.display().to_string()))
             .unwrap_or_else(|| "none".to_string());
         let module_count = self.registry().discoverable_modules().count();
         let tool_count = self.registry().discoverable_tools().count();

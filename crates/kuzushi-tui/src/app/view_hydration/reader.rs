@@ -357,6 +357,9 @@ fn read_target_analysis_value(target: &Path, key: &ViewHydrationKey) -> Option<V
         ViewHydrationKey::MapArtifacts => Some(ViewHydrationValue::MapArtifacts(
             map_evidence_is_adequate(target),
         )),
+        ViewHydrationKey::RepositoryIndex => Some(ViewHydrationValue::RepositoryIndex(
+            repository_index::read(target),
+        )),
         ViewHydrationKey::CpgArtifacts => Some(ViewHydrationValue::CpgArtifacts(
             kuzushi_core::cpg_has_artifacts(target),
         )),

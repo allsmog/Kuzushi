@@ -175,6 +175,7 @@ fn common_target_keys() -> Vec<ViewHydrationKey> {
         ViewHydrationKey::RunIdCompletionValues,
         ViewHydrationKey::TargetProfile,
         ViewHydrationKey::MapArtifacts,
+        ViewHydrationKey::RepositoryIndex,
         ViewHydrationKey::TargetBase,
         ViewHydrationKey::GitMetadata,
         ViewHydrationKey::ProjectScopeTree,

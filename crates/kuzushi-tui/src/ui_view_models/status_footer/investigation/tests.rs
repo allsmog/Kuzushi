@@ -88,7 +88,7 @@ fn work_and_real_model_override_remain_visible_without_changing_routing() {
     assert!(model
         .compact_left_segments
         .contains(&"triage:run: active".into()));
-    assert_eq!(routing_mode_segment(&app), "run route");
+    assert_eq!(routing_mode_segment(&app), "Run active");
     assert!(model
         .left_segments
         .iter()
@@ -129,7 +129,7 @@ fn other_shell_surfaces_keep_their_existing_routing_and_diagnostic_contract() {
         assert!(compact_segments(&app, false).is_none());
         assert!(status_footer_model(&app)
             .left_segments
-            .contains(&"module route".into()));
+            .contains(&"Module selected".into()));
     }
     app.set_shell_view(ShellView::Workbench);
     for page in [WorkbenchPage::Prove, WorkbenchPage::Fix] {
@@ -169,7 +169,8 @@ fn investigation_readers_prioritize_source_and_decisions_over_shell_diagnostics(
             assert!(
                 segments.iter().all(|s| !s.contains("route")
                     && !s.contains("notify:")
-                    && !s.contains("focus unknown")),
+                    && !s.contains("focus unknown")
+                    && !s.to_lowercase().contains("desktop alerts")),
                 "{view:?}: {segments:?}"
             );
         }
@@ -230,7 +231,7 @@ fn fixed_study_readers_use_the_investigation_footer_and_legacy_campaigns_keep_di
         assert!(full_segments(&app).is_none());
         assert!(status_footer_model(&app)
             .left_segments
-            .contains(&"module route".into()));
+            .contains(&"Module selected".into()));
     }
 }
 
@@ -284,7 +285,8 @@ fn setup_retains_active_tool_identity_and_model_without_reviving_diagnostics() {
         .iter()
         .all(|label| !label.contains("route")
             && !label.contains("notify:")
-            && !label.contains("focus unknown")));
+            && !label.contains("focus unknown")
+            && !label.to_lowercase().contains("desktop alerts")));
 }
 
 #[test]

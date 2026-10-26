@@ -2,6 +2,26 @@ use super::*;
 use serde_json::json;
 use std::fs;
 
+fn exported_spdx_id(output: &serde_json::Value, purl: &str) -> serde_json::Value {
+    output["data"]["spdx"]["packages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|package| package["externalRefs"][0]["referenceLocator"] == purl)
+        .unwrap()["SPDXID"]
+        .clone()
+}
+
+fn exported_cyclonedx_ref(output: &serde_json::Value, purl: &str) -> serde_json::Value {
+    output["data"]["cycloneDx"]["components"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|component| component["purl"] == purl)
+        .unwrap()["bom-ref"]
+        .clone()
+}
+
 #[cfg(unix)]
 #[test]
 fn parser_rejects_manifest_when_parent_is_replaced_after_inventory() {
@@ -3586,9 +3606,14 @@ fn sbom_scan_outputs_completed_tool_envelope() {
         output["data"]["cycloneDx"]["dependencies"][0]["ref"],
         json!("kuzushi:root")
     );
+    let mut expected_dependencies = vec![
+        exported_cyclonedx_ref(&output, "pkg:npm/express@4.18.2"),
+        exported_cyclonedx_ref(&output, "pkg:npm/lodash@4.17.21"),
+    ];
+    expected_dependencies.sort_by(|left, right| left.as_str().cmp(&right.as_str()));
     assert_eq!(
         output["data"]["cycloneDx"]["dependencies"][0]["dependsOn"],
-        json!(["pkg:npm/express@4.18.2", "pkg:npm/lodash@4.17.21"])
+        json!(expected_dependencies)
     );
     assert_eq!(output["data"]["spdx"]["spdxVersion"], json!("SPDX-2.3"));
     assert!(output["data"]["spdx"]["packages"]
@@ -3603,7 +3628,7 @@ fn sbom_scan_outputs_completed_tool_envelope() {
         .iter()
         .any(
             |relationship| relationship["spdxElementId"] == json!("SPDXRef-DOCUMENT")
-                && relationship["relatedSpdxElement"] == json!("SPDXRef-Package-npm-lodash")
+                && relationship["relatedSpdxElement"] == exported_spdx_id(&output, "pkg:npm/lodash@4.17.21")
         ));
 }
 
@@ -3650,8 +3675,8 @@ version = "1.0.197"
         .unwrap()
         .iter()
         .any(
-            |dependency| dependency["ref"] == json!("pkg:cargo/demo@0.1.0")
-                && dependency["dependsOn"] == json!(["pkg:cargo/serde@1.0.197"])
+            |dependency| dependency["ref"] == exported_cyclonedx_ref(&output, "pkg:cargo/demo@0.1.0")
+                && dependency["dependsOn"] == json!([exported_cyclonedx_ref(&output, "pkg:cargo/serde@1.0.197")])
         ));
     assert!(output["data"]["spdx"]["packages"]
         .as_array()
@@ -3669,7 +3694,7 @@ version = "1.0.197"
         .unwrap()
         .iter()
         .any(
-            |relationship| relationship["spdxElementId"] == json!("SPDXRef-Package-cargo-demo")
-                && relationship["relatedSpdxElement"] == json!("SPDXRef-Package-cargo-serde")
+            |relationship| relationship["spdxElementId"] == exported_spdx_id(&output, "pkg:cargo/demo@0.1.0")
+                && relationship["relatedSpdxElement"] == exported_spdx_id(&output, "pkg:cargo/serde@1.0.197")
         ));
 }

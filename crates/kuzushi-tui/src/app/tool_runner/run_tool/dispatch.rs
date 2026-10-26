@@ -100,7 +100,7 @@ impl ShellApp {
     }
 
     pub(crate) fn tool_launch_blocked(&mut self, requested_tool: &str) -> bool {
-        if !self.has_running_work() {
+        if !self.has_local_running_work() {
             return false;
         }
         if let Some(active_tool) = self.running_tool_name_owned() {
@@ -119,7 +119,7 @@ impl ShellApp {
         self.log(
             "tool",
             format!(
-                "{requested_tool} launch blocked — finish or cancel the active work, then retry"
+                "{requested_tool} launch blocked; finish or cancel the active work, then retry"
             ),
         );
         true
@@ -618,3 +618,6 @@ mod remembered_confirmation_tests {
 
 #[cfg(test)]
 mod preparation_failure_tests;
+
+#[cfg(test)]
+mod dispatcher_tests;

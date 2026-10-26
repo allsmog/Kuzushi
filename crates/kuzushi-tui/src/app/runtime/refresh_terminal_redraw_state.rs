@@ -187,7 +187,11 @@ pub(crate) fn draw_terminal_if_needed(
         // `terminal_shell_step` guarantees it paints within the interval.
         return Ok(());
     }
-    terminal.draw(|frame| render_measured_terminal_frame(frame, app))?;
+    super::synchronized_output::paint_synchronized_frame(&mut io::stdout(), |_| {
+        terminal
+            .draw(|frame| render_measured_terminal_frame(frame, app))
+            .map(|_| ())
+    })?;
     state.last_draw = Some(Instant::now());
     state.needs_redraw = false;
     state.redraw_priority = RedrawPriority::Background;

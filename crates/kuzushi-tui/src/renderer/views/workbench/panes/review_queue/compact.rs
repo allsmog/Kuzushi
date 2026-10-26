@@ -112,5 +112,8 @@ fn card_location_or_occurrence(row: &ReviewQueueRow, width: usize) -> String {
             occurrence.seen, occurrence.completed, occurrence.planned, occurrence.failed
         );
     }
-    format!("  {}", fit_path(&row.location, width.saturating_sub(2)))
+    format!(
+        "  {}",
+        fit_location_label(&row.location, width.saturating_sub(2))
+    )
 }

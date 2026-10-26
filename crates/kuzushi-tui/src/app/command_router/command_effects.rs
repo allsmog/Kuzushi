@@ -1323,7 +1323,7 @@ impl ShellApp {
     }
 
     fn steer_dispatch_blocked(&self) -> bool {
-        self.has_running_work()
+        self.has_local_running_work()
             || self.engagement.has_pending_chain()
             || self.engagement.has_pending_prereq_prompt()
             || !self.engagement.planning_queues_empty()

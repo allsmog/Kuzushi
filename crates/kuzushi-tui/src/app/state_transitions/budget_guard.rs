@@ -106,7 +106,7 @@ impl ShellApp {
         self.log(
             "budget",
             format!(
-                "aborting due to cost cap (abort requested: {requested}); budget halt remains armed",
+                "session work abort requested: {requested}; session budget remains halted. An owned study has its own allowance; Ctrl+C requests Stop.",
             ),
         );
     }

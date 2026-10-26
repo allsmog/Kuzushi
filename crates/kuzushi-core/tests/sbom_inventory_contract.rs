@@ -5,6 +5,9 @@ use kuzushi_core::{
 use serde_json::{json, Value};
 use std::path::Path;
 
+#[path = "sbom_inventory_contract/pnpm.rs"]
+mod pnpm;
+
 fn dispatch(
     root: &Path,
     input: Value,

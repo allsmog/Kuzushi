@@ -1,5 +1,78 @@
 # Releasing Kuzushi
 
+## Repository index refresh and session dollars
+
+Workspace artifact refresh now updates the optional repository-index view after
+owned studies and external writers. The existing background hydration path
+keeps reads bound to the active target and rejects stale target generations.
+Read failures remain unavailable, with an explicit retry, rather than suggesting
+that a snapshot is absent. Accepted context, investigation jobs and spending
+retain their existing identities.
+
+The global dollar chip says `session:`. Study and investigation totals retain
+their own unknown-cost qualifiers and shared allowance. Structured results,
+persisted artifacts and tool options retain their contracts.
+
+## Literal whitespace in terminal evidence
+
+Logs now wraps each message once, preserving printable path whitespace and
+complete graphemes across timestamp and continuation widths. Plain output also
+preserves internal spaces when wrapping long rows; repeated spaces alone no
+longer cause a row to be treated as a column heading and truncated. Existing
+control stripping and right-padding cleanup in plain output remain.
+
+Long human-readable rows can therefore occupy additional lines. Structured JSON
+results, source identities and persisted artifacts retain their contracts.
+
+## Source-qualified CycloneDX references
+
+New `sbom-scan:scan` CycloneDX documents use opaque `bom-ref` values for complete
+recorded component identities. The `purl` field remains package metadata and
+must not be reconstructed as a reference. Consumers must join each actual
+`bom-ref`. The root reference remains `kuzushi:root`. Saved exports are preserved;
+re-run inventory for corrected documents.
+
+SPDX and CycloneDX now consume one source-qualified export graph. The shared
+extraction preserves the corrected SPDX package identifiers and relationships.
+Both formats omit and disclose missing or ambiguous endpoints while retaining
+all canonical component records and raw edges. One combined message names the
+omitted count. The additive `data.cycloneDxExport` records counts and candidate
+references. Both diagnostic objects add `uniqueComponentCount`.
+
+CycloneDX metadata retains omission details in
+`kuzushi:omittedDependencyRelationships`. Its dependency compositions are
+`incomplete` when an observed edge cannot be mapped and `unknown` otherwise.
+Absence of outgoing evidence does not create a dependency-free leaf. Each
+generated document has a fresh serial number, which identifies that document
+and does not authenticate a Git revision or installed dependency resolution.
+Public options, report structs and stored artifacts need no migration. See the
+[verification and limits](docs/assessments/sbom-cyclonedx-source-references-2026-10-26.md).
+
+## Source-qualified SPDX package references
+
+New `sbom-scan:scan` SPDX exports use opaque package identifiers derived from the
+complete recorded component identity: ecosystem, name, version, manifest path,
+scope and package URL. Identical component records share one SPDX package.
+Consumers must read each package's `SPDXID` and join relationships by that value;
+do not construct the former ecosystem/name identifier. Saved historical exports
+are preserved. Re-run inventory to obtain corrected exports.
+
+Dependency endpoints resolve only within their recorded source manifest or
+lockfile. Missing or ambiguous endpoints produce no guessed SPDX relationship.
+The additive `data.spdxExport` records emitted counts and every omitted edge with
+its source and candidate IDs. Raw `data.components` and `data.dependencies`
+retain their contracts and full observations. The output summary discloses
+omissions, and the standalone SPDX document retains them as annotations.
+
+Each export now has creation and annotation timestamps, a fresh document
+namespace and explicit document-to-package `DESCRIBES` relationships. The
+namespace identifies the generated document, not a Git revision or an atomic
+source snapshot. Version-specific relationships remain unknown when the raw
+name-level graph cannot distinguish them. CycloneDX has the separate reference
+and composition correction above. Full semantic and ecosystem qualification
+remain open. Public tool options, report structs and stored artifacts need no
+migration.
+
 ## Setup context drafts after restart
 
 Setup now captures supplied options through shared descriptor validation before

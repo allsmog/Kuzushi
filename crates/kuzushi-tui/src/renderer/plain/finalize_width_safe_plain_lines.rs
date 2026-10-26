@@ -11,7 +11,7 @@ pub(crate) fn finalize_width_safe_plain_lines(lines: Vec<String>, width: usize) 
             out.push(sanitize_for_plain_output(&fit(&trimmed, width)));
         } else {
             out.extend(
-                wrap_text(&trimmed, width)
+                wrap_document_text(&trimmed, width, width)
                     .into_iter()
                     .map(|line| sanitize_for_plain_output(&line)),
             );
@@ -26,6 +26,11 @@ pub(crate) fn should_truncate_plain_line(line: &str) -> bool {
         return false;
     }
     let route_prefixes = [
+        "Commands · view:",
+        "Module selected · view:",
+        "Agent active · view:",
+        "Plan · view:",
+        "Run active · view:",
         "shell route",
         "module route",
         "agent route",
@@ -41,8 +46,7 @@ pub(crate) fn should_truncate_plain_line(line: &str) -> bool {
         return true;
     }
 
-    let padded_column_gaps = line.matches("  ").count();
-    padded_column_gaps >= 3
+    false
 }
 
 pub(crate) fn sanitize_for_plain_output(value: &str) -> String {
@@ -95,6 +99,14 @@ pub(crate) fn trim_plain_lines(mut lines: Vec<String>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn long_plain_paths_keep_all_printable_spaces() {
+        let body = format!("/owned/{}/one  two  three  four.rs", "a".repeat(90));
+        let rows = finalize_width_safe_plain_lines(vec![body.clone()], 40);
+        assert_eq!(rows.concat(), body);
+        assert!(rows.iter().all(|row| display_width(row) <= 40));
+    }
 
     #[test]
     fn sanitize_for_plain_output_folds_terminal_glyphs() {

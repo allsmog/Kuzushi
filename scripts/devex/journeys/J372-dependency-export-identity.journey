@@ -1,0 +1,97 @@
+name: Dependency exports keep source records distinct and disclose graph omissions
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_cyclonedx.py @TMP_TARGET @ART prepare
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+require-live-snap: 20 LOGS | inventory-origin
+expect: Commands
+expect-not: shell route
+expect-not: focus unknown
+submit: run sbom-scan:scan
+require-live-snap: 30 SPDX and CycloneDX omitted 3 dependency relationships | inventory-result
+expect: sbom-scan: 5 components
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_cyclonedx.py @TMP_TARGET @ART initial
+resize: 160x48
+live-snap: warning-160x48
+resize: 96x89
+live-snap: warning-96x89
+resize: 80x24
+live-snap: warning-80x24
+resize: 60x20
+live-snap: warning-60x20
+resize: 40x12
+live-snap: warning-40x12
+nav-mode:
+keys: z
+require-live-snap: 20 READ TRANSCRIPT | warning-expanded-40x12
+keys: PPage
+live-snap: warning-page-1-40x12
+keys: PPage
+live-snap: warning-page-2-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_cyclonedx.py @TMP_TARGET @ART warning-pages
+ask: Are both exports explicit about skipped relationships, and is the complete warning readable by keyboard at every supported size?
+keys: q
+resize: 120x36
+submit: scene
+require-live-snap: 20 KUZUSHI VIZ | inventory-gallery
+keys: Tab
+require-live-snap: 20 COMPONENT STACK | inventory-components
+expect: library
+expect: other
+expect: declared ^1.0
+expect: declared ^3.0
+expect: 3 resolved
+expect: 2 manifests · 1 lockfile
+expect-not: 1 lockfiles
+expect: Source freshness is unverified
+expect-not: Map ✓
+expect-not: Scan ✓
+resize: 160x48
+live-snap: components-160x48
+resize: 96x89
+live-snap: components-96x89
+resize: 80x24
+live-snap: components-80x24
+resize: 60x20
+live-snap: components-60x20
+resize: 40x12
+live-snap: components-40x12
+keys: NPage
+live-snap: components-page-1-40x12
+keys: NPage
+live-snap: components-page-2-40x12
+keys: NPage
+live-snap: components-page-3-40x12
+keys: NPage
+live-snap: components-page-4-40x12
+keys: NPage
+live-snap: components-page-5-40x12
+keys: NPage
+live-snap: components-page-6-40x12
+resize: 120x36
+keys: Escape
+keys: C-c
+require-exit: 10
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: scene
+require-live-snap: 20 KUZUSHI VIZ | restart-gallery
+keys: Tab
+require-live-snap: 20 declared ^1.0 | restart-components
+expect: library
+expect: other
+expect-not: Map ✓
+expect-not: Scan ✓
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_cyclonedx.py @TMP_TARGET @ART restarted
+ask: Does restart retain five component records and both incomplete exports, with declared constraints separate from observed versions and no new model work?
+keys: C-c
+require-exit: 10

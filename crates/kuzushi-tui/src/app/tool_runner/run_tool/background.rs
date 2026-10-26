@@ -477,8 +477,9 @@ impl ShellApp {
         self.log(
             "tool",
             format!(
-                "running {tool_name} in background; {status} under {} · run {}",
-                run.target_label, run.run_id
+                "running {tool_name} in background; {status} · target {} · run {}",
+                crate::ui_view_models::compact_target_path(&run.target_label),
+                run.run_id
             ),
         );
         self.set_live_activity(

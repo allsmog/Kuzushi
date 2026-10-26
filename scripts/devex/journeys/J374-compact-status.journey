@@ -1,0 +1,90 @@
+name: Compact status preserves whole index, cost and model fields above an unsent draft
+size: 240x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/operator_status.py @TMP_TARGET @ART prepare
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+require-live-snap: 20 kz> | commands
+expect: LOGS
+expect: Commands
+expect: Desktop alerts unavailable
+expect-not: shell route
+expect-not: focus unknown
+submit: run context:build {"sampleLimit":20,"enrichment":false}
+require-live-snap: 35 run receipt | index-produced
+submit: logs
+require-live-snap: 20 repo index ready | wide-index-ready
+expect-not: ctx:not built
+expect-not: repo index not built
+expect-not: Map ✓
+expect-not: Scan ✓
+require-shell: python3 -B @REPO/scripts/devex/fixtures/operator_status.py @TMP_TARGET @ART built
+type: status-copy draft
+resize: 160x48
+live-snap: index-160x48
+expect: status-copy draft
+resize: 96x89
+live-snap: index-96x89
+expect: status-copy draft
+expect: repo index ready
+expect: session:$0.00
+expect: model:unconfigured
+expect: target:./fixture-target
+resize: 80x24
+live-snap: index-80x24
+expect: status-copy draft
+expect: repo index ready
+expect: session:$0.00
+expect: model:unconfigured
+expect: target:./fixture-target
+resize: 60x20
+live-snap: index-60x20
+expect: status-copy draft
+resize: 40x12
+live-snap: index-40x12
+expect: status-copy draft
+ask: Do the two compact header rows keep index readiness, cost and model visible at 80 and 96 columns, while short screens retain the draft and reading controls?
+keys: C-u
+resize: 120x36
+submit: scene
+require-live-snap: 20 KUZUSHI VIZ | gallery
+keys: Tab
+require-live-snap: 20 COMPONENT STACK | components
+expect: 2 manifests · 1 lockfile
+expect-not: 1 lockfiles
+expect: declared ^1.0
+expect-not: Map ✓
+expect-not: Scan ✓
+keys: Escape
+keys: C-c
+require-exit: 10
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+resize: 240x36
+submit: logs
+require-live-snap: 20 kz> | recovered-index
+expect: LOGS
+expect: repo index ready
+expect: Commands
+expect-not: MAP VIEW
+expect-not: repo index not built
+expect-not: Map ✓
+expect-not: Scan ✓
+wait: 1
+live-snap: recovered-index-settled
+expect: kz>
+expect: LOGS
+expect: repo index ready
+expect-not: MAP VIEW
+require-shell: python3 -B @REPO/scripts/devex/fixtures/operator_status.py @TMP_TARGET @ART restarted
+ask: Does restart retain the same real index and one auxiliary run, with no additional model work, scan jobs or accepted Map?
+keys: C-c
+require-exit: 10

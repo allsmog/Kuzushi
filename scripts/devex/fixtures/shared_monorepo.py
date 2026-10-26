@@ -2,15 +2,19 @@
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 import bounded_semgrep
 from installed_scope_study import native, current_counts, save
+from semgrep_invocation_probe import install
 
 NAMES = ["Service A", "Service B", "Root files"]
-MARKERS = {"Service A":"services/a/f064.py", "Service B":"services/b/f064.py", "Root files":"loose.py"}
+DEEP_PATH = "/".join(["deep"] * 40)
+MARKERS = {"Service A":f"services/a/{DEEP_PATH}/f064.py", "Service B":f"services/b/{DEEP_PATH}/f064.py", "Root files":"loose.py"}
 
 
 def hashes(root):
@@ -27,13 +31,12 @@ def hashes(root):
 
 def seed(root, evidence, home):
     bounded_semgrep.seed(root, evidence, home)
+    subprocess.run(["git", "init", "--quiet", "--initial-branch=main", str(home)], check=True)
     (root / "service/notice.py").unlink()
     (root / "service").rmdir()
     for service in ["a", "b"]:
         for index in range(65):
-            parent = root / "services" / service
-            if index == 0:
-                parent = parent.joinpath(*(["deep"] * 40))
+            parent = root / "services" / service / DEEP_PATH
             parent.mkdir(parents=True, exist_ok=True)
             marker = "OWNER_POLICY_REVIEW" if index == 64 else "ordinary notice"
             (parent / ("f%03d.py" % index)).write_text('# Owned inert text, never executed.\nprint("' + marker + '")\n')
@@ -49,6 +52,42 @@ def seed(root, evidence, home):
     (root / ".kuzushi/manual-context.json").write_text(json.dumps(doc,indent=2) + "\n")
     (evidence / "runtime-home.txt").write_text(str(home))
     save(evidence,"source-before",hashes(root))
+    probe = install(evidence)
+    (evidence / "scanner-setting.txt").write_text("set semgrepBinary " + json.dumps(str(probe)))
+
+
+def verify_native_membership(root, evidence):
+    rows = [json.loads(line) for line in (evidence / "semgrep-invocations.jsonl").read_text().splitlines()]
+    scans = [row for row in rows if "--" in row["argv"]]
+    expected = set(json.loads((evidence / "source-before.json").read_text()))
+    observed = Counter()
+    batches = Counter()
+    by_worker = {}
+    for row in scans:
+        assert Path(row["cwd"]).resolve() == root.resolve()
+        arguments = row["argv"]
+        assert "--json" in arguments and arguments[arguments.index("--metrics") + 1] == "off"
+        files = arguments[arguments.index("--") + 1:]
+        assert files and len(files) == len(set(files))
+        assert set(files) <= expected
+        labels = {"Service A" if name.startswith("services/a/") else
+                  "Service B" if name.startswith("services/b/") else "Root files" for name in files}
+        assert len(labels) == 1, "One native process crossed discovery boundaries"
+        batches[next(iter(labels))] += 1
+        observed.update(files)
+        by_worker.setdefault(row["parentPid"], []).append(files)
+    assert observed == Counter({name: 3 for name in expected})
+    assert batches == {"Service A": 6, "Service B": 6, "Root files": 3}, batches
+    assert len(by_worker) == 9, "Expected one executor process per fixed job"
+    for groups in by_worker.values():
+        members = [name for batch in groups for name in batch]
+        assert len(members) == len(set(members))
+        scope = next(iter(members)).split("/", 2)[:2]
+        selected = {name for name in expected if name.split("/", 2)[:2] == scope}
+        assert set(members) == selected
+        assert len(groups) == (1 if selected == {"loose.py"} else 2)
+    save(evidence,"native-membership",{"files":len(expected),"processes":len(scans),"processesByBoundary":dict(batches),
+        "inspectionsPerFile":3,"sourceExecuted":False,"realEngine":json.loads((evidence / "semgrep-probe.json").read_text())})
 
 
 def review(root, evidence):
@@ -121,6 +160,7 @@ def verify_work(root, evidence, stage):
     counts = current_counts(root,evidence)
     assert counts["finding_observations"] == counts["investigation_work_attempts"] == 9
     assert counts["investigation_call_reservations"] == 0
+    verify_native_membership(root,evidence)
     occurrence = native(root,evidence,"scope-occurrence",["findings","batch",plan["campaignId"],"--json"])
     names = {case_id:case["label"] for case_id,case in cases.items()}
     suffixes = {"Service A":"a","Service B":"b","Root files":"root"}

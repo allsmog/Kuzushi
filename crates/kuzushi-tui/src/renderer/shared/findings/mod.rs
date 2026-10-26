@@ -1,10 +1,11 @@
 pub(in crate::renderer) use super::*;
 pub(crate) use crate::ui_view_models::{SeverityCounts, SeverityTone};
+pub(in crate::renderer) use location::fit_location_label;
+mod location;
 
 /// Title owns the row. It claims the width it needs (leaving a minimum
-/// location tail) and the location gets the remainder, truncated from the
-/// LEFT so `…/file.rs:42` survives — a deep path must never squeeze the
-/// text that says what the finding IS down to a stub.
+/// location tail). Location labels keep the source prefix and filename when
+/// space permits. Deep paths leave the finding title readable.
 const COMPACT_ROW_MIN_TITLE_WIDTH: usize = 12;
 const COMPACT_ROW_MIN_LOCATION_WIDTH: usize = 12;
 
@@ -34,6 +35,6 @@ pub(crate) fn compact_finding_row(
         ),
         Span::styled(pad(&fit(name, name_w), name_w), theme::primary()),
         Span::styled("  ", Style::default()),
-        Span::styled(fit_path(location, location_w), theme::muted()),
+        Span::styled(fit_location_label(location, location_w), theme::muted()),
     ])
 }

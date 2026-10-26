@@ -263,6 +263,57 @@ fn old_operator_stop_does_not_mask_a_new_source_failure() {
     assert!(!notice.contains("Stopped by operator"));
 }
 
+#[test]
+fn operator_stop_before_any_completion_explains_partial_work() {
+    let (root, mut app) = deck_app();
+    park_for_stop(root.path());
+    let path = kuzushi_core::capabilities::campaign::campaign_queue_path(root.path(), "camp1");
+    let mut queue: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    queue["jobs"]["j1"] = serde_json::json!({"state":"parked","reason":"canceled","attempts":1});
+    std::fs::write(path, serde_json::to_vec(&queue).unwrap()).unwrap();
+    app.open_campaign_view(Some("camp1".into()));
+    app.set_input("held early-stop draft");
+    failed_dispatcher(
+        &mut app,
+        root.path(),
+        Some("Error: campaign camp1: 2 parked\n"),
+    );
+
+    assert!(app.poll_campaign_completion());
+    let notice = app.router.campaign().notice.as_deref().unwrap();
+    assert!(
+        notice.contains("Stopped by operator: 0 completed, 2 parked"),
+        "{notice}"
+    );
+    assert!(notice.contains("unresolved spending remain recorded"));
+    assert!(!notice.contains("failure"));
+    assert_eq!(app.input(), "held early-stop draft");
+}
+
+#[test]
+fn canceled_work_does_not_relabel_an_existing_failed_job_as_operator_stop() {
+    let (root, mut app) = deck_app();
+    park_for_stop(root.path());
+    let path = kuzushi_core::capabilities::campaign::campaign_queue_path(root.path(), "camp1");
+    let mut queue: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    queue["jobs"]["j1"]["state"] = serde_json::json!("failed");
+    std::fs::write(path, serde_json::to_vec(&queue).unwrap()).unwrap();
+    app.open_campaign_view(Some("camp1".into()));
+    failed_dispatcher(
+        &mut app,
+        root.path(),
+        Some("Error: campaign camp1: 1 failed, 1 parked\n"),
+    );
+
+    assert!(app.poll_campaign_completion());
+    let notice = app.router.campaign().notice.as_deref().unwrap();
+    assert!(notice.contains("1 failed, 1 parked"));
+    assert!(notice.contains("Review the recorded failure"));
+    assert!(!notice.contains("Stopped by operator"));
+}
+
 fn park_for_stop(root: &Path) {
     park_for_allowance(root);
     let path = kuzushi_core::capabilities::campaign::campaign_queue_path(root, "camp1");
