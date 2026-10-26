@@ -269,8 +269,8 @@ impl WorkbenchPage {
     /// the engagement header. Canonical 80x24 therefore has fewer than 20 body
     /// rows and renders the single combined Fix pane.
     pub const FIX_DIAGRAM_MIN_BODY_ROWS: u16 = 20;
-    /// Legacy page order, retained for explicit compatibility consumers.
-    #[allow(dead_code)]
+    /// Full page order, including the compatibility readers. The keymap
+    /// enumerates it so a page digit always names the same page, bound or not.
     pub const ALL: [Self; 5] = [Self::Map, Self::Scan, Self::Review, Self::Prove, Self::Fix];
 
     pub const INVESTIGATION: [Self; 3] = [Self::Map, Self::Scan, Self::Review];

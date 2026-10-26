@@ -11229,6 +11229,109 @@ fn future_page_browsing_does_not_advance_journey_reality() {
     );
 }
 
+/// A target-backed Workbench resting on `page`, in Navigate mode.
+fn workbench_navigate_app_for_test(page: WorkbenchPage) -> (tempfile::TempDir, ShellApp) {
+    let target = tempfile::tempdir().expect("temp target");
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(target.path().to_path_buf()));
+    open_workbench_page_for_test(&mut app, page);
+    app.set_input_mode(InputMode::Navigate);
+    (target, app)
+}
+
+#[test]
+fn an_unbound_phase_page_digit_names_its_verb_instead_of_starting_a_draft() {
+    // The Workbench binds page digits for the investigation pages only, so `4`
+    // and `5` reach no page. Typing them into the composer would answer a
+    // navigation press with unannounced draft text and a silent mode flip.
+    for (digit, title, verb) in [('4', "Prove", "prove"), ('5', "Fix", "fix")] {
+        let (_target, mut app) = workbench_navigate_app_for_test(WorkbenchPage::Review);
+
+        press_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char(digit), KeyModifiers::empty()),
+        );
+
+        assert_eq!(
+            app.input_mode(),
+            InputMode::Navigate,
+            "`{digit}` left Navigate"
+        );
+        assert_eq!(app.input(), "", "`{digit}` became draft text");
+        assert_eq!(
+            app.router.workbench().page(),
+            Some(WorkbenchPage::Review),
+            "`{digit}` must not move the page it cannot reach"
+        );
+        let expected = format!("`{digit}` does not open {title} here — type `{verb}`");
+        assert!(
+            app.log_lines().iter().any(|line| line.body == expected),
+            "missing {expected:?} in {:?}",
+            app.log_lines()
+        );
+    }
+}
+
+#[test]
+fn a_bound_phase_page_digit_still_opens_its_page() {
+    let (_target, mut app) = workbench_navigate_app_for_test(WorkbenchPage::Map);
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('2'), KeyModifiers::empty()),
+    );
+
+    assert_eq!(app.router.workbench().page(), Some(WorkbenchPage::Scan));
+    assert_eq!(app.input_mode(), InputMode::Navigate);
+}
+
+#[test]
+fn a_digit_outside_the_page_keymap_still_starts_a_draft() {
+    // Only the digits the Workbench advertises as pages are withheld from
+    // type-ahead; every other printable keeps opening a prompt draft.
+    let (_target, mut app) = workbench_navigate_app_for_test(WorkbenchPage::Review);
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('7'), KeyModifiers::empty()),
+    );
+
+    assert_eq!(app.input_mode(), InputMode::Prompt);
+    assert_eq!(app.input(), "7");
+}
+
+#[test]
+fn a_page_digit_off_the_workbench_still_starts_a_draft() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Logs);
+    app.sync_view_change();
+    app.set_input_mode(InputMode::Navigate);
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('4'), KeyModifiers::empty()),
+    );
+
+    assert_eq!(app.input_mode(), InputMode::Prompt);
+    assert_eq!(app.input(), "4");
+}
+
+#[test]
+fn a_page_digit_extends_a_preserved_navigate_draft() {
+    // A non-empty composer means the press continues composition, not
+    // navigation. Withholding the digit there would drop the keystroke.
+    let (_target, mut app) = workbench_navigate_app_for_test(WorkbenchPage::Review);
+    app.set_input("run sast:scan --depth ");
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('4'), KeyModifiers::empty()),
+    );
+
+    assert_eq!(app.input_mode(), InputMode::Prompt);
+    assert_eq!(app.input(), "run sast:scan --depth 4");
+}
+
 #[test]
 fn next_command_opens_report_for_a_clean_selected_scan_without_mutating_reality() {
     use kuzushi_core::workflow_attempts::phase_attempt_ledger_path;
