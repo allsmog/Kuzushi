@@ -9,8 +9,10 @@ mod brief;
 mod diagnosis;
 mod model_selection;
 mod recovery;
+mod scope_correction;
 mod scoped_context;
 mod scopes;
+pub(crate) use scope_correction::ScopeCorrectionEditor;
 mod setup;
 #[cfg(test)]
 mod tests;
@@ -35,6 +37,7 @@ pub(crate) struct StudyContextGeneration {
         Option<kuzushi_core::capabilities::campaign::WorkflowProposalResult>,
     pub(crate) show_answer: bool,
     pub(crate) generated_scopes: Option<kuzushi_core::workspace::ScanScopeReview>,
+    pub(crate) scope_correction: Option<ScopeCorrectionEditor>,
     pub(crate) result_error: Option<String>,
     pub(crate) rejected_available: bool,
     pub(crate) rejected_output:
@@ -119,7 +122,7 @@ impl StudyContextGeneration {
     pub(crate) fn supports_rejected_retention(&self) -> bool {
         matches!(
             self.generation_tool.as_deref(),
-            None | Some("threat-model:build")
+            None | Some("threat-model:build") | Some("pack:suggest-scopes")
         )
     }
 
@@ -139,6 +142,7 @@ impl StudyContextGeneration {
 
     pub(crate) fn supports_result_overview(&self) -> bool {
         self.supports_rejected_retention()
+            && !self.is_scope_proposal()
             && !self.is_scope_context()
             && (self.generated.is_some() || self.result_error.is_some())
     }
@@ -235,6 +239,9 @@ impl StudyContextGeneration {
     }
 
     fn scope_proposal_action(&self, config: &BatchScanConfig) -> &'static str {
+        if self.has_corrected_scopes() {
+            return "Review corrected scope draft";
+        }
         if self.result_error.is_some() {
             return "Inspect scope proposal outcome";
         }
@@ -312,7 +319,9 @@ impl ShellApp {
             KeyCode::Esc => self.close_context_generation(),
             KeyCode::Char('t') => self.edit_context_allowance(BatchScanConfigRow::ProviderCalls),
             KeyCode::Char('r') => self.edit_context_allowance(BatchScanConfigRow::ReviewCalls),
-            KeyCode::Char('n') if !self.has_running_work() => self.open_context_generation(),
+            KeyCode::Char('n') if !self.has_running_work() => {
+                self.open_generation_preserving_correction()
+            }
             KeyCode::Char('M')
                 if !self.has_running_work()
                     && self

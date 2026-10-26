@@ -1,6 +1,7 @@
-//! Generated scope ancestry retains the investigation that paid for its proposal.
+//! Scope ancestry retains the investigation that paid for its proposal.
 use super::*;
 use crate::workspace::{ScanScopeProposalRef, ScanScopeReview, WorkspaceTarget};
+mod correction;
 
 pub fn load_scope_proposal_allowance(
     root: &Path,
@@ -8,6 +9,9 @@ pub fn load_scope_proposal_allowance(
 ) -> Result<Option<crate::allowance::AllowanceSnapshot>> {
     let workspace = WorkspaceTarget::new(root)?;
     let review = crate::workspace::load_scan_scope_proposal(&workspace, reference)?;
+    if let Some(correction) = &review.record.correction {
+        return correction::load(root, &workspace, &review, correction).map(Some);
+    }
     let Some(generation) = &review.record.generation else {
         return Ok(None);
     };

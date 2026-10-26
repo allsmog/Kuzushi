@@ -43,11 +43,15 @@ pub(super) fn render_generation_state_controls(
         controls,
         position.0,
         position.1,
-        generation.has_result(),
+        has_inspection_action(generation),
         generation.is_scope_proposal(),
         generation.rejected_available,
         generation.receipt.is_none(),
     );
+}
+
+fn has_inspection_action(generation: &crate::app::StudyContextGeneration) -> bool {
+    generation.has_result() || (generation.is_scope_proposal() && generation.result_error.is_some())
 }
 
 fn render_context_result_controls(
@@ -100,7 +104,12 @@ fn render_generation_reader_controls(
         return true;
     }
     if generation.show_rejected {
-        render_diagnostic_controls(frame, area);
+        render_diagnostic_controls(
+            frame,
+            area,
+            generation.is_scope_proposal(),
+            generation.has_corrected_scopes(),
+        );
         return true;
     }
     false

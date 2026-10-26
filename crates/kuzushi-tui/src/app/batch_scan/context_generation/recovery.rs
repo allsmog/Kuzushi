@@ -21,6 +21,25 @@ impl StudyContextGeneration {
             Ok(result) => self.apply_generated_result(result),
             Err(error) => self.result_error = Some(format!("{error:#}")),
         }
+        self.refresh_corrected_scopes(target);
+    }
+
+    fn refresh_corrected_scopes(&mut self, target: &std::path::Path) {
+        let Some(receipt) = self.receipt.as_ref().filter(|_| self.is_scope_proposal()) else {
+            return;
+        };
+        match receipt.corrected_scopes(target) {
+            Ok(Some(review)) => self.generated_scopes = Some(review),
+            Ok(None) => {}
+            Err(error) => {
+                self.result_error = Some(format!(
+                    "{}. Corrected scope history unavailable: {error:#}",
+                    self.result_error
+                        .as_deref()
+                        .unwrap_or("Scope result unavailable")
+                ))
+            }
+        }
     }
 
     fn apply_generated_result(&mut self, result: GeneratedResult) {

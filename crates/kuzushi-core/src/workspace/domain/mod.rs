@@ -5,8 +5,13 @@ use std::path::{Path, PathBuf};
 
 mod nested_scope;
 mod program_scope;
+mod rejected_scope_candidate;
+mod scan_scope_correction;
 mod scan_scope_proposal;
 mod scan_scope_revision;
+pub(crate) use rejected_scope_candidate::RejectedScopeCandidate;
+pub use rejected_scope_candidate::MAX_REJECTED_SCOPE_BYTES;
+pub use scan_scope_correction::{RejectedScopeRef, ScanScopeCorrection};
 mod workspace_state_initialization;
 mod workspace_state_io;
 mod workspace_target;

@@ -12,10 +12,13 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 #[cfg(test)]
+mod boundary_tests;
+#[cfg(test)]
 mod tests;
 
 mod license_file;
 mod manifest;
+mod manifest_inspection;
 mod report;
 mod rule_policy;
 mod source_header;
@@ -23,11 +26,13 @@ pub(crate) use rule_policy::enabled_rule_ids;
 
 use license_file::repository_license_findings;
 use manifest::{is_license_manifest, manifest_license, ManifestLicense};
+use manifest_inspection::{inspect_manifests, InspectedManifest};
 use source_header::source_header_findings;
 
 const MAX_LICENSE_MANIFEST_BYTES: usize = 8 * 1024 * 1024;
 const MAX_LICENSE_FILE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_SOURCE_HEADER_BYTES: usize = 64 * 1024;
+const EVIDENCE_SEPARATOR: &str = "\nEvidence: ";
 
 #[derive(Debug, Clone, Default)]
 pub struct LicenseScanScanner;
@@ -40,6 +45,13 @@ pub struct LicenseScanOptions {
 impl ScanEngine for LicenseScanScanner {
     fn id(&self) -> &'static str {
         "license-scan"
+    }
+
+    fn rebind_scoped_finding(&self, finding: &mut Finding, file_path: String) {
+        finding.file_path = file_path;
+        if let Some((_, evidence)) = finding.message.split_once(EVIDENCE_SEPARATOR) {
+            finding.fingerprint = fingerprint(&finding.rule_id, &finding.file_path, evidence);
+        }
     }
 
     fn scan(&self, target: &Path, cancellation: &ScanCancellation) -> Result<Vec<Finding>> {
@@ -62,15 +74,10 @@ pub fn scan_licenses_with_options(
 ) -> Result<LicenseScanReport> {
     ensure_directory(target)?;
     let files = collect_regular_files(target, cancellation, license_walk_options())?.files;
-    let mut manifests = files
-        .iter()
-        .filter(|path| is_license_manifest(path))
-        .cloned()
-        .collect::<Vec<_>>();
-    manifests.sort_by_key(|path| relative_display(target, path));
+    let manifests = inspect_manifests(target, &files, cancellation)?;
     let mut findings = manifests
         .iter()
-        .filter_map(|path| license_finding(target, path, cancellation).transpose())
+        .filter_map(|manifest| license_finding(target, manifest, cancellation).transpose())
         .collect::<Result<Vec<_>>>()?;
     findings.extend(repository_license_findings(
         target,
@@ -136,19 +143,15 @@ fn ignored_dir(path: &Path) -> bool {
 
 fn license_finding(
     target: &Path,
-    path: &Path,
+    manifest: &InspectedManifest,
     cancellation: &ScanCancellation,
 ) -> Result<Option<LicenseScanFinding>> {
     ensure_scan_active(cancellation)?;
-    let text = crate::bounded_file::read_utf8_text_within(target, path, MAX_LICENSE_MANIFEST_BYTES)
-        .with_context(|| format!("license-scan: read {}", path.display()))?;
-    match manifest_license(path, &text)? {
+    match &manifest.license {
         ManifestLicense::Skip => Ok(None),
-        ManifestLicense::Missing => Ok(Some(missing_license_finding(target, path))),
-        ManifestLicense::Declared(license) => {
-            Ok(risky_license(&license)
-                .map(|risk| risky_license_finding(target, path, &license, risk)))
-        }
+        ManifestLicense::Missing => Ok(Some(missing_license_finding(target, &manifest.path))),
+        ManifestLicense::Declared(license) => Ok(risky_license(license)
+            .map(|risk| risky_license_finding(target, &manifest.path, license, risk))),
     }
 }
 
@@ -257,6 +260,11 @@ pub struct LicenseScanFinding {
 }
 
 impl LicenseScanFinding {
+    pub(crate) fn rebase_path(&mut self, prefix: &Path) {
+        self.file_path = relative_display(Path::new(""), &prefix.join(&self.file_path));
+        self.fingerprint = fingerprint(&self.rule_id, &self.file_path, &self.evidence);
+    }
+
     fn new(
         target: &Path,
         path: &Path,
@@ -289,7 +297,7 @@ impl LicenseScanFinding {
             self.start_line,
             Some(self.start_line),
             self.severity,
-            format!("{}\nEvidence: {}", self.message, self.evidence),
+            format!("{}{EVIDENCE_SEPARATOR}{}", self.message, self.evidence),
         );
         finding.fingerprint = self.fingerprint.clone();
         finding.title = self.message.clone();
@@ -313,8 +321,5 @@ fn fingerprint(rule_id: &str, file_path: &str, evidence: &str) -> String {
 }
 
 fn relative_display(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .replace('\\', "/")
+    crate::workspace::inventory::repo_relative(root, path)
 }

@@ -111,6 +111,12 @@ fn selected_heading(
             .as_ref()
             .and_then(|review| review.record.generation.as_ref()),
     ));
+    lines.extend(super::generation::correction_summary(
+        state
+            .review
+            .as_ref()
+            .and_then(|review| review.record.correction.as_ref()),
+    ));
     lines.push(format!(
         "Boundary: {}",
         scope

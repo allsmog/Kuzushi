@@ -118,10 +118,15 @@ def wait_for_inspection(root, evidence, stage):
             time.sleep(0.1)
 
 
-root, evidence, stage = Path(sys.argv[1]).resolve(), Path(sys.argv[2]).resolve(), sys.argv[3]
-if stage == "prepare":
-    prepare(root, evidence)
-elif stage in ["license", "oversize", "repair"]:
-    edit_source(root, evidence, stage)
-else:
-    wait_for_inspection(root, evidence, stage)
+def main():
+    root, evidence, stage = Path(sys.argv[1]).resolve(), Path(sys.argv[2]).resolve(), sys.argv[3]
+    if stage == "prepare":
+        prepare(root, evidence)
+    elif stage in ["license", "oversize", "repair"]:
+        edit_source(root, evidence, stage)
+    else:
+        wait_for_inspection(root, evidence, stage)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,4 +1,7 @@
 use super::*;
+use std::collections::BTreeMap;
+
+type LicenseBoundaries<'a> = BTreeMap<PathBuf, Vec<&'a str>>;
 
 const SOURCE_EXTENSIONS: &[&str] = &[
     "c", "cc", "cpp", "go", "h", "hpp", "java", "js", "jsx", "kt", "php", "py", "rb", "rs", "ts",
@@ -7,22 +10,23 @@ const SOURCE_EXTENSIONS: &[&str] = &[
 
 pub(super) fn source_header_findings(
     target: &Path,
-    manifests: &[PathBuf],
+    manifests: &[InspectedManifest],
     files: &[PathBuf],
     cancellation: &ScanCancellation,
     require_source_spdx_headers: bool,
 ) -> Result<Vec<LicenseScanFinding>> {
-    let declared = declared_license_kind(target, manifests, cancellation)?;
-    if declared.is_none() && !require_source_spdx_headers {
-        return Ok(Vec::new());
-    }
+    let boundaries = manifest_boundaries(manifests, cancellation)?;
     let mut findings = Vec::new();
     for path in files.iter().filter(|path| is_source_file(path)) {
         ensure_scan_active(cancellation)?;
+        let declared = licenses_for_source(path, &boundaries);
+        if !header_check_applies(declared, require_source_spdx_headers) {
+            continue;
+        }
         inspect_source_path(
             target,
             path,
-            declared.as_deref(),
+            declared,
             require_source_spdx_headers,
             &mut findings,
         )?;
@@ -31,48 +35,83 @@ pub(super) fn source_header_findings(
     Ok(findings)
 }
 
-fn declared_license_kind(
-    target: &Path,
-    manifests: &[PathBuf],
+fn manifest_boundaries<'a>(
+    manifests: &'a [InspectedManifest],
     cancellation: &ScanCancellation,
-) -> Result<Option<String>> {
-    for path in manifests {
+) -> Result<LicenseBoundaries<'a>> {
+    let mut boundaries = BTreeMap::new();
+    for manifest in manifests {
         ensure_scan_active(cancellation)?;
-        let text =
-            crate::bounded_file::read_utf8_text_within(target, path, MAX_LICENSE_MANIFEST_BYTES)
-                .with_context(|| format!("license-scan: read {}", path.display()))?;
-        if let ManifestLicense::Declared(license) = manifest_license(path, &text)? {
-            return Ok(Some(normalize_license_id(&license)));
-        }
+        record_boundary(&mut boundaries, manifest);
     }
-    Ok(None)
+    Ok(boundaries)
+}
+
+fn record_boundary<'a>(boundaries: &mut LicenseBoundaries<'a>, manifest: &'a InspectedManifest) {
+    let Some(directory) = manifest.path.parent() else {
+        return;
+    };
+    // Even an unknown or private package defines a local boundary. It does not
+    // authorize borrowing another package's declaration.
+    let declared = boundaries.entry(directory.to_path_buf()).or_default();
+    if let Some(license) = manifest.declared_license() {
+        declared.push(license);
+    }
+}
+
+fn licenses_for_source<'a>(source: &Path, boundaries: &'a LicenseBoundaries<'a>) -> &'a [&'a str] {
+    source
+        .ancestors()
+        .skip(1)
+        .find_map(|directory| boundaries.get(directory))
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
+}
+
+fn header_check_applies(declared: &[&str], require_headers: bool) -> bool {
+    require_headers || !declared.is_empty()
 }
 
 fn inspect_source_path(
     target: &Path,
     path: &Path,
-    declared: Option<&str>,
+    declared: &[&str],
     require_source_spdx_headers: bool,
     findings: &mut Vec<LicenseScanFinding>,
 ) -> Result<()> {
     match source_spdx_license(target, path)? {
-        Some(header)
-            if declared.is_some_and(|license| normalize_license_id(&header) != license) =>
-        {
-            findings.push(spdx_header_mismatch_finding(
-                target,
-                path,
-                declared.unwrap_or_default(),
-                &header,
-            ));
-        }
-        Some(_) => {}
+        Some(header) => findings.extend(header_mismatch_finding(target, path, declared, &header)),
         None if require_source_spdx_headers => {
             findings.push(missing_spdx_header_finding(target, path));
         }
         None => {}
     }
     Ok(())
+}
+
+fn header_mismatch_finding(
+    target: &Path,
+    path: &Path,
+    declared: &[&str],
+    header: &str,
+) -> Option<LicenseScanFinding> {
+    let license = mismatched_declaration(declared, header)?;
+    Some(spdx_header_mismatch_finding(
+        target,
+        path,
+        &normalize_license_id(license),
+        header,
+    ))
+}
+
+fn mismatched_declaration<'a>(declared: &[&'a str], header: &str) -> Option<&'a str> {
+    if declared
+        .iter()
+        .any(|license| normalized_license_chars(license).eq(normalized_license_chars(header)))
+    {
+        return None;
+    }
+    declared.first().copied()
 }
 
 fn source_spdx_license(target: &Path, path: &Path) -> Result<Option<String>> {
@@ -117,11 +156,18 @@ fn spdx_license_from_line(line: &str) -> Option<String> {
 }
 
 fn normalize_license_id(value: &str) -> String {
+    normalized_license_chars(value).collect()
+}
+
+fn normalized_license_chars(value: &str) -> impl Iterator<Item = char> + '_ {
     value
         .trim()
         .trim_matches(['(', ')'])
-        .to_ascii_lowercase()
-        .replace('_', "-")
+        .chars()
+        .map(|character| match character {
+            '_' => '-',
+            other => other.to_ascii_lowercase(),
+        })
 }
 
 fn missing_spdx_header_finding(target: &Path, path: &Path) -> LicenseScanFinding {

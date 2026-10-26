@@ -46,6 +46,8 @@ pub(in crate::modules) use run_taint_iris_tool::*;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 #[cfg(test)]
+mod child_target_contract_tests;
+#[cfg(test)]
 mod coverage_contract_tests;
 #[cfg(test)]
 mod cpg_contract_tests;

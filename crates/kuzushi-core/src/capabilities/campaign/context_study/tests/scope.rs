@@ -1,5 +1,6 @@
 use super::*;
 mod failure;
+mod recovery;
 
 fn scope_target() -> (
     tempfile::TempDir,
@@ -110,4 +111,21 @@ fn explicit_scope_context_omission_never_reads_global_context_or_map_history() {
         serde_json::from_value(input["proposalRef"].clone()).unwrap();
     assert!(scope_proposal_study_input(workspace.root(), reference, "".into(), false).is_err());
     let _ = config;
+}
+
+#[test]
+fn scope_retention_alias_false_is_preserved_before_the_new_plan_is_frozen() {
+    let (root, workspace, config, reference) = scope_target();
+    let mut input = scope_plan(&reference);
+    input["contextInput"]["save_rejected_output"] = json!(false);
+    ModuleRegistry::with_v2_builtins()
+        .execute_tool(
+            "campaign:context-study",
+            input,
+            &context(&workspace, &config),
+        )
+        .unwrap();
+    let receipt = load_context_study(root.path(), "scope-draft").unwrap();
+    assert_eq!(receipt.input["saveRejectedOutput"], false);
+    assert!(receipt.input.get("save_rejected_output").is_none());
 }

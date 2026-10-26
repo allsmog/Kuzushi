@@ -1,11 +1,39 @@
 # Kuzushi modules
 
+Normalized native license, dependency-policy and secret findings keep locations
+relative to the explicit workspace, including child-directory scans. Their saved
+source comes from the cited child file. Direct and SAST directory scans retain
+one durable identity per finding and child path. License and dependency producer
+fingerprints follow that path; opaque secret fingerprints remain compatibility
+aliases. The reported target names the inspected subtree. Raw scanner APIs and
+secret `data.findings` retain engine-relative paths; normalized `coreFindings`,
+ledger locations and exports use workspace paths. Relative inline targets resolve
+inside an explicit workspace. Existing ambiguous child observations require a fresh scan and source
+reassessment; see [the migration note](../RELEASING.md#package-boundaries-and-child-target-source-locations).
+
+The three native tools above bind source identity in the selected workspace,
+with child discovery coverage recorded separately. Identity hashing can read
+parent source outside the inspected child and has separate IO limits. A
+standalone tool receipt does not accept a guided Map or Scan checkpoint;
+results and findings remain readable. See [source ownership and phase guidance](assessments/workspace-source-guidance-2026-10-26.md).
+
 Scope inventory completeness and content inspection are separate facts.
 `pack:scopes` uses the recorded enumeration receipt for
 `coverage.enumerationComplete`; a content-prefix limit still makes
 `inventoryLimited` true and requires the existing inventory-limit acknowledgement
 before acceptance. Legacy inventories without recorded enumeration completeness
 remain readable and limited. Scope acceptance never approves scans or spending.
+
+Failed scope proposals can retain at most 16 KiB of local candidate text through
+the declared `saveRejectedOutput` option. Explicit inspection can open a bounded
+JSON editor. `pack:scopes operation=recover` authenticates the failed run and
+current source before saving a manually corrected, unaccepted revision. It
+starts no model work and preserves the failed producer and spent request. See
+[rejected scope correction](assessments/rejected-scope-correction-2026-10-26.md)
+for the additive contract and qualification limits.
+Later scan planning retains the original investigation through its authenticated
+run accounting. Missing, foreign or damaged history blocks planning instead of
+starting fresh spending.
 
 Report retains a labeled previous read during refresh, requires current data
 for export, and keeps repeated metadata in `p details`. Its

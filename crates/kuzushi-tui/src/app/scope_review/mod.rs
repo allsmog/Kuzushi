@@ -117,6 +117,9 @@ impl ShellApp {
     }
 
     pub(crate) fn scope_review_failed(&mut self, tool: &str, error: &str) {
+        if self.scope_correction_failed(tool, error) {
+            return;
+        }
         if tool != "pack:scopes" || self.scope_review().is_none() {
             return;
         }

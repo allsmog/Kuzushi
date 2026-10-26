@@ -19,9 +19,12 @@ mod map_result;
 mod preparation;
 mod recovery;
 mod run_result;
+mod scope_diagnosis;
 pub use diagnosis::RejectedContextOutput;
 pub use map_result::execute_context_map;
 pub use preparation::ContextPreparationJob;
+pub(crate) use scope_diagnosis::recover_scope_draft;
+pub use scope_diagnosis::RejectedScopeDraft;
 
 const TOOL: &str = "threat-model:build";
 const JOB: &str = "context-001";

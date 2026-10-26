@@ -63,6 +63,7 @@ fn failed_scope_cause_precedes_planning_terms_at_every_required_width() {
         assert!(
             text.contains("separate approval") && text.contains("No automatic repair or rerun")
         );
+        assert!(!text.contains("Enter reviews the fixed plan"), "{text}");
     }
 }
 

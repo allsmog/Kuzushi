@@ -45,7 +45,7 @@ fn source_change_before_persistence_keeps_the_run_partial_and_preserves_earlier_
         started,
         target_snapshot,
     };
-    let output = finish(&ctx, workspace.root(), &findings, output, receipt).unwrap();
+    let output = finish(&ctx, &findings, output, receipt).unwrap();
     assert_eq!(output["status"], "partial");
     assert_eq!(
         store.run_status("changed-source").unwrap().as_deref(),

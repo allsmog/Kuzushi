@@ -30,6 +30,13 @@ impl ShellApp {
     }
 
     pub(super) fn handle_rejected_context_key(&mut self, code: KeyCode) -> InputUpdate {
+        if code == KeyCode::Char('e')
+            && self
+                .context_generation()
+                .is_some_and(|g| g.is_scope_proposal())
+        {
+            return self.open_scope_correction();
+        }
         if matches!(code, KeyCode::Esc | KeyCode::Char('d')) {
             if let Some(generation) = self
                 .router

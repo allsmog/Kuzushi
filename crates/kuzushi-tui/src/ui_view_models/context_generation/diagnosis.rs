@@ -16,12 +16,27 @@ pub(super) fn retention_label(
     }
 }
 
+pub(super) fn scope_retention_label(
+    receipt: Option<&ContextStudyReceipt>,
+    input: &Value,
+) -> &'static str {
+    let enabled = receipt.map_or_else(
+        || input["saveRejectedOutput"].as_bool().unwrap_or(true),
+        |receipt| receipt.input["saveRejectedOutput"] == true,
+    );
+    if enabled {
+        "Rejected scope output: retain at most 16 KiB locally. May contain source or sensitive text. s changes this choice before preparing the plan."
+    } else {
+        "Rejected scope output: not retained. s changes this choice before preparing the plan."
+    }
+}
+
 pub(super) fn lines(
     output: Option<&Result<RejectedContextOutput, String>>,
     width: usize,
 ) -> Vec<String> {
     let mut lines = vec!["UNACCEPTED MODEL OUTPUT".into(),
-        "Local diagnostic only. Untrusted text may contain source or sensitive information. Reading never accepts context or starts work.".into()];
+        "Local diagnostic only. Untrusted text may contain source or sensitive information. Reading never accepts a result or starts work.".into()];
     match output {
         Some(Ok(output)) => {
             lines.extend([
@@ -49,7 +64,7 @@ pub(super) fn lines(
         .collect()
 }
 
-fn escape_controls(line: &str) -> String {
+pub(super) fn escape_controls(line: &str) -> String {
     line.chars()
         .map(|character| {
             if character.is_control() {

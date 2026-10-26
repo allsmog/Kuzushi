@@ -769,8 +769,8 @@ mod tests {
                 "DECISION",
                 "SOURCE",
                 "EVIDENCE",
-                "REVIEW ACTIONS",
                 "SCANNER MESSAGE",
+                "REVIEW ACTIONS",
                 "PROVENANCE",
             ],
         );

@@ -535,11 +535,6 @@ fn engagement_header_model(
         configured_model_label(&context.model)
     };
     let result_card = phase_result_card(app, phase);
-    let result_next = app
-        .engagement
-        .unresolved_phase_attempt(phase)
-        .filter(|_| !app.prove_detail_owns_controls())
-        .map(|record| super::journey::unresolved_attempt_action(app, record));
     EngagementHeaderModel {
         phase,
         reality_phase: guidance.reality_phase,
@@ -557,7 +552,7 @@ fn engagement_header_model(
         liveness: super::work_liveness(app),
         finding_filter: super::findings::scope_filter::display(app),
         phase_rail: guidance.phase_rail,
-        next_action: result_next.unwrap_or(guidance.next_action),
+        next_action: guidance.next_action,
         next_tools: result_card
             .as_ref()
             .map_or(guidance.next_tools, |_| String::new()),

@@ -143,6 +143,26 @@ pub fn edit_scan_scope_proposal(
     })
 }
 
+pub(crate) fn correct_rejected_scan_scope(
+    ctx: &ToolExecutionContext<'_>,
+    reference: &ScanScopeProposalRef,
+    draft: ScanScopeDraft,
+    correction: ScanScopeCorrection,
+) -> Result<ScanScopeReview> {
+    update_proposal(ctx, reference, |review, inventory| {
+        anyhow::ensure!(draft.exclusions == review.record.draft.exclusions
+            && draft.shared_discovery == review.record.draft.shared_discovery,
+            "Correction must preserve existing exclusions and shared discovery. Change these separately in scope review.");
+        let coverage = draft.evaluate(inventory)?;
+        let mut record = revision::next(review)?;
+        record.draft = draft;
+        record.acceptance = None;
+        record.generation = None;
+        record.correction = Some(correction);
+        Ok((record, coverage))
+    })
+}
+
 pub fn accept_scan_scope_proposal(
     ctx: &ToolExecutionContext<'_>,
     reference: &ScanScopeProposalRef,

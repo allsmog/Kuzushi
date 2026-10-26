@@ -52,7 +52,8 @@ pub(crate) fn run_tool_workspace_for_invocation(
     raw_input: &str,
     option_overrides: &[String],
 ) -> Result<Option<WorkspaceTarget>> {
-    let inline_target = invocation_target_path(registry, tool, raw_input, option_overrides)?;
+    let inline_target =
+        invocation_target_path(registry, tool, raw_input, option_overrides, target)?;
     run_tool_workspace_with_inline_target(registry, tool, target, inline_target.as_deref())
 }
 
@@ -61,11 +62,12 @@ fn invocation_target_path(
     tool: &str,
     raw_input: &str,
     option_overrides: &[String],
+    workspace: Option<&Path>,
 ) -> Result<Option<PathBuf>> {
     let target_is_path = registry.tool_option_is_path(tool, "target");
     let cwd_is_path = registry.tool_option_is_path(tool, "cwd");
-    inline_target_path(raw_input, target_is_path, cwd_is_path)?.map_or_else(
-        || option_override_target_path(option_overrides, target_is_path, cwd_is_path),
+    inline_target_path(raw_input, target_is_path, cwd_is_path, workspace)?.map_or_else(
+        || option_override_target_path(option_overrides, target_is_path, cwd_is_path, workspace),
         |target| Ok(Some(target)),
     )
 }
@@ -98,6 +100,7 @@ fn inline_target_path(
     raw_input: &str,
     target_is_path: bool,
     cwd_is_path: bool,
+    workspace: Option<&Path>,
 ) -> Result<Option<PathBuf>> {
     let Some(input) = serde_json::from_str::<Value>(raw_input).ok() else {
         return Ok(None);
@@ -108,13 +111,14 @@ fn inline_target_path(
     let cwd = cwd_is_path
         .then(|| inline_target_value(&input, "cwd"))
         .flatten();
-    target_path_from_values(target, cwd, "inline")
+    target_path_from_values(target, cwd, "inline", workspace)
 }
 
 fn option_override_target_path(
     options: &[String],
     target_is_path: bool,
     cwd_is_path: bool,
+    workspace: Option<&Path>,
 ) -> Result<Option<PathBuf>> {
     let mut target = None;
     let mut cwd = None;
@@ -128,7 +132,7 @@ fn option_override_target_path(
             _ => {}
         }
     }
-    target_path_from_values(target, cwd, "--option")
+    target_path_from_values(target, cwd, "--option", workspace)
 }
 
 fn non_empty_option_target<'a>(value: &'a str, name: &str) -> Result<&'a str> {
@@ -143,11 +147,12 @@ fn target_path_from_values(
     target: Option<&str>,
     cwd: Option<&str>,
     source: &str,
+    workspace: Option<&Path>,
 ) -> Result<Option<PathBuf>> {
     match (target, cwd) {
         (Some(target), Some(cwd)) => {
-            let target = WorkspaceTarget::new(target)?;
-            let cwd = WorkspaceTarget::new(cwd)?;
+            let target = WorkspaceTarget::new(invocation_path(target, workspace))?;
+            let cwd = WorkspaceTarget::new(invocation_path(cwd, workspace))?;
             if target.root() != cwd.root() {
                 anyhow::bail!(
                     "{source} target {} conflicts with cwd {}. Pass one canonical workspace target.",
@@ -162,6 +167,10 @@ fn target_path_from_values(
     }
 }
 
+fn invocation_path(value: &str, workspace: Option<&Path>) -> PathBuf {
+    workspace.map_or_else(|| PathBuf::from(value), |root| root.join(value))
+}
+
 fn inline_target_value<'a>(input: &'a Value, name: &str) -> Option<&'a str> {
     input
         .get(name)
@@ -171,7 +180,8 @@ fn inline_target_value<'a>(input: &'a Value, name: &str) -> Option<&'a str> {
 }
 
 fn ensure_inline_target_is_nested(workspace: &WorkspaceTarget, inline_target: &Path) -> Result<()> {
-    let inline_workspace = WorkspaceTarget::new(inline_target)?;
+    let candidate = workspace.root().join(inline_target);
+    let inline_workspace = WorkspaceTarget::new(candidate)?;
     if inline_workspace.root().starts_with(workspace.root()) {
         return Ok(());
     }
@@ -285,6 +295,84 @@ mod resolve_run_target_tests {
             workspace.root(),
             workspace_root.path().canonicalize().unwrap()
         );
+    }
+
+    #[test]
+    fn relative_child_target_is_resolved_inside_the_explicit_workspace() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("nested")).unwrap();
+        let workspace = run_tool_workspace_for_input(
+            "license-scan:scan",
+            Some(root.path()),
+            r#"{"target":"nested"}"#,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(workspace.root(), root.path().canonicalize().unwrap());
+    }
+
+    #[test]
+    fn relative_child_option_is_resolved_inside_the_explicit_workspace() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("nested")).unwrap();
+        let registry = kuzushi_core::ModuleRegistry::with_v2_builtins();
+        let workspace = super::run_tool_workspace_for_invocation(
+            &registry,
+            "license-scan:scan",
+            Some(root.path()),
+            "{}",
+            &["target=nested".into()],
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(workspace.root(), root.path().canonicalize().unwrap());
+    }
+
+    #[test]
+    fn relative_child_escape_is_checked_against_the_explicit_workspace() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = root.path().join("workspace");
+        std::fs::create_dir(&workspace).unwrap();
+        std::fs::create_dir(root.path().join("outside")).unwrap();
+        let error = run_tool_workspace_for_input(
+            "license-scan:scan",
+            Some(&workspace),
+            r#"{"target":"../outside"}"#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("outside the explicit workspace"), "{error}");
+    }
+
+    #[test]
+    fn relative_inline_aliases_use_the_same_explicit_workspace() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("nested")).unwrap();
+        let workspace = run_tool_workspace_for_input(
+            "semgrep:scan",
+            Some(root.path()),
+            r#"{"target":"nested","cwd":"./nested"}"#,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(workspace.root(), root.path().canonicalize().unwrap());
+    }
+
+    #[test]
+    fn relative_option_aliases_use_the_same_explicit_workspace() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("nested")).unwrap();
+        let registry = kuzushi_core::ModuleRegistry::with_v2_builtins();
+        let workspace = super::run_tool_workspace_for_invocation(
+            &registry,
+            "semgrep:scan",
+            Some(root.path()),
+            "{}",
+            &["target=nested".into(), "cwd=./nested".into()],
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(workspace.root(), root.path().canonicalize().unwrap());
     }
 
     #[test]

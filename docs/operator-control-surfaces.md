@@ -151,6 +151,11 @@ as JSON. If both are present for the same canonical option, `--input` wins.
 For a `path` option (for example a scanner target), inline JSON or a session
 `--option` may establish the workspace when `--target` is absent; when a
 workspace is already explicit, the resolved path must remain inside it.
+Relative inline path values and equivalent `target`/`cwd` choices use that
+explicit workspace as their base. For example,
+`kuzushi --target /repos/monorepo run license-scan:scan --option target=packages/client`
+inspects the client while retaining state in the monorepo workspace. Its finding
+locations use paths such as `packages/client/package.json` in that workspace.
 Persisted `target`/`cwd` values are checked at the shared dispatch boundary and
 cannot steer execution outside the workspace that owns the finding store and
 run artifacts. For a `string` option (for example `recon:nmap` or

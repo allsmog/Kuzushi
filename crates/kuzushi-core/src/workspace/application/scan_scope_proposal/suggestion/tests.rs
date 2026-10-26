@@ -7,6 +7,7 @@ const MODEL: &str = "openai-codex:gpt-5.5";
 mod accounting;
 mod context_input;
 mod dependencies;
+mod rejected_output;
 
 struct Fixture {
     root: tempfile::TempDir,

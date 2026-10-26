@@ -1,6 +1,6 @@
 use super::*;
 
-fn failed_scope() -> (tempfile::TempDir, ContextStudyReceipt) {
+pub(super) fn failed_scope() -> (tempfile::TempDir, ContextStudyReceipt) {
     let (root, workspace, config, reference) = scope_target();
     ModuleRegistry::with_v2_builtins()
         .execute_tool(
@@ -25,7 +25,7 @@ fn failed_scope() -> (tempfile::TempDir, ContextStudyReceipt) {
     (root, receipt)
 }
 
-fn publish(root: &Path, leaf: &str, value: &Value) {
+pub(super) fn publish(root: &Path, leaf: &str, value: &Value) {
     let label = if leaf == "input.json" {
         "tool input"
     } else {

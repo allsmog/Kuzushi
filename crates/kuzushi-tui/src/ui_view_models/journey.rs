@@ -523,7 +523,8 @@ fn legacy_summary_is_accepted_scan(
         status.as_str(),
         "completed" | "complete" | "succeeded" | "success"
     );
-    completed
+    summary.kind.eq_ignore_ascii_case("scan")
+        && completed
         && super::scan_summary::has_scan_phase_result(summary)
         && legacy_scan_is_fresh(summary, current)
 }
@@ -872,11 +873,34 @@ fn unresolved_attempt(
         JourneyDestination::Phase(phase) => app.engagement.unresolved_phase_attempt(phase),
         JourneyDestination::Report(_) => None,
     };
-    destination_attempt.or_else(|| {
+    let record = destination_attempt.or_else(|| {
         WorkflowPhase::INVESTIGATION_ORDER
             .iter()
             .find_map(|phase| app.engagement.unresolved_phase_attempt(*phase))
-    })
+    })?;
+    (!later_result_waits_for_map(app, destination, record)).then_some(record)
+}
+
+fn later_result_waits_for_map(
+    app: &ShellApp,
+    destination: JourneyDestination,
+    record: &kuzushi_core::workflow_attempts::PhaseAttemptRecord,
+) -> bool {
+    match (
+        destination,
+        record.completed.phase,
+        record.completed.outcome,
+    ) {
+        (
+            JourneyDestination::Phase(WorkflowPhase::Map),
+            WorkflowPhase::Scan | WorkflowPhase::Review,
+            PhaseAttemptOutcome::Completed | PhaseAttemptOutcome::Partial,
+        ) => app
+            .engagement
+            .stale_selected_phase_attempt(WorkflowPhase::Map)
+            .is_none(),
+        _ => false,
+    }
 }
 
 pub(super) fn unresolved_attempt_action(
@@ -1836,6 +1860,58 @@ mod tests {
             journey.destination,
             JourneyDestination::Report(ReportReason::CleanScan)
         );
+    }
+
+    #[test]
+    fn standalone_tool_receipts_do_not_complete_map_or_scan() {
+        for tool in ["license-scan:scan", "dep-hygiene:check", "secret-scan:scan"] {
+            let target = tempfile::tempdir().unwrap();
+            let workspace = WorkspaceTarget::new(target.path()).unwrap();
+            let summary = RunSummary::running(
+                "standalone",
+                "tool",
+                Some(tool.into()),
+                workspace.root().display().to_string(),
+            )
+            .complete();
+            write_run_summary(target.path(), &summary).unwrap();
+            let app = hydrated_app(&workspace, vec![ViewHydrationKey::RunSummaryEntries]);
+            let journey = journey_model(&app).unwrap();
+            assert!(!journey.progress.map_checkpoint, "{tool}");
+            assert!(!journey.progress.scan_checkpoint, "{tool}");
+            assert!(!journey.progress.legacy_inferred, "{tool}");
+            assert_eq!(journey.current, WorkflowPhase::Map);
+        }
+    }
+
+    #[test]
+    fn completed_scan_keeps_missing_map_guidance_first() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        record_phase_source(
+            target.path(),
+            WorkflowPhase::Scan,
+            "scan-complete",
+            "completed",
+        );
+        let scan = PhaseAttemptCompleted::new(
+            WorkflowPhase::Scan,
+            vec!["scan-complete".into()],
+            PhaseTargetSnapshot::capture(target.path()),
+            PhaseAttemptOutcome::Completed,
+        );
+        append_phase_attempt_completed(target.path(), scan).unwrap();
+        let app = hydrated_app(&workspace, Vec::new());
+        let journey = journey_model(&app).unwrap();
+        assert_eq!(journey.current, WorkflowPhase::Map);
+        assert_eq!(
+            journey.next_action,
+            "build or explicitly skip the current-revision map"
+        );
+        assert!(!journey.next_tools.is_empty());
+        let page = crate::ui_view_models::phase_cockpit_model_for_phase(&app, WorkflowPhase::Scan);
+        assert_eq!(page.header.next_action, journey.next_action);
+        assert!(page.header.result_card.is_some());
     }
 
     #[test]

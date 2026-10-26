@@ -9,7 +9,7 @@ mod context_generation;
 mod lesson_followup;
 mod lesson_generation;
 mod review_study;
-pub(crate) use context_generation::StudyContextGeneration;
+pub(crate) use context_generation::{ScopeCorrectionEditor, StudyContextGeneration};
 pub(crate) use review_study::ReviewStudyDraft;
 mod context_comparison;
 mod context_experiment;

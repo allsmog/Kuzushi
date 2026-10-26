@@ -1,5 +1,83 @@
 # Releasing Kuzushi
 
+## Workspace-owned native source identity and phase guidance
+
+License, dependency-policy and secret tool runs now register and verify source
+identity in the selected workspace, including child-directory inspection. Child
+discovery coverage stays at the child. Source identity IO is separate from
+scanner read limits. Standalone secret results add the shared snapshot hashes
+and source-currentness field. Existing observations and decisions are retained;
+previous unverifiable workflow results require a new scan for reusable identity.
+
+Standalone tool history no longer implies accepted Map or Scan checkpoints.
+Genuine legacy scan history remains readable. When Map is missing, its next
+step stays first while completed or partial later results remain available for
+explicit selection. Failed recovery and stale accepted-Map guidance remain.
+See [the source and guidance assessment](docs/assessments/workspace-source-guidance-2026-10-26.md).
+
+## Rejected scope diagnostics and manual correction
+
+`pack:suggest-scopes` adds optional `saveRejectedOutput` with alias
+`save_rejected_output`. Omission preserves the earlier no-retention behavior;
+there is no injected descriptor default. New `campaign:context-study` scope
+plans explicitly choose retention unless the operator sets false, and include
+that choice in the frozen input. Existing plans are not rewritten.
+
+Retained `rejected-scope-output.json` has schema version 1, at most 16 KiB of
+candidate text, an original byte count, completeness and a bounded failure
+reason. Partial output remains readable but cannot enter the recovery action.
+The file can contain sensitive text and stays separate from valid revisions.
+
+`pack:scopes` adds `operation=recover` and optional `recoveryRef`. Together with
+`draft`, these authenticate one failed campaign's retained output, current scope
+head and source before saving an unaccepted revision. This starts no model
+request and preserves the failed job and consumed allowance. Exclusions and
+shared discovery must match the original draft.
+Subsequent scope-backed study planning retains the failed producer's original
+investigation and spending through authenticated run accounting, including after
+acceptance or boundary edits. Missing or foreign accounting is an error, not a
+new allowance.
+
+Scope revisions add optional `correction` metadata, omitted when absent. It
+records the failed output reference, model/context and corrected-draft SHA-256;
+the retained artifact hash remains its existing typed content hash. Old records
+remain readable without conversion. No old rejected response can be recovered
+unless its text was retained. See the
+[qualification](docs/assessments/rejected-scope-correction-2026-10-26.md).
+
+Older binaries that reject unknown revision fields cannot read new correction
+records. Upgrade readers before using recovery; the original revisions remain
+unchanged for historical reading. This does not rewrite a saved old plan.
+
+## Package boundaries and child-target source locations
+
+License header checks use the nearest package declarations, including explicit
+boundaries for private or undeclared packages. Parsed declarations are shared
+across the license checks. Root-license recognition remains heuristic.
+
+Normalized license, dependency-policy and secret findings from a child directory
+now use paths relative to the explicit parent workspace. Retained source bytes
+come from that child file. Direct and SAST directory scans converge on the same
+durable finding identity, and sibling packages remain distinct. License and
+dependency producer fingerprints use the workspace path. Opaque secret producer
+fingerprints remain compatibility aliases. License paths retain literal Unix
+backslashes. Relative inline targets and equivalent `target`/`cwd`
+choices are resolved inside an explicitly selected workspace before containment
+checks; its findings store and run artifacts remain at the parent.
+
+Field names, tool names and source-snapshot formats are unchanged. Raw scanner
+APIs continue to use their supplied scan root. Resolve normalized `coreFindings`
+paths, ledger locations and exports against the explicit workspace. The result's
+target still names the inspected subtree. Secret scanner `data.findings` retains
+its engine-relative paths and legacy producer fingerprints.
+
+Existing observations and human decisions are preserved. Earlier child-target
+records can contain ambiguous locations or source captured from the parent
+file. Updating does not repair that history. Rescan the intended child and
+reassess affected decisions against its new source receipt. Corrected child paths
+can produce different identities; review historical duplicate relationships
+explicitly. A missed later finding still does not establish a fix.
+
 ## Repository index refresh and session dollars
 
 Workspace artifact refresh now updates the optional repository-index view after

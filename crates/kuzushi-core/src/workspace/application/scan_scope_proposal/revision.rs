@@ -16,6 +16,7 @@ pub(super) fn initial(
         draft,
         acceptance: None,
         generation: None,
+        correction: None,
     }
 }
 

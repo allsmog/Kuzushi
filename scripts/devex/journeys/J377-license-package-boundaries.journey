@@ -1,0 +1,100 @@
+name: Local package licenses survive repetitions, review, source change and restart
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/license_boundaries.py @TMP_TARGET @ART prepare
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+submit: run license-scan:scan {}
+require-live-snap: 35 license-scan: 0 findings | matching-packages
+require-shell: python3 -B @REPO/scripts/devex/fixtures/license_boundaries.py @TMP_TARGET @ART matching
+ask: Does the real scanner accept both locally matching package headers without borrowing a sibling declaration or claiming broader legal compliance?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/license_boundaries.py @TMP_TARGET @ART mismatch
+submit: run sast:scan {"taskMode":"manual","tasks":["license-scan"],"triage":false,"verify":false,"autoPatch":false}
+require-live-snap: 25 PREREQUISITE PLAN | deterministic-prerequisite
+expect: no model cost expected
+keys: a
+require-live-snap: 35 1 finding(s) | local-mismatch
+require-shell: python3 -B @REPO/scripts/devex/fixtures/license_boundaries.py @TMP_TARGET @ART first
+submit: logs
+submit: run license-scan:scan {}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/license_boundaries.py @TMP_TARGET @ART second
+require-live-snap: 35 run receipt | second-pass
+submit: run license-scan:scan {}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/license_boundaries.py @TMP_TARGET @ART third
+require-live-snap: 35 run receipt | third-pass
+submit: open F-0001
+require-live-snap: 25 Source SPDX license header does not match package | local-finding
+expect: service/example.rs
+expect: signal-only
+ask: Do three explicit native passes consolidate into one local service finding while preserving separate observations and signal-only evidence?
+submit: decision deferred Owned package metadata needs owner review
+require-live-snap: 25 recorded: deferred | deferred-review
+require-shell: python3 -B @REPO/scripts/devex/fixtures/license_boundaries.py @TMP_TARGET @ART deferred
+resize: 160x48
+live-snap: review-160x48
+resize: 96x89
+live-snap: review-96x89
+resize: 80x24
+live-snap: review-80x24
+resize: 60x20
+live-snap: review-60x20
+nav-mode:
+keys: Enter
+require-live-snap: 25 F-0001 · FINDING | evidence-reader
+resize: 40x12
+live-snap: evidence-40x12
+expect: F-0001
+expect: PgUp/PgDn read
+keys: NPage NPage NPage NPage
+live-snap: paged-evidence-40x12
+keys: NPage
+live-snap: evidence-page-5-40x12
+keys: NPage
+live-snap: evidence-page-6-40x12
+keys: NPage
+live-snap: evidence-page-7-40x12
+ask: Across six sizes, can the operator read the finding identity, local declaration evidence and retained deferral through normal navigation without accidental actions?
+resize: 120x36
+keys: q
+require-shell: python3 -B @REPO/scripts/devex/fixtures/license_boundaries.py @TMP_TARGET @ART match
+submit: logs
+submit: run license-scan:scan {}
+require-live-snap: 35 license-scan: 0 findings | matching-rerun
+require-shell: python3 -B @REPO/scripts/devex/fixtures/license_boundaries.py @TMP_TARGET @ART clean
+paste-file: @ART/compare.txt
+keys: Enter
+require-live-snap: 25 1 not observed | changed-source-comparison
+expect: Absence does not establish a fix.
+keys: Tab
+require-live-snap: 20 content: | compared-content
+expect-not: content:unknown
+ask: Does the later matching scan disclose covered absence and changed content while preserving the earlier decision instead of declaring the finding fixed?
+keys: Escape
+submit: open F-0001
+require-live-snap: 25 recorded: deferred | retained-review
+expect: not observed
+submit: report
+require-live-snap: 25 Enter export | report
+keys: j j j
+require-live-snap: 20 format json | json-report
+keys: Enter
+require-live-snap: 25 EXPORTED | report-exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/license_boundaries.py @TMP_TARGET @ART exported
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: open F-0001
+require-live-snap: 25 recorded: deferred | recovered-review
+expect: not observed
+require-shell: python3 -B @REPO/scripts/devex/fixtures/license_boundaries.py @TMP_TARGET @ART restarted
+ask: Does no-color restart retain five real local scan results, three observations, one scripted decision and the exported absence limitation without paid calls or source execution?
+keys: C-c
+require-exit: 10

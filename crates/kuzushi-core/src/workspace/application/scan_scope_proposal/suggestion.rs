@@ -5,6 +5,7 @@ use crate::runtime::{
 };
 use serde_json::{json, Value};
 mod input;
+mod rejected_output;
 #[cfg(test)]
 mod tests;
 
@@ -28,13 +29,25 @@ pub(crate) fn suggest_scan_scope_proposal(
     let priorities = input["priorities"].as_str().unwrap_or("");
     let outline = input::build(&inventory, &review, context.as_ref(), priorities)?;
     let request = query_request(ctx, input, model, &outline)?;
-    let prompt_sha256 = crate::options::prompt_content_sha256(&serde_json::to_string(&request)?);
     let response = runtime.query_blocking_controlled(
         request.clone(),
         AgentQueryControl::new(ctx.cancellation.cloned(), None),
     )?;
+    store_response(ctx, review, request, outline, context_ref, &response)
+        .map_err(|error| rejected_output::retain(ctx, input, &response, error))
+}
+
+fn store_response(
+    ctx: &ToolExecutionContext<'_>,
+    review: ScanScopeReview,
+    request: AgentQueryRequest,
+    outline: input::ScopeModelInput,
+    context_ref: Option<crate::ThreatModelRef>,
+    response: &crate::runtime::AgentQueryResponse,
+) -> Result<ScanScopeReview> {
     let mut draft = parse_response(response)?;
     draft.exclusions = review.record.draft.exclusions.clone();
+    let prompt_sha256 = crate::options::prompt_content_sha256(&serde_json::to_string(&request)?);
     let generation = ScanScopeGeneration {
         schema_version: 1,
         model: request.model,
@@ -49,12 +62,13 @@ pub(crate) fn suggest_scan_scope_proposal(
         inventoried_files: outline.inventoried_files,
         limitations: outline.limitations,
     };
-    update_proposal(ctx, &reference, |review, inventory| {
+    update_proposal(ctx, &review.reference, |review, inventory| {
         let coverage = draft.evaluate(inventory)?;
         let mut record = revision::next(review)?;
         record.draft = draft;
         record.acceptance = None;
         record.generation = Some(generation);
+        record.correction = None;
         Ok((record, coverage))
     })
 }
@@ -132,11 +146,11 @@ fn query_request(
     Ok(request)
 }
 
-fn parse_response(response: crate::runtime::AgentQueryResponse) -> Result<ScanScopeDraft> {
+fn parse_response(response: &crate::runtime::AgentQueryResponse) -> Result<ScanScopeDraft> {
     anyhow::ensure!(!response.truncated, "scope proposal output was partial; review the outcome and explicitly request another attempt");
-    let bytes = match response.structured {
+    let bytes = match &response.structured {
         Some(value) => serde_json::to_vec(&value)?,
-        None => response.text.into_bytes(),
+        None => response.text.as_bytes().to_vec(),
     };
     anyhow::ensure!(
         bytes.len() <= 256 * 1024,

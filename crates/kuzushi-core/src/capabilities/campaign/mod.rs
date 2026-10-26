@@ -75,10 +75,11 @@ pub use review_study::{
     ReviewSupportingFile, MAX_REVIEW_SUPPORTING_FILES, REVIEW_STUDY_KIND,
 };
 mod scope_allowance;
+pub(crate) use context_study::recover_scope_draft;
 pub use context_study::{
     execute_context_map, execute_context_study, load_context_study, scope_proposal_study_input,
     ContextPreparationJob, ContextQuestionAnswer, ContextStudyReceipt, GeneratedStudyContext,
-    RejectedContextOutput, ScopeStudyOriginV1, WorkflowProposalResult,
+    RejectedContextOutput, RejectedScopeDraft, ScopeStudyOriginV1, WorkflowProposalResult,
 };
 pub use scope_allowance::load_scope_proposal_allowance;
 pub use study_receipt::{

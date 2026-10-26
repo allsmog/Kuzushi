@@ -1,5 +1,34 @@
 # Bounded investigation acceptance ledger
 
+The [rejected scope correction](../assessments/rejected-scope-correction-2026-10-26.md)
+adds bounded opt-in local output retention and runtime-free manual recovery of a
+failed scope proposal. The original job and spending remain failed/consumed;
+the correction is a separate unaccepted revision with authenticated history.
+There are 248 distinct focused Rust passes, workspace build, Core/TUI/CLI Clippy
+and passing changed-code risk. Final J382 has 41 machine passes, zero failures,
+32 capture pairs and seven answered agent reviews with findings over six editor
+sizes, paste, invalid saves, preserved drafts and no-color restart. One labeled
+intercepted response is used; there is no new live inference or source execution.
+All five fixture files remain unchanged; the operator explicitly includes two
+initially uncovered root files before a separate boundary acceptance. Scan
+planning retains the original spent investigation without new work or approval.
+Missing or foreign accounting fails instead of resetting the allowance.
+Earlier failed attempts remain recorded. Dense receipts, compact JSON editing,
+unsaved-draft durability, live grouping usefulness and the broad goal stay open.
+
+The [larger live scope experiment](../assessments/live-monorepo-scope-failure-2026-10-26.md)
+uses one separately approved request on 602 owned files and fails dependency
+validation. One attempt and settled reservation remain; source and the inactive
+architecture are unchanged. No scopes, scans or follow-ups are accepted.
+Cumulative experiments reach eighteen with no live allowance remaining; dollars
+remain unknown. J380 preapproval inspection passes with findings. The first
+J381 machine run passes but its agent screen audit fails on contradictory Enter
+guidance. The local correction passes 82 focused checks, build, Clippy and all
+ten summary gates. Final J381 has sixteen machine passes, zero failures and
+three answered agent reviews with findings through inspection, six sizes and
+no-color restart. The actual model failure remains recorded. Larger monorepo
+grouping usefulness and broad workflow acceptance remain open.
+
 The [current complete keyboard repeat](../assessments/repository-index-refresh-2026-10-26.md)
 repairs stale index presentation after an owned producer and distinguishes
 session dollars from unknown study cost. Final J121 has 331 machine passes,
@@ -1070,3 +1099,48 @@ Review calls, unknown dollar cost and unchanged export bytes after restart. Sixt
 focused Rust checks pass. Scopes and root Map are manually supplied, transport is
 intercepted, and source is inert under a dirty borrowed HEAD. This does not close
 real-model scope quality, cross-SHA fix adjudication or reference-level UX.
+
+The [local package license correction](../assessments/license-package-boundaries-2026-10-26.md)
+removes one reproduced false positive and detects one missed local metadata
+mismatch. Parsed declarations are shared and headers respect package boundaries.
+Review presents the scanner explanation before action instructions. There are
+96 focused Rust passes; final J377 has 30 machine passes, zero failures and
+five answered agent screen reviews with remaining polish findings. Its five
+local scans retain three observations, one scripted deferral, changed content,
+covered absence, export and no-color recovery with no new model work. The
+fixture has unknown Git revisions and does not close cross-SHA adjudication,
+aggregate resource bounds, broader module qualification or full UX acceptance.
+
+The [child-target source correction](../assessments/child-target-source-evidence-2026-10-26.md)
+fixes reproduced parent-file substitution in normalized license, dependency and
+secret observations. Direct and directory-scoped SAST scans keep one durable
+identity per finding and child path. Relative inline targets resolve against the
+explicit workspace. Existing ambiguous history is retained for explicit
+reassessment. The combined package and source checkpoint has 237 distinct
+focused Rust passes, workspace build and Core/CLI Clippy. Final J378 has 22
+machine passes, zero failures, 26 capture pairs and four answered agent reviews
+with remaining polish findings. Nine explicit native scans retain nine
+observations, six findings, one scripted deferral, exact child bytes, draft,
+export and no-color restart. A fresh J367 adds 38 machine passes, 25 capture
+pairs and four answered reviews over two existing real commits; five export
+formats preserve current observation and historical relationship SHAs. No
+model request or target source execution is added. These are source-retention
+and export checks, with no automatic fix verdict, full guided acceptance,
+general detector quality or reference-product UX claim.
+
+The [workspace source and guidance follow-up](../assessments/workspace-source-guidance-2026-10-26.md)
+corrects another reproduced defect: standalone tool receipts could imply Map
+completion, and child-owned snapshot claims could not be authenticated by the
+parent workflow. Three native adapters now keep source identity at the selected
+workspace while retaining child-only discovery coverage. Global NEXT follows
+the reality-derived required step across pages, with local result actions kept
+on their own card. There are 1,452 distinct passing checks across current Core
+and TUI selections, including all 1,258 TUI view-model checks after a screen
+review caught a second header override. Final J379 has 31 machine passes, zero
+failures, 27 capture pairs and five answered agent screen reviews with remaining
+polish findings. Nine scans retain nine observations, six findings, one decision
+and five valid pending Scan results through export and no-color restart without
+accepting Map/Scan or starting follow-up work. Raw failures and review status
+remain retained. No model request is added. Source-identity IO is separate from
+discovery limits; large-monorepo performance, all other adapters and the full
+investigation goal remain open.

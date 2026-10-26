@@ -1,0 +1,86 @@
+name: Child-target findings retain correct parent-workspace paths and source through Review and Report
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/child_target_sources.py @TMP_TARGET @ART @TMP_HOME prepare
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+paste-file: @ART/open-client.txt
+keys: Enter
+require-live-snap: 25 client/package.json:1 | prepared-child-source
+expect: Package manifest does not declare a license
+ask: Does the headless relative child-target scan reopen as client/package.json in the parent workspace, with the client's source rather than the parent's manifest?
+submit: logs
+submit: run license-scan:scan {"target":"service"}
+require-live-snap: 35 license-scan: 1 finding | service-license
+submit: run dep-hygiene:check {"target":"client"}
+require-live-snap: 35 dep-hygiene: 1 risky specifier | client-dependency
+submit: run dep-hygiene:check {"target":"service"}
+require-live-snap: 35 dep-hygiene: 1 risky specifier | service-dependency
+submit: run secret-scan:scan {"target":"client","maxEntries":16,"maxFileBytes":2048,"maxTotalBytes":8192,"maxFindings":4}
+require-live-snap: 35 secret-scan: 1 finding | client-secret
+submit: run secret-scan:scan {"target":"service","maxEntries":16,"maxFileBytes":2048,"maxTotalBytes":8192,"maxFindings":4}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/child_target_sources.py @TMP_TARGET @ART @TMP_HOME six
+require-live-snap: 35 secret-scan: 1 finding | service-secret
+type: preserve module audit draft
+require-shell: python3 -B @REPO/scripts/devex/fixtures/child_target_sources.py @TMP_TARGET @ART @TMP_HOME sast-run
+require-live-snap: 25 preserve module audit draft | external-sast-draft
+ask: Do three explicit headless SAST checks preserve the live composer while retaining the same six child findings and adding only their three observations?
+keys: C-u
+paste-file: @ART/open-client.txt
+keys: Enter
+require-live-snap: 25 client/package.json:1 | current-client-source
+submit: decision deferred Owned child metadata needs owner review
+require-live-snap: 25 recorded: deferred | child-decision
+require-shell: python3 -B @REPO/scripts/devex/fixtures/child_target_sources.py @TMP_TARGET @ART @TMP_HOME reviewed
+resize: 160x48
+live-snap: child-review-160x48
+resize: 96x89
+live-snap: child-review-96x89
+resize: 80x24
+live-snap: child-review-80x24
+resize: 60x20
+live-snap: child-review-60x20
+nav-mode:
+keys: Enter
+require-live-snap: 25 q review list | child-reader
+resize: 40x12
+live-snap: child-review-40x12
+expect: client/package.json:1
+keys: NPage
+live-snap: child-source-page-1
+keys: NPage
+live-snap: child-source-page-2
+keys: NPage
+live-snap: child-source-page-3
+keys: NPage
+live-snap: child-source-page-4
+keys: NPage
+live-snap: child-source-page-5
+ask: Across six sizes and normal paging, is the client finding's identity, source and deferral readable without substituting the parent or sibling manifest?
+resize: 120x36
+keys: q
+submit: report
+require-live-snap: 25 Enter export | report
+keys: j j j
+require-live-snap: 20 format json | json-report
+keys: Enter
+require-live-snap: 25 EXPORTED | exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/child_target_sources.py @TMP_TARGET @ART @TMP_HOME exported
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/open-client.txt
+keys: Enter
+require-live-snap: 25 client/package.json:1 | recovered-child
+expect: recorded: deferred
+require-shell: python3 -B @REPO/scripts/devex/fixtures/child_target_sources.py @TMP_TARGET @ART @TMP_HOME restarted
+ask: Does no-color restart retain nine finite local scans, nine observations, six workspace-qualified findings, one decision and the exported source references with no paid calls or source execution?
+keys: C-c
+require-exit: 10

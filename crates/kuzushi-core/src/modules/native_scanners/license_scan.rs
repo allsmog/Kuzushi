@@ -17,17 +17,18 @@ pub(super) fn run(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Value>
     let options = options(&input)?;
     let started = Instant::now();
     let target_snapshot = PhaseTargetSnapshot::capture(&target);
-    let snapshot = SourceSnapshot::capture(ctx, TOOL, &target)?;
+    let source_workspace = crate::workspace::source_snapshot::workspace_source_owner(ctx, &target)?;
+    let snapshot = SourceSnapshot::capture(ctx, TOOL, source_workspace.root())?;
     emit_scan_start(ctx, "license-scan", &target);
     let (output, findings) = snapshot.bind_result(scan(&target, options, ctx))?;
     let settlement_snapshot = snapshot.clone();
-    let output = snapshot.finish(ctx, TOOL, &target, output);
+    let output = snapshot.finish(ctx, TOOL, source_workspace.root(), output);
     let receipt = receipt::LicenseScanReceipt {
         options,
         started,
         target_snapshot,
     };
-    settlement_snapshot.bind_result(finish(ctx, &target, &findings, output, receipt))
+    settlement_snapshot.bind_result(finish(ctx, &findings, output, receipt))
 }
 
 fn scan(
@@ -35,7 +36,7 @@ fn scan(
     options: LicenseScanOptions,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<(Value, Vec<Finding>)> {
-    let report =
+    let mut report =
         match ctx.with_cancellation(|cancel| scan_licenses_with_options(target, cancel, options)) {
             Ok(report) => report,
             Err(error) => {
@@ -45,6 +46,7 @@ fn scan(
                 ))
             }
         };
+    rebase_report(&mut report, target, ctx)?;
     let findings = report
         .findings
         .iter()
@@ -55,9 +57,25 @@ fn scan(
     Ok((output, findings))
 }
 
+fn rebase_report(
+    report: &mut crate::license_scan::LicenseScanReport,
+    target: &Path,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<()> {
+    let Some(workspace) = ctx.workspace else {
+        return Ok(());
+    };
+    let prefix = target
+        .strip_prefix(workspace.root())
+        .context("License discovery target must stay inside its workspace")?;
+    for finding in &mut report.findings {
+        finding.rebase_path(prefix);
+    }
+    Ok(())
+}
+
 fn finish(
     ctx: &ToolExecutionContext<'_>,
-    target: &Path,
     findings: &[Finding],
     mut output: Value,
     receipt: receipt::LicenseScanReceipt,
@@ -74,7 +92,7 @@ fn finish(
         store,
         ctx.run_observation().as_ref(),
         &run_id,
-        target,
+        workspace.root(),
         findings,
         status,
     )?;
