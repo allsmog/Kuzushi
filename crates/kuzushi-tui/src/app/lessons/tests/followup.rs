@@ -159,20 +159,84 @@ fn followup_shortcut_respects_the_composer_and_lesson_editor() {
 
 #[test]
 fn context_followup_action_is_visible_at_every_supported_size_and_plain_output() {
-    let (_root, _store, app) = copied_context();
+    let (_root, store, mut app) = copied_context();
+    let page = store.finding_lessons(50, 0).unwrap();
+    let title = page.rows[0].content.title.clone();
+    app.workbench_cache()
+        .borrow_mut()
+        .lesson_pages
+        .insert((app.target_owned().unwrap(), 0), Ok(page));
+    let before = app.router.lessons.clone();
     for (width, height) in [(160, 48), (120, 36), (96, 89), (80, 24), (60, 20), (40, 12)] {
-        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-        terminal
-            .draw(|frame| crate::renderer::render_app(frame, &app))
-            .unwrap();
-        let text = terminal
-            .backend()
-            .buffer()
-            .content
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect::<String>();
+        app.set_viewport(crate::TerminalViewport::new(width, height));
+        let text = browser_text(&app, width, height);
         assert!(text.contains("s Plan follow-up"), "{width}x{height}");
+        let readable = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(readable.contains(&title), "{width}x{height}: {readable}");
+        assert!(
+            readable.contains("Accepted"),
+            "{width}x{height}: {readable}"
+        );
+        if height == 12 {
+            assert!(readable.contains("a/r/t review"), "{readable}");
+            assert!(readable.contains("u copy"), "{readable}");
+        }
     }
-    assert!(crate::renderer::render_plain_app(&app, 40).contains("s Plan follow-up"));
+    let plain = crate::renderer::render_plain_app(&app, 40);
+    for label in [
+        "s Plan follow-up",
+        "n draft",
+        "g model",
+        "a/r/t review",
+        "u copy",
+    ] {
+        assert!(plain.contains(label), "missing {label}: {plain}");
+    }
+    assert_eq!(app.router.lessons, before);
+}
+
+#[test]
+fn compact_loading_empty_and_failed_pages_keep_state_and_recovery_visible() {
+    let (_root, store, mut app) = copied_context();
+    app.set_viewport(crate::TerminalViewport::new(40, 12));
+    let key = (app.target_owned().unwrap(), 0);
+    let mut empty = store.finding_lessons(50, 0).unwrap();
+    empty.rows.clear();
+    let states = [
+        (None, "Loading saved lessons"),
+        (Some(Ok(empty)), "No saved lessons"),
+        (
+            Some(Err("Owned read failure".into())),
+            "Lessons unavailable",
+        ),
+    ];
+    for (state, caption) in states {
+        app.workbench_cache().borrow_mut().lesson_pages.remove(&key);
+        if let Some(page) = state {
+            app.workbench_cache()
+                .borrow_mut()
+                .lesson_pages
+                .insert(key.clone(), page);
+        }
+        let text = browser_text(&app, 40, 12);
+        for label in [caption, "n draft", "g model", "R refresh"] {
+            assert!(text.contains(label), "missing {label}: {text}");
+        }
+        assert!(app.runtime_state.lesson_write.is_none());
+        assert!(app.router.campaign().batch_scan_config.is_none());
+    }
+}
+
+fn browser_text(app: &ShellApp, width: u16, height: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    terminal
+        .draw(|frame| crate::renderer::render_app(frame, app))
+        .unwrap();
+    terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect()
 }

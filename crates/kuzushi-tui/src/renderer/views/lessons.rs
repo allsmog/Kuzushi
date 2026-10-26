@@ -11,6 +11,7 @@ mod reader;
 mod replacement;
 mod selection;
 pub(crate) use reader::lesson_reader_scroll;
+const MIN_VISIBLE_LESSON_ROWS: usize = 3;
 
 pub(super) fn lesson_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     if let Some(lines) = modal_lines(app, area) {
@@ -40,16 +41,29 @@ fn modal_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'static>>> {
 fn browser_document_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = vec![Line::styled("REUSABLE LESSONS", theme::accent())];
     lines.extend(selection::recorded_heading(app, area.width));
-    lines.extend(browser_actions(app, area.width));
-    lines.extend(browser_lines(app, area));
+    lines.extend(saved_context_action(app, area.width));
+    let (content, has_lessons) = browser_lines(app, area);
+    let help = lesson_management_actions(area.width);
+    let remaining = usize::from(area.height).saturating_sub(lines.len() + help.len());
+    if remaining < MIN_VISIBLE_LESSON_ROWS {
+        lines.extend(compact_browser_actions(has_lessons, area.width));
+        lines.extend(content);
+        lines.extend(help);
+    } else {
+        lines.extend(help);
+        lines.extend(content);
+    }
     lines.extend(notice_lines(app, area.width));
     lines
 }
 
-fn browser_actions(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
-    let mut lines = saved_context_action(app, width);
-    lines.extend(lesson_management_actions(width));
-    lines
+fn compact_browser_actions(has_lessons: bool, width: u16) -> Vec<Line<'static>> {
+    let controls = if has_lessons {
+        "Space select · a/r/t review · u copy"
+    } else {
+        "n draft · g model · R refresh"
+    };
+    wrapped(controls, width, theme::accent())
 }
 
 fn saved_context_action(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
@@ -76,17 +90,20 @@ fn lesson_management_actions(width: u16) -> Vec<Line<'static>> {
     lines
 }
 
-fn browser_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+fn browser_lines(app: &ShellApp, area: Rect) -> (Vec<Line<'static>>, bool) {
     let page = match app.lesson_page() {
         ViewDataState::Ready(Ok(page)) => page,
         ViewDataState::Ready(Err(error)) => {
-            return wrapped(
-                &format!("Lessons unavailable: {error}. R refreshes."),
-                area.width,
-                theme::warn(),
+            return (
+                wrapped(
+                    &format!("Lessons unavailable: {error}. R refreshes."),
+                    area.width,
+                    theme::warn(),
+                ),
+                false,
             )
         }
-        _ => return vec![Line::raw("Loading saved lessons...")],
+        _ => return (vec![Line::raw("Loading saved lessons...")], false),
     };
     let mut lines = vec![Line::raw(format!(
         "{} on this page · {} selected · page {}{}",
@@ -101,10 +118,10 @@ fn browser_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     ))];
     if page.rows.is_empty() {
         lines.extend(selection::empty_page_lines(app, area.width));
-        return lines;
+        return (lines, false);
     }
     lines.extend(lesson_rows(app, area, &page));
-    lines
+    (lines, true)
 }
 
 fn lesson_rows(

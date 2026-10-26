@@ -160,7 +160,7 @@ fn context_summary(receipt: &ContextStudyReceipt) -> FrozenWorkSummary<'_> {
 }
 
 fn context_action_lines(receipt: &ContextStudyReceipt, jobs: usize) -> Vec<String> {
-    vec![
+    let mut lines = vec![
         format!("Context: {jobs} fixed jobs · 1 worker"),
         format!("Action: {}", receipt.generation_tool),
         format!("Preparation jobs: {}", receipt.preparation_jobs.len()),
@@ -169,8 +169,19 @@ fn context_action_lines(receipt: &ContextStudyReceipt, jobs: usize) -> Vec<Strin
             .as_str()
             .map(|question| format!("Frozen question: {question}"))
             .unwrap_or_default(),
-        context_line(&receipt.input),
-    ]
+    ];
+    lines.extend(generation_context_lines(receipt));
+    lines
+}
+
+fn generation_context_lines(receipt: &ContextStudyReceipt) -> Vec<String> {
+    if receipt.generation_tool == "findings:lesson-generate" {
+        return vec![
+            "Evidence: exact confirmed observation; current source is not substituted".into(),
+            "Threat context: not used for lesson drafts".into(),
+        ];
+    }
+    vec![context_line(&receipt.input)]
 }
 
 fn context_source_lines(receipt: &ContextStudyReceipt) -> Vec<String> {

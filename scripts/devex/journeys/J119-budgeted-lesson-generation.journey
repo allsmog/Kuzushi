@@ -38,10 +38,13 @@ ask: Across six sizes, is the complete plan readable by paging with model, spend
 resize: 120x36
 keys: Enter
 require-live-snap: 25 REVIEW PLAN & ALLOWANCE | approval
+expect: Evidence: exact confirmed observation
 keys: End
 require-live-snap: 20 y approve | approval-last
 expect: 1 fixed jobs
 expect: Total provider calls: 2
+expect: Threat context: not used for lesson drafts
+expect-not: legacy selection
 ask: Does approval bind exactly one job and one attempt to the original confirmation, selected model and two total calls, with one protected Review call and uncertain dollar consumption?
 keys: y
 require-live-snap: 30 Open approved lesson job | approved

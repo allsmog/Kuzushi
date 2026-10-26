@@ -1228,23 +1228,26 @@
       ],
       "declaredEffect": "workspace-write",
       "approval": "explicit",
-      "readinessVerdict": "scoped generation and export evidence; one approved real OAuth synthesis completed with honest accounting, measured product usefulness remains pending",
+      "readinessVerdict": "Scoped generation, approval, immutable draft and native restart evidence. One fresh real OAuth request completed on October 26; general usefulness, larger histories and complete investigation acceptance remain open.",
       "evidence": [
         "crates/kuzushi-core/src/capabilities/finding_lessons/tests.rs",
         "crates/kuzushi-core/src/workspace/application/export_lessons/tests.rs",
         "scripts/devex/journeys/J119-budgeted-lesson-generation.journey",
         "scripts/devex/journeys/J120-lesson-report.journey",
         "docs/assessments/lesson-generation-2026-10-08.md",
-        "docs/assessments/live-lesson-retry-2026-10-10.md"
+        "docs/assessments/live-lesson-retry-2026-10-10.md",
+        "docs/assessments/live-lesson-generation-2026-10-26.md",
+        "scripts/devex/journeys/J376-live-lesson-draft.journey"
       ],
       "outcomeEvidence": {
         "requiredInputs": "Exact finding generation with current human confirmation, frozen origin, selected model/runtime, captured source when available and approved allowanceRef. Fixed study preparation validates and freezes these through the shared boundary.",
         "sharedDispatchExecution": "Real core executor through prepared dispatch, Learning accounting and the existing fixed campaign runner. TUI does not make direct model requests.",
         "artifactConsumption": "Returns an immutable model-authored Draft with model/run/prompt/source receipt. Human lesson review and report exports consume it separately. It cannot publish Map or enter automatic context.",
-        "failureAndRecovery": "Invalid/truncated output, cancellation and changed confirmation refuse draft saving without repair. Original generated revision authenticates after later human review. The earlier real OAuth attempt failed authentication. On October 10, explicitly approved credential renewal and one fixed retry completed once with one committed request, no unresolved reservation and no automatic lesson acceptance.",
+        "failureAndRecovery": "Invalid/truncated output, cancellation and changed confirmation refuse draft saving without repair. Historical authentication failure and later success remain documented. Fresh October 26 evidence records one completed request and one settled reservation, no automatic acceptance, a corrected misleading approval caption, completed-plan refusal and preserved Draft state after restart. Earlier observer and setup failures remain retained.",
         "approvedResources": "One fixed job, worker and attempt; one tool-free synthesis request. Internal transport requests require shared reservation. Learning cannot spend protected Review allocation. Output-token/dollar ceilings are not claimed as enforced.",
         "scopeEnforcement": "The model receives the confirmed historical observation and authenticated bounded captured source. No tools, current-source substitution, finding creation, source execution or follow-up work.",
-        "interfaceParity": "Headless/core fixed study, native Lessons planning and restart, and native Report exports are exercised on labeled owned fixtures. Full module and platform acceptance remain pending."
+        "interfaceParity": "Shared prepared dispatch and general campaign runner execute the actual one-job synthesis. Current J119 covers intercepted TUI planning/approval, separate scripted acceptance and restart; J376 reads the completed real draft across six sizes and no-color restart with no new requests. Full module/platform and broad UX acceptance remain open.",
+        "purposeAndValue": "Draft reusable defensive guidance from an exact human-confirmed historical observation. The current real output preserves synthetic and historical limits and distinguishes a human label from technical proof. This is one benign owned case, not general lesson-quality or vulnerability-precision evidence."
       },
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
@@ -1252,11 +1255,11 @@
         "requiredInputs": "Exact finding generation with current human confirmation, frozen origin, selected model/runtime, captured source when available and approved allowanceRef. Fixed study preparation validates and freezes these through the shared boundary.",
         "sharedDispatchExecution": "Real core executor through prepared dispatch, Learning accounting and the existing fixed campaign runner. TUI does not make direct model requests.",
         "artifactConsumption": "Returns an immutable model-authored Draft with model/run/prompt/source receipt. Human lesson review and report exports consume it separately. It cannot publish Map or enter automatic context.",
-        "failureAndRecovery": "Invalid/truncated output, cancellation and changed confirmation refuse draft saving without repair. Original generated revision authenticates after later human review. The earlier real OAuth attempt failed authentication. On October 10, explicitly approved credential renewal and one fixed retry completed once with one committed request, no unresolved reservation and no automatic lesson acceptance.",
+        "failureAndRecovery": "Invalid/truncated output, cancellation and changed confirmation refuse draft saving without repair. Historical authentication failure and later success remain documented. Fresh October 26 evidence records one completed request and one settled reservation, no automatic acceptance, a corrected misleading approval caption, completed-plan refusal and preserved Draft state after restart. Earlier observer and setup failures remain retained.",
         "approvedResources": "One fixed job, worker and attempt; one tool-free synthesis request. Internal transport requests require shared reservation. Learning cannot spend protected Review allocation. Output-token/dollar ceilings are not claimed as enforced.",
         "scopeEnforcement": "The model receives the confirmed historical observation and authenticated bounded captured source. No tools, current-source substitution, finding creation, source execution or follow-up work.",
-        "interfaceParity": "Headless/core fixed study, native Lessons planning and restart, and native Report exports are exercised on labeled owned fixtures. Full module and platform acceptance remain pending.",
-        "purposeAndValue": "Draft reusable defensive review guidance from a human-confirmed historical observation. Seven current executor/allowance tests demonstrate an immutable unaccepted draft and separate review; the retained live receipt records one completed request, not general lesson quality.",
+        "interfaceParity": "Shared prepared dispatch and general campaign runner execute the actual one-job synthesis. Current J119 covers intercepted TUI planning/approval, separate scripted acceptance and restart; J376 reads the completed real draft across six sizes and no-color restart with no new requests. Full module/platform and broad UX acceptance remain open.",
+        "purposeAndValue": "Draft reusable defensive guidance from an exact human-confirmed historical observation. The current real output preserves synthetic and historical limits and distinguishes a human label from technical proof. This is one benign owned case, not general lesson-quality or vulnerability-precision evidence.",
         "phaseAgreement": "Auxiliary Review with explicit Learning accounting. Generation cannot accept a lesson, change a finding verdict, publish Map or start discovery; later human review and context selection are separate."
       },
       "phaseResultDeclared": false,
@@ -6636,7 +6639,29 @@
     "reportJourneyBeforeCopyCorrection": "/tmp/kuzushi-lesson-generation-20261008/tui/20261008-043601/J120",
     "finalReportJourney": "/tmp/kuzushi-lesson-generation-20261008/tui/20261008-044616/J120",
     "finalReportNativeSha256": "3389dc0d407ba761e2c8d87c6f65ef75dd46b924b936ffdd645520dd2ec8892f",
-    "finalVerificationReceipt": "/tmp/kuzushi-lesson-generation-20261008/verify-copy-final.json"
+    "finalVerificationReceipt": "/tmp/kuzushi-lesson-generation-20261008/verify-copy-final.json",
+    "currentValidation": {
+      "date": "2026-10-26",
+      "assessment": "docs/assessments/live-lesson-generation-2026-10-26.md",
+      "evidenceRoot": "scripts/devex/artifacts/live-lesson-prepared-20261026",
+      "model": "openai-oauth:gpt-6-luna",
+      "reasoning": "low",
+      "jobs": 1,
+      "attempts": 1,
+      "realProviderRequests": 1,
+      "cumulativeLiveExperimentRequests": 17,
+      "remainingApprovedLiveRequests": 0,
+      "capturedSourceBytes": 32,
+      "evidenceTextBytes": 2572,
+      "state": "draft",
+      "automaticAcceptance": false,
+      "dollars": "unknown",
+      "nativeReaderMachinePasses": 25,
+      "nativeReaderFailures": 0,
+      "agentQuestionsAnswered": 3,
+      "rawHarnessVerdict": "REVIEW_REQUIRED",
+      "scope": "Owned unversioned synthetic greeting only; no source execution, scans, follow-ups or general usefulness claim."
+    }
   },
   "operationalReaderAudit": {
     "sourceCommit": "c25b38fd67d0f535631cbe66e5faf360ba48f3b7",

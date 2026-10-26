@@ -59,6 +59,10 @@ submit: lessons
 require-live-snap: 25 s Plan follow-up | visible-followup
 resize: 40x12
 require-live-snap: 20 s Plan follow-up | compact-followup-action
+expect: Owned greeting
+expect: Accepted
+expect: a/r/t review
+expect: u copy
 ask: Does the compact Lessons browser expose the follow-up action with its saved context, without treating copied guidance as scan approval?
 resize: 120x36
 keys: s
@@ -157,6 +161,7 @@ require-live-snap: 20 changed or retired lesson | future-use-blocked
 ask: Does retirement preserve the six observations and original human decision while making the copied context ineligible for new work?
 keys: C-c
 require-exit: 10
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR NODE_OPTIONS KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE SEMGREP_APP_TOKEN SEMGREP_AGENT_TOKEN
 env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0
 launch: --target @TMP_TARGET
 require-live-snap: 30 KUZUSHI | restarted

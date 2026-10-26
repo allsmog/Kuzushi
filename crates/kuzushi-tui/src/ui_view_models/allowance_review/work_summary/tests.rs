@@ -386,3 +386,29 @@ fn context_approval_keeps_frozen_inheritance_membership_and_inventory_extent() {
     assert!(text.contains("entry cap reached"));
     assert!(!text.contains("legacy selection") && !text.contains("unfrozen.py"));
 }
+
+#[test]
+fn lesson_approval_names_historical_evidence_without_implying_threat_context_use() {
+    let (_root, mut config, _) = fixture();
+    let receipt: ContextStudyReceipt = serde_json::from_value(json!({
+        "campaignId":"lesson","investigationId":"owned",
+        "generationTool":"findings:lesson-generate",
+        "planSha256":"sha256:lesson","sourceIdentity":"owned-source",
+        "configSha256":"owned-config","model":"openai-codex:gpt-5.5",
+        "input":{"findingId":123,"maxSourceBytes":1024},"preparationJobs":[]
+    }))
+    .unwrap();
+    config.context_generation = Some(crate::app::StudyContextGeneration {
+        receipt: Some(receipt),
+        ..Default::default()
+    });
+    let approval =
+        json!({"campaignId":"lesson","campaignPlanSha256":"sha256:lesson","campaignJobs":1});
+    let text = summary_text(&config, &approval);
+    assert!(text.contains("Action: findings:lesson-generate"));
+    assert!(
+        text.contains("Evidence: exact confirmed observation; current source is not substituted")
+    );
+    assert!(text.contains("Threat context: not used for lesson drafts"));
+    assert!(!text.contains("legacy selection"));
+}
