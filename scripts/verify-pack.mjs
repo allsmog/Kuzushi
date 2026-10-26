@@ -2,6 +2,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
+import { parse as parseYaml } from "yaml";
 import { checkArtifactSchemaInventory } from "./artifact-schema-inventory-contract.mjs";
 import { bridgeModuleClosure } from "./bridge-module-closure.mjs";
 import { canonicalRunSchemaFiles } from "./canonical-run-schema-files.mjs";
@@ -15,6 +16,7 @@ const bridgeClosure = bridgeModuleClosure((module) =>
   readFileSync(path.join(repo, module), "utf8"),
 );
 const manifest = readPackageManifest();
+const workspaceManifest = parseYaml(readFileSync(path.join(repo, "pnpm-workspace.yaml"), "utf8"));
 const rawPackageFileEntries = manifest.files;
 const packageFileShapeFailures = packageFileEntryShapeFailures(rawPackageFileEntries);
 const entries = Array.isArray(rawPackageFileEntries)
@@ -90,7 +92,7 @@ const expectedPackageIdentity = {
   type: "module",
   license: "MIT",
 };
-const expectedOnlyBuiltDependencies = ["esbuild"];
+const expectedAllowedBuildPackages = ["better-sqlite3", "esbuild"];
 // devDependencies must never reintroduce the retired TypeScript toolchain.
 const forbiddenDevDependencyPatterns = [
   /^typescript$/,
@@ -248,7 +250,10 @@ const scriptRuntimePolicyFixtureFailures = packageScriptRuntimePolicyFixtureFail
 );
 const releaseScriptFailures = releaseScriptFailuresFor(packageScripts);
 const publishWrapperFailures = publishWrapperContentFailures();
-const metadataFailures = packageMetadataFailures(manifest);
+const metadataFailures = [
+  ...packageMetadataFailures(manifest),
+  ...workspaceBuildPolicyFailures(workspaceManifest),
+];
 const requiredFileFailures = requiredPackageFileFailures(sorted);
 const publicDocumentFailures = publicDocumentContentFailures();
 const schemaInventoryFailures = checkArtifactSchemaInventory();
@@ -754,16 +759,23 @@ function packageMetadataFailures(packageManifest) {
     packageManifest.engines.node.startsWith(">=")
       ? []
       : ["package engines.node must declare a >= floor"]),
-    ...arrayFieldFailures(
-      "pnpm.onlyBuiltDependencies",
-      packageManifest.pnpm?.onlyBuiltDependencies,
-      expectedOnlyBuiltDependencies,
-    ),
     ...packageVersionFailures(packageManifest.version),
     ...packageTypesRuntimePolicyFailures(packageManifest.types),
     ...packagePublishMetadataFailures(packageManifest),
     ...packageForbiddenMetadataFieldFailures(packageManifest),
   ];
+}
+
+function workspaceBuildPolicyFailures(workspace) {
+  const allowed = Object.entries(workspace?.allowBuilds ?? {})
+    .filter(([, enabled]) => enabled === true)
+    .map(([packageName]) => packageName)
+    .sort();
+  return JSON.stringify(allowed) === JSON.stringify(expectedAllowedBuildPackages)
+    ? []
+    : [
+        `pnpm-workspace allowBuilds must enable only ${JSON.stringify(expectedAllowedBuildPackages)}`,
+      ];
 }
 
 function packageTypesRuntimePolicyFailures(types) {
@@ -826,12 +838,6 @@ function packageForbiddenMetadataFieldFailures(packageManifest) {
   return forbiddenPackageMetadataFields
     .filter((field) => Object.hasOwn(packageManifest, field))
     .map((field) => `package ${field} must be absent`);
-}
-
-function arrayFieldFailures(field, actual, expected) {
-  return JSON.stringify(actual ?? []) === JSON.stringify(expected)
-    ? []
-    : [`package ${field} must be ${JSON.stringify(expected)}`];
 }
 
 function lifecycleScriptFile(script) {

@@ -116,7 +116,7 @@
     "@langchain/langgraph": "^1.0.0",
     "@langchain/mcp-adapters": "^1.0.0",
     "@langchain/openai": "^1.0.0",
-    "zod": "^4.3.6"
+    "zod": "^4.6.7"
   },
   "optionalDependencies": {
     "@kuzushi/darwin-arm64": "0.24.0-alpha.14",
@@ -135,14 +135,6 @@
     "husky": "^9.1.7",
     "lint-staged": "^17.0.8",
     "yaml": "2.9.0"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ],
-    "overrides": {
-      "ws@>=8.0.0 <8.21.0": ">=8.21.0"
-    }
   },
   "keywords": [
     "sast",

@@ -692,6 +692,28 @@ mod tests {
     }
 
     #[test]
+    fn catalog_window_marks_exactly_the_cursor_row() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_target(Some(std::path::PathBuf::from(".")));
+        app.router.catalog_mut().expand();
+        let model = catalog_model(&app);
+        let rows = catalog_overlay_rows(&model);
+        assert!(rows.len() > 3);
+
+        let capacity = 7;
+        let lines = windowed_catalog_overlay_lines(&model, &rows, 2, 90, capacity);
+        let selected = lines
+            .iter()
+            .map(line_text)
+            .filter(|line| line.starts_with('▸'))
+            .collect::<Vec<_>>();
+
+        assert_eq!(lines.len(), capacity);
+        assert_eq!(selected.len(), 1, "{selected:?}");
+        assert!(selected[0].contains(&rows[2][0]), "{selected:?}");
+    }
+
+    #[test]
     fn boot_workspace_path_preserves_target_tail_with_visible_ellipsis() {
         let line = boot_check_line(
             110,

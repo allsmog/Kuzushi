@@ -18,6 +18,9 @@ version = 2
 # Permissive licenses compatible with Kuzushi's MIT distribution (NOTICE).
 allow = [
   "MIT",
+  # `borrow-or-share` uses MIT-0, an OSI-approved permissive variant pulled
+  # in through the JSON Schema validation graph.
+  "MIT-0",
   "Apache-2.0",
   "Apache-2.0 WITH LLVM-exception",
   "BSD-2-Clause",

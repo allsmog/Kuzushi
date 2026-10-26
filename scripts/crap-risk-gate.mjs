@@ -93,13 +93,12 @@ function productionSource(file, source) {
 }
 
 function changedFilesFromGit() {
-  const files = [
+  return [
     ...gitLines(["diff", "--name-only", "--diff-filter=ACMR"]),
     ...gitLines(["diff", "--cached", "--name-only", "--diff-filter=ACMR"]),
     ...gitLines(["ls-files", "--others", "--exclude-standard"]),
+    ...gitLinesRequired(["diff", "--name-only", "--diff-filter=ACMR", base, "HEAD"]),
   ];
-  if (files.length > 0) return files;
-  return gitLinesRequired(["diff", "--name-only", "--diff-filter=ACMR", base, "HEAD"]);
 }
 
 function diffBase() {
@@ -295,7 +294,9 @@ function isProductionCode(file) {
 function isTestFile(file) {
   return (
     file.includes("/tests/") ||
+    file.includes("_tests/") ||
     file.endsWith("/tests.rs") ||
+    file.endsWith("_tests.rs") ||
     file.endsWith("/test_support.rs") ||
     file.includes("_test.") ||
     file.includes(".test.") ||

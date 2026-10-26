@@ -41,22 +41,22 @@ function userMessages(raw) {
 
   const messages = [];
   let humanBlocks = [];
-  const flushHumanBlocks = () => {
-    if (!humanBlocks.length) return;
-    messages.push(new HumanMessage(humanBlocks));
-    humanBlocks = [];
-  };
 
   for (const block of content) {
     if (block?.type !== "tool_result") {
       humanBlocks.push(block);
       continue;
     }
-    flushHumanBlocks();
+    humanBlocks = flushHumanBlocks(messages, humanBlocks);
     messages.push(toolMessageFromResultBlock(block));
   }
-  flushHumanBlocks();
+  flushHumanBlocks(messages, humanBlocks);
   return messages;
+}
+
+function flushHumanBlocks(messages, humanBlocks) {
+  if (humanBlocks.length) messages.push(new HumanMessage(humanBlocks));
+  return [];
 }
 
 function toolCallFromUseBlock(block) {

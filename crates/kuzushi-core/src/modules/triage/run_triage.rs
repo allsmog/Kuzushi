@@ -532,21 +532,30 @@ fn prefilter_triage_findings_with_receipts(
         }
     }
 
-    let kept_count = kept.len();
-    (
-        PrefilteredTriageFindings {
-            total,
-            kept_count,
-            dropped,
-            kept,
-        },
-        PrefilterDropReport {
-            threshold: prefilter_threshold,
-            total: dropped,
-            receipts,
-            omitted,
-        },
-    )
+    prefilter_result(total, kept, dropped, receipts, omitted, prefilter_threshold)
+}
+
+fn prefilter_result(
+    total: usize,
+    kept: Vec<Finding>,
+    dropped: usize,
+    receipts: Vec<PrefilterDropReceipt>,
+    omitted: usize,
+    threshold: i64,
+) -> (PrefilteredTriageFindings, PrefilterDropReport) {
+    let findings = PrefilteredTriageFindings {
+        total,
+        kept_count: kept.len(),
+        dropped,
+        kept,
+    };
+    let report = PrefilterDropReport {
+        threshold,
+        total: dropped,
+        receipts,
+        omitted,
+    };
+    (findings, report)
 }
 
 fn attach_prefilter_drop_report(response: &mut Value, report: &PrefilterDropReport) {

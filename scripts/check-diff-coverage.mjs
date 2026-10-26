@@ -6,6 +6,9 @@ import process from "node:process";
 
 const DEFAULT_THRESHOLD = 80;
 const MAX_GIT_OUTPUT_BYTES = 64 * 1024 * 1024;
+// These sources compile only under a feature set that is checked separately
+// from the default workspace build used to generate the LCOV report.
+const ALTERNATE_FEATURE_SOURCES = new Set(["crates/kuzushi-cpg/src/disabled.rs"]);
 
 export function parseLcov(text, root = process.cwd()) {
   const files = new Map();
@@ -52,6 +55,25 @@ export function evaluateDiffCoverage(coverage, changed, threshold = DEFAULT_THRE
   }
   const percent = measured === 0 ? 100 : (covered / measured) * 100;
   return { covered, measured, percent, threshold, uncovered };
+}
+
+export function omitUninstrumentedDeclarationSources(coverage, changed, sourceForFile) {
+  return new Map(
+    [...changed].filter(([file]) => {
+      if (coverage.has(file)) return true;
+      if (hasSeparateCoverageConfiguration(file)) return false;
+      return hasExecutableFunction(sourceForFile(file));
+    }),
+  );
+}
+
+function hasSeparateCoverageConfiguration(file) {
+  if (ALTERNATE_FEATURE_SOURCES.has(file)) return true;
+  return /\/(?:windows|linux|macos)(?:\/|\.rs$)/.test(file);
+}
+
+function hasExecutableFunction(source) {
+  return /\bfn\s+(?:r#)?[A-Za-z_][A-Za-z0-9_]*/.test(source);
 }
 
 function evaluateFileCoverage(file, coverage, changedLines) {
@@ -176,9 +198,12 @@ function main() {
   const reportPath = process.argv[2] ?? "target/llvm-cov/lcov.info";
   const base = resolveBase(root);
   const diff = git(root, ["diff", "--unified=0", "--no-color", base, "--", "crates"]);
+  const coverage = readCoverageReport(root, reportPath);
   const result = evaluateDiffCoverage(
-    readCoverageReport(root, reportPath),
-    parseChangedRustLines(diff),
+    coverage,
+    omitUninstrumentedDeclarationSources(coverage, parseChangedRustLines(diff), (file) =>
+      readFileSync(path.resolve(root, file), "utf8"),
+    ),
     thresholdFromEnvironment(),
   );
   process.stdout.write(
