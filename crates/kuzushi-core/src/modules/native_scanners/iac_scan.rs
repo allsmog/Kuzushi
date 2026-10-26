@@ -19,12 +19,13 @@ fn run_with_scanner(
     ) -> Result<crate::iac_scan::IacScanReport>,
 ) -> Result<Value> {
     let target = resolve_tool_target(&input, ctx)?;
-    let source = SourceSnapshot::capture(ctx, "iac-scan:scan", &target)?;
+    let source_workspace = crate::workspace::source_snapshot::workspace_source_owner(ctx, &target)?;
+    let source = SourceSnapshot::capture(ctx, "iac-scan:scan", source_workspace.root())?;
     let kind = IacScanOptions::from_tool_input(&input)?.kind;
     let receipt = DirectScanReceipt::capture(ctx, &target, DirectScanPolicy::Iac(kind))?;
     let (output, findings) = source.bind_result(analyze(&target, &input, ctx, scan))?;
     let settlement_source = source.clone();
-    let output = source.finish(ctx, "iac-scan:scan", &target, output);
+    let output = source.finish(ctx, "iac-scan:scan", source_workspace.root(), output);
     let output = settlement_source.bind_result(receipt.finish(ctx, &findings, output))?;
     Ok(output)
 }
@@ -75,7 +76,9 @@ fn rebase_report(
     report.inspected_files = report.inspected_files.take().map(|files| {
         files
             .into_iter()
-            .map(|file| prefix.join(file).to_string_lossy().replace('\\', "/"))
+            .map(|file| {
+                crate::workspace::inventory::repo_relative(Path::new(""), &prefix.join(file))
+            })
             .collect()
     });
     for finding in &mut report.findings {

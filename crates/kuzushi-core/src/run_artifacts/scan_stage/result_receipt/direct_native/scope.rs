@@ -55,7 +55,7 @@ fn expected_paths(target: &Path, id: &str, result: &Value) -> Result<Vec<String>
     if path.as_os_str().is_empty() {
         return Ok(vec![".".into()]);
     }
-    let path = path.to_string_lossy().replace('\\', "/");
+    let path = crate::workspace::inventory::repo_relative(Path::new(""), &path);
     anyhow::ensure!(
         valid_relative(&path),
         "Direct scan selected path is invalid"
@@ -82,7 +82,9 @@ fn expected_members(id: &str, result: &Value, paths: &[String]) -> Result<BTreeS
 
 fn valid_relative(file: &str) -> bool {
     !file.is_empty()
-        && !file.contains('\\')
+        && Path::new(file)
+            .components()
+            .all(|part| matches!(part, std::path::Component::Normal(_)))
         && file.split('/').all(|part| !matches!(part, "" | "." | ".."))
         && !Path::new(file).is_absolute()
 }

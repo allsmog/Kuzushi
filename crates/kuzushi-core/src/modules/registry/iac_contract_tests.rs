@@ -216,3 +216,5 @@ fn iac_does_not_follow_external_files_or_directory_cycles() {
     assert!(report.findings.is_empty());
     assert_eq!(report.inspection.symlinks_excluded, 2);
 }
+
+mod child_source;

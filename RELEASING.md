@@ -1,5 +1,21 @@
 # Releasing Kuzushi
 
+## IaC child source and literal coverage
+
+Direct `iac-scan:scan` now registers and verifies source identity in its explicit
+parent workspace. Discovery stays in the selected child. Literal Unix
+backslashes remain distinct from nested directories in finding paths,
+fingerprints, inspected membership and authenticated coverage readers.
+Review's follow-up drawer accurately names drafting and opening planning;
+work approval remains separate.
+
+Tool names, options and stored field names are unchanged. Existing ambiguous
+child records and human decisions are preserved. Rescan the intended directory
+and review historical relationships against retained source. Updating or a
+later missed finding does not establish a fix. Source identity IO remains
+separate from discovery limits. See the
+[qualification and limits](docs/assessments/iac-child-source-2026-10-26.md).
+
 ## Workspace-owned native source identity and phase guidance
 
 License, dependency-policy and secret tool runs now register and verify source

@@ -52,7 +52,10 @@ impl IacScanAccumulator {
         self.files_scanned += 1;
         if let Ok(relative) = file.strip_prefix(target) {
             self.inspected_files
-                .insert(relative.to_string_lossy().replace('\\', "/"));
+                .insert(crate::workspace::inventory::repo_relative(
+                    Path::new(""),
+                    relative,
+                ));
         }
         self.findings
             .extend(analyze_enabled_iac_file(target, file, options, raw));

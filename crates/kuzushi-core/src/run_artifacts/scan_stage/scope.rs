@@ -43,7 +43,10 @@ fn target_relative(target: &str, file: &str) -> Option<String> {
         Err(_) if path.is_absolute() => return None,
         Err(_) => path,
     };
-    lexically_normalized(&stripped.to_string_lossy().replace('\\', "/"))
+    lexically_normalized(&crate::workspace::inventory::repo_relative(
+        Path::new(""),
+        stripped,
+    ))
 }
 
 fn lexically_normalized(path: &str) -> Option<String> {
@@ -91,6 +94,22 @@ mod tests {
         ));
         assert!(!scan_paths_cover_file("/repo", &["lib/..".into()], "x.rs"));
     }
+    #[cfg(unix)]
+    #[test]
+    fn literal_directories_do_not_cover_nested_neighbors() {
+        let mut scope = ScanStageScope {
+            target: "/repo".into(),
+            paths: vec![r"client\scope".into()],
+            inspected_files: Some([r"client\scope/Dockerfile".into()].into()),
+        };
+        assert!(scope.covers_file(r"client\scope/Dockerfile"));
+        assert!(scope.covers_file(r"/repo/client\scope/Dockerfile"));
+        assert!(!scope.covers_file("client/scope/Dockerfile"));
+        assert!(!scope.covers_file(r"../client\scope/Dockerfile"));
+        scope.paths = vec!["client/scope".into()];
+        assert!(!scope.covers_file(r"client\scope/Dockerfile"));
+    }
+
     #[test]
     fn exact_membership_distinguishes_empty_unknown_and_excluded_files() {
         let mut scope = ScanStageScope {

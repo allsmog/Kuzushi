@@ -2242,7 +2242,8 @@
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
       "phaseResultDeclared": true,
-      "descriptorSha256": "sha256:a25dd398f8bd603ec615d11ad2666a168f31a621f79cc2c684c56e93607b022b"
+      "descriptorSha256": "sha256:a25dd398f8bd603ec615d11ad2666a168f31a621f79cc2c684c56e93607b022b",
+      "sourceOwnershipEvidence": "docs/assessments/iac-child-source-2026-10-26.md: reproduced child snapshot ownership and literal-versus-nested source, identity and coverage defects. Direct source identity now belongs to the explicit workspace; discovery stays at the child. Shared authenticated receipt readers retain literal Unix paths. All 113 focused Rust checks, workspace build, Core/TUI/CLI Clippy and risk pass. Final J383 has 26 machine passes, zero failures and four answered agent screen reviews with polish findings. Six real native scans retain seven observations, two findings, one scripted deferral and authenticated coverage through JSON export and no-color restart. Old history is preserved; all other adapter ownership and full investigation/UX acceptance remain separately qualified."
     },
     {
       "tool": "license-scan:scan",

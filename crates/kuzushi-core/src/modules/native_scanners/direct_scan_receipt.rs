@@ -40,7 +40,7 @@ impl DirectScanReceipt {
                 paths: vec![if path.as_os_str().is_empty() {
                     ".".into()
                 } else {
-                    path.to_string_lossy().replace('\\', "/")
+                    crate::workspace::inventory::repo_relative(Path::new(""), &path)
                 }],
                 inspected_files: None,
             },

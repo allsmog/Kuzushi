@@ -1,5 +1,17 @@
 # Bounded investigation acceptance ledger
 
+The [IaC child-source follow-up](../assessments/iac-child-source-2026-10-26.md)
+repairs parent snapshot ownership and preserves literal Unix paths through
+observations, coverage and retained source. Its first complete J383 has 23
+machine passes but fails agent screen review on contradictory plan guidance and
+a Report coverage-reader defect. Final J383 has 26 machine passes, zero failures,
+24 capture pairs and four answered agent reviews with polish findings. Six
+explicit scans retain seven observations, two findings and one scripted deferral
+through Report and no-color restart. All 113 focused Rust checks, workspace
+build, Clippy and risk pass. Earlier failures stay recorded, including a later
+observer assumption about an absent optional drawer. No model request, accepted
+phase, automatic follow-up or broad milestone closure follows.
+
 The [rejected scope correction](../assessments/rejected-scope-correction-2026-10-26.md)
 adds bounded opt-in local output retention and runtime-free manual recovery of a
 failed scope proposal. The original job and spending remain failed/consumed;

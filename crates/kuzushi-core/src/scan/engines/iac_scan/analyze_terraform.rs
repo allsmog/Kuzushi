@@ -121,10 +121,7 @@ pub(crate) fn canonical_directory(target: &Path) -> Result<PathBuf> {
 }
 
 pub(crate) fn relative_display(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .display()
-        .to_string()
+    crate::workspace::inventory::repo_relative(root, path)
 }
 
 pub(crate) fn should_skip_dir(name: &str) -> bool {
