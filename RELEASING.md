@@ -1,5 +1,19 @@
 # Releasing Kuzushi
 
+## Current review counts across scan passes
+
+Campaign status, the TUI trend, shared confirmed SARIF and the CLI gate now read
+recorded decisions against current canonical findings. A carried confirmation
+survives a new observation row; a later human FP replaces that confirmation once.
+Human priority and exact-row decision scope follow the shared review resolver.
+Filtering or paging the Review list does not change workspace trend totals.
+
+Field names and legacy observation-row selection APIs remain compatible.
+Previously saved trend-history points may contain observation-based counts and
+are preserved. Re-run a current status or export to obtain corrected totals;
+old snapshots are not rewritten. Exact zero no longer displays as a negative
+spend, and unknown-spend flags remain unchanged.
+
 ## Native observation sources and exported revisions
 
 The aggregate native scan now binds observations to the authenticated source

@@ -1,0 +1,78 @@
+name: Effective report counters survive repeated observations and human FP
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/report_trend.py @TMP_TARGET @ART seed
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: findings
+require-live-snap: 20 Labeled observation | initial-review
+submit: campaigns
+require-live-snap: 20 1 confirmed | one-canonical-confirmation
+expect: 0% (0/1)
+expect: $0.00 spent
+ask: Does the workspace trend count one effective confirmation across two observations, without claiming source applicability or analysis completion?
+submit: findings
+require-live-snap: 20 Labeled observation | decision-target
+paste-file: @ART/dismiss-command.txt
+keys: Enter
+require-live-snap: 25 run receipt | decision-saved
+submit: campaigns
+require-live-snap: 20 0 confirmed | fp-counters
+expect: 100% (1/1)
+expect: $0.00 spent
+require-shell: python3 -B @REPO/scripts/devex/fixtures/report_trend.py @TMP_TARGET @ART exported
+ask: Does the later human FP replace the earlier confirmation in the trend while retaining both observations and decisions, with real SARIF and CI consumers in agreement?
+resize: 160x48
+live-snap: trend-160x48
+resize: 96x89
+live-snap: trend-96x89
+resize: 80x24
+live-snap: trend-80x24
+resize: 60x20
+live-snap: trend-60x20
+resize: 40x12
+live-snap: trend-40x12
+keys: Escape
+require-live-snap: 20 Esc compose | trend-narrow-reading
+expect: 100% (1/1)
+expect: 0 confirmed
+keys: NPage
+live-snap: trend-narrow-page-1
+keys: NPage
+live-snap: trend-narrow-page-2
+ask: At all six sizes, can the operator read the current trend and its scope through visible controls without starting work or changing the decision?
+resize: 120x36
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | no-color-ready
+submit: findings
+require-live-snap: 20 Labeled observation | no-color-review
+submit: campaigns
+require-live-snap: 20 0 confirmed | no-color-trend
+expect: 100% (1/1)
+expect: $0.00 spent
+resize: 160x48
+live-snap: no-color-160x48
+resize: 96x89
+live-snap: no-color-96x89
+resize: 80x24
+live-snap: no-color-80x24
+resize: 60x20
+live-snap: no-color-60x20
+resize: 40x12
+live-snap: no-color-narrow
+keys: Escape
+require-live-snap: 20 Esc compose | no-color-narrow-reading
+expect: 100% (1/1)
+expect: 0 confirmed
+keys: NPage
+live-snap: no-color-narrow-page
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/report_trend.py @TMP_TARGET @ART recovered
+ask: Does no-color restart preserve the effective FP totals, raw history and honest source limitations with zero model or scanner work?
+keys: C-c
+require-exit: 10

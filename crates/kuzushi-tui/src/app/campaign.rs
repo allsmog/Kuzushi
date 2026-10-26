@@ -83,10 +83,16 @@ impl ShellApp {
         unreadable: usize,
     ) {
         let spend = campaign_snapshot_spend(campaigns, unreadable);
-        let trend = kuzushi_core::capabilities::campaign::trend::trend_metrics_with_spend(
-            self.review_decisions(),
-            spend,
-        );
+        let trend = self
+            .domain()
+            .review_trend()
+            .unwrap_or_else(|| {
+                kuzushi_core::capabilities::campaign::trend::trend_metrics_from_ledger(
+                    kuzushi_core::capabilities::campaign::trend::DecisionLedger::Unreadable,
+                    Default::default(),
+                )
+            })
+            .with_spend(spend);
         let history = refresh_trend_history(target, &trend);
         let deck = self.router.campaign_mut();
         deck.trend = Some(trend);

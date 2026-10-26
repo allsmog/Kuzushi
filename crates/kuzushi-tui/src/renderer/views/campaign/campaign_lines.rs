@@ -119,11 +119,11 @@ fn append_campaign_trend(lines: &mut Vec<Line<'static>>, deck: &CampaignRouteSta
 
 fn append_workspace_trend(lines: &mut Vec<Line<'static>>, label: &str, width: usize) {
     if width >= 80 {
-        push_deck_text(lines, label, width, theme::subtle());
+        push_deck_text(lines, label, width, theme::primary());
         return;
     }
     for part in label.split(" · ") {
-        push_deck_text(lines, part, width, theme::subtle());
+        push_deck_text(lines, part, width, theme::primary());
     }
 }
 

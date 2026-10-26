@@ -33,6 +33,7 @@ pub(crate) struct FindingsReadSnapshot {
     pub(crate) report: FindingListReport,
     pub(crate) corpus: Vec<Finding>,
     pub(crate) review_decisions: Vec<ReviewDecisionRecord>,
+    pub(crate) review_trend: kuzushi_core::capabilities::campaign::trend::TrendMetrics,
     pub(crate) completion: Result<WorkspaceReviewCompletion, String>,
     pub(crate) legacy_lifecycles: Vec<PatchLifecycleRecord>,
     pub(crate) warnings: Vec<String>,
@@ -78,14 +79,11 @@ fn read_projection_snapshot(
         policy,
         request.scan_run_refs.as_deref(),
     )?;
-    let review_decisions = store.list_all_review_decisions()?;
+    let (review_decisions, review_trend) = read_review_snapshot(store)?;
     let completion = read_source_completion(workspace, store, &corpus, scope_error.as_deref());
     let (legacy_lifecycles, mut warnings) = read_legacy_lifecycles(store);
     warnings.extend(scope_error);
-    anyhow::ensure!(
-        store.projection_meta()?.applied_seq == watermark,
-        "Findings snapshot changed on its owning connection"
-    );
+    ensure_snapshot_watermark(store, watermark)?;
     Ok(FindingsReadSnapshot {
         target: workspace.root().to_path_buf(),
         watermark: durable_projection.then_some(watermark),
@@ -93,6 +91,7 @@ fn read_projection_snapshot(
         report: page.report,
         corpus,
         review_decisions,
+        review_trend,
         completion,
         legacy_lifecycles,
         warnings,
@@ -100,6 +99,30 @@ fn read_projection_snapshot(
         page_recovery_notice: page.recovery_notice,
         study: page.study,
     })
+}
+
+fn read_review_snapshot(
+    store: &FindingStore,
+) -> Result<(
+    Vec<ReviewDecisionRecord>,
+    kuzushi_core::capabilities::campaign::trend::TrendMetrics,
+)> {
+    let subjects = store.list_review_decision_subjects()?;
+    let review_decisions = store.list_review_decisions_for_subjects(&subjects)?;
+    let review_trend = kuzushi_core::capabilities::campaign::trend::trend_metrics_for_subjects(
+        &subjects,
+        &review_decisions,
+        Default::default(),
+    );
+    Ok((review_decisions, review_trend))
+}
+
+fn ensure_snapshot_watermark(store: &FindingStore, watermark: u64) -> Result<()> {
+    anyhow::ensure!(
+        store.projection_meta()?.applied_seq == watermark,
+        "Findings snapshot changed on its owning connection"
+    );
+    Ok(())
 }
 
 #[cfg(test)]

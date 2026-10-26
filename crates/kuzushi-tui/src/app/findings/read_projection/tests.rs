@@ -70,6 +70,7 @@ fn complete_projection_keeps_one_watermark_when_rows_and_decisions_change_mid_re
             assert_eq!(snapshot.report.count, 1);
             assert_eq!(snapshot.corpus.len(), 1);
             assert!(snapshot.review_decisions.is_empty());
+            assert_eq!(snapshot.review_trend.decided_findings, 0);
             Ok(snapshot)
         })
         .unwrap();
@@ -77,6 +78,7 @@ fn complete_projection_keeps_one_watermark_when_rows_and_decisions_change_mid_re
     let current = read_findings_projection(root.path(), &request).unwrap();
     assert_eq!(current.page.total, 2);
     assert_eq!(current.review_decisions.len(), 1);
+    assert_eq!(current.review_trend.rejected_false_positives, 1);
     assert!(current.watermark > snapshot.watermark);
 }
 
@@ -92,4 +94,54 @@ fn missing_previous_ledger_is_still_an_error_instead_of_an_empty_snapshot() {
         .to_string()
         .contains("Previously loaded findings ledger is unavailable"));
     assert!(!root.path().join(".kuzushi").exists());
+}
+
+#[test]
+fn trend_filtered_page_keeps_global_effective_counts_in_campaign_cache() {
+    let (root, mut app, store) = fixture();
+    let original = store.list_all_findings().unwrap().remove(0);
+    store
+        .record_run_started("repeated", root.path(), "completed")
+        .unwrap();
+    let later = store.insert_finding("repeated", &original).unwrap();
+    store
+        .append_dismissal(
+            later,
+            kuzushi_core::findings::DismissReason::FalsePositive,
+            "Owned repeated observation",
+            "operator",
+        )
+        .unwrap();
+    let request = app.findings_read_request(
+        1,
+        root.path().join("operator"),
+        Some("severity:critical".into()),
+    );
+    let snapshot = read_findings_projection(root.path(), &request).unwrap();
+    assert_eq!(snapshot.report.count, 0);
+    assert_eq!(snapshot.review_trend.decided_findings, 1);
+    assert_eq!(snapshot.review_trend.rejected_false_positives, 1);
+    app.router.campaign_mut().trend =
+        Some(kuzushi_core::capabilities::campaign::trend::TrendMetrics {
+            confirmed_findings: 1,
+            campaign_spend_usd: 0.25,
+            provider_spend_unresolved: true,
+            ..Default::default()
+        });
+    app.apply_findings_read_snapshot(snapshot, &request, false);
+    let displayed = app.router.campaign().trend.unwrap();
+    assert_eq!(displayed.confirmed_findings, 0);
+    assert_eq!(displayed.rejected_false_positives, 1);
+    assert_eq!(displayed.campaign_spend_usd, 0.25);
+    assert!(displayed.provider_spend_unresolved);
+    assert!(app.findings().is_empty());
+    assert_eq!(
+        app.domain()
+            .review_trend()
+            .unwrap()
+            .rejected_false_positives,
+        1
+    );
+    app.set_review_decisions(vec![]);
+    assert!(app.domain().review_trend().is_none());
 }

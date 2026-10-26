@@ -2,7 +2,7 @@
 
 use super::snapshot::{campaign_ids, load_campaign_snapshot, CampaignSnapshot};
 use super::string_input;
-use crate::findings::{FindingStore, ReviewDecisionRecord};
+use crate::findings::FindingStore;
 use crate::modules::ToolExecutionContext;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
@@ -31,13 +31,8 @@ pub fn execute_campaign_status(input: &Value, ctx: &ToolExecutionContext<'_>) ->
 /// `trendHistory`; a history write failure degrades to history-less status
 /// rather than failing the read.
 fn workspace_trend_json(root: &Path, ctx: &ToolExecutionContext<'_>) -> (Value, Value) {
-    let read = ctx
-        .findings_store
-        .map(FindingStore::list_all_review_decisions);
-    let metrics = super::trend::trend_metrics_from_ledger(
-        decision_ledger(&read),
-        super::trend::workspace_campaign_spend_report(root),
-    );
+    let spend = super::trend::workspace_campaign_spend_report(root);
+    let metrics = workspace_review_metrics(ctx.findings_store, spend);
     let _ = super::trend_history::record_trend_snapshot(root, &metrics);
     let history =
         super::trend_history::load_trend_history(root, super::trend_history::TREND_HISTORY_LIMIT);
@@ -47,16 +42,18 @@ fn workspace_trend_json(root: &Path, ctx: &ToolExecutionContext<'_>) -> (Value, 
     )
 }
 
-/// No store at all folds over an empty ledger, as it always has — there is
-/// no database to have failed. Only a read that failed is unreadable.
-fn decision_ledger(
-    read: &Option<Result<Vec<ReviewDecisionRecord>>>,
-) -> super::trend::DecisionLedger<'_> {
-    match read {
-        Some(Ok(records)) => super::trend::DecisionLedger::Read(records),
-        Some(Err(_)) => super::trend::DecisionLedger::Unreadable,
-        None => super::trend::DecisionLedger::Read(&[]),
-    }
+fn workspace_review_metrics(
+    store: Option<&FindingStore>,
+    spend: super::trend::WorkspaceCampaignSpend,
+) -> super::trend::TrendMetrics {
+    let Some(store) = store else {
+        return super::trend::trend_metrics_with_spend(&[], spend);
+    };
+    store.with_projection_snapshot(|store| {
+        let subjects = store.list_review_decision_subjects()?;
+        let records = store.list_review_decisions_for_subjects(&subjects)?;
+        Ok(super::trend::trend_metrics_for_subjects(&subjects, &records, spend))
+    }).unwrap_or_else(|_| super::trend::trend_metrics_from_ledger(super::trend::DecisionLedger::Unreadable, spend))
 }
 
 fn all_campaigns_status(root: &Path, trend: Value, trend_history: Value) -> Result<Value> {
@@ -167,3 +164,6 @@ fn counts_line(counts: &BTreeMap<String, usize>) -> String {
         .collect::<Vec<_>>()
         .join(", ")
 }
+
+#[cfg(test)]
+mod tests;

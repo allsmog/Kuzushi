@@ -13,7 +13,7 @@
 //! overturn a decision an operator already made.
 
 use super::super::domain::{
-    Finding, ReviewDecision, ReviewDecisionRecord, ReviewDecisionVerdict, TriageAuthor,
+    Finding, ReviewDecision, ReviewDecisionRecord, ReviewDecisionSubject, ReviewDecisionVerdict, TriageAuthor,
     TriageVerdict,
 };
 use crate::workspace::WorkspaceFindingReviewContext;
@@ -218,29 +218,28 @@ impl EffectiveReviewStateIndex {
         insert_latest_decision(&mut self.by_finding_id, record.finding_id, indexed);
     }
 
-    fn finding_decision_for(&self, finding: &Finding) -> Option<EffectiveReviewDecision> {
-        finding
-            .id
-            .and_then(|finding_id| self.by_finding_id.get(&finding_id))
-            .map(|indexed| EffectiveReviewDecision::from_indexed(indexed, finding))
+    fn indexed_decision_for_subject(
+        &self,
+        subject: &ReviewDecisionSubject,
+    ) -> Option<&IndexedReviewDecision> {
+        let Some(identity) = normalized_identity(subject.identity_id.as_deref()) else {
+            return subject.finding_id.and_then(|id| self.by_finding_id.get(&id));
+        };
+        let local = subject
+            .finding_id
+            .and_then(|id| self.by_local_finding_id.get(&id));
+        effective_indexed_decision(self.by_identity.get(&identity), local)
     }
 
-    fn identity_decision_for(&self, finding: &Finding) -> Option<EffectiveReviewDecision> {
-        let identity = normalized_identity_id(finding)
-            .as_deref()
-            .and_then(|identity_id| self.by_identity.get(identity_id));
-        let local = finding.id.and_then(|id| self.by_local_finding_id.get(&id));
-        effective_indexed_decision(identity, local)
-            .map(|indexed| EffectiveReviewDecision::from_indexed(indexed, finding))
+    /// Resolve projected lookup keys with the same scope and authority as a finding.
+    pub fn verdict_for_subject(&self, subject: &ReviewDecisionSubject) -> Option<ReviewDecisionVerdict> {
+        self.indexed_decision_for_subject(subject)
+            .map(|indexed| indexed.decision.verdict)
     }
 
     pub fn effective_decision_for(&self, finding: &Finding) -> Option<EffectiveReviewDecision> {
-        if normalized_identity_id(finding).is_some() {
-            return self
-                .identity_decision_for(finding)
-                .or_else(|| EffectiveReviewDecision::from_finding(finding));
-        }
-        self.finding_decision_for(finding)
+        self.indexed_decision_for_subject(&ReviewDecisionSubject::from(finding))
+            .map(|indexed| EffectiveReviewDecision::from_indexed(indexed, finding))
             .or_else(|| EffectiveReviewDecision::from_finding(finding))
     }
 

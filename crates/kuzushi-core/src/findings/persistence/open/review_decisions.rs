@@ -109,8 +109,13 @@ impl FindingStore {
     /// Returns exactly the rows `list_review_decisions_for_findings` would
     /// for `list_all_findings()`, at a fraction of the read cost.
     pub fn list_all_review_decisions(&self) -> Result<Vec<ReviewDecisionRecord>> {
-        let subjects = self.v3_review_decision_subjects()?;
+        let subjects = self.list_review_decision_subjects()?;
         self.list_review_decisions_for_subjects(&subjects)
+    }
+
+    /// Current canonical lookup subjects, without hydrating findings or source.
+    pub fn list_review_decision_subjects(&self) -> Result<Vec<ReviewDecisionSubject>> {
+        self.v3_review_decision_subjects()
     }
 
     pub fn list_review_decisions_for_subjects(

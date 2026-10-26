@@ -4,6 +4,8 @@
 //! route, and `campaign:status` render the exact same numbers.
 
 use super::snapshot::{campaign_ids, load_campaign_snapshot};
+mod review;
+pub use review::{trend_metrics_for_findings, trend_metrics_for_subjects};
 use crate::findings::{ReviewDecisionRecord, ReviewDecisionVerdict};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -35,6 +37,12 @@ pub struct WorkspaceCampaignSpend {
 }
 
 impl TrendMetrics {
+    pub fn with_spend(mut self, spend: WorkspaceCampaignSpend) -> Self {
+        self.campaign_spend_usd = if spend.observed_usd == 0.0 { 0.0 } else { spend.observed_usd };
+        self.provider_spend_unresolved = spend.provider_spend_unresolved;
+        self
+    }
+
     /// True when the decision counts came from a ledger the fold could read.
     /// A rate over counts that stand for an unread ledger would be fiction.
     fn decisions_counted(&self) -> bool {
@@ -131,11 +139,9 @@ pub fn trend_metrics_from_ledger(
     match ledger {
         DecisionLedger::Read(records) => trend_metrics_with_spend(records, spend),
         DecisionLedger::Unreadable => TrendMetrics {
-            campaign_spend_usd: spend.observed_usd,
-            provider_spend_unresolved: spend.provider_spend_unresolved,
             decisions_unreadable: true,
             ..TrendMetrics::default()
-        },
+        }.with_spend(spend),
     }
 }
 
@@ -143,12 +149,15 @@ pub fn trend_metrics_with_spend(
     records: &[ReviewDecisionRecord],
     spend: WorkspaceCampaignSpend,
 ) -> TrendMetrics {
-    let mut metrics = TrendMetrics {
-        campaign_spend_usd: spend.observed_usd,
-        provider_spend_unresolved: spend.provider_spend_unresolved,
-        ..TrendMetrics::default()
-    };
-    for verdict in latest_verdicts(records).values() {
+    metrics_from_verdicts(latest_verdicts(records).into_values(), spend)
+}
+
+fn metrics_from_verdicts(
+    verdicts: impl IntoIterator<Item = ReviewDecisionVerdict>,
+    spend: WorkspaceCampaignSpend,
+) -> TrendMetrics {
+    let mut metrics = TrendMetrics::default().with_spend(spend);
+    for verdict in verdicts {
         match verdict {
             ReviewDecisionVerdict::NeedsReview => continue,
             ReviewDecisionVerdict::Confirmed | ReviewDecisionVerdict::ToFix => {
