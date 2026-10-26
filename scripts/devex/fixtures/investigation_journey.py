@@ -176,6 +176,12 @@ def verify(root, evidence, stage):
         assert receipt["reviewedCount"] == 2
         assert receipt["observationCount"] == (4 if complete else 3)
         assert receipt["occurrence"]["completed"] == (3 if complete else 2)
+        if canceled:
+            stopped = json.loads((evidence / "after-stop.json").read_text())
+            canceled_run = next(job["runId"] for job in stopped["jobs"].values() if job.get("reason") == "canceled")
+            attempt = next(row for row in receipt["attempts"] if row["runId"] == canceled_run)
+            assert attempt["runStatus"] == "canceled"
+            assert attempt["scan"] is None, "Cancellation must not fabricate an engine outcome"
         with closing(query_ledger(root)) as db:
             assert db.execute("select count(*) from review_decisions").fetchone()[0] == (3 if complete else 2)
     (evidence / (stage + "-check.json")).write_text(json.dumps({"stage": stage, "interceptedRequests": expected_calls,

@@ -5,8 +5,73 @@ env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NODE_OPTIONS NO_COLOR KUZUSHI_MODEL 
 env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART seed @TMP_HOME
 require-wrapper-flow:
+env: NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 READY THE MAP RUN | setup-no-color-120x36
+expect-not: shell route
+expect-not: notify:
+expect-not: focus unknown
+resize: 160x48
+live-snap: setup-no-color-160x48
+expect-not: shell route
+expect-not: notify:
+expect-not: focus unknown
+resize: 96x89
+live-snap: setup-no-color-96x89
+expect-not: shell route
+expect-not: notify:
+expect-not: focus unknown
+resize: 80x24
+live-snap: setup-no-color-80x24
+expect-not: shell route
+expect-not: notify:
+expect-not: focus unknown
+resize: 60x20
+live-snap: setup-no-color-60x20
+expect-not: shell route
+expect-not: notify:
+expect-not: focus unknown
+resize: 40x12
+live-snap: setup-no-color-40x12
+expect-not: shell route
+expect-not: notify:
+expect-not: focus unknown
+resize: 120x36
+keys: C-c
+require-exit: 10
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NODE_OPTIONS NO_COLOR KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
 launch: --target @TMP_TARGET
 require-live-snap: 30 READY THE MAP RUN | fresh-setup
+expect-not: shell route
+expect-not: notify:
+expect-not: focus unknown
+resize: 160x48
+live-snap: setup-160x48
+expect-not: shell route
+expect-not: notify:
+expect-not: focus unknown
+resize: 96x89
+live-snap: setup-96x89
+expect-not: shell route
+expect-not: notify:
+expect-not: focus unknown
+resize: 80x24
+live-snap: setup-80x24
+expect-not: shell route
+expect-not: notify:
+expect-not: focus unknown
+resize: 60x20
+live-snap: setup-60x20
+expect-not: shell route
+expect-not: notify:
+expect-not: focus unknown
+resize: 40x12
+live-snap: setup-40x12
+expect-not: shell route
+expect-not: notify:
+expect-not: focus unknown
+resize: 120x36
 keys: Down Enter
 require-live-snap: 20 Build threat model | map-selection
 keys: Down Down
@@ -191,7 +256,8 @@ keys: Enter
 require-live-snap: 20 Attempts per job | revise-attempts
 type: 2
 keys: Enter L Home
-require-live-snap: 25 REVIEW PLAN & ALLOWANCE | retry-work-overview
+require-live-snap: 25 Execution model: openai-oauth:gpt-5.5 | retry-work-overview
+expect: REVIEW PLAN & ALLOWANCE
 expect: Engines: agentic
 expect: Scope: whole repository
 expect: Execution model: openai-oauth:gpt-5.5
@@ -248,6 +314,8 @@ resize: 40x12
 require-live-snap: 20 allowance exhausted | refused-40x12
 keys: NPage NPage NPage
 require-live-snap: 20 allowance exhausted | refused-paged-40x12
+expect: a plan/allowance
+expect-not: L resume
 ask: Does the blocked action remain visible while paging and resizing, with full details reachable and no focus, draft, job or spending change?
 resize: 120x36
 keys: Escape
@@ -302,6 +370,8 @@ require-live-snap: 25 deferred | deferred-decision
 submit: report
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 4/6 report
 require-live-snap: 25 0 pending · TP: 0 · FP: 1 · 1 deferred | partial-report
+expect: 1 canceled
+expect-not: outcome unavailable
 expect: 4 committed / 6 calls
 expect: 2 protected review remaining
 expect: 3 producer observations
@@ -376,6 +446,8 @@ expect-not: Saved choices unavailable
 expect: 4 producer observations
 expect: 2 protected review remaining
 require-live-snap: 25 0 pending · TP: 0 · FP: 1 · 1 deferred | final-reviewed-report
+expect: 1 canceled
+expect-not: outcome unavailable
 keys: p End
 require-live-snap: 25 Recent run cost records: | final-cost-records
 expect-not: missing metadata
@@ -471,6 +543,7 @@ require-live-snap: 25 CONFIRM SESSION EXIT | exit-confirmation
 expect: no active work
 keys: y
 require-exit: 10
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NODE_OPTIONS NO_COLOR KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE KUZUSHI_SKIP_ONBOARDING
 env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1
 launch: --target @TMP_TARGET
 require-live-snap: 30 KUZUSHI | restarted
@@ -484,6 +557,8 @@ resize: 120x36
 submit: report
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 5/7 report
 require-live-snap: 25 5 committed / 7 calls | recovered-report
+expect: 1 canceled
+expect-not: outcome unavailable
 expect: 0 pending · TP: 0 · FP: 1 · 1 deferred
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART restart
 require-shell: python3 -B @REPO/scripts/devex/fixtures/report_bundle.py @TMP_TARGET @ART restart

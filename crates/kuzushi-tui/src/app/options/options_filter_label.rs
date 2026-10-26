@@ -145,3 +145,30 @@ pub(crate) fn closest_option_names(name: &str, choices: &[&str]) -> Vec<String> 
         .map(|(_, choice)| choice)
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn integer_option(minimum: Option<i64>, maximum: Option<i64>) -> OptionSpec {
+        let mut spec = OptionSpec::new("workers", OptionType::Int, "Worker count");
+        spec.minimum = minimum;
+        spec.maximum = maximum;
+        spec
+    }
+
+    #[test]
+    fn bounded_integer_hints_disclose_each_configured_limit() {
+        let cases = [
+            (Some(1), Some(8), "Enter edits this whole number · 1 to 8"),
+            (Some(1), None, "Enter edits this whole number · minimum 1"),
+            (None, Some(8), "Enter edits this whole number · maximum 8"),
+            (None, None, "Enter edits this whole number"),
+        ];
+
+        for (minimum, maximum, expected) in cases {
+            let spec = integer_option(minimum, maximum);
+            assert_eq!(option_edit_hint(&spec), expected);
+        }
+    }
+}

@@ -4,6 +4,7 @@ use crate::capabilities::campaign::{
 };
 use crate::modules::ModuleRegistry;
 
+mod attempt_status;
 mod context_guidance;
 mod matrix;
 mod reassessment;

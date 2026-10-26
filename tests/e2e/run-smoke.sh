@@ -31,9 +31,8 @@ disclose_smoke_failure() {
 trap 'disclose_smoke_failure "$?" "${LINENO}" "${BASH_COMMAND}"' ERR
 
 NATIVE_EXE_NAME="$(node -p 'process.platform === "win32" ? "kuzushi.exe" : "kuzushi"')"
-DOWNLOADED_NATIVE_BIN="$(
-  find "${REPO_DIR}/native" -type f -name "${NATIVE_EXE_NAME}" -print -quit 2>/dev/null || true
-)"
+NATIVE_PLATFORM="$(node -p '`${process.platform}-${process.arch}`')"
+DOWNLOADED_NATIVE_BIN="${REPO_DIR}/native/${NATIVE_PLATFORM}/${NATIVE_EXE_NAME}"
 
 # Command used to invoke the Kuzushi CLI. CI can set
 # KUZUSHI_CMD="node bin/kuzushi-rs.mjs" after downloading native/.
@@ -90,7 +89,7 @@ export PATH="${FAKE_BIN_DIR}:${PATH}"
 export KUZUSHI_MODEL="${KUZUSHI_MODEL:-openai:gpt-4.1}"
 export OPENAI_API_KEY="${OPENAI_API_KEY:-fake-key}"
 
-if [[ -z "${KUZUSHI_NATIVE_BIN:-}" && -n "${DOWNLOADED_NATIVE_BIN}" ]]; then
+if [[ -z "${KUZUSHI_NATIVE_BIN:-}" && -f "${DOWNLOADED_NATIVE_BIN}" ]]; then
   chmod +x "${DOWNLOADED_NATIVE_BIN}"
   export KUZUSHI_NATIVE_BIN="${DOWNLOADED_NATIVE_BIN}"
 fi
@@ -104,7 +103,7 @@ grep -q "Kuzushi security-native code agent" "${TEST_LOG_DIR}/wrapper-help.log"
 grep -q "modules" "${TEST_LOG_DIR}/wrapper-help.log"
 
 "${KUZUSHI_CMD_ARR[@]}" --target "${TEST_APP_DIR}" config show >"${TEST_LOG_DIR}/config-show.log" 2>&1
-"${KUZUSHI_CMD_ARR[@]}" scan "${TEST_APP_DIR}" --json >"${TEST_LOG_DIR}/scan.json" 2>"${TEST_LOG_DIR}/scan.err"
+"${KUZUSHI_CMD_ARR[@]}" scan "${TEST_APP_DIR}" --tasks semgrep --json >"${TEST_LOG_DIR}/scan.json" 2>"${TEST_LOG_DIR}/scan.err"
 "${KUZUSHI_CMD_ARR[@]}" findings --target "${TEST_APP_DIR}" --limit 10 --json >"${TEST_LOG_DIR}/findings.json" 2>&1
 
 if [[ ! -f "${DB_PATH}" ]]; then

@@ -8,6 +8,8 @@ pub struct AdvisoryState {
     /// Transient error/warning banner surfaced above the prompt so failures
     /// and dropped input are visible, not buried in the transcript log.
     pub notice: Option<Notice>,
+    /// Only this background banner stays visible without taking input.
+    pub(crate) background_notice_since: Option<Instant>,
     /// Pending operator approval for a tool dispatch that triggered a
     /// confirm gate (network egress, fs:write outside `.kuzushi/`,
     /// destructive verb).  See `design/mockups/confirm-dialog.jsx`.
@@ -25,6 +27,18 @@ pub struct AdvisoryState {
     /// End-of-engagement retry gate: offered after 掛 KAKE when planning tasks
     /// failed. Yes re-runs them (with auto-adjustments); no skips them.
     pub pending_retry: Option<crate::app::PendingRetry>,
+}
+
+impl AdvisoryState {
+    pub(crate) fn foreground_notice_pending(&self) -> bool {
+        self.notice.as_ref().is_some_and(|notice| {
+            Some(notice.since) != self.background_notice_since
+                && matches!(
+                    notice.severity,
+                    NoticeSeverity::Error | NoticeSeverity::Warn
+                )
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

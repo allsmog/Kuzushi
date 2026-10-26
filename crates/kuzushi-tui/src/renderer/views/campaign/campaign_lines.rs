@@ -524,7 +524,7 @@ const PAUSED_FIXED_WORK_COMMANDS: &[&str] = &[
     "Enter inspect",
     "a plan/allowance",
     "work paused",
-    "L resume after review",
+    "review plan before resuming",
     "R report",
     "r refresh",
     "q list",

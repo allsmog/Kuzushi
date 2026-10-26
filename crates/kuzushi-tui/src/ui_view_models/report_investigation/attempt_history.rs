@@ -40,10 +40,27 @@ fn outcome_counts(attempts: &[InvestigationAttemptReceipt]) -> BTreeMap<&'static
 }
 
 fn outcome_label(attempt: &InvestigationAttemptReceipt) -> &'static str {
+    if let Some(label) = interrupted_run_label(attempt.run_status.as_deref()) {
+        return label;
+    }
     attempt
         .scan
         .as_ref()
-        .map_or("outcome unavailable", scan_outcome_label)
+        .map(scan_outcome_label)
+        .or_else(|| finished_run_label(attempt.run_status.as_deref()))
+        .unwrap_or("outcome unavailable")
+}
+
+fn interrupted_run_label(status: Option<&str>) -> Option<&'static str> {
+    ["canceled", "failed", "blocked", "interrupted", "running"]
+        .into_iter()
+        .find(|label| Some(*label) == status)
+}
+
+fn finished_run_label(status: Option<&str>) -> Option<&'static str> {
+    ["completed", "partial", "skipped"]
+        .into_iter()
+        .find(|label| Some(*label) == status)
 }
 
 fn scan_outcome_label(receipt: &PhaseStageReceipt) -> &'static str {

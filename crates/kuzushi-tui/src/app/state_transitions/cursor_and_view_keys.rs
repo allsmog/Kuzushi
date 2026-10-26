@@ -301,9 +301,17 @@ impl ShellApp {
         // there is no cursor to move and the footer advertises it as the
         // generate affordance — so it stays modeless like the empty DFD's
         // Enter. `handle_scene_view_key` has already proved the composer empty.
-        if key.code == KeyCode::Enter && crate::ui_view_models::dfd_model_is_empty(self) {
+        if self.summary_empty_activation_requested(key) {
             return self.activate_summary_component_selection();
         }
+        self.handle_summary_navigation_when_active(key)
+    }
+
+    fn summary_empty_activation_requested(&self, key: KeyEvent) -> bool {
+        key.code == KeyCode::Enter && crate::ui_view_models::dfd_model_is_empty(self)
+    }
+
+    fn handle_summary_navigation_when_active(&mut self, key: KeyEvent) -> InputUpdate {
         if self.input_mode() != InputMode::Navigate {
             return InputUpdate::ignored();
         }

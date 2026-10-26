@@ -5,6 +5,7 @@ use kuzushi_core::WorkflowPhase;
 fn receipt(run: &str, outcome: Option<PhaseStageOutcome>) -> InvestigationAttemptReceipt {
     InvestigationAttemptReceipt {
         run_id: run.into(),
+        run_status: None,
         source_identity: TargetContentIdentity::Unavailable {
             reason: kuzushi_core::run_lifecycle::SafeText::operator_visible(
                 "Owned receipt fixture; source applicability is unassessed",
@@ -78,4 +79,37 @@ fn failed_attempt_history_precedes_long_context_receipts_and_keeps_the_scope() {
             .count(),
         100
     );
+}
+
+#[test]
+fn a_recorded_cancellation_is_not_missing_engine_data_or_a_completed_attempt() {
+    let mut canceled = receipt("stopped", Some(PhaseStageOutcome::Completed));
+    canceled.run_status = Some("canceled".into());
+    let text = lines(&[canceled], true).join("\n");
+    assert!(text.contains("1 canceled"));
+    assert!(text.contains("Attempt: stopped · canceled"));
+    assert!(!text.contains("completed") && !text.contains("unavailable"));
+}
+
+#[test]
+fn execution_status_and_engine_outcome_keep_their_distinct_meanings() {
+    for status in ["failed", "blocked", "interrupted", "running"] {
+        let mut attempt = receipt("known-execution", Some(PhaseStageOutcome::Completed));
+        attempt.run_status = Some(status.into());
+        assert_eq!(outcome_label(&attempt), status);
+    }
+    let mut partial = receipt("partial-engine", Some(PhaseStageOutcome::Partial));
+    partial.run_status = Some("completed".into());
+    assert_eq!(outcome_label(&partial), "partial");
+    let mut completed = receipt("no-engine-details", None);
+    completed.run_status = Some("completed".into());
+    assert_eq!(outcome_label(&completed), "completed");
+}
+
+#[test]
+fn an_unknown_status_or_canceled_looking_name_never_invents_cancellation() {
+    let mut attempt = receipt("canceled-in-name", None);
+    assert_eq!(outcome_label(&attempt), "outcome unavailable");
+    attempt.run_status = Some("unrecognized\u{1b}[31mstatus".into());
+    assert_eq!(outcome_label(&attempt), "outcome unavailable");
 }

@@ -1599,6 +1599,25 @@ mod tests {
     }
 
     #[test]
+    fn composer_input_is_limited_to_unfocused_non_file_pickers() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.set_shell_view(ShellView::TargetPicker);
+        app.router.target_picker_mut().open(Vec::new());
+        assert!(app.picker_surface_accepts_composer_input());
+
+        app.router
+            .target_picker_mut()
+            .set_focus(PickerFocus::Prompt);
+        assert!(!app.picker_surface_accepts_composer_input());
+
+        app.set_shell_view(ShellView::FilePicker);
+        assert!(!app.picker_surface_accepts_composer_input());
+
+        app.set_shell_view(ShellView::Workbench);
+        assert!(!app.picker_surface_accepts_composer_input());
+    }
+
+    #[test]
     fn api_key_editor_keeps_printable_input_ownership() {
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
         app.open_credential_entry("anthropic".to_string());

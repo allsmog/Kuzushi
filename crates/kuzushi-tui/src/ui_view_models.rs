@@ -59,7 +59,7 @@ mod catalog;
 pub(crate) mod study_resource_picker;
 pub(crate) use campaign_job::{
     campaign_job_attempt_cell, campaign_job_attempt_summary, campaign_job_cost_label,
-    campaign_job_detail_lines, campaign_job_scope_label,
+    campaign_job_detail_lines, campaign_job_scope_label, campaign_job_state_label,
 };
 mod chrome_layout;
 mod command_palette;

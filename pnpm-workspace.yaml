@@ -21,3 +21,11 @@ supportedArchitectures:
 allowBuilds:
   better-sqlite3: true
   esbuild: true
+
+overrides:
+  "@modelcontextprotocol/sdk@>=1.12.0 <1.32.0": "1.32.2"
+  "body-parser@>=2.0.0 <2.4.0": "2.4.0"
+  "fast-uri@>=3.0.0 <3.1.7": "3.1.7"
+  "proxy-addr@<2.0.8": "2.0.8"
+  "ws@>=8.0.0 <8.21.0": "8.21.0"
+  "zod@<4.6.6": "4.6.7"

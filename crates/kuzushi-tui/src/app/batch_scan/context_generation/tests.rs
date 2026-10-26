@@ -9,6 +9,7 @@ mod diagnosis;
 mod missing_state;
 mod navigation;
 mod recovery;
+mod stored_settings;
 mod workflow_proposal;
 
 fn fixture() -> (tempfile::TempDir, ShellApp) {

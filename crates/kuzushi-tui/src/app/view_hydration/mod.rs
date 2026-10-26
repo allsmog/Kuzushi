@@ -14,6 +14,8 @@ mod reader;
 #[cfg(test)]
 mod reader_tests;
 #[cfg(test)]
+mod recovery_tests;
+#[cfg(test)]
 mod report_refresh_tests;
 mod requests;
 mod runtime;
@@ -607,7 +609,7 @@ impl ShellApp {
                 recovered.len()
             )
         };
-        self.set_warn_notice("recovery", message);
+        self.set_background_warn_notice("recovery", message);
     }
 
     fn pending_active_view_hydration_keys(&self, target: &Path) -> Vec<ViewHydrationKey> {

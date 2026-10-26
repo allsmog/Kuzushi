@@ -1208,6 +1208,21 @@ and external scanner files preserve their existing rows. Omission of `campaignId
 retains the existing workspace-history export. Completeness filters describe
 human review, not repository coverage. Unknown dollar totals remain unknown.
 
+Each attempt may include `runStatus` from its recorded run metadata. This is
+separate from the optional `scan` engine receipt: a canceled run may have no
+engine outcome. Report preserves that cancellation without repairing metadata,
+inventing coverage or interpreting status from a run name. Missing metadata
+remains unrecorded. Existing exports retain their original contents; re-export
+to obtain recorded statuses. See [the migration notes](../RELEASING.md#recorded-execution-status-in-investigation-reports)
+for the additive JSON field and public Rust struct construction.
+
+Setup context drafts resolve supplied options through the registry's descriptor
+validation, including canonical aliases, stored precedence and workspace policy checks.
+Global runtime-role settings remain outside tool input. Explicit unknown options
+still fail. Context-study preparation binds its finite-action defaults before
+approval, so capturing settings does not select legacy scope, activate context or
+add recursive work. Reading these settings grants no allowance and starts no jobs.
+
 The external scanner format's `scan_completed` flag is true only for a selected
 authenticated study with nonzero planned work, every job completed and no failed
 or pending jobs. Workspace history uses false because it has no selected finite

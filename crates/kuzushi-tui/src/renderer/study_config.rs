@@ -1,12 +1,18 @@
 use super::*;
 use crate::app::{BatchScanConfig, BatchScanConfigRow};
 use crate::ui_view_models::study_config::{
-    study_allowance_summary, study_config_area, study_controls_hint, study_detail_lines,
-    study_projection, study_read_hint, study_reader_layout, study_row_value, study_surface_title,
-    study_workload_summary,
+    study_config_area, study_controls_hint, study_detail_lines, study_projection, study_read_hint,
+    study_reader_layout, study_row_value,
 };
 use ratatui::widgets::{Block, Borders, Clear};
 mod case_name;
+mod chrome;
+mod matrix;
+mod number_editor;
+use chrome::render_study_chrome;
+pub(super) use chrome::render_study_target;
+use matrix::{render_context_matrix, render_context_results};
+use number_editor::render_number_editor;
 
 pub(super) fn render_study_config(frame: &mut Frame<'_>, app: &ShellApp) -> bool {
     if !app.batch_config_open() || app.advisory().pending_confirm.is_some() {
@@ -130,141 +136,6 @@ fn render_study_auxiliary_picker(frame: &mut Frame<'_>, app: &ShellApp, area: Re
     super::study_brief::render(frame, app, area) || render_configuration_picker(frame, app)
 }
 
-fn render_context_matrix(
-    frame: &mut Frame<'_>,
-    app: &ShellApp,
-    config: &BatchScanConfig,
-    area: Rect,
-) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" CONTEXT CASES ");
-    let inner = block.inner(area).inner(ratatui::layout::Margin::new(1, 0));
-    frame.render_widget(block, area);
-    let body = crate::ui_view_models::matrix_body(area, config.study.matrix.results);
-    let lines = matrix_surface_lines(app, config, body);
-    frame.render_widget(ratatui::widgets::Paragraph::new(lines.join("\n")), body);
-    if config.study.matrix.results {
-        render_matrix_result_controls(frame, app, inner);
-    } else {
-        render_matrix_controls(frame, inner)
-    };
-}
-
-fn matrix_surface_lines(app: &ShellApp, config: &BatchScanConfig, body: Rect) -> Vec<String> {
-    if config.study.matrix.results {
-        return crate::ui_view_models::matrix_result_lines(
-            app,
-            body.width as usize,
-            body.height as usize,
-        );
-    }
-    crate::ui_view_models::context_matrix_lines(config, body.width as usize, body.height as usize)
-}
-
-fn render_matrix_result_controls(frame: &mut Frame<'_>, app: &ShellApp, inner: Rect) {
-    let hints = crate::ui_view_models::matrix_result_controls(app);
-    frame.render_widget(
-        ratatui::widgets::Paragraph::new(hints.join("\n")),
-        Rect::new(inner.x, inner.bottom().saturating_sub(3), inner.width, 3),
-    );
-}
-
-fn render_matrix_controls(frame: &mut Frame<'_>, inner: Rect) {
-    let (hints, height) = if inner.width < 50 {
-        (
-            "↑↓ · Enter inspect · n rename\na add · b baseline · p passes\nx remove · c clear · v results\nL next · Esc back",
-            4,
-        )
-    } else {
-        (
-            "↑↓ · Enter inspect · n rename · a add\nb baseline · p passes · x remove · c clear\nv results · L next · Esc back",
-            3,
-        )
-    };
-    frame.render_widget(
-        ratatui::widgets::Paragraph::new(hints),
-        Rect::new(
-            inner.x,
-            inner.bottom().saturating_sub(height),
-            inner.width,
-            height,
-        ),
-    );
-}
-
-fn render_context_results(frame: &mut Frame<'_>, app: &ShellApp, area: Rect) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" COMPARE CONTEXT EXPERIMENT ");
-    let inner = block.inner(area).inner(ratatui::layout::Margin::new(1, 0));
-    frame.render_widget(block, area);
-    let lines = crate::ui_view_models::study_config::context_result_lines(
-        app,
-        inner.width as usize,
-        inner.height.saturating_sub(2) as usize,
-    );
-    frame.render_widget(
-        Paragraph::new(lines.into_iter().map(Line::from).collect::<Vec<_>>()),
-        Rect {
-            height: inner.height.saturating_sub(2),
-            ..inner
-        },
-    );
-    frame.render_widget(
-        Paragraph::new(vec![
-            Line::from("↑↓ pass · Enter compare · Esc back"),
-            Line::from("r refresh · x clear · no work starts"),
-        ]),
-        Rect {
-            y: inner.bottom().saturating_sub(2),
-            height: 2,
-            ..inner
-        },
-    );
-}
-
-fn render_study_chrome(frame: &mut Frame<'_>, config: &BatchScanConfig, area: Rect) {
-    let title = study_surface_title(config);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(theme::subtle())
-        .title(Span::styled(format!(" {title} "), theme::heading()))
-        .title_bottom(Line::from(format!(" {} ", study_workload_summary(config))).right_aligned());
-    frame.render_widget(block, area);
-    render_study_target(frame, config, area);
-    render_study_allowance(frame, config, area);
-}
-
-fn render_study_allowance(frame: &mut Frame<'_>, config: &BatchScanConfig, area: Rect) {
-    frame.render_widget(
-        Paragraph::new(Line::styled(
-            study_allowance_summary(config, area.width.saturating_sub(4) as usize),
-            theme::muted(),
-        )),
-        Rect::new(area.x + 2, area.y + 2, area.width.saturating_sub(4), 1),
-    );
-}
-
-pub(super) fn render_study_target(frame: &mut Frame<'_>, config: &BatchScanConfig, area: Rect) {
-    let target = config
-        .target
-        .file_name()
-        .unwrap_or(config.target.as_os_str())
-        .to_string_lossy();
-    let target_line = Line::styled(
-        fit(
-            &format!("Repository: {target}"),
-            area.width.saturating_sub(4) as usize,
-        ),
-        theme::muted(),
-    );
-    frame.render_widget(
-        Paragraph::new(target_line),
-        Rect::new(area.x + 2, area.y + 1, area.width.saturating_sub(4), 1),
-    );
-}
-
 fn render_config_body(
     frame: &mut Frame<'_>,
     config: &BatchScanConfig,
@@ -337,42 +208,6 @@ fn config_row(
         ),
         style,
     )
-}
-
-fn render_number_editor(frame: &mut Frame<'_>, config: &BatchScanConfig, area: Rect) {
-    let Some(edit) = config.number_edit.as_ref() else {
-        return;
-    };
-    let body = Rect::new(
-        area.x + 2,
-        area.y + 2,
-        area.width.saturating_sub(4),
-        area.height.saturating_sub(5),
-    );
-    let Some((minimum, maximum)) = edit.bounds() else {
-        return;
-    };
-    let mut lines = vec![Line::styled(
-        format!("{} · {minimum}–{maximum}", edit.row.label()),
-        theme::heading(),
-    )];
-    lines.extend(field_editor_lines(&edit.field, body.width as usize, 2));
-    if let Some(error) = &edit.error {
-        lines.extend(
-            wrap_text(error, body.width as usize)
-                .into_iter()
-                .map(|line| Line::styled(line, theme::danger())),
-        );
-    }
-    frame.render_widget(Paragraph::new(lines), body);
-    let controls = Rect::new(body.x, area.bottom().saturating_sub(3), body.width, 2);
-    frame.render_widget(
-        Paragraph::new(vec![
-            Line::styled("Enter save · Esc cancel", theme::accent()),
-            Line::styled("Saving starts no work", theme::muted()),
-        ]),
-        controls,
-    );
 }
 
 #[cfg(test)]

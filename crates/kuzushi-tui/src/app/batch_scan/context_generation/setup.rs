@@ -73,16 +73,11 @@ impl ShellApp {
         let task = PlanningTaskId::BuildThreatModel;
         let explicit =
             crate::app::planning_task_explicit_input(task, self.engagement.option_overrides());
-        // Merge stored operator settings without materializing legacy defaults.
-        let mut input = serde_json::to_value(
-            self.option_store()
-                .effective_stored_values(task.tool_name()),
-        )?;
-        input
-            .as_object_mut()
-            .unwrap()
-            .extend(explicit.as_object().unwrap().clone());
-        Ok(input)
+        self.registry().prepare_supplied_tool_options(
+            task.tool_name(),
+            explicit,
+            Some(self.option_store()),
+        )
     }
 
     pub(super) fn retain_setup_context_study(&mut self) -> bool {

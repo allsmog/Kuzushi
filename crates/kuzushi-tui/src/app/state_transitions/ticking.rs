@@ -177,6 +177,22 @@ impl ShellApp {
         self.set_notice(NoticeSeverity::Warn, source, message);
     }
 
+    pub(crate) fn set_background_warn_notice(
+        &mut self,
+        source: impl Into<String>,
+        message: impl Into<String>,
+    ) {
+        let source = source.into();
+        let message = message.into();
+        if self.advisory().foreground_notice_pending() {
+            self.log(source, message);
+            return;
+        }
+        self.set_warn_notice(source, message);
+        let since = self.advisory().notice.as_ref().map(|notice| notice.since);
+        self.advisory_mut().background_notice_since = since;
+    }
+
     pub fn set_info_notice(&mut self, source: impl Into<String>, message: impl Into<String>) {
         self.set_notice(NoticeSeverity::Info, source, message);
     }
@@ -203,6 +219,7 @@ impl ShellApp {
             }
         };
         self.log(prefix, message.clone());
+        self.advisory_mut().background_notice_since = None;
         self.advisory_mut().notice = Some(Notice {
             source,
             message,
@@ -213,6 +230,7 @@ impl ShellApp {
 
     pub fn clear_notice(&mut self) {
         self.advisory_mut().notice = None;
+        self.advisory_mut().background_notice_since = None;
     }
 
     pub fn is_budget_halted(&self) -> bool {
@@ -319,7 +337,7 @@ impl AdvisoryKind {
     fn clear(self, app: &mut ShellApp) {
         match self {
             AdvisoryKind::Throttle => app.advisory_mut().throttle = None,
-            AdvisoryKind::Notice => app.advisory_mut().notice = None,
+            AdvisoryKind::Notice => app.clear_notice(),
         }
     }
 }

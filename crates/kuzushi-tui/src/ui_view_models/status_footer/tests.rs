@@ -1,5 +1,5 @@
 use super::*;
-use crate::app::ReviewMode;
+use crate::app::{ProgramScopeState, ReviewMode};
 use crate::ScanPanelState;
 use kuzushi_core::{
     incremental_index::{ReindexPlan, WorkspaceChange},
@@ -215,7 +215,8 @@ fn status_footer_shows_scope_chip_when_program_scope_loaded() {
         "#,
     )
     .unwrap();
-    app.domain_mut().set_program_scope(Some(scope));
+    app.domain_mut()
+        .set_program_scope_state(ProgramScopeState::Loaded(scope));
 
     let model = status_footer_model(&app);
 
@@ -225,11 +226,44 @@ fn status_footer_shows_scope_chip_when_program_scope_loaded() {
         model.left_segments
     );
 
-    app.domain_mut().set_program_scope(None);
+    app.domain_mut()
+        .set_program_scope_state(ProgramScopeState::Unconfigured);
     let model = status_footer_model(&app);
     assert!(
         !model.left_segments.iter().any(|s| s.starts_with("scope:")),
-        "no scope chip expected when scope is None, got {:?}",
+        "no scope chip expected when no scope file is configured, got {:?}",
+        model.left_segments
+    );
+}
+
+#[test]
+fn status_footer_separates_an_unloadable_scope_from_an_absent_one() {
+    // The scope-gated dispatchers refuse an unloadable `scope.toml` and run
+    // unrestricted without one, so the footer must not present the first as
+    // the second. An empty scope is a documented no-op and stays chipless.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.domain_mut()
+        .set_program_scope_state(ProgramScopeState::Unavailable);
+
+    let model = status_footer_model(&app);
+
+    assert!(
+        model
+            .left_segments
+            .iter()
+            .any(|s| s == "scope: load failed"),
+        "expected scope: load failed chip, got {:?}",
+        model.left_segments
+    );
+
+    app.domain_mut()
+        .set_program_scope_state(ProgramScopeState::Loaded(
+            kuzushi_core::ProgramScope::default(),
+        ));
+    let model = status_footer_model(&app);
+    assert!(
+        !model.left_segments.iter().any(|s| s.starts_with("scope:")),
+        "an empty scope is a no-op and carries no chip, got {:?}",
         model.left_segments
     );
 }
@@ -289,11 +323,11 @@ fn dirty_history_requests_source_check_without_inventing_inventory_changes() {
     let (_root, mut app) = setup_fixture();
     app.domain_mut().set_returning_source_unverified(true);
     let model = status_footer_model(&app);
-    assert!(model.left_segments.contains(&"history:check source".into()));
+    assert!(model.left_segments.contains(&"Source unchecked".into()));
     assert!(model
         .compact_left_segments
         .iter()
-        .any(|s| s.contains("source check")));
+        .any(|s| s.contains("source unchecked")));
     assert!(app.workspace_stale().is_none());
     assert!(app.workspace_pending_changes().is_empty());
 
@@ -301,8 +335,8 @@ fn dirty_history_requests_source_check_without_inventing_inventory_changes() {
     let model = status_footer_model(&app);
     assert!(model
         .left_segments
-        .contains(&"workspace:stale inventory".into()));
-    assert!(!model.left_segments.contains(&"history:check source".into()));
+        .contains(&"Workspace changed (inventory)".into()));
+    assert!(!model.left_segments.contains(&"Source unchecked".into()));
     assert!(model
         .compact_left_segments
         .iter()

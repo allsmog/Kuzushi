@@ -235,8 +235,8 @@ export function responseOrdinal(count, cancellation) {
 function holdForOperatorStop(signal) {
   return new Promise((_, reject) => {
     const timer = setTimeout(
-      () => reject(new Error("Fixture expected operator Stop within 45 seconds")),
-      45_000,
+      () => reject(new Error("Fixture expected operator Stop within 90 seconds")),
+      90_000,
     );
     const abort = () => {
       clearTimeout(timer);

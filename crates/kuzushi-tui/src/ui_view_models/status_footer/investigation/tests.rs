@@ -233,3 +233,77 @@ fn fixed_study_readers_use_the_investigation_footer_and_legacy_campaigns_keep_di
             .contains(&"module route".into()));
     }
 }
+
+#[test]
+fn fresh_setup_keeps_orientation_and_draft_without_terminal_diagnostics() {
+    let (_root, mut app) = app();
+    app.open_setup();
+    app.set_input("Held Setup draft\nsecond line");
+    app.set_cursor(4);
+    for mode in [InputMode::Prompt, InputMode::Navigate] {
+        app.set_input_mode(mode);
+        let model = status_footer_model(&app);
+        assert_eq!(model.left_segments, ["Setup"]);
+        assert_eq!(model.compact_left_segments, ["Setup"]);
+        assert!(app.engagement.planning_picker().returns_to_setup());
+        assert_eq!(
+            (app.input(), app.cursor()),
+            ("Held Setup draft\nsecond line", 4)
+        );
+        assert_eq!(app.shell_view(), ShellView::Setup);
+        let config = super::super::super::config_model(&app);
+        assert!(config
+            .summary_rows
+            .iter()
+            .any(|row| row.cells[0] == "notifications"
+                && row.cells[1].contains("desktop alerts unavailable")));
+    }
+}
+
+#[test]
+fn setup_retains_active_tool_identity_and_model_without_reviving_diagnostics() {
+    let (_root, mut app) = app();
+    app.open_setup();
+    app.set_running_tool_for_test("triage:run");
+    app.set_active_model_override_for_test("openai-oauth:gpt-5.5");
+    let model = status_footer_model(&app);
+    assert!(model
+        .left_segments
+        .iter()
+        .any(|label| label.contains("triage:run: active")));
+    assert!(model
+        .left_segments
+        .iter()
+        .any(|label| label.contains("openai-oauth:gpt-5.5 (tool)")));
+    assert!(model
+        .compact_left_segments
+        .iter()
+        .any(|label| label.contains("triage:run: active")));
+    assert!(model
+        .left_segments
+        .iter()
+        .all(|label| !label.contains("route")
+            && !label.contains("notify:")
+            && !label.contains("focus unknown")));
+}
+
+#[test]
+fn setup_retains_source_attention_before_investigation_chrome_is_committed() {
+    let (_root, mut app) = app();
+    app.open_setup();
+    app.apply_workspace_changes(&[WorkspaceChange::GitIndexChanged]);
+    let model = status_footer_model(&app);
+    assert!(model
+        .left_segments
+        .iter()
+        .any(|label| label.contains("Workspace changed (inventory)")));
+    assert!(model
+        .compact_left_segments
+        .iter()
+        .any(|label| label.contains("stale")));
+    assert!(model
+        .left_segments
+        .iter()
+        .all(|label| !label.contains("autonomy:")));
+    assert!(model.left_segments.iter().any(|label| label == "Setup"));
+}

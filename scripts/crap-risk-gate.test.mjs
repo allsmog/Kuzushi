@@ -32,6 +32,29 @@ test("explicit CI base covers every commit in a multi-commit change", () => {
   }
 });
 
+test("dirty worktree files do not hide committed changes since the CI base", () => {
+  const repository = mkdtempSync(path.join(os.tmpdir(), "kuzushi-crap-dirty-base-"));
+  try {
+    initializeRepository(repository);
+    const base = git(repository, ["rev-parse", "HEAD"]).trim();
+    writeBranchyProductionChange(repository);
+    commit(repository, "add risky code");
+    writeFileSync(path.join(repository, "README.md"), "uncommitted docs change\n");
+
+    const result = spawnSync(process.execPath, [gate], {
+      cwd: repository,
+      encoding: "utf8",
+      env: { ...process.env, KUZUSHI_CRAP_RISK_BASE_REF: base },
+    });
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /src\/risky\.rs/);
+    assert.match(result.stderr, /complexity/);
+  } finally {
+    rmSync(repository, { recursive: true, force: true });
+  }
+});
+
 test("zero-SHA event base covers a complete multi-commit new ref", () => {
   const repository = mkdtempSync(path.join(os.tmpdir(), "kuzushi-crap-zero-base-"));
   try {
@@ -126,6 +149,33 @@ ${Array.from({ length: 45 }, (_, index) => `    if value == ${index} { return; }
 }
 `,
     );
+
+    const result = spawnSync(process.execPath, [gate], {
+      cwd: repository,
+      encoding: "utf8",
+      env: { ...process.env, KUZUSHI_CRAP_RISK_BASE_REF: "HEAD" },
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /passed for 0 changed code file/);
+  } finally {
+    rmSync(repository, { recursive: true, force: true });
+  }
+});
+
+test("Rust test module naming conventions are excluded from production scoring", () => {
+  const repository = mkdtempSync(path.join(os.tmpdir(), "kuzushi-crap-test-modules-"));
+  try {
+    initializeRepository(repository);
+    const src = path.join(repository, "src");
+    const nested = path.join(src, "bridge_process_tests");
+    mkdirSync(nested, { recursive: true });
+    const fixture = `fn branchy_fixture(value: usize) {
+${Array.from({ length: 45 }, (_, index) => `    if value == ${index} { return; }`).join("\n")}
+}
+`;
+    writeFileSync(path.join(src, "runtime_admission_tests.rs"), fixture);
+    writeFileSync(path.join(nested, "admission.rs"), fixture);
 
     const result = spawnSync(process.execPath, [gate], {
       cwd: repository,

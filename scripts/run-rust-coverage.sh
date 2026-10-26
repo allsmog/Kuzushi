@@ -24,11 +24,13 @@ mkdir -p target/llvm-cov
 # when debugging the coverage toolchain itself.
 coverage_build_dir="$repo_root/target/llvm-cov-target"
 cleanup_coverage_build() {
+  find "$repo_root/crates" -type f -name '*.profraw' -delete
   if [[ "${KUZUSHI_KEEP_COVERAGE_BUILD:-0}" != "1" ]]; then
     rm -rf "$coverage_build_dir"
   fi
 }
 trap cleanup_coverage_build EXIT
+find "$repo_root/crates" -type f -name '*.profraw' -delete
 rm -rf "$coverage_build_dir"
 export CARGO_LLVM_COV_TARGET_DIR="target/llvm-cov-target"
 export CARGO_LLVM_COV_BUILD_DIR="target/llvm-cov-target"

@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { evaluateDiffCoverage, parseChangedRustLines, parseLcov } from "./check-diff-coverage.mjs";
+import {
+  evaluateDiffCoverage,
+  omitUninstrumentedDeclarationSources,
+  parseChangedRustLines,
+  parseLcov,
+} from "./check-diff-coverage.mjs";
 
 test("LCOV paths and execution counts normalize into source lines", () => {
   const coverage = parseLcov(
@@ -75,6 +80,71 @@ test("missing instrumentation cannot become perfect coverage", () => {
   assert.throws(
     () => evaluateDiffCoverage(coverage, changed),
     /missing coverage.*crates\/new\/src\/lib.rs/,
+  );
+});
+
+test("uninstrumented declaration-only Rust sources carry no executable coverage debt", () => {
+  const file = "crates/demo/src/application/mod.rs";
+  const changed = new Map([[file, new Set([2, 4])]]);
+  const source = `
+pub(crate) mod commands;
+#[cfg(test)]
+mod tests;
+`;
+
+  const filtered = omitUninstrumentedDeclarationSources(new Map(), changed, () => source);
+
+  assert.deepEqual([...filtered], []);
+  assert.equal(evaluateDiffCoverage(new Map(), filtered).percent, 100);
+});
+
+test("uninstrumented enum schemas carry no executable coverage debt", () => {
+  const file = "crates/demo/src/command.rs";
+  const changed = new Map([[file, new Set([4, 8])]]);
+  const source = `
+#[derive(Debug)]
+pub enum Command {
+  Run { path: String },
+}
+`;
+
+  const filtered = omitUninstrumentedDeclarationSources(new Map(), changed, () => source);
+
+  assert.deepEqual([...filtered], []);
+});
+
+test("explicit alternate-feature sources are covered by their separate build", () => {
+  const file = "crates/kuzushi-cpg/src/disabled.rs";
+  const changed = new Map([[file, new Set([2])]]);
+
+  const filtered = omitUninstrumentedDeclarationSources(new Map(), changed, () => {
+    return "pub fn unavailable() -> bool { false }\n";
+  });
+
+  assert.deepEqual([...filtered], []);
+});
+
+test("platform-specific sources are covered by their platform builds", () => {
+  const file = "crates/demo/src/process/windows.rs";
+  const changed = new Map([[file, new Set([2])]]);
+
+  const filtered = omitUninstrumentedDeclarationSources(new Map(), changed, () => {
+    return "pub fn terminate() {}\n";
+  });
+
+  assert.deepEqual([...filtered], []);
+});
+
+test("sources with executable functions still require instrumentation", () => {
+  const file = "crates/demo/src/application/mod.rs";
+  const changed = new Map([[file, new Set([2])]]);
+  const source = "pub(crate) fn run() {}\n";
+
+  const filtered = omitUninstrumentedDeclarationSources(new Map(), changed, () => source);
+
+  assert.throws(
+    () => evaluateDiffCoverage(new Map(), filtered),
+    /missing coverage.*crates\/demo\/src\/application\/mod.rs/,
   );
 });
 

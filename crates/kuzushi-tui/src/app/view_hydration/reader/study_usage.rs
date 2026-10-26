@@ -47,10 +47,18 @@ fn read_matrix_report(
 ) -> Result<kuzushi_core::findings::ContextMatrixOccurrenceReport, String> {
     let report = kuzushi_core::findings::read_context_matrix_occurrence_report(target, id)
         .map_err(|error| format!("{error:#}"))?;
+    validate_matrix_report_digest(&report, digest)?;
+    Ok(report)
+}
+
+fn validate_matrix_report_digest(
+    report: &kuzushi_core::findings::ContextMatrixOccurrenceReport,
+    digest: &str,
+) -> Result<(), String> {
     if report.plan_sha256 != digest {
         return Err("Context matrix changed; refresh the saved plan before reading results".into());
     };
-    Ok(report)
+    Ok(())
 }
 
 fn read_catalogue(
@@ -63,5 +71,30 @@ fn read_catalogue(
         Err(error) => Some(ViewHydrationValue::StudyUsageCatalogue(Err(
             error.to_string()
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn report(plan_sha256: &str) -> kuzushi_core::findings::ContextMatrixOccurrenceReport {
+        kuzushi_core::findings::ContextMatrixOccurrenceReport {
+            schema_version: 1,
+            campaign_id: "owned-matrix".into(),
+            plan_sha256: plan_sha256.into(),
+            baseline_case_id: "baseline".into(),
+            cases: vec![],
+        }
+    }
+
+    #[test]
+    fn matrix_report_digest_accepts_current_plan_and_rejects_stale_plan() {
+        let report = report("current-digest");
+        assert!(validate_matrix_report_digest(&report, "current-digest").is_ok());
+        assert_eq!(
+            validate_matrix_report_digest(&report, "stale-digest").unwrap_err(),
+            "Context matrix changed; refresh the saved plan before reading results"
+        );
     }
 }

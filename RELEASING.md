@@ -1,5 +1,30 @@
 # Releasing Kuzushi
 
+## Setup context drafts after restart
+
+Setup now captures supplied options through shared descriptor validation before
+freezing context work. Stored global runtime-role settings remain in their
+operator configuration instead of becoming unknown threat-model options after
+restart. Canonical aliases, explicit overrides and workspace policy checks are
+preserved. Shared context-study preparation applies its finite-action defaults
+before approval. This repair selects no model, allowance or additional job.
+
+## Recorded execution status in investigation reports
+
+Investigation attempt receipts add optional `runStatus`, read from the saved run
+metadata without repair. It remains separate from `scan`, which is the engine's
+phase receipt. Cancellation can be known even when no engine outcome exists.
+TUI attempt history now names recorded cancellation, interruption or failure
+rather than presenting those executions as missing outcomes or successful scans.
+Missing or malformed run metadata remains unknown; names never imply a status.
+
+JSON, JSONL, SARIF and Markdown investigation receipts include this additive field
+when recorded; schema version 1 remains. Old receipts and unknown status values
+remain readable. Consumers constructing the public Rust
+`InvestigationAttemptReceipt` must initialize `run_status`, using `None` when no
+recorded metadata is available. Re-export to obtain recorded statuses in new
+reports. Stored historical exports are preserved.
+
 ## Current review counts across scan passes
 
 Campaign status, the TUI trend, shared confirmed SARIF and the CLI gate now read

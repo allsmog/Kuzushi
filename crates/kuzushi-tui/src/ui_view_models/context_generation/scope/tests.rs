@@ -25,14 +25,14 @@ fn frozen_scope_receipt_names_explicit_effort_without_inventing_a_default() {
             "campaignId":"scope-fixture", "investigationId":"scope-fixture",
             "planSha256":"sha256:owned", "sourceIdentity":"tree:owned", "configSha256":"sha256:owned",
             "model":"openai-codex:gpt-6-luna", "input":{"thinkingLevel":"low","maxOutputTokens":4096}})).unwrap();
-    let text = receipt_lines(&receipt).join("\n");
+    let text = super::super::receipts::receipt_lines(&receipt).join("\n");
     assert!(text.contains("reasoning: low"));
     receipt
         .input
         .as_object_mut()
         .unwrap()
         .remove("thinkingLevel");
-    let text = receipt_lines(&receipt).join("\n");
+    let text = super::super::receipts::receipt_lines(&receipt).join("\n");
     assert!(text.contains("reasoning: recorded runtime setting"));
     assert!(!text.contains("reasoning: medium"));
 }

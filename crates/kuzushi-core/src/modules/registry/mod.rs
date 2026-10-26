@@ -110,6 +110,8 @@ mod shinsa_allowance_contract_tests;
 #[cfg(test)]
 mod sink_import_contract_tests;
 #[cfg(test)]
+mod supplied_options_contract_tests;
+#[cfg(test)]
 mod taint_candidate_contract_tests;
 #[cfg(test)]
 mod taint_planning_contract_tests;
