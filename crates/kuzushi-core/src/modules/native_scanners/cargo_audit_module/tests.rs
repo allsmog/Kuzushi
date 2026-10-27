@@ -1,6 +1,9 @@
 use super::*;
 use crate::{FindingStore, V2Config, WorkspaceTarget};
 
+#[cfg(unix)]
+mod child_source;
+
 const FINDING: &str = r#"{"vulnerabilities":{"found":true,"list":[{"advisory":{"id":"RUSTSEC-OWNED-1","title":"Owned advisory fixture"},"package":{"name":"owned","version":"1.0.0"}}]}}"#;
 
 #[cfg(unix)]
@@ -210,7 +213,7 @@ fn cargo_audit_scoped_study_keeps_separate_lockfile_identities_and_refuses_exact
         std::fs::create_dir_all(&directory).unwrap();
         std::fs::write(
             directory.join("Cargo.lock"),
-            "# Owned metadata\nversion=3\n",
+            "# Owned metadata\nversion=3\n[[package]]\nname='owned'\nversion='1.0.0'\n",
         )
         .unwrap();
     }
@@ -226,7 +229,8 @@ fn cargo_audit_scoped_study_keeps_separate_lockfile_identities_and_refuses_exact
         .unwrap();
     assert_eq!(
         crate::tool_result_status(&output),
-        crate::ToolResultStatus::Completed
+        crate::ToolResultStatus::Completed,
+        "{output:#}"
     );
     let findings = store.list_all_findings().unwrap();
     assert_eq!(findings.len(), 2, "{output}");

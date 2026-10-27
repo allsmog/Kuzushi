@@ -1,0 +1,99 @@
+name: Installed offline advisory scans preserve child source, literal paths and limited coverage
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cargo_child_source.py @TMP_TARGET @ART @TMP_HOME prepare
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+paste-file: @ART/open-literal.txt
+keys: Enter
+require-live-snap: 25 "client\\scope/Cargo.lock":6 | literal-child-finding
+require-live-snap: 25 name = "time" | affected-package-source
+expect: RUSTSEC-2020-0071
+expect: version = "0.1.40"
+expect-not: Map ✓
+ask: Does the installed scanner's advisory remain a source-bound signal over hypothetical metadata, with the literal child distinct and no verified runtime vulnerability or accepted Map?
+submit: logs
+paste-file: @ART/run-nested.txt
+keys: Enter
+require-live-snap: 35 cargo-audit: 1 advisory findings | nested-child-scan
+paste-file: @ART/run-literal.txt
+keys: Enter
+require-live-snap: 35 cargo-audit: 1 advisory findings | repeated-literal-scan
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cargo_child_source.py @TMP_TARGET @ART @TMP_HOME direct
+type: preserve offline audit draft
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cargo_child_source.py @TMP_TARGET @ART @TMP_HOME sast-run
+require-live-snap: 25 preserve offline audit draft | external-scans-keep-draft
+ask: Do two explicit headless SAST scans preserve the composer and two findings without duplicate identities, model work, database updates or target builds?
+keys: C-u
+paste-file: @ART/run-root.txt
+keys: Enter
+require-live-snap: 35 cargo-audit: 0 advisory findings | parent-only-scan
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cargo_child_source.py @TMP_TARGET @ART @TMP_HOME root
+paste-file: @ART/open-literal.txt
+keys: Enter
+require-live-snap: 25 "client\\scope/Cargo.lock":6 | literal-source-review
+submit: decision deferred Hypothetical dependency requires owner review of actual deployment
+require-live-snap: 25 recorded: deferred | literal-decision
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cargo_child_source.py @TMP_TARGET @ART @TMP_HOME reviewed
+resize: 160x48
+live-snap: literal-160x48
+resize: 96x89
+live-snap: literal-96x89
+resize: 80x24
+live-snap: literal-80x24
+resize: 60x20
+live-snap: literal-60x20
+nav-mode:
+keys: Enter
+require-live-snap: 25 q review list | literal-source-reader
+resize: 40x12
+live-snap: literal-40x12
+expect: "client\\scope/Cargo.lock":6
+keys: NPage
+live-snap: literal-page-1
+keys: NPage
+live-snap: literal-page-2
+keys: NPage
+live-snap: literal-page-3
+keys: NPage
+live-snap: literal-page-4
+keys: NPage
+live-snap: literal-page-5
+keys: NPage
+live-snap: literal-page-6
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cargo_child_source.py @TMP_TARGET @ART @TMP_HOME source-read
+ask: Across six sizes and paging, are the literal child, retained lockfile and deferral distinguishable from its nested neighbor without suggesting the later empty parent scan fixed either finding?
+resize: 120x36
+keys: q
+keys: Escape
+paste-file: @ART/open-nested.txt
+keys: Enter
+require-live-snap: 25 │client/scope/Cargo.lock:6 | nested-source-review
+expect-not: recorded: deferred
+submit: report
+require-live-snap: 25 scope paths Cargo.lock | report
+expect: 1 inspected file
+expect: Advisory policy was not recorded
+keys: j j j
+require-live-snap: 20 format json | json-report
+keys: Enter
+require-live-snap: 25 EXPORTED | exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cargo_child_source.py @TMP_TARGET @ART @TMP_HOME exported
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/open-literal.txt
+keys: Enter
+require-live-snap: 25 "client\\scope/Cargo.lock":6 | recovered-literal
+expect: recorded: deferred
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cargo_child_source.py @TMP_TARGET @ART @TMP_HOME restarted
+ask: Does no-color restart retain six real module scans, five advisory observations, two source-qualified findings and one deferral without accepting a phase, widening coverage or using a provider?
+keys: C-c
+require-exit: 10

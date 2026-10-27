@@ -1,5 +1,33 @@
 # Bounded investigation acceptance ledger
 
+The [dependency child-source follow-up](../assessments/cargo-child-source-2026-10-26.md)
+repairs parent snapshot ownership, literal paths and the package source anchor
+that an installed-scanner visual audit found missing. All 51 distinct focused
+Rust checks, workspace build, Core/TUI/CLI Clippy and changed-code risk pass.
+Final J384 has 27 machine passes, zero failures, 27 capture pairs and four
+answered agent reviews with polish findings. Six installed offline module scans
+retain five observations, two findings and one scripted deferral through Report
+and no-color restart. The empty parent scan resolves neither child. All source
+and copied database files stay unchanged. Earlier product and observer failures
+remain recorded. No model request, accepted phase or broad acceptance follows.
+
+The [real scope-context variant](../assessments/live-scope-context-variant-2026-10-26.md)
+uses one separately approved request on the same 602-file fixture. Seven primary
+scopes cover 601 files, with one uncovered root file and context-only shared
+contracts. The revision stays unaccepted. The same investigation preserves its
+earlier failed request and consumes two of two calls after an explicit allowance
+revision. Cumulative experiments reach nineteen with zero remaining allowance;
+dollars remain unknown. This changed-priority variant does not establish causal
+instruction effects, unfamiliar-repository usefulness or complete coverage.
+The proposal-context reading correction passes all 80 scope-review TUI checks.
+Final read-only J385 has 18 machine passes, zero failures, 15 capture pairs and
+four answered agent screen reviews with findings. The exact saved proposal
+context remains separate from future Scan context. Six sizes and no-color
+restart preserve the root omission and original spending without another model
+request, scope acceptance or source execution. Its earlier observer and context
+display failures remain recorded. Combined focused Rust passes total 131;
+full operator and reference-product acceptance remain open.
+
 The [IaC child-source follow-up](../assessments/iac-child-source-2026-10-26.md)
 repairs parent snapshot ownership and preserves literal Unix paths through
 observations, coverage and retained source. Its first complete J383 has 23

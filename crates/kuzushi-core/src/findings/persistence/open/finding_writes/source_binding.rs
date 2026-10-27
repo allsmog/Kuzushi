@@ -271,8 +271,9 @@ impl CapturedFindingSources {
             .files
             .get(path)
             .context("Source anchor is outside captured membership")?;
+        anyhow::ensure!(line > 0, "Source anchor has no recorded line: {path}");
         anyhow::ensure!(
-            line > 0 && line as usize <= file.supplied_lines,
+            line as usize <= file.supplied_lines,
             "Source anchor is outside the supplied prefix: {path}:{line}"
         );
         Ok(())

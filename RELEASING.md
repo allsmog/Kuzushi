@@ -1,5 +1,32 @@
 # Releasing Kuzushi
 
+## Recorded context in scope review
+
+Generated scope drafts now show their recorded proposal-context revision
+separately from context for future scans. The detail retains its full model id
+and content digest. A missing historical reference remains unrecorded; reading
+the draft does not activate context or accept Map. Stored scope formats and
+dispatch options are unchanged. See the
+[live variant and reading qualification](docs/assessments/live-scope-context-variant-2026-10-26.md).
+
+## Selected dependency source and package declarations
+
+Direct child-directory advisory scans now register and verify source in their
+explicit parent workspace while preserving child-only discovery coverage.
+Native path rebinding keeps literal Unix backslashes separate from directory
+separators. Direct and scoped execution agree on finding identity.
+
+Package source locations come from the exact captured lockfile bytes supplied
+to the scanner. Unique package/version declarations now anchor retained source
+at the package name. Missing, ambiguous or malformed declarations retain raw
+observations with unavailable locations; scoped source binding keeps that work
+partial. No live-file reread or historical observation rewrite occurs.
+
+Tool names, descriptor options and stored field names stay compatible. Existing
+line-1 observations retain their original locations and decisions. A new scan
+can supply a new source anchor; absence alone cannot establish a fix. See the
+[qualification and limits](docs/assessments/cargo-child-source-2026-10-26.md).
+
 ## IaC child source and literal coverage
 
 Direct `iac-scan:scan` now registers and verifies source identity in its explicit
