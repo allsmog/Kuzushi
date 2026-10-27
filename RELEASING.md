@@ -1,5 +1,22 @@
 # Releasing Kuzushi
 
+## Exact observation links in study results
+
+Occurrence rows add optional `representativeObservationRef`, an opaque
+`generation:<id>` string scoped to the original workspace. It identifies the
+same recorded observation used for the row's representative evidence, even
+when another pass or case later reports the same fingerprint. It does not
+change recurrence, severity, evidence confidence or a human decision.
+
+Old artifacts are not rewritten. Readers should tolerate the additive field;
+when absent, refresh the recorded study results before opening an exact
+observation. Do not substitute the latest fingerprint match. Rust consumers
+constructing `BatchOccurrenceRow` literals must initialize
+`representative_observation_ref`, using `None` when no exact observation is
+known. No request option, database migration, plan approval or provider call
+is added. Context results offer an explicit findings picker and return from
+Review with the selected case and reading position intact.
+
 ## Bounded campaign history readers
 
 `campaign:status` adds `data.historyCoverage` version 1. Omitting `campaignId`
@@ -5029,3 +5046,14 @@ references but omit text. Missing entries are null; malformed or unsupported
 receipts are unavailable. Existing fields and public tool inputs are unchanged.
 Readers may ignore the additive field and must not infer complete coverage from
 it. See the [workflow evidence](docs/assessments/generated-scope-investigation-2026-10-24.md).
+
+
+### Fixed-study accounting in jobs
+
+Fixed-study jobs retain the exact plan identity from bounded history and display
+shared investigation calls, protected Review capacity and cost availability.
+Jobs cost labels identify the plan subtotal. Loading, unavailable and unapproved
+accounting remain explicit. The additive read-only Rust
+`campaign::load_fixed_study_allowance` API requires the saved plan digest;
+existing tool inputs and persisted ledger formats are unchanged. Approval-plan
+reads now reject symlinked paths using the existing bounded containment reader.

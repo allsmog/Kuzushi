@@ -17,6 +17,7 @@ pub(crate) const CAMPAIGN_MAX_WORKERS: usize = 8;
 #[derive(Debug, Clone, PartialEq)]
 pub struct CampaignRouteState {
     pub(crate) campaigns: Vec<CampaignSnapshot>,
+    pub(crate) plan_digests: std::collections::BTreeMap<String, String>,
     pub(crate) history_coverage:
         Option<kuzushi_core::capabilities::campaign::history::CampaignHistoryCoverage>,
     pub(crate) selected_campaign: usize,
@@ -58,12 +59,15 @@ pub struct CampaignRouteState {
     /// Recorded observation membership, independent of completed-pass recurrence.
     pub(crate) active_batch_observation_fingerprints: BTreeSet<String>,
     pub(crate) scan_study_origin: Option<crate::app::state_transitions::LinkedFindingsOrigin>,
+    pub(crate) matrix_observation_origin:
+        Option<crate::app::state_transitions::LinkedFindingsOrigin>,
 }
 
 impl Default for CampaignRouteState {
     fn default() -> Self {
         Self {
             campaigns: Vec::new(),
+            plan_digests: Default::default(),
             history_coverage: None,
             selected_campaign: 0,
             detail: false,
@@ -86,6 +90,7 @@ impl Default for CampaignRouteState {
             active_batch_report: None,
             active_batch_observation_fingerprints: BTreeSet::new(),
             scan_study_origin: None,
+            matrix_observation_origin: None,
         }
     }
 }

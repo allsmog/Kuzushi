@@ -162,6 +162,7 @@ impl ShellApp {
     }
 
     pub(crate) fn open_report_from_current_origin(&mut self) {
+        let study = self.report_study_from_origin();
         if let Some(target) = self.target_owned() {
             self.workbench_cache()
                 .borrow_mut()
@@ -179,8 +180,24 @@ impl ShellApp {
         }
         self.set_shell_view(ShellView::Report);
         self.set_input_mode(InputMode::Navigate);
-        self.router.report_mut().set_study(None);
+        self.bind_report_study(study);
         self.clear_report_navigation_notice();
+    }
+
+    fn report_study_from_origin(&self) -> Option<crate::app::view_state::ReportStudyRef> {
+        let receipt = self.reviewed_context_matrix_receipt()?;
+        Some(crate::app::view_state::ReportStudyRef {
+            campaign_id: receipt.campaign_id.clone(),
+            plan_sha256: receipt.plan_sha256.clone(),
+        })
+    }
+
+    fn bind_report_study(&mut self, study: Option<crate::app::view_state::ReportStudyRef>) {
+        let scoped = study.is_some();
+        self.router.report_mut().set_study(study);
+        if scoped {
+            self.scroll_to_top();
+        }
     }
 
     fn clear_report_navigation_notice(&mut self) {

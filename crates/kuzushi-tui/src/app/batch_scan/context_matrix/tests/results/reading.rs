@@ -13,7 +13,7 @@ fn reading_fixture() -> (tempfile::TempDir, ShellApp) {
     (root, app)
 }
 
-fn page(app: &ShellApp) -> String {
+pub(super) fn page(app: &ShellApp) -> String {
     use ratatui::{backend::TestBackend, Terminal};
     let viewport = app.viewport();
     let mut terminal = Terminal::new(TestBackend::new(viewport.columns, viewport.rows)).unwrap();
@@ -261,10 +261,15 @@ fn matrix_result_controls_show_read_position_and_only_the_active_selection_keys(
     }
     app.reduce_resize(40, 12);
     app.handle_matrix_result_key(KeyCode::Home);
-    let first = crate::ui_view_models::matrix_result_controls(&app)[2].clone();
+    let first = crate::ui_view_models::matrix_result_controls(&app)
+        .last()
+        .unwrap()
+        .clone();
     app.handle_matrix_result_key(KeyCode::PageDown);
     assert_ne!(
-        crate::ui_view_models::matrix_result_controls(&app)[2],
-        first
+        crate::ui_view_models::matrix_result_controls(&app)
+            .last()
+            .unwrap(),
+        &first
     );
 }

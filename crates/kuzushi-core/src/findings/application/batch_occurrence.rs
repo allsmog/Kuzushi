@@ -93,6 +93,9 @@ pub struct BatchOccurrenceRow {
     pub titles: Vec<String>,
     pub fingerprints: Vec<String>,
     pub run_ids: Vec<String>,
+    /// Exact recorded generation in this workspace, never the latest fingerprint match.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub representative_observation_ref: Option<String>,
     pub representative_fingerprint: String,
     pub representative_title: String,
     pub representative_severity: String,
@@ -213,13 +216,17 @@ impl BatchOccurrenceRow {
             self.seen, self.completed, self.planned, self.failed
         );
         format!(
-            "{occurrence:<39} {:<9} {}  {}{}{}",
+            "{occurrence:<39} {:<9} {}  {}{}{}{}",
             self.representative_severity,
             self.representative_location,
             self.representative_title,
             variance_suffix(self),
             self.completed_pass_hint()
                 .map(|hint| format!(" [{hint}]"))
+                .unwrap_or_default(),
+            self.representative_observation_ref
+                .as_ref()
+                .map(|reference| format!(" [observation {reference}]"))
                 .unwrap_or_default()
         )
     }

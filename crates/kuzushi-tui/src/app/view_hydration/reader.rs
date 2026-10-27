@@ -8,6 +8,7 @@ mod groups;
 #[cfg(test)]
 mod recommendation_tests;
 mod review_source;
+mod study_allowance;
 mod study_usage;
 mod workspace_io;
 use completion_io::*;
@@ -124,6 +125,9 @@ fn read_result_document_value(target: &Path, key: &ViewHydrationKey) -> Option<V
 }
 
 fn read_investigation_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydrationValue> {
+    if let Some(value) = study_allowance::read(target, key) {
+        return Some(value);
+    }
     match key {
         ViewHydrationKey::ScanStudyProgress { campaign_id } => {
             Some(ViewHydrationValue::ScanStudyProgress(

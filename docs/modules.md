@@ -1,5 +1,13 @@
 # Kuzushi modules
 
+Study occurrence rows expose an optional `representativeObservationRef` for
+the exact recorded generation in the original workspace. The context-results
+findings picker opens that observation through the shared Review reader.
+Review retains evidence confidence, decisions and source warnings; recurrence
+remains a separate completed-pass count. A missing reference requires a fresh
+read rather than opening the latest fingerprint match. No model request or
+new scan is started. See the [additive output migration](../RELEASING.md#exact-observation-links-in-study-results).
+
 Normalized native license, dependency-policy and secret findings keep locations
 relative to the explicit workspace, including child-directory scans. Their saved
 source comes from the cited child file. Direct and SAST directory scans retain
@@ -4537,3 +4545,24 @@ text. Unsupported receipts remain unavailable; missing flags and counts remain
 unrecorded. Report details share the receipt presentation, while reader shortcuts
 stay local to the context reader. See the [generated scope workflow](assessments/generated-scope-investigation-2026-10-24.md)
 for sequential native evidence and qualification limits.
+
+
+### Fixed-study jobs and shared accounting
+
+The jobs and job-detail readers bind Scan, context, context-matrix, scope and
+Review studies to the exact plan digest retained by bounded campaign history.
+They read the shared investigation ledger in the background. Call limits,
+protected Review capacity and cost availability stay visible while paging.
+Dollar totals for this plan are labeled as Jobs subtotals. Unrecorded cost stays
+unknown, and an unreadable or changed plan cannot borrow another plan's approval.
+
+The shared read-only `campaign::load_fixed_study_allowance` projection checks
+saved plan identity and historical work approval before returning current
+investigation totals. Later approved work may share those totals. An unapproved
+draft may display its explicitly named investigation's spending while its work
+still requires approval. Retained source evidence is unnecessary for reading
+recorded charges. Reading this projection never authorizes or starts work.
+Bounded approval-plan reads enforce repository containment and reject symlinks.
+
+See the [fixed-study accounting evidence](assessments/jobs-allowance-2026-10-27.md)
+for buffer, native and accounting qualification limits.

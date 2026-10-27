@@ -354,6 +354,7 @@ fn batch_report_with_occurrence(fingerprint: &str, seen: usize) -> BatchOccurren
             titles: vec!["path traversal".to_string()],
             fingerprints: vec![fingerprint.to_string()],
             run_ids: vec!["run-1".to_string(), "run-2".to_string()],
+            representative_observation_ref: None,
             representative_fingerprint: fingerprint.to_string(),
             representative_title: "path traversal".to_string(),
             representative_severity: "high".to_string(),

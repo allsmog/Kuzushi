@@ -49,7 +49,9 @@ pub use context_matrix::{
     ContextMatrixDraft, ContextMatrixMetadataV1, ContextMatrixReceipt, FrozenContextCase,
     CONTEXT_MATRIX_KIND, MAX_CONTEXT_CASES,
 };
+mod study_allowance;
 mod study_receipt;
+pub use study_allowance::{is_fixed_study_kind, load_fixed_study_allowance};
 mod study_resources;
 pub use map_allowance::{
     load_accepted_map_allowance, load_map_run_allowance, load_selected_map_history_allowance,

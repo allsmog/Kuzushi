@@ -27,9 +27,7 @@ pub(super) fn append_observation_receipt(lines: &mut Vec<String>, row: &BatchOcc
         ),
         format!("Fingerprint: {}", row.representative_fingerprint),
     ]);
-    if let Some(identity) = &row.identity_id {
-        lines.push(format!("Identity: {identity}"));
-    }
+    append_observation_identifiers(lines, row);
     for location in row
         .locations
         .iter()
@@ -42,5 +40,14 @@ pub(super) fn append_observation_receipt(lines: &mut Vec<String>, row: &BatchOcc
     }
     for run in &row.run_ids {
         lines.push(format!("Run: {run}"));
+    }
+}
+
+fn append_observation_identifiers(lines: &mut Vec<String>, row: &BatchOccurrenceRow) {
+    if let Some(reference) = &row.representative_observation_ref {
+        lines.push(format!("Recorded observation: {reference}"));
+    }
+    if let Some(identity) = &row.identity_id {
+        lines.push(format!("Identity: {identity}"));
     }
 }

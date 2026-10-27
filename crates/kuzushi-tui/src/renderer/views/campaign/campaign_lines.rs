@@ -16,6 +16,9 @@ mod history_tests;
 /// All lifecycle truth comes from the snapshot fold (plan + dispatcher queue).
 pub(crate) fn campaign_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
+    if let Some(allowance) = crate::ui_view_models::investigation_allowance_model(app) {
+        lines.push(Line::styled(allowance.summary, theme::primary()));
+    }
     lines.push(blank());
     build_campaign_lines(app, area, lines)
 }
@@ -1063,6 +1066,7 @@ mod tests {
                 titles: vec!["unsafe auth flow".to_string()],
                 fingerprints: vec!["finding-1".to_string()],
                 run_ids: vec!["run-1".to_string(), "run-2".to_string()],
+                representative_observation_ref: None,
                 representative_fingerprint: "finding-1".to_string(),
                 representative_title: "unsafe auth flow".to_string(),
                 representative_severity: "high".to_string(),

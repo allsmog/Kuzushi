@@ -67,10 +67,5 @@ pub(crate) fn is_scan_batch_snapshot(
 pub(crate) fn is_fixed_study_snapshot(
     snapshot: &kuzushi_core::capabilities::campaign::snapshot::CampaignSnapshot,
 ) -> bool {
-    is_scan_batch_snapshot(snapshot)
-        || snapshot.kind.as_deref() == Some("context-study")
-        || snapshot.kind.as_deref() == Some(kuzushi_core::capabilities::campaign::REVIEW_STUDY_KIND)
-        || snapshot.kind.as_deref()
-            == Some(kuzushi_core::capabilities::campaign::CONTEXT_MATRIX_KIND)
-        || snapshot.kind.as_deref() == Some(kuzushi_core::capabilities::campaign::SCOPE_STUDY_KIND)
+    kuzushi_core::capabilities::campaign::is_fixed_study_kind(snapshot.kind.as_deref())
 }

@@ -2,7 +2,9 @@ use super::*;
 
 impl CampaignRouteState {
     pub(crate) fn clear_campaign_history(&mut self) {
+        self.matrix_observation_origin = None;
         self.campaigns.clear();
+        self.plan_digests.clear();
         self.history_coverage = None;
         self.reset_campaign_selection();
         self.trend = None;
@@ -11,6 +13,7 @@ impl CampaignRouteState {
     }
 
     pub(crate) fn replace_campaigns(&mut self, campaigns: Vec<CampaignSnapshot>) -> Option<String> {
+        self.plan_digests.clear();
         let campaign_id = self.selected_campaign().map(|row| row.campaign_id.clone());
         let job_id = self.selected_job().map(|row| row.job_id.clone());
         self.campaigns = campaigns;

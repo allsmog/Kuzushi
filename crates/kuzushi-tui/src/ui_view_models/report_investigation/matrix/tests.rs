@@ -18,6 +18,7 @@ fn observation(path: &str, seen: usize) -> BatchOccurrenceRow {
         titles: vec!["Same owned observation".into()],
         fingerprints: vec![format!("owned-fingerprint-{seen}")],
         run_ids: vec![format!("owned-run-{seen}")],
+        representative_observation_ref: None,
         representative_fingerprint: format!("owned-fingerprint-{seen}"),
         representative_title: "Same owned observation".into(),
         representative_severity: "info".into(),

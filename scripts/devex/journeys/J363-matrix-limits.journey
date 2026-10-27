@@ -11,6 +11,9 @@ paste-file: @ART/study-command.txt
 keys: Enter
 require-live-snap: 25 6 planned | approved-fixed-matrix
 expect: Jobs: 6
+require-live-snap: 25 calls 0/7 | initial-shared-allowance
+expect: 2 Review protected
+expect: $0.0000 exact
 require-shell: python3 -B @REPO/scripts/devex/fixtures/matrix_limits.py @TMP_TARGET @ART draft
 nav-mode:
 keys: a
@@ -30,18 +33,100 @@ expect: 1 parked
 expect: Allowance reached
 expect: R report
 expect: a plan/allowance
-ask: Is the failed pass distinct from the unstarted pass, with a truthful partial outcome and visible Report and allowance choices?
+require-live-snap: 25 calls 5/7 | partial-shared-allowance
+expect: 2 Review protected
+expect: cost not recorded
+ask: Is the failed pass distinct from the unstarted pass, with the shared call counter, protected Review capacity, unknown cost and visible Report and allowance choices?
 resize: 40x12
 wait: 1
 require-live-snap: 25 Allowance reached | mixed-stop-40x12
 expect: R report
 expect: a plan/allowance
+expect: calls 5/7
+expect: 2 Review protected
+expect: cost not recorded
+keys: End
+live-snap: mixed-stop-end-40x12
+expect: calls 5/7
+expect: 2 Review protected
+keys: Home
 resize: 120x36
 wait: 1
 keys: a Home Down Down Down Down Down Down Down Down Down Down Enter
 require-live-snap: 25 CONTEXT CASES | retained-context-cases
 keys: v
 require-live-snap: 25 observed 2 / 2 | partial-alpha-results
+require-live-snap: 25 Calls 5/7 | partial-allowance
+expect: Review 2 protected
+expect: 0 unsettled
+expect: cost not recorded
+keys: f
+require-live-snap: 25 Recorded findings: Alpha baseline | case-findings
+expect: Enter review
+expect: Calls 5/7
+expect: Review 2 protected
+resize: 160x48
+live-snap: case-findings-160x48
+resize: 96x89
+live-snap: case-findings-96x89
+resize: 80x24
+live-snap: case-findings-80x24
+resize: 60x20
+live-snap: case-findings-60x20
+resize: 40x12
+live-snap: case-findings-40x12
+expect: Calls 5/7
+expect: Review 2 protected
+expect: cost unknown
+keys: End
+live-snap: case-findings-details-40x12
+keys: Home
+resize: 120x36
+keys: Enter
+require-live-snap: 25 earlier observation | recorded-case-review
+expect: Viewing Review
+expect: Evidence: unverified
+require-live-snap: 25 calls 5/7 | recorded-case-allowance
+resize: 40x12
+live-snap: recorded-case-allowance-40x12
+expect: calls 5/7
+resize: 60x20
+live-snap: recorded-case-allowance-60x20
+expect: calls 5/7
+resize: 80x24
+live-snap: recorded-case-allowance-80x24
+expect: calls 5/7
+resize: 96x89
+live-snap: recorded-case-allowance-96x89
+expect: calls 5/7
+resize: 160x48
+live-snap: recorded-case-allowance-160x48
+expect: calls 5/7
+resize: 120x36
+keys: NPage
+require-live-snap: 25 Reopen this observation | recorded-case-reference
+require-shell: python3 -B @REPO/scripts/devex/fixtures/matrix_limits.py @TMP_TARGET @ART case-review
+submit: report
+require-live-snap: 25 Context cases: 2 | review-scoped-report
+expect: Scope: context matrix matrix-limits
+expect: 5 committed / 7 calls
+expect: 3 raw observations
+keys: r
+require-live-snap: 25 Scope: context matrix matrix-limits | review-report-refreshed
+keys: s
+require-live-snap: 25 Scope: workspace history | review-report-history
+keys: s
+require-live-snap: 25 Scope: context matrix matrix-limits | review-report-study-restored
+expect: 5 committed / 7 calls
+keys: Escape
+require-live-snap: 25 Reopen this observation | report-review-return
+require-shell: python3 -B @REPO/scripts/devex/fixtures/matrix_limits.py @TMP_TARGET @ART case-report
+nav-mode:
+keys: q q
+require-live-snap: 25 Recorded findings: Alpha baseline | case-review-return
+keys: Escape
+require-live-snap: 25 observed 2 / 2 | case-results-return
+ask: Does the exact Alpha observation retain its study's calls through Review and Report, with explicit workspace-history switching and a return to the same evidence, finding picker and case across all six sizes without another request or decision?
 keys: Down
 require-live-snap: 25 observed 1 / 2 | partial-beta-results
 keys: Up
@@ -110,15 +195,32 @@ require-shell: python3 -B @REPO/scripts/devex/fixtures/matrix_limits.py @TMP_TAR
 keys: r
 require-live-snap: 25 6 completed | original-six-completed
 expect: 2 total attempts
+require-live-snap: 25 calls 7/9 | finished-shared-allowance
+expect: 2 Review protected
 keys: Down Enter
 require-live-snap: 25 Current attempt counter: 1 | retried-job-details
 expect: 2 total attempts
+expect: calls 7/9
+expect: 2 Review protected
+resize: 40x12
+require-live-snap: 25 calls 7/9 | retried-job-allowance-40x12
+expect: 2 Review protected
+expect: cost not recorded
+keys: End
+live-snap: retried-job-end-40x12
+expect: calls 7/9
+expect: 2 Review protected
+keys: Home
+resize: 120x36
 keys: q
 require-live-snap: 25 Fixed jobs | retried-job-origin
 keys: a Home Down Down Down Down Down Down Down Down Down Down Enter
 require-live-snap: 25 CONTEXT CASES | completed-context-cases
 keys: v
 require-live-snap: 25 observed 3 / 3 | completed-alpha-results
+require-live-snap: 25 Calls 7/9 | revised-allowance
+expect: Review 2 protected
+expect: 0 unsettled
 keys: Down
 require-live-snap: 25 observed 1 / 3 | completed-beta-results
 keys: b Enter Enter Down Down
@@ -145,6 +247,9 @@ live-snap: completed-results-60x20
 resize: 40x12
 wait: 1
 live-snap: completed-results-40x12
+expect: Calls 7/9
+expect: Review 2 protected
+expect: cost unknown
 keys: NPage NPage NPage NPage NPage NPage NPage NPage End
 wait: 0.3
 live-snap: completed-evidence-end-40x12

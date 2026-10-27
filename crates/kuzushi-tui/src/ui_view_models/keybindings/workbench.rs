@@ -61,7 +61,10 @@ fn regular_workbench_keybindings(
 }
 
 fn prioritize_linked_return(bindings: &mut [FooterKeybinding], app: &ShellApp) {
-    if !app.dfd_review_return_is_available() && !app.scope_findings_return_is_available() {
+    if !app.dfd_review_return_is_available()
+        && !app.scope_findings_return_is_available()
+        && !app.matrix_observation_return_is_available()
+    {
         return;
     }
     let Some(key) = app.view_back_key(ShellView::Workbench) else {

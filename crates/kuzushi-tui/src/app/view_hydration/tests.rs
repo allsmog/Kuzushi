@@ -112,7 +112,8 @@ pub(super) fn missing_value(key: &ViewHydrationKey) -> ViewHydrationValue {
         ViewHydrationKey::ScanStudyProgress { .. } => {
             ViewHydrationValue::ScanStudyProgress(Err("missing fixture study".into()))
         }
-        ViewHydrationKey::InvestigationAllowance { .. } => {
+        ViewHydrationKey::InvestigationAllowance { .. }
+        | ViewHydrationKey::StudyAllowance { .. } => {
             ViewHydrationValue::InvestigationAllowance(Ok(None))
         }
         ViewHydrationKey::FindingGroups(_) => {

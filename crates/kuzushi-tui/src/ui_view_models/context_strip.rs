@@ -200,6 +200,9 @@ fn stage_spinner(phase: u8) -> &'static str {
 }
 
 fn cost_segment_value(app: &ShellApp) -> Option<String> {
+    if app.study_allowance_selection().is_some() {
+        return None;
+    }
     Some(super::format_runtime_cost(
         app.session().session_cost_report(),
         app.session().cost_accounting_error(),

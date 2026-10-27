@@ -260,6 +260,10 @@ impl OccurrenceAccumulator {
             titles: self.titles.into_iter().collect(),
             fingerprints: self.fingerprints.into_iter().collect(),
             run_ids: self.run_ids.into_iter().collect(),
+            representative_observation_ref: representative
+                .id
+                .filter(|id| *id > 0)
+                .map(|id| format!("generation:{id}")),
             representative_fingerprint: representative.fingerprint.clone(),
             representative_title: representative.title.clone(),
             representative_severity: representative.severity.as_str().to_string(),

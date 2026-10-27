@@ -24,8 +24,8 @@ pub(crate) use context_matrix::{
     case_name_notice, case_name_plain_lines, context_matrix_conditions, context_matrix_lines,
 };
 pub(crate) use context_matrix::{
-    matrix_body, matrix_plain_lines, matrix_result_controls, matrix_result_lines,
-    matrix_result_read_limits, matrix_result_state, MatrixResultReadLimits,
+    matrix_allowance_lines, matrix_body, matrix_plain_lines, matrix_result_controls,
+    matrix_result_lines, matrix_result_read_limits, matrix_result_state, MatrixResultReadLimits,
 };
 pub(crate) mod scope_context;
 pub(crate) mod study_context;

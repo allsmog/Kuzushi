@@ -793,7 +793,9 @@ fn hydration_group(key: &ViewHydrationKey) -> HydrationGroup {
     use ViewHydrationKey as Key;
     match key {
         Key::FindingsProjection(_) => HydrationGroup::Transient,
-        Key::InvestigationAllowance { .. } => HydrationGroup::Allowance,
+        Key::InvestigationAllowance { .. } | Key::StudyAllowance { .. } => {
+            HydrationGroup::Allowance
+        }
         Key::ScanStudyProgress { .. } => HydrationGroup::ScanStudy,
         Key::StudyHistory
         | Key::StudyUsageCatalogue

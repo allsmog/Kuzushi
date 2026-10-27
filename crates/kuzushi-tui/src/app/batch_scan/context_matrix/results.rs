@@ -62,7 +62,10 @@ impl ShellApp {
         {
             return None;
         };
-        if let Some(update) = self.matrix_report_read_key(code) {
+        if let Some(update) = self
+            .matrix_observation_key(code)
+            .or_else(|| self.matrix_report_read_key(code))
+        {
             return Some(update);
         }
         if matches!(code, KeyCode::Enter | KeyCode::Char('b')) {

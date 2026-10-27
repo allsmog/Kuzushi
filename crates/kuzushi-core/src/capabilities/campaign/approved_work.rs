@@ -4,7 +4,6 @@ use crate::{
     allowance::{ApprovedWorkItem, ApprovedWorkPlanV1},
     modules::{ModuleRegistry, ToolExecutionContext},
 };
-use std::io::Read;
 
 pub fn campaign_plan_digest(root: &Path, id: &str) -> Result<String> {
     digest_serializable(&read_bounded_plan(root, id)?)
@@ -201,15 +200,9 @@ pub fn work_input_digest(input: &Value) -> Result<String> {
 pub fn read_bounded_plan(root: &Path, id: &str) -> Result<Value> {
     validate_scan_batch_id(id)?;
     let path = campaign_plan_path(root, id);
-    let mut bytes = Vec::new();
-    std::fs::File::open(&path)?
-        .take(4 * 1024 * 1024 + 1)
-        .read_to_end(&mut bytes)?;
-    anyhow::ensure!(
-        bytes.len() <= 4 * 1024 * 1024,
-        "campaign plan exceeds the 4 MiB approval limit"
-    );
-    let plan = serde_json::from_slice(&bytes).context("campaign plan is malformed")?;
+    let body = crate::bounded_file::read_utf8_text_within(root, &path, 4 * 1024 * 1024)
+        .context("campaign plan could not be read within the 4 MiB approval limit")?;
+    let plan = serde_json::from_str(&body).context("campaign plan is malformed")?;
     super::brief::validate_plan(root, &plan)?;
     Ok(plan)
 }

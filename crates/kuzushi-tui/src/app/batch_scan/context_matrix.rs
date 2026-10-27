@@ -7,6 +7,7 @@ use kuzushi_core::capabilities::campaign::{
 };
 use serde_json::json;
 mod editing;
+mod observations;
 #[cfg(test)]
 mod tests;
 pub(crate) use editing::ContextCaseNameEdit;
@@ -23,6 +24,9 @@ pub(crate) struct StudyContextMatrix {
     pub(crate) pass_cursor: usize,
     pub(crate) baseline_run_id: Option<String>,
     pub(crate) detail_scroll: usize,
+    pub(crate) observation_key: Option<String>,
+    pub(crate) observation_scroll: usize,
+    pub(crate) observation_notice: Option<String>,
     pub(crate) name_edit: Option<ContextCaseNameEdit>,
 }
 

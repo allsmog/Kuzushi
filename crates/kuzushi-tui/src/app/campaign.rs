@@ -81,6 +81,7 @@ impl ShellApp {
     fn replace_campaign_snapshots(&mut self, history: CampaignHistory) {
         let deck = self.router.campaign_mut();
         let selection_notice = deck.replace_campaigns(history.campaigns);
+        deck.plan_digests = history.plan_digests;
         deck.history_coverage = Some(history.coverage);
         let notices = selection_notice
             .into_iter()

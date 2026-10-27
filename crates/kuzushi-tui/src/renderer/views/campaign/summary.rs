@@ -46,9 +46,17 @@ fn summary_fields(deck: &CampaignRouteState, campaign: &CampaignSnapshot) -> [St
     [
         job_count_label(campaign),
         campaign_worker_label(deck, campaign),
-        campaign_spend_label(campaign),
+        study_jobs_cost_label(campaign),
         dispatcher,
     ]
+}
+
+fn study_jobs_cost_label(campaign: &CampaignSnapshot) -> String {
+    let cost = campaign_spend_label(campaign);
+    if crate::app::is_fixed_study_snapshot(campaign) {
+        return format!("Jobs {cost}");
+    }
+    cost
 }
 
 pub(super) fn job_count_label(campaign: &CampaignSnapshot) -> String {

@@ -250,6 +250,10 @@ pub(crate) enum ViewHydrationKey {
     InvestigationAllowance {
         run_refs: Vec<String>,
     },
+    StudyAllowance {
+        campaign_id: String,
+        plan_sha256: String,
+    },
     ScanStudyProgress {
         campaign_id: String,
     },

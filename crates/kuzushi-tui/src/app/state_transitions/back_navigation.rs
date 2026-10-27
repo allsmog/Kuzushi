@@ -36,6 +36,7 @@ impl ShellApp {
 
     fn restore_linked_reader_origin(&mut self) -> bool {
         self.restore_campaign_reader_origin()
+            || self.restore_matrix_observation_origin()
             || self.restore_scope_findings_origin()
             || self.restore_dfd_review_origin()
     }

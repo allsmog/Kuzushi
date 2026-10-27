@@ -94,7 +94,7 @@ fn reader_chrome(app: &ShellApp, area: Rect) -> ReaderChrome {
         controls.extend(compact_navigation_controls(app, area.width));
     }
     controls.truncate(usize::from(area.height).saturating_sub(2));
-    let identity = pinned_reader_identity(app, area.width);
+    let identity = pinned_reader_identity(app, area);
     let mut header = context_strip(app, area);
     let mut notice = pinned_action_result(app, area.width);
     let available =
@@ -111,29 +111,30 @@ fn reader_chrome(app: &ShellApp, area: Rect) -> ReaderChrome {
     }
 }
 
-fn pinned_reader_identity(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
+fn pinned_reader_identity(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let deck = app.router.campaign();
     let Some(campaign) = deck.selected_campaign().filter(|_| deck.detail) else {
         return Vec::new();
     };
-    let mut identity = vec![Line::styled(
-        fit(
-            &format!("Study: {}", campaign.campaign_id),
-            usize::from(width),
-        ),
-        theme::accent(),
-    )];
-    identity.push(Line::styled(
-        fit(
-            &format!("Study {}", super::summary::campaign_spend_label(campaign)),
-            usize::from(width),
-        ),
-        theme::primary(),
-    ));
+    let width = usize::from(area.width);
+    let allowance = crate::ui_view_models::investigation_allowance_model(app);
+    let title = format!("Study: {}", campaign.campaign_id);
+    let title = match allowance
+        .as_ref()
+        .filter(|_| compact_campaign_document(app, area))
+    {
+        Some(model) => format!("{} · {title}", model.calls),
+        None => title,
+    };
+    let mut identity = vec![Line::styled(fit(&title, width), theme::accent())];
+    let spending = allowance
+        .map(|model| model.summary)
+        .unwrap_or_else(|| format!("Study {}", super::summary::campaign_spend_label(campaign)));
+    identity.push(Line::styled(fit(&spending, width), theme::primary()));
     if deck.job_detail {
         identity.extend(deck.selected_job().map(|job| {
             Line::styled(
-                super::fixed_jobs::selected_job_heading(job, usize::from(width)),
+                super::fixed_jobs::selected_job_heading(job, width),
                 theme::accent(),
             )
         }));

@@ -8,6 +8,9 @@ pub(super) fn recorded_matrix_lines(
     width: usize,
     rows: usize,
 ) -> Vec<String> {
+    if config.study.matrix.observation_key.is_some() {
+        return super::observations::lines(config, report, width, rows);
+    }
     if config.study.matrix.pass_selection.is_some() {
         return pass_lines(config, report, width, rows);
     }
