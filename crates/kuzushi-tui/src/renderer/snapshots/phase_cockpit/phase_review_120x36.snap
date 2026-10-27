@@ -35,7 +35,7 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · 
 │                                            │    request_input -> database_query
 │                                            │    attacker-controlled input reaches a security boundary
 │                                            │
-│                                            │── REVIEW ACTIONS ──
+│                                            │── SCANNER MESSAGE ──
 ⛭ autonomy:fix · ⠋ context:build · 42s · 1/2 · openai:gpt-5.4                       6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt

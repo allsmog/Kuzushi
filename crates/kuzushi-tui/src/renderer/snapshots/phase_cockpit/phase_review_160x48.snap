@@ -35,6 +35,9 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · 
 │  Debug endpoint remains enabled              │    request_input -> database_query                                         │
 │  sources:1 · @– · open                       │    attacker-controlled input reaches a security boundary                   │
 │  src/config.rs:5                             │                                                                            │
+│                                              │── SCANNER MESSAGE ──                                                       │
+│                                              │  SQL injection reaches query                                               │
+│                                              │                                                                            │
 │                                              │── REVIEW ACTIONS ──                                                        │
 │                                              │  Reopen this observation: open generation:1364509416246451584              │
 │                                              │  This reference belongs to this workspace. List aliases can change as      │
@@ -44,9 +47,6 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · 
 │                                              │  false positive: `dismiss false_positive <note>`                           │
 │                                              │  suppression rule: `suppress <id> --reason <text> --days 90`               │
 │                                              │  report · export findings and decisions                                    │
-│                                              │                                                                            │
-│                                              │── SCANNER MESSAGE ──                                                       │
-│                                              │  SQL injection reaches query                                               │
 │                                              │                                                                            │
 ⛭ autonomy:fix · ⠋ context:build · 42s · 1/2 · openai:gpt-5.4                           6 findings / 1 crit / 2 high / 2 med│
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────│

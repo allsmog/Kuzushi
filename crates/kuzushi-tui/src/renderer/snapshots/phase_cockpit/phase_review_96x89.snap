@@ -35,7 +35,10 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · 
 │ F-0006 L unverified               │    request_input -> database_query
 │  Debug endpoint remains enabled   │    attacker-controlled input reaches a security...
 │  sources:1 · @– · open            │
-│  src/config.rs:5                  │── REVIEW ACTIONS ──
+│  src/config.rs:5                  │── SCANNER MESSAGE ──
+│                                   │  SQL injection reaches query
+│                                   │
+│                                   │── REVIEW ACTIONS ──
 │                                   │  Reopen this observation: open
 │                                   │  generation:1364509416246451584
 │                                   │  This reference belongs to this workspace. List aliases
@@ -48,9 +51,6 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · 
 │                                   │  suppression rule: `suppress <id> --reason <text>
 │                                   │  --days 90`
 │                                   │  report · export findings and decisions
-│                                   │
-│                                   │── SCANNER MESSAGE ──
-│                                   │  SQL injection reaches query
 │                                   │
 │                                   │── PROVENANCE ──
 │                                   │rule: phase.rule.0
