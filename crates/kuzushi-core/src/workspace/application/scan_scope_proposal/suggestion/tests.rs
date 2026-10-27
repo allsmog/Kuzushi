@@ -377,7 +377,7 @@ fn bounded_input_discloses_omissions_and_preserves_loose_parent_files() {
         current_inventory(&fixture.context(), &fixture.original.reference).unwrap();
     let files = &mut inventory.inspection.as_mut().unwrap().files;
     files.extend((0..5000).map(|id| format!("packages/component-{id}/src/main.rs")));
-    let outline=input::build(&inventory,&fixture.original,Some(&json!({"contextSummary":"Architecture","dfd":{"nodes":[{"id":"app","purpose":"Application"}]}})),"Operator priorities").unwrap();
+    let outline=input::build(&inventory,&fixture.original,Some(&json!({"contextSummary":"Architecture","dfd":{"nodes":[{"id":"app","purpose":"Application"}]}})),"Operator priorities",None).unwrap();
     assert!(serde_json::to_vec(&outline.document).unwrap().len() <= input::MAX_PROMPT_BYTES);
     assert!(outline.supplied_files <= 512);
     assert_eq!(outline.inventoried_files, 5002);
@@ -387,7 +387,7 @@ fn bounded_input_discloses_omissions_and_preserves_loose_parent_files() {
         .unwrap()
         .iter()
         .any(|row| row["path"] == "."));
-    assert!(input::build(&inventory, &fixture.original, None, &"x".repeat(2049)).is_err());
+    assert!(input::build(&inventory, &fixture.original, None, &"x".repeat(2049), None).is_err());
 }
 
 #[test]

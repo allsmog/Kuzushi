@@ -2,6 +2,7 @@
 use super::*;
 use serde::Serialize;
 use std::collections::BTreeMap;
+mod file_selection;
 
 pub(super) const MAX_PROMPT_BYTES: usize = 65_536;
 const MAX_CONTEXT_OUTLINE_BYTES: usize = 8192;
@@ -18,16 +19,18 @@ pub(super) fn build(
     review: &ScanScopeReview,
     context: Option<&Value>,
     priorities: &str,
+    selection: Option<&Value>,
 ) -> Result<ScopeModelInput> {
     validate_priorities(priorities)?;
     let inspection = inventory
         .inspection
         .as_ref()
         .context("scope inventory membership is missing")?;
-    let files = sample(&inspection.files, 512, 16_384)?;
+    let files = file_selection::sample(&inspection.files, selection)?;
     let supplied_files = files["items"].as_array().unwrap().len();
     let context = context_outline(context)?;
-    let limitations = limitations(inventory, inspection.files.len(), supplied_files, &context);
+    let mut limitations = limitations(inventory, inspection.files.len(), supplied_files, &context);
+    limitations.extend(file_selection::summary(&files));
     let document = json!({
         "schemaVersion":1, "source":review.record.source,
         "inventoryHash":review.record.inventory_hash,
@@ -60,17 +63,38 @@ pub(super) fn validate_priorities(priorities: &str) -> Result<()> {
 }
 
 fn sample<T: Serialize>(values: &[T], maximum: usize, byte_limit: usize) -> Result<Value> {
+    sample_candidates(
+        values.iter().take(maximum),
+        values.len(),
+        maximum,
+        byte_limit,
+    )
+}
+
+fn sample_candidates<T: Serialize>(
+    values: impl IntoIterator<Item = T>,
+    total: usize,
+    maximum: usize,
+    byte_limit: usize,
+) -> Result<Value> {
     let mut items = Vec::new();
     let mut remaining = byte_limit;
-    for value in values.iter().take(maximum) {
-        let bytes = serde_json::to_vec(value)?;
+    for value in values {
+        if items.len() == maximum {
+            break;
+        }
+        let bytes = serde_json::to_vec(&value)?;
         if bytes.len() + 1 > remaining {
             continue;
         }
         remaining -= bytes.len() + 1;
         items.push(serde_json::from_slice::<Value>(&bytes)?);
     }
-    Ok(json!({"total":values.len(), "omitted":values.len()-items.len(), "items":items}))
+    Ok(json!({"total":total, "omitted":total-items.len(), "items":items}))
+}
+
+pub(super) fn validate_file_selection(value: Option<&Value>) -> Result<()> {
+    file_selection::validate(value)
 }
 
 fn ensure_bounded_document(document: &Value) -> Result<()> {
@@ -84,10 +108,9 @@ fn ensure_bounded_document(document: &Value) -> Result<()> {
 fn directory_groups(files: &[String]) -> Result<Value> {
     let mut groups: BTreeMap<String, usize> = BTreeMap::new();
     for file in files {
-        let segments: Vec<_> = file.split('/').collect();
-        let depth = segments.len().saturating_sub(1).min(2);
-        let path = segments[..depth].join("/");
-        *groups.entry(path).or_default() += 1;
+        *groups
+            .entry(file_selection::group(file).into())
+            .or_default() += 1;
     }
     let rows: Vec<_> = groups
         .into_iter()

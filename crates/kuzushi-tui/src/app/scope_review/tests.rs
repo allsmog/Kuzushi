@@ -9,6 +9,7 @@ mod enumeration;
 mod file_boundaries;
 mod findings;
 mod literal_paths;
+mod reading;
 mod source;
 mod suggestion;
 mod tree;
@@ -580,7 +581,7 @@ fn scope_review_viewports_keep_controls_and_plain_output_keeps_recorded_source()
             .collect::<String>();
         assert!(text.contains("SCOPES"), "{width}x{height}");
         assert!(text.contains("Enter menu · Esc"), "{width}x{height}");
-        assert!(text.contains("PgUp/Dn"), "{width}x{height}");
+        assert!(text.contains("Tab read"), "{width}x{height}");
         assert!(text.contains("Enter menu"), "{width}x{height}");
         assert!(text.contains("p plan"), "{width}x{height}");
         assert!(text.contains("a accept"), "{width}x{height}");

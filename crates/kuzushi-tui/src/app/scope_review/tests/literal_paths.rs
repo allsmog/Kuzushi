@@ -48,11 +48,12 @@ fn literal_scope_split_keeps_each_exact_membership_without_overlap() {
     assert_eq!(review.coverage.uncovered_files.total, 0);
     assert_eq!(review.coverage.overlaps.total, 0);
     assert!(review.record.acceptance.is_none());
-    assert!(
-        crate::ui_view_models::scope_review::scope_detail(app.scope_review().unwrap())
-            .iter()
-            .any(|line| line == "Boundary: \" auth \"")
-    );
+    assert!(crate::ui_view_models::scope_review::scope_detail(
+        app.scope_review().unwrap(),
+        Vec::new()
+    )
+    .iter()
+    .any(|line| line == "Boundary: \" auth \""));
 }
 
 #[test]

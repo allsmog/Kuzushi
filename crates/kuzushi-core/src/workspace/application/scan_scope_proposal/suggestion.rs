@@ -27,7 +27,13 @@ pub(crate) fn suggest_scan_scope_proposal(
     let (review, inventory) = current_inventory(ctx, &reference)?;
     let (context_ref, context) = selected_context(ctx, input)?;
     let priorities = input["priorities"].as_str().unwrap_or("");
-    let outline = input::build(&inventory, &review, context.as_ref(), priorities)?;
+    let outline = input::build(
+        &inventory,
+        &review,
+        context.as_ref(),
+        priorities,
+        input.get("fileSelection"),
+    )?;
     let request = query_request(ctx, input, model, &outline)?;
     let response = runtime.query_blocking_controlled(
         request.clone(),
@@ -96,6 +102,7 @@ pub(crate) fn validate_scan_scope_suggestion_input(
     let reference: ScanScopeProposalRef = serde_json::from_value(input["proposalRef"].clone())?;
     current_inventory(ctx, &reference)?;
     selected_context(ctx, input)?;
+    input::validate_file_selection(input.get("fileSelection"))?;
     input::validate_priorities(input["priorities"].as_str().unwrap_or(""))
 }
 

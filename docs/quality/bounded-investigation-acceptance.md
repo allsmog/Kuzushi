@@ -1,5 +1,19 @@
 # Bounded investigation acceptance ledger
 
+The [scope filename selection follow-up](../assessments/scope-filename-selection-2026-10-26.md)
+repairs an input visibility gap confirmed in the saved 602-file inventory. New
+plans freeze root-first balanced filename samples; omitted policy in older jobs
+retains the earlier prefix sample. The 512-name, 16 KiB and total 64 KiB limits
+remain. All 65 distinct focused Rust checks, build, Clippy and risk pass,
+including actual 100,000-entry sampling and current descriptor consistency.
+Final read-only J386 has sixteen machine passes, zero failures, fifteen capture
+pairs and three answered agent reviews with findings across six sizes and
+no-color restart. Two unapproved plans and all 602 inert fixture files remain
+unchanged, with no grant, model request, finding or accepted scope. Earlier
+duplicate-copy polish is retained in its own run. Cumulative live use stays
+nineteen. New-policy model usefulness, dense reading and the broad goal remain
+open; the paid scope result and its uncovered root file are not rewritten.
+
 The [dependency child-source follow-up](../assessments/cargo-child-source-2026-10-26.md)
 repairs parent snapshot ownership, literal paths and the package source anchor
 that an installed-scanner visual audit found missing. All 51 distinct focused

@@ -1,0 +1,73 @@
+name: Read real scope boundaries before identifiers and return from full-width detail without changes
+size: 120x36
+cwd: @REPO/scripts/devex/artifacts/monorepo-scope-live-20261025/attempt-2/target
+env-unset: NODE_OPTIONS KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE KUZUSHI_AGENT_MCPS ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@REPO/scripts/devex/artifacts/monorepo-scope-live-20261025/attempt-2/operator-home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NODE_OPTIONS=--import=@REPO/scripts/devex/fixtures/deny_provider_transport.mjs KUZUSHI_TEST_DENIED_FETCH_LOG=@ART/denied-fetch.jsonl
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_scope_variant.py @ART inspect
+require-wrapper-flow:
+launch: --target @REPO/scripts/devex/artifacts/monorepo-scope-live-20261025/attempt-2/target
+require-live-snap: 30 KUZUSHI | ready
+submit: scopes
+require-live-snap: 25 DRAFT SCOPES · r2 | decision-first
+expect: Boundary: apps/control-panel
+expect: Why: Keep the client application
+expect: Next study (focused): 3 jobs
+expect: Tab read
+ask: Does scope review put the component boundary, its rationale and finite workload before detailed source identifiers while keeping the unaccepted state clear?
+keys: Tab
+require-live-snap: 20 SCOPE DETAIL | detail-reader
+expect: Tab / Esc tree
+keys: Enter a p c Space
+require-live-snap: 20 SCOPE DETAIL | reading-owns-input
+expect-not: ACCEPTED SCOPES
+resize: 160x48
+live-snap: reader-160x48
+resize: 96x89
+live-snap: reader-96x89
+resize: 80x24
+live-snap: reader-80x24
+resize: 60x20
+live-snap: reader-60x20
+resize: 40x12
+live-snap: reader-40x12
+keys: NPage
+live-snap: reader-page-40x12
+keys: End
+require-live-snap: 20 model requests. | reader-end-40x12
+keys: Home
+require-live-snap: 20 Control panel client | reader-home-40x12
+ask: Is the full-width reader usable at all six sizes, with rationale, source details and return controls reachable without exposing hidden actions while reading?
+keys: Escape
+require-live-snap: 20 DRAFT SCOPES | tree-return-40x12
+expect: Control panel
+resize: 120x36
+keys: Down Down Down Down Down Down Down Down Right Down
+require-live-snap: 20 File: workspace.json | uncovered-file
+keys: Tab
+require-live-snap: 20 SCOPE DETAIL | uncovered-file-reader
+expect: File: workspace.json
+keys: Escape
+require-live-snap: 20 File: workspace.json | file-origin-return
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_scope_variant.py @ART inspected
+ask: Does returning restore the same tree or uncovered file, with shared context, original proposal, source and exhausted allowance unchanged?
+keys: Escape
+submit: logs
+paste-file: @ART/read-allowance.txt
+keys: Enter
+require-live-snap: 30 Calls committed: 2/2 · remaining: 0 | retained-accounting
+expect: Unresolved calls: 0
+keys: C-c
+require-exit: 10
+env: HOME=@REPO/scripts/devex/artifacts/monorepo-scope-live-20261025/attempt-2/operator-home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1 NODE_OPTIONS=--import=@REPO/scripts/devex/fixtures/deny_provider_transport.mjs KUZUSHI_TEST_DENIED_FETCH_LOG=@ART/denied-fetch.jsonl
+launch: --target @REPO/scripts/devex/artifacts/monorepo-scope-live-20261025/attempt-2/target
+require-live-snap: 30 KUZUSHI | restarted
+submit: scopes
+require-live-snap: 25 DRAFT SCOPES · r2 | recovered-tree
+keys: Tab End
+require-live-snap: 20 SCOPE DETAIL | no-color-detail-end
+keys: Home
+require-live-snap: 20 Control panel client | no-color-detail-home
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_scope_variant.py @ART restarted
+ask: Does no-color restart keep exact source and proposal-context details readable while preserving zero new calls, no accepted scope and no executed discovery?
+keys: C-c
+require-exit: 10

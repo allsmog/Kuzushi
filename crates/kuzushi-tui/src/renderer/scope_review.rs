@@ -98,7 +98,7 @@ fn render_scope_panels(
     area: Rect,
 ) {
     let (rows, cursor) = scope_rows(state);
-    let layout = scope_layout(area, rows.len());
+    let layout = scope_review_layout(area, state);
     let start = cursor.saturating_sub(layout.list.height.saturating_sub(1) as usize);
     let lines = rows
         .into_iter()
@@ -126,7 +126,7 @@ fn render_scope_panels(
         &scope_source_view(app, state),
         layout.detail.width as usize,
     );
-    render_scope_document(frame, detail, state.scroll, layout.detail);
+    render_scope_document(frame, detail, scope_detail_scroll(state), layout.detail);
 }
 
 fn render_scope_document(frame: &mut Frame<'_>, lines: Vec<String>, scroll: usize, area: Rect) {

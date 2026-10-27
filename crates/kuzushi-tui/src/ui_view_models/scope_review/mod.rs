@@ -15,6 +15,9 @@ pub(crate) use detail::scope_detail;
 pub(crate) use source::{scope_source_view, ScopeSourceView};
 
 pub(crate) fn scope_title(state: &ScopeReviewState, source: &ScopeSourceView) -> String {
+    if state.detail_reader.open {
+        return scope_reader_title(state, source);
+    }
     if let Some(title) = state.form.as_ref().and_then(form_title) {
         return title.into();
     }
@@ -39,20 +42,40 @@ fn saved_scope_title(
     review: &kuzushi_core::workspace::ScanScopeReview,
     source: &ScopeSourceView,
 ) -> String {
-    let label = match (
-        source.unbound(),
-        source.differs(),
-        review.record.acceptance.is_some(),
-    ) {
-        (true, _, _) => "MEMBERSHIP UNBOUND · SCOPES",
-        (false, true, _) => "SHA DIFFERS · SCOPES",
-        (false, false, true) => "ACCEPTED SCOPES",
-        _ => "DRAFT SCOPES",
-    };
+    let label = scope_labels(review, source).0;
     let total = workload::all_jobs(review)
         .map(|jobs| format!("all: {jobs} jobs"))
         .unwrap_or_else(|_| "workload unavailable".into());
     format!("{label} · r{} · {total}", review.reference.revision)
+}
+
+fn scope_labels(
+    review: &kuzushi_core::workspace::ScanScopeReview,
+    source: &ScopeSourceView,
+) -> (&'static str, &'static str) {
+    match (
+        source.unbound(),
+        source.differs(),
+        review.record.acceptance.is_some(),
+    ) {
+        (true, _, _) => ("MEMBERSHIP UNBOUND · SCOPES", "UNBOUND"),
+        (false, true, _) => ("SHA DIFFERS · SCOPES", "SHA DIFFERS"),
+        (false, false, true) => ("ACCEPTED SCOPES", "ACCEPTED"),
+        _ => ("DRAFT SCOPES", "DRAFT"),
+    }
+}
+
+fn scope_reader_title(state: &ScopeReviewState, source: &ScopeSourceView) -> String {
+    state.review.as_ref().map_or_else(
+        || "SCOPE DETAIL".into(),
+        |review| {
+            format!(
+                "SCOPE DETAIL · {} r{}",
+                scope_labels(review, source).1,
+                review.reference.revision
+            )
+        },
+    )
 }
 
 fn form_title(form: &crate::app::ScopeEditForm) -> Option<&'static str> {
@@ -153,7 +176,14 @@ pub(crate) fn scope_controls(state: &ScopeReviewState) -> [&'static str; 2] {
             "PgUp/Dn read · Esc back",
         ];
     }
-    scope_navigation_controls(state)
+    reader_controls(state).unwrap_or_else(|| scope_navigation_controls(state))
+}
+
+fn reader_controls(state: &ScopeReviewState) -> Option<[&'static str; 2]> {
+    state.detail_reader.open.then_some([
+        "↑↓ / PgUp/Dn read · Home/End",
+        "Tab / Esc tree · no changes",
+    ])
 }
 
 fn scope_form_controls(form: &crate::app::ScopeEditForm) -> [&'static str; 2] {
@@ -194,12 +224,12 @@ fn scope_navigation_controls(state: &ScopeReviewState) -> [&'static str; 2] {
 fn boundary_controls(review: &kuzushi_core::workspace::ScanScopeReview) -> [&'static str; 2] {
     if review.record.acceptance.is_none() {
         return [
-            "↑↓↔ Space mark · f files · PgUp/Dn",
+            "↑↓↔ Space mark · f files · Tab read",
             "a accept · p plan · Enter menu · Esc",
         ];
     }
     [
-        "↑↓↔ Space mark · f files · PgUp/Dn",
+        "↑↓↔ Space mark · f files · Tab read",
         "p plan · Enter menu · Esc back",
     ]
 }
@@ -214,12 +244,8 @@ pub(crate) fn scope_detail_lines(
     if let Some(notice) = &state.notice {
         text.extend([notice.clone(), String::new()]);
     }
-    let mut detail = action_search::search_detail(state).unwrap_or_else(|| scope_detail(state));
-    let position = detail.len().min(2);
-    detail.splice(
-        position..position,
-        context::scope_context_detail(app, state),
-    );
+    let detail = action_search::search_detail(state)
+        .unwrap_or_else(|| scope_detail(state, context::scope_context_detail(app, state)));
     text.extend(detail);
     if let Some(review) = &state.review {
         text.push(format!(
@@ -250,4 +276,22 @@ pub(crate) fn scope_layout(
         layout.detail.height += released;
     }
     layout
+}
+
+pub(crate) fn scope_review_layout(
+    area: ratatui::layout::Rect,
+    state: &ScopeReviewState,
+) -> super::study_config::StudyConfigLayout {
+    if state.detail_reader.open {
+        return super::study_config::study_reader_layout(area, true);
+    }
+    scope_layout(area, scope_rows(state).0.len())
+}
+
+pub(crate) fn scope_detail_scroll(state: &ScopeReviewState) -> usize {
+    if state.detail_reader.open {
+        state.detail_reader.scroll
+    } else {
+        state.scroll
+    }
 }

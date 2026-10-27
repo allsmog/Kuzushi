@@ -2,28 +2,29 @@ use super::generation::generation_detail;
 use super::*;
 use crate::app::{selected_scope, ScopeReviewState};
 
-pub(crate) fn scope_detail(state: &ScopeReviewState) -> Vec<String> {
+pub(crate) fn scope_detail(state: &ScopeReviewState, context: Vec<String>) -> Vec<String> {
     let Some(review) = &state.review else {
         return vec!["Build a bounded repository inventory first.".into(), "The initial draft keeps the whole repository together. You choose whether to split it. This action makes no model requests.".into(), "Optional AI suggestions are available from Actions after inventory. Scope review and scan approval remain separate.".into()];
     };
-    let mut lines = current_detail(state);
+    let mut lines = current_detail(state, context);
     lines.push(String::new());
     lines.extend(source_detail(review));
     lines.extend(generation_detail(review));
     lines
 }
 
-fn current_detail(state: &ScopeReviewState) -> Vec<String> {
+fn current_detail(state: &ScopeReviewState, context: Vec<String>) -> Vec<String> {
     if let Some(lines) = editor_detail(state) {
         return lines;
     }
     if state.menu.is_some() {
         return menu_detail(state);
     }
-    if let Some(detail) = reading_detail(state) {
+    if let Some(mut detail) = reading_detail(state) {
+        detail.extend(context);
         return detail;
     }
-    selected_detail(state)
+    selected_detail(state, context)
 }
 
 fn reading_detail(state: &ScopeReviewState) -> Option<Vec<String>> {
@@ -75,12 +76,20 @@ fn file_detail(files: &crate::app::ScopeFiles) -> Vec<String> {
     lines
 }
 
-fn selected_detail(state: &ScopeReviewState) -> Vec<String> {
+fn selected_detail(state: &ScopeReviewState, context: Vec<String>) -> Vec<String> {
     let Some(review) = state.review.as_ref() else {
         return Vec::new();
     };
     if let Some(scope) = selected_scope(state) {
         let mut lines = selected_heading(state, scope);
+        lines.extend(context);
+        lines.extend(super::generation::generation_summary(
+            review.record.generation.as_ref(),
+        ));
+        lines.extend(super::generation::correction_summary(
+            review.record.correction.as_ref(),
+        ));
+        lines.push(format!("Scope id: {}", scope.id));
         lines.push(format!(
             "Inventory limited: {}. Included files without content identity: {}.",
             review.coverage.inventory_limited, review.identity_omissions.total
@@ -105,18 +114,6 @@ fn selected_heading(
     scope: &kuzushi_core::workspace::ProposedScanScope,
 ) -> Vec<String> {
     let mut lines = vec![scope.name.clone()];
-    lines.extend(super::generation::generation_summary(
-        state
-            .review
-            .as_ref()
-            .and_then(|review| review.record.generation.as_ref()),
-    ));
-    lines.extend(super::generation::correction_summary(
-        state
-            .review
-            .as_ref()
-            .and_then(|review| review.record.correction.as_ref()),
-    ));
     lines.push(format!(
         "Boundary: {}",
         scope
@@ -126,11 +123,8 @@ fn selected_heading(
             .collect::<Vec<_>>()
             .join(", ")
     ));
+    lines.push(format!("Why: {}", scope.rationale));
     lines.extend(super::workload::summary(state));
-    lines.extend([
-        format!("Why: {}", scope.rationale),
-        format!("Scope id: {}", scope.id),
-    ]);
     lines
 }
 
@@ -160,7 +154,7 @@ fn coverage_detail(review: &kuzushi_core::workspace::ScanScopeReview) -> Vec<Str
             .iter()
             .map(|file| format!("Unbound: {}", super::paths::display_path(file))),
     );
-    lines.push("Press f to read this category's files. Exclusions and overlap need separate acknowledgement. Uncovered or unbound included files block acceptance.".into());
+    lines.push("In the tree, f reads this category's files. Exclusions and overlap need separate acknowledgement. Uncovered or unbound included files block acceptance.".into());
     lines
 }
 
@@ -183,7 +177,7 @@ fn joined_or_none(values: &[String]) -> String {
 
 fn resource_detail() -> Vec<String> {
     let mut lines = super::workload::guidance();
-    lines.push("Space marks discovery boundaries; p reviews the marked set, or the focused boundary when none are marked. Other boundaries stay unplanned. Scope acceptance does not approve jobs or spending.".into());
+    lines.push("In the tree, Space marks discovery boundaries; p reviews the marked set, or the focused boundary when none are marked. Other boundaries stay unplanned. Scope acceptance does not approve jobs or spending.".into());
     lines
 }
 

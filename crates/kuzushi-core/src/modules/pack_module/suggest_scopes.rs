@@ -7,6 +7,7 @@ pub(super) fn descriptor() -> ToolDescriptor {
             opt("proposalRef", OptionType::Json, "Current source-bound scope revision whose inventory will be reused.").required(),
             opt("threatModelRef", OptionType::Json, "Immutable architecture/context revision, or null to explicitly omit context. The global active pointer is never read.").default(Value::Null),
             opt("priorities", OptionType::String, "Operator priorities for boundaries, at most 2048 bytes. Priorities never determine finding verdicts.").default(json!("")),
+            opt("fileSelection", OptionType::Enum, "Bounded filename sample: root-balanced-v1 prioritizes loose root files, then balances directory groups. prefix-v1 retains the earlier filename prefix. Omission preserves existing jobs; new context-study plans choose root-balanced-v1.").choices(&["prefix-v1","root-balanced-v1"]),
             opt("model", OptionType::String, "Explicit model; otherwise use the operator's selected model with no fallback."),
             opt("thinkingLevel", OptionType::Enum, "Reasoning effort. Omit to inherit the selected runtime effort.").choices(&["low","medium","high","xhigh"]),
             opt("maxOutputTokens", OptionType::Int, "Requested output tokens. Subscription OAuth may not enforce this ceiling; shared provider-request limits still apply.").integer_range(1024,8192).default(json!(4096)),

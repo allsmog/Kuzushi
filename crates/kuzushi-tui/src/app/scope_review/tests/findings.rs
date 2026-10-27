@@ -121,7 +121,8 @@ fn saved_findings_action_explains_reading_and_keeps_back_visible_at_every_size()
     accept(&mut app, root.path());
     app.router.scope_review_mut().as_mut().unwrap().menu = Some(16);
     let detail =
-        crate::ui_view_models::scope_review::scope_detail(app.scope_review().unwrap()).join("\n");
+        crate::ui_view_models::scope_review::scope_detail(app.scope_review().unwrap(), Vec::new())
+            .join("\n");
     assert!(detail.contains("Saved findings for"));
     assert!(detail.contains("No discovery or model work starts"));
     assert!(!detail.contains("Create a separate inventory"));

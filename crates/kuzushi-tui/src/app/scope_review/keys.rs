@@ -41,6 +41,12 @@ impl ShellApp {
         if !matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT) {
             return InputUpdate::handled();
         }
+        if self
+            .scope_review()
+            .is_some_and(|state| state.detail_reader.open)
+        {
+            return self.scope_detail_reader_key(key.code);
+        }
         if let Some(update) = self.scope_reading_key(key.code) {
             return update;
         }
@@ -60,54 +66,12 @@ impl ShellApp {
         Some(self.request_scope_files(offset))
     }
 
-    fn scope_reading_key(&mut self, code: KeyCode) -> Option<InputUpdate> {
-        if !matches!(code, KeyCode::PageUp | KeyCode::PageDown) {
-            return None;
-        }
-        use crate::ui_view_models::{
-            scope_review::{scope_detail_lines, scope_layout, scope_rows, scope_source_view},
-            study_config::study_config_area,
-        };
-        let viewport = self.viewport();
-        let state = self.scope_review()?;
-        let area = scope_layout(
-            study_config_area(viewport.columns, viewport.rows),
-            scope_rows(state).0.len(),
-        )
-        .detail;
-        let maximum = scope_detail_lines(
-            self,
-            state,
-            &scope_source_view(self, state),
-            area.width as usize,
-        )
-        .len()
-        .saturating_sub(area.height as usize);
-        let current = state.scroll.min(maximum);
-        let page = area.height.max(1) as usize;
-        let offset = if code == KeyCode::PageUp {
-            current.saturating_sub(page)
-        } else {
-            current.saturating_add(page).min(maximum)
-        };
-        self.router.scope_review_mut().as_mut().unwrap().scroll = offset;
-        Some(InputUpdate::handled())
-    }
-
     fn close_scope_subview(&mut self) {
         let state = self.router.scope_review_mut().as_mut().unwrap();
         if cancel_scope_editor(state) {
             return;
         }
-        if state.accepting {
-            state.accepting = false;
-            return;
-        }
-        if state.files.take().is_some() {
-            state.scroll = 0;
-            return;
-        }
-        state.open = false;
+        close_scope_navigation(state);
     }
 
     fn scope_form_key(&mut self, key: KeyEvent) -> InputUpdate {
@@ -226,6 +190,18 @@ impl ShellApp {
             KeyCode::Char('r') => return self.refresh_scope_head(),
             KeyCode::Char(']') => return self.turn_scope_file_page(false),
             KeyCode::Char('[') => return self.turn_scope_file_page(true),
+            KeyCode::Tab
+                if self
+                    .scope_review()
+                    .is_some_and(|state| state.review.is_some()) =>
+            {
+                self.router
+                    .scope_review_mut()
+                    .as_mut()
+                    .unwrap()
+                    .detail_reader
+                    .open = true
+            }
             _ => self.move_scope_cursor(code),
         }
         InputUpdate::handled()
@@ -239,6 +215,7 @@ impl ShellApp {
         if before != state.cursor {
             state.files = None;
             state.scroll = 0;
+            state.detail_reader.scroll = 0;
             state.notice = None;
         }
     }
@@ -270,6 +247,23 @@ impl ShellApp {
         insert_scope_paste(state, text);
         true
     }
+}
+
+fn close_scope_navigation(state: &mut ScopeReviewState) {
+    if state.detail_reader.open {
+        state.detail_reader.open = false;
+        return;
+    }
+    if state.accepting {
+        state.accepting = false;
+        return;
+    }
+    if state.files.take().is_some() {
+        state.scroll = 0;
+        state.detail_reader.scroll = 0;
+        return;
+    }
+    state.open = false;
 }
 
 fn insert_scope_paste(state: &mut ScopeReviewState, text: &str) {

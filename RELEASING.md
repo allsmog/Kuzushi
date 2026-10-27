@@ -1,5 +1,24 @@
 # Releasing Kuzushi
 
+## Frozen filename selection for scope proposals
+
+`pack:suggest-scopes` adds optional `fileSelection` with `prefix-v1` and
+`root-balanced-v1` choices. Omission preserves the earlier prefix sample and
+its serialized filename sample. New scope context-study plans explicitly freeze
+`root-balanced-v1`; an explicit legacy choice remains available. Existing plans
+and approvals are not rewritten.
+
+The new policy selects loose root files first, then balances filename examples
+across structural directory groups. It retains the 512-name, 16 KiB filename
+and 64 KiB total-input limits. Counts disclose root names and directory groups
+that did not fit. Selection reuses the saved inventory and adds no model call,
+source read, scan boundary or job. Coverage review still includes omitted names.
+
+The TUI shows the frozen policy and exact option before work approval, and names
+the earlier policy when reading old plans. Tool names, stored artifact versions,
+module maturity and one-request proposal limits remain unchanged. See
+[qualification and limits](docs/assessments/scope-filename-selection-2026-10-26.md).
+
 ## Recorded context in scope review
 
 Generated scope drafts now show their recorded proposal-context revision

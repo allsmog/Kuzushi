@@ -2580,6 +2580,7 @@
     },
     {
       "tool": "pack:suggest-scopes",
+      "filenameSelectionEvidence": "docs/assessments/scope-filename-selection-2026-10-26.md: one declared filename-selection option preserves old prefix inputs and freezes root-first balanced samples only in new plans. Bounds remain 512 names, 16 KiB and 64 KiB overall. Omitted root/directory counts are explicit; no source traversal, model call, accepted scope or additional job is created by sampling. Controlled dispatch and legacy preparation evidence are separate from real-model grouping usefulness.",
       "contextVariantEvidence": "docs/assessments/live-scope-context-variant-2026-10-26.md: one approved changed-priority request on the same owned 602-file fixture produces seven primary scopes covering 601 files and a context-only shared scope. workspace.json remains uncovered and revision 2 stays unaccepted. Exact inactive manually declared architecture is preserved. The durable investigation retains the paid failure and uses two of two calls after an explicit allowance revision. Nineteen cumulative experiment requests, zero remaining allowance, unknown dollars. This context variant does not establish causation, complete coverage or useful grouping on unfamiliar repositories. Final read-only J385 has 18 machine passes, zero failures and four answered agent screen reviews with findings across six sizes and no-color restart. The exact proposal context is displayed separately from future Scan context; no model is called during inspection.",
       "scope": "one budgeted architecture proposal over an authenticated existing inventory; no discovery",
       "executionEvidence": "Two explicitly approved normal OAuth jobs on the same owned nine-file monorepo, GPT-6 Luna low: first rejected an undeclared dependency; corrected instructions then produced a valid unaccepted revision with three primary boundaries, shared context and two uncovered discovery members. Each job used one request and one attempt. Controlled tests cover scope-id dependencies and context-only membership. October 24: canonical systemContext is supplied from the exact immutable selected revision under the existing 8 KiB projection. Final J88 has 49 machine passes, zero failures and eight pending operator judgments; one intercepted actual adapter request preserves overview quotes/newlines, one settled reservation, unchanged active context and a separately unstarted three-job scan. The 40-column input receipt takes two PageDown presses instead of 35. See docs/assessments/scope-context-overview-2026-10-24.md. This is handoff and workflow evidence, not live inference or useful large-monorepo grouping evidence. October 26: one separately approved normal OAuth request on the owned 602-file, six-component fixture was rejected for an undeclared contracts dependency. One settled reservation and consumed attempt remain; no result revision, acceptance or scan was published. See docs/assessments/live-monorepo-scope-failure-2026-10-26.md. This is a failed larger-fixture result, not grouping usefulness evidence.",
@@ -2611,6 +2612,7 @@
         "proposalRef",
         "threatModelRef",
         "priorities",
+        "fileSelection",
         "model",
         "thinkingLevel",
         "maxOutputTokens",
@@ -2624,7 +2626,7 @@
       "evidenceSourceCommit": "f8649511f74695f3f4dbd75197a2148f538047e7",
       "evidenceSourceState": "Uncommitted main. Existing maturity unchanged. Live producing native fingerprint retained separately.",
       "phaseResultDeclared": false,
-      "descriptorSha256": "sha256:049c9b144ebe29a6a606f71d890c92cc648f32bef292d7009893c9112f0b84d3",
+      "descriptorSha256": "sha256:f6f7d03c93c59ddf4e5822944c7fc5cc3ca6c4428acea7b5e71e16aed162086b",
       "scopeCorrectionEvidence": "docs/assessments/rejected-scope-correction-2026-10-26.md: bounded local retention, exact failed-run recovery and a separate unaccepted manual revision. Final J382 has 41 machine passes, zero failures and seven answered agent reviews with findings; 248 distinct focused Rust checks, workspace build, Clippy and risk pass. Explicit later boundary acceptance and scan planning retain the original spent investigation without new work. Missing or foreign accounting refuses. One intercepted response, no new live request. Larger model usefulness and full UX remain open."
     },
     {
