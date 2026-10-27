@@ -4,11 +4,9 @@
 
 **Do not open a public GitHub issue for security vulnerabilities.**
 
-Kuzushi does not currently publish a verified private reporting channel. Do
-not send vulnerability details through issues, discussions, or an unverified
-email address. Repository owners must configure and test a private reporting
-channel before making the repository public; this policy will name that
-channel once it exists.
+Use [GitHub private vulnerability reporting](https://github.com/allsmog/Kuzushi/security/advisories/new)
+to send a report to the maintainers. Private reporting is enabled for this
+repository. Keep vulnerability details out of public issues and discussions.
 
 Include:
 - Description of the vulnerability
@@ -24,7 +22,6 @@ This policy covers the Kuzushi codebase and its official npm package. It does no
 
 ## Supported Versions
 
-| Version | Supported |
-| ------- | --------- |
 No supported public version is currently declared. `0.24.0-alpha.14` is a
-release candidate until its release and public-package verification finish.
+source release candidate until its hosted release and public-package
+verification finish.
