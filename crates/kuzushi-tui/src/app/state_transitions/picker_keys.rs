@@ -1047,17 +1047,15 @@ impl ShellApp {
             return;
         };
         let tasks = self.engagement.planning_picker().tasks().to_vec();
+        // Bind the cycled row before the toggle so the disposition below reads
+        // the same row the cursor named, without a second lookup.
+        let Some(cycled) = tasks.iter().find(|row| row.id == task).cloned() else {
+            return;
+        };
         let picker = self.engagement.planning_picker_mut();
         let (selected, rebuild) = picker.outcome_sets_mut();
         let outcome = cycle_planning_row(task, &tasks, selected, rebuild);
-        let disposition = row_disposition(
-            tasks
-                .iter()
-                .find(|row| row.id == task)
-                .expect("current row"),
-            picker.selected(),
-            picker.rebuild(),
-        );
+        let disposition = row_disposition(&cycled, picker.selected(), picker.rebuild());
         self.log_cycle_outcome(&outcome, disposition);
     }
 

@@ -31,10 +31,14 @@ struct RunFocusCompletion {
 }
 
 impl RunFocusCompletion {
-    fn should_restore(&self, current_view: ShellView) -> bool {
-        self.origin.is_some_and(|origin| origin.auto_return)
-            && !self.backgrounded
-            && current_view == ShellView::Activity
+    /// The origin to restore, or `None` when this completion must not steal
+    /// focus. Returning the origin keeps the decision and the value it implies
+    /// in one place.
+    fn restorable_origin(&self, current_view: ShellView) -> Option<RunFocusOrigin> {
+        if self.backgrounded || current_view != ShellView::Activity {
+            return None;
+        }
+        self.origin.filter(|origin| origin.auto_return)
     }
 }
 
@@ -177,7 +181,9 @@ impl ShellApp {
         let Some(read) = kuzushi_core::run_lifecycle::read_run_items(&target, &run_id)? else {
             return Ok(());
         };
-        let session = self.activity_mut().expect("activity checked above");
+        let Some(session) = self.activity_mut() else {
+            return Ok(());
+        };
         for item in read.items.into_iter().filter(|item| item.seq > applied_seq) {
             session.apply_run_item(item)?;
         }
@@ -277,10 +283,9 @@ impl ShellApp {
     }
 
     fn restore_run_focus_origin(&mut self, completion: &RunFocusCompletion) -> bool {
-        if !completion.should_restore(self.shell_view()) {
+        let Some(origin) = completion.restorable_origin(self.shell_view()) else {
             return false;
-        }
-        let origin = completion.origin.expect("restore decision requires origin");
+        };
         self.set_shell_view(origin.view);
         self.set_input_mode(self.completed_reader_input_mode(origin.input_mode));
         true
@@ -423,7 +428,9 @@ impl ShellApp {
             return Ok(());
         }
         let items = durable_phase_receipt_prefix(target, receipt, applied_seq)?;
-        let session = self.activity_mut().expect("activity checked above");
+        let Some(session) = self.activity_mut() else {
+            return Ok(());
+        };
         session.observe_committed_range(CommittedRange {
             first_seq: applied_seq.saturating_add(1),
             through_seq: receipt.seq,

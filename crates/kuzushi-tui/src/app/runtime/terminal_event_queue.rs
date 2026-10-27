@@ -179,8 +179,9 @@ fn require_waitable(state: &QueueState, deadline: Instant) -> Result<(), RecvTim
 
 impl QueueState {
     fn insert(&mut self, event: QueuedEvent) -> Result<(), QueuedEvent> {
-        if let Some(index) = coalescing_index(&self.events, &event) {
-            let prior = self.events.remove(index).expect("existing coalescing slot");
+        if let Some(prior) =
+            coalescing_index(&self.events, &event).and_then(|index| self.events.remove(index))
+        {
             self.stats.bytes -= event_bytes(&prior);
             self.stats.coalesced = self.stats.coalesced.saturating_add(1);
         }

@@ -44,26 +44,27 @@ fn with_tool_completion(
     state
 }
 
-fn named_tool_terminal(outcome: ToolRunRecordOutcome) -> NamedToolTerminal {
+/// `None` for the four result-bearing outcomes: `record_tool_run_outcome`
+/// matches those by name before its catch-all arm reaches here, and naming one
+/// of them as a terminal row would mislabel a run that carries a result.
+fn named_tool_terminal(outcome: ToolRunRecordOutcome) -> Option<NamedToolTerminal> {
     match outcome {
-        ToolRunRecordOutcome::Canceled { reason } => canceled_terminal(reason, None),
-        ToolRunRecordOutcome::Interrupted { reason } => interrupted_terminal(reason, None),
-        ToolRunRecordOutcome::Refused { reason } => refused_terminal(reason, None),
+        ToolRunRecordOutcome::Canceled { reason } => Some(canceled_terminal(reason, None)),
+        ToolRunRecordOutcome::Interrupted { reason } => Some(interrupted_terminal(reason, None)),
+        ToolRunRecordOutcome::Refused { reason } => Some(refused_terminal(reason, None)),
         ToolRunRecordOutcome::ObservedCanceled { reason, completion } => {
-            canceled_terminal(reason, Some(completion))
+            Some(canceled_terminal(reason, Some(completion)))
         }
         ToolRunRecordOutcome::ObservedInterrupted { reason, completion } => {
-            interrupted_terminal(reason, Some(completion))
+            Some(interrupted_terminal(reason, Some(completion)))
         }
         ToolRunRecordOutcome::ObservedRefused { reason, completion } => {
-            refused_terminal(reason, Some(completion))
+            Some(refused_terminal(reason, Some(completion)))
         }
         ToolRunRecordOutcome::Complete { .. }
         | ToolRunRecordOutcome::Failed { .. }
         | ToolRunRecordOutcome::ObservedComplete { .. }
-        | ToolRunRecordOutcome::ObservedFailed { .. } => {
-            unreachable!("result-bearing outcome handled before terminal persistence")
-        }
+        | ToolRunRecordOutcome::ObservedFailed { .. } => None,
     }
 }
 
@@ -807,7 +808,11 @@ impl ShellApp {
         tool_name: &str,
         outcome: ToolRunRecordOutcome,
     ) -> anyhow::Result<()> {
-        let terminal = named_tool_terminal(outcome);
+        let Some(terminal) = named_tool_terminal(outcome) else {
+            anyhow::bail!(
+                "result-bearing tool outcome reached terminal persistence for {tool_name}"
+            );
+        };
         let persistence = record_tool_run_terminal(
             target,
             run_id,
@@ -1123,6 +1128,37 @@ mod tests {
         load_run_summary, try_record_tool_run_canceled,
         try_record_tool_run_started_with_reproducibility, ToolRunRecord,
     };
+
+    /// A result-bearing outcome has its own recorder; naming it as a terminal
+    /// row would label a run that carries a result as canceled, interrupted or
+    /// refused.
+    #[test]
+    fn only_terminal_outcomes_name_a_terminal_row() {
+        let reason = || "operator cancel".to_string();
+        assert_eq!(
+            named_tool_terminal(ToolRunRecordOutcome::Canceled { reason: reason() })
+                .map(|terminal| terminal.label),
+            Some("canceled")
+        );
+        assert_eq!(
+            named_tool_terminal(ToolRunRecordOutcome::Interrupted { reason: reason() })
+                .map(|terminal| terminal.label),
+            Some("interrupted")
+        );
+        assert_eq!(
+            named_tool_terminal(ToolRunRecordOutcome::Refused { reason: reason() })
+                .map(|terminal| terminal.label),
+            Some("blocked")
+        );
+        assert!(named_tool_terminal(ToolRunRecordOutcome::Complete {
+            result: serde_json::json!({"ok": true})
+        })
+        .is_none());
+        assert!(named_tool_terminal(ToolRunRecordOutcome::Failed {
+            error: "boom".to_string()
+        })
+        .is_none());
+    }
 
     fn app_with_tool_session(tool_name: &str, run_id: &str) -> ShellApp {
         let mut app = ShellApp::new(V2Config::default(), None);
