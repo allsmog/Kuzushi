@@ -17,6 +17,9 @@ impl ContextStudyReceipt {
     }
 
     pub fn rejected_output(&self, root: &Path) -> Result<Option<RejectedContextOutput>> {
+        if self.generation_tool == generation::SCOPE_TOOL {
+            return self.scope_diagnostic(root);
+        }
         let Some(run) = self.diagnostic_run(root)? else {
             return Ok(None);
         };
@@ -32,7 +35,7 @@ impl ContextStudyReceipt {
         }))
     }
 
-    fn diagnostic_run(&self, root: &Path) -> Result<Option<String>> {
+    pub(super) fn diagnostic_run(&self, root: &Path) -> Result<Option<String>> {
         if !self.retains_rejected_output() {
             return Ok(None);
         }
@@ -43,14 +46,19 @@ impl ContextStudyReceipt {
             .find(|job| job.job_id == JOB)
             .context("context job missing")?;
         anyhow::ensure!(
-            job.tool.as_deref() == Some(TOOL),
+            job.tool.as_deref() == Some(self.generation_tool.as_str()),
             "context diagnostic job tool changed"
         );
         let Some(run) = &job.run_id else {
             return Ok(None);
         };
         let artifacts = crate::run_artifacts::load_run_artifacts(root, run)?;
-        if !artifacts.iter().any(|artifact| artifact.path == LEAF) {
+        let leaf = if self.generation_tool == generation::SCOPE_TOOL {
+            "rejected-scope-output.json"
+        } else {
+            LEAF
+        };
+        if !artifacts.iter().any(|artifact| artifact.path == leaf) {
             return Ok(None);
         }
         self.authenticate_diagnostic_input(root, run)?;
@@ -58,7 +66,8 @@ impl ContextStudyReceipt {
     }
 
     fn retains_rejected_output(&self) -> bool {
-        self.generation_tool == TOOL && self.input["saveRejectedOutput"] == true
+        matches!(self.generation_tool.as_str(), TOOL | generation::SCOPE_TOOL)
+            && self.input["saveRejectedOutput"] == true
     }
 
     fn authenticate_diagnostic_input(&self, root: &Path, run: &str) -> Result<()> {

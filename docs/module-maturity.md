@@ -362,6 +362,11 @@ membership is refused. Readiness depends on a lockfile, executable and advisory
 database; published-advisory matches remain signals requiring owner review.
 The [Cargo audit assessment](assessments/cargo-audit-module-audit-2026-10-11.md)
 records shared execution, failure states, finite approval and native consumers.
+The [child-source follow-up](assessments/cargo-child-source-2026-10-26.md)
+qualifies parent snapshot ownership, literal native paths and retained package
+declaration locations through installed offline execution and J384. Missing or
+ambiguous declarations stay unlocated; scoped work remains partial when its
+source cannot be authenticated. Historical anchors and decisions are preserved.
 Database freshness/identity, full configuration and interface coverage, large
 cases and complete investigation acceptance remain open. Its context DAG edge
 does not execute context preparation.

@@ -49,6 +49,10 @@ pub struct InvestigationReportReceipt {
 #[serde(rename_all = "camelCase")]
 pub struct InvestigationAttemptReceipt {
     pub run_id: String,
+    /// Recorded execution status, independent of the optional engine receipt.
+    /// Missing or unreadable metadata remains absent; reports never repair it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_status: Option<String>,
     pub source_identity: TargetContentIdentity,
     pub scan: Option<PhaseStageReceipt>,
 }
@@ -256,6 +260,9 @@ fn validate_approved_source(
 fn attempt_receipt(root: &Path, run: &str) -> Result<InvestigationAttemptReceipt> {
     Ok(InvestigationAttemptReceipt {
         run_id: run.into(),
+        run_status: crate::run_artifacts::load_run_summary_without_repair(root, run)
+            .ok()
+            .map(|summary| summary.status),
         source_identity: referenced_run_content_identity(root, &[run.to_owned()]),
         scan: load_scan_stage_data(root, run)?,
     })

@@ -142,7 +142,7 @@ fn parse_ledger_row(line: &str) -> Option<LedgerRow> {
     let value: serde_json::Value = serde_json::from_str(line).ok()?;
     let object = value.as_object()?;
     let row = LedgerRow {
-        file: first_string(object, &["file", "path", "file_path", "_file"]),
+        file: first_source_path(object),
         line: first_u32(object, &["line", "start_line", "_line"]),
         title: first_string(object, &["title", "message", "summary"]),
         severity: first_string(object, &["severity", "tier"]),
@@ -156,6 +156,15 @@ fn parse_ledger_row(line: &str) -> Option<LedgerRow> {
         return None;
     }
     Some(row)
+}
+
+fn first_source_path(object: &serde_json::Map<String, serde_json::Value>) -> String {
+    ["file", "path", "file_path", "_file"]
+        .iter()
+        .filter_map(|key| object.get(*key).and_then(serde_json::Value::as_str))
+        .find(|path| !path.is_empty())
+        .unwrap_or_default()
+        .to_string()
 }
 
 fn first_string(object: &serde_json::Map<String, serde_json::Value>, keys: &[&str]) -> String {
@@ -292,7 +301,7 @@ fn grounding_annotation(status: &GroundingStatus) -> Option<String> {
 fn citation_evidence(row: &LedgerRow, cited_line: String) -> FindingEvidence {
     FindingEvidence {
         kind: "code".to_string(),
-        file_path: row.file.trim().to_string(),
+        file_path: row.file.clone(),
         line: row.line,
         snippet: cited_line,
         rationale: "Import grounding: cited line read from the target tree".to_string(),
@@ -361,14 +370,14 @@ fn ledger_severity(raw: &str) -> Severity {
 fn ledger_evidence(row: &LedgerRow) -> FindingEvidence {
     FindingEvidence {
         kind: "reasoning".to_string(),
-        file_path: row.file.trim().to_string(),
+        file_path: row.file.clone(),
         line: row.line,
         // The evidence snippet feeds the identity key (it wins over the
         // message text locator). Ledger rows are point facts: qualify the
         // snippet with the location so same-titled sinks at different
         // lines keep distinct identities, while re-imports of the same
         // row still corroborate.
-        snippet: format!("{} @ {}:{}", row.title.trim(), row.file.trim(), row.line),
+        snippet: format!("{} @ {}:{}", row.title.trim(), row.file, row.line),
         rationale: ledger_rationale(row),
         confidence: ledger_confidence(&row.verdict),
         request_blob: None,
@@ -404,6 +413,58 @@ fn ledger_confidence(verdict: &str) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_aliases_preserve_literal_path_text_and_priority() {
+        for key in ["file", "path", "file_path", "_file"] {
+            for path in [
+                " leading.txt",
+                "trailing.txt ",
+                "Case.txt",
+                "a\\b.txt",
+                "./file",
+            ] {
+                let mut value = serde_json::json!({"title":" title "});
+                value[key] = serde_json::json!(path);
+                let row = parse_ledger_row(&value.to_string()).unwrap();
+                assert_eq!(row.file, path);
+                assert_eq!(row.title, "title");
+            }
+        }
+        let row =
+            parse_ledger_row(r#"{"file":"","path":" kept ","_file":"ignored","title":"title"}"#)
+                .unwrap();
+        assert_eq!(row.file, " kept ");
+    }
+
+    #[test]
+    fn imported_paths_and_evidence_remain_distinct_through_replay() {
+        let (temp, workspace) = fixture_workspace();
+        let paths = [" greeting.txt", "greeting.txt", "greeting.txt "];
+        let mut body = String::new();
+        for path in paths {
+            std::fs::write(temp.path().join(path), "Owned inert greeting.\n").unwrap();
+            body.push_str(
+                &serde_json::json!({"file":path,"line":1,"class":"owned","title":"Owned metadata"})
+                    .to_string(),
+            );
+            body.push('\n');
+        }
+        let ledger = write_ledger(temp.path(), &body);
+        import_ledger_jsonl(&workspace, &ledger, "owned-literal").unwrap();
+        import_ledger_jsonl(&workspace, &ledger, "owned-literal").unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let findings = store.list_all_findings().unwrap();
+        assert_eq!(findings.len(), 3);
+        for path in paths {
+            let finding = findings.iter().find(|f| f.file_path == path).unwrap();
+            assert!(finding.evidence.iter().all(|e| e.file_path == path));
+            assert!(finding
+                .evidence
+                .iter()
+                .any(|e| e.snippet.contains(&format!(" @ {path}:1"))));
+        }
+    }
 
     fn fixture_workspace() -> (tempfile::TempDir, WorkspaceTarget) {
         let temp = tempfile::tempdir().unwrap();

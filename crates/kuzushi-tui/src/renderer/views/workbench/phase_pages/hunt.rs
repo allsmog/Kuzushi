@@ -259,7 +259,7 @@ fn role_glyph(role: &str) -> &'static str {
 
 /// The scan-complete recommendation moment: the recommender proposes
 /// follow-up passes with their evidence, and Enter merely drafts the command
-/// — Kuzushi recommends, the operator authorizes.
+/// Kuzushi recommends; the operator authorizes.
 fn render_next_plan_drawer(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -269,7 +269,7 @@ fn render_next_plan_drawer(
     render_lines_pane(
         frame,
         area,
-        "NEXT INVESTIGATION PLAN · Enter run plan · Tab skip",
+        "NEXT INVESTIGATION PLAN · Enter draft next · Tab next pane",
         next_plan_lines(&model.next_plan, area.width.saturating_sub(2) as usize),
         PhaseSurfaceId::ReviewNextPlan,
         state,
@@ -297,7 +297,7 @@ fn next_plan_lines(next_plan: &NextScansState, width: usize) -> Vec<Line<'static
         Line::styled(
             fit(
                 &format!(
-                    "▸ {} {} — {} · {}",
+                    "▸ {} {} · {} · {}",
                     row.phase, row.scope, row.reason, row.evidence
                 ),
                 width,
@@ -307,7 +307,7 @@ fn next_plan_lines(next_plan: &NextScansState, width: usize) -> Vec<Line<'static
     }));
     lines.push(Line::styled(
         fit(
-            "Enter drafts `next` into the prompt — nothing runs until you submit it",
+            "Enter drafts `next`. Submit it to open the planner; approve work separately.",
             width,
         ),
         theme::subtle(),
@@ -587,8 +587,8 @@ mod tests {
         let rendered = text(&next_plan_lines(&ready, 100));
 
         assert!(rendered.contains("recommends 1 follow-up pass(es)"));
-        assert!(rendered.contains("▸ scan root — changed · 14 files changed since a1b2c3d4"));
-        assert!(rendered.contains("nothing runs until you submit"));
+        assert!(rendered.contains("▸ scan root · changed · 14 files changed since a1b2c3d4"));
+        assert!(rendered.contains("Submit it to open the planner; approve work separately."));
     }
 
     #[test]

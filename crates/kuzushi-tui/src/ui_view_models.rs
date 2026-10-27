@@ -59,7 +59,7 @@ mod catalog;
 pub(crate) mod study_resource_picker;
 pub(crate) use campaign_job::{
     campaign_job_attempt_cell, campaign_job_attempt_summary, campaign_job_cost_label,
-    campaign_job_detail_lines, campaign_job_scope_label,
+    campaign_job_detail_lines, campaign_job_scope_label, campaign_job_state_label,
 };
 mod chrome_layout;
 mod command_palette;
@@ -219,6 +219,8 @@ pub(crate) use finding_summary::{
     status_footer_findings_summary, status_footer_findings_summary_from_counts,
     status_footer_findings_summary_with_total, FindingsNarrowing, SeverityCounts,
 };
+#[cfg(test)]
+pub(crate) use findings::finding_identity_label;
 #[cfg(test)]
 pub(crate) use findings::projected_visible_finding_pairs;
 pub(crate) use findings::{

@@ -130,3 +130,38 @@ fn scope_budget_and_priorities_controls_render_at_all_sizes_without_creating_wor
     assert!(text.contains("No tools, recursive subdivision, output repair or scan jobs"));
     assert!(!root.path().join(".kuzushi/v3/campaigns").exists());
 }
+
+#[test]
+fn failed_scope_controls_offer_inspection_instead_of_plan_approval_at_all_sizes() {
+    let (root, mut app) = model_fixture();
+    open_ai_action(&mut app);
+    press(&mut app, KeyCode::F(2));
+    app.router
+        .campaign_mut()
+        .batch_scan_config
+        .as_mut()
+        .unwrap()
+        .context_generation
+        .as_mut()
+        .unwrap()
+        .result_error = Some("Scope proposal rejected: undeclared contracts dependency".into());
+    for (width, height) in [(160, 48), (120, 36), (96, 89), (80, 24), (60, 20), (40, 12)] {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| crate::renderer::render_app(frame, &app))
+            .unwrap();
+        let text = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(
+            text.contains("Enter inspect · n new · Esc back"),
+            "{width}x{height}: {text}"
+        );
+        assert!(!text.contains("Enter next"), "{width}x{height}: {text}");
+    }
+    assert!(!root.path().join(".kuzushi/v3/campaigns").exists());
+}

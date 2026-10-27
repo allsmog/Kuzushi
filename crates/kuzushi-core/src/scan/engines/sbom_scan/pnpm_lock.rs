@@ -7,6 +7,8 @@ use std::path::Path;
 
 type Mapping = serde_json::Map<String, Value>;
 
+mod snapshots;
+
 pub(super) use super::dependency_graph::is_pnpm_lock;
 
 const IMPORTER_DEPENDENCY_BLOCKS: &[&str] =
@@ -15,24 +17,30 @@ const PACKAGE_DEPENDENCY_BLOCKS: &[&str] =
     &["dependencies", "optionalDependencies", "peerDependencies"];
 
 pub(super) fn pnpm_lock_edges(target: &SbomInputs, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
-    let text = fs::read_to_string(target, path)
-        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
-    let value = crate::yaml::parse_value(&text).context("sbom-scan: parse pnpm-lock.yaml")?;
+    let value = read_lock(target, path)?;
     let source = relative_display(target, path);
     let mut edges = importer_edges(&value, &source);
     edges.extend(package_edges(&value, &source));
+    edges.extend(snapshots::edges(&value, &source));
     Ok(edges)
 }
 
 pub(super) fn pnpm_lock_components(target: &SbomInputs, path: &Path) -> Result<Vec<SbomComponent>> {
-    let text = fs::read_to_string(target, path)
-        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
-    let value = crate::yaml::parse_value(&text).context("sbom-scan: parse pnpm-lock.yaml")?;
+    let value = read_lock(target, path)?;
     let source = relative_display(target, path);
     let mut components = importer_components(target, path, &value, &source);
     components.extend(package_components(target, path, &value, &source));
     components.extend(package_dependency_components(target, path, &value, &source));
     Ok(components)
+}
+
+fn read_lock(target: &SbomInputs, path: &Path) -> Result<Value> {
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
+    let value = crate::yaml::parse_value(&text).context("sbom-scan: parse pnpm-lock.yaml")?;
+    snapshots::validate(&value)
+        .with_context(|| format!("sbom-scan: invalid {}", relative_display(target, path)))?;
+    Ok(value)
 }
 
 fn importer_edges(value: &Value, source: &str) -> Vec<SbomDependencyEdge> {
@@ -74,7 +82,9 @@ fn package_edges(value: &Value, source: &str) -> Vec<SbomDependencyEdge> {
     mapping_child(value, "packages")
         .into_iter()
         .flat_map(|packages| packages.iter())
-        .flat_map(|(key, package)| package_dependency_edges(key, package, source))
+        .flat_map(|(key, package)| {
+            package_dependency_edges(key, package, source, PACKAGE_DEPENDENCY_BLOCKS)
+        })
         .collect()
 }
 
@@ -106,11 +116,16 @@ fn package_dependency_components(
         .collect()
 }
 
-fn package_dependency_edges(key: &str, package: &Value, source: &str) -> Vec<SbomDependencyEdge> {
+fn package_dependency_edges(
+    key: &str,
+    package: &Value,
+    source: &str,
+    fields: &[&str],
+) -> Vec<SbomDependencyEdge> {
     let Some(from) = package_key(key).map(pnpm_package_name) else {
         return Vec::new();
     };
-    PACKAGE_DEPENDENCY_BLOCKS
+    fields
         .iter()
         .filter_map(|block| mapping_child(package, block))
         .flat_map(|dependencies| dependencies.keys())
@@ -169,7 +184,7 @@ fn package_key(value: &str) -> Option<&str> {
 }
 
 fn pnpm_package_name(key: &str) -> String {
-    let key = key.trim_start_matches('/');
+    let key = package_id(key);
     if key.starts_with('@') {
         return scoped_package_name(key);
     }
@@ -177,7 +192,7 @@ fn pnpm_package_name(key: &str) -> String {
 }
 
 fn pnpm_component_from_key(key: &str) -> Option<LockedPackage> {
-    let key = key.trim_start_matches('/');
+    let key = package_id(key);
     let at = key.rfind('@')?;
     let name = key.get(..at)?.to_string();
     let version = key.get(at + 1..).and_then(clean_version)?;
@@ -194,8 +209,13 @@ fn clean_version(version: &str) -> Option<String> {
 }
 
 fn scoped_package_name(key: &str) -> String {
-    let at = key.rfind('@').unwrap_or(key.len());
+    let at = key.rfind('@').filter(|at| *at > 0).unwrap_or(key.len());
     key.get(..at).unwrap_or(key).to_string()
+}
+
+fn package_id(key: &str) -> &str {
+    let key = key.trim_start_matches('/');
+    key.split('(').next().unwrap_or(key)
 }
 
 struct LockedPackage {

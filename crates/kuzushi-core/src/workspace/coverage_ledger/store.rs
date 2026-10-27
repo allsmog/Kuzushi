@@ -6,6 +6,7 @@ use rusqlite::Connection;
 use std::path::Path;
 
 const BASELINE_READ_LIMIT: usize = 10_000;
+const BASELINE_TEXT_BYTES: usize = 8 * 1024 * 1024;
 
 /// One receipt-backed coverage fact: `scope_id` was covered by `phase` in
 /// `mode` at `revision` by run `run_id`.
@@ -69,8 +70,8 @@ impl CoverageLedger {
         Ok(())
     }
 
-    /// Latest baseline per (scope, phase), across modes: a `sweep-skip` row
-    /// advances the same coverage fact a real scan would.
+    /// Latest stored baseline per (scope, phase), across modes. Equal timestamps
+    /// use storage order; they do not establish which scan completed first.
     pub fn latest_baselines(&self) -> Result<Vec<BaselineRow>> {
         self.latest_baselines_with_cancellation(None)
     }
@@ -80,8 +81,16 @@ impl CoverageLedger {
         cancellation: Option<&crate::ScanCancellation>,
     ) -> Result<Vec<BaselineRow>> {
         self.query_baselines(
-            "SELECT scope_id, phase, mode, run_id, revision_sha, branch, dirty, MAX(ts)
-             FROM scan_baselines GROUP BY scope_id, phase
+            "WITH latest AS (
+                 SELECT scope_id, phase, MAX(ts) AS ts
+                 FROM scan_baselines GROUP BY scope_id, phase
+             ), selected AS (
+                 SELECT MAX(b.rowid) AS row_id FROM scan_baselines b
+                 JOIN latest USING (scope_id, phase, ts)
+                 GROUP BY b.scope_id, b.phase
+             )
+             SELECT scope_id, phase, mode, run_id, revision_sha, branch, dirty, ts
+             FROM scan_baselines WHERE rowid IN (SELECT row_id FROM selected)
              ORDER BY scope_id, phase",
             cancellation,
         )
@@ -90,7 +99,7 @@ impl CoverageLedger {
     pub fn all_baselines(&self) -> Result<Vec<BaselineRow>> {
         self.query_baselines(
             "SELECT scope_id, phase, mode, run_id, revision_sha, branch, dirty, ts
-             FROM scan_baselines ORDER BY scope_id, phase, ts",
+             FROM scan_baselines ORDER BY scope_id, phase, ts, rowid",
             None,
         )
     }
@@ -105,18 +114,36 @@ impl CoverageLedger {
 
     fn read_baselines(&self, sql: &str) -> Result<Vec<BaselineRow>> {
         let mut statement = self.conn.prepare(sql)?;
-        let raw_rows = statement
-            .query_map([], RawBaseline::from_row)?
-            .take(BASELINE_READ_LIMIT + 1)
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .context("Could not read scan baselines")?;
-        anyhow::ensure!(raw_rows.len() <= BASELINE_READ_LIMIT,
-            "coverage history exceeds the {BASELINE_READ_LIMIT}-row read limit; archive history before requesting recommendations");
+        let mut rows = statement.query([])?;
+        let mut raw_rows = Vec::new();
+        let mut text_bytes = 0usize;
+        while let Some(row) = rows.next().context("Could not read scan baselines")? {
+            anyhow::ensure!(raw_rows.len() < BASELINE_READ_LIMIT,
+                "coverage history exceeds the {BASELINE_READ_LIMIT}-row read limit; archive history before requesting recommendations");
+            text_bytes = text_bytes.saturating_add(baseline_text_bytes(row)?);
+            anyhow::ensure!(text_bytes <= BASELINE_TEXT_BYTES,
+                "coverage history exceeds the {BASELINE_TEXT_BYTES}-byte read limit; archive oversized baseline metadata before requesting history advice");
+            raw_rows.push(RawBaseline::from_row(row)?);
+        }
         raw_rows
             .into_iter()
             .map(RawBaseline::into_baseline)
             .collect()
     }
+}
+
+fn baseline_text_bytes(row: &rusqlite::Row<'_>) -> Result<usize> {
+    let mut bytes = 0usize;
+    // The first six projected columns contain all retained text, including
+    // optional branch metadata. Inspect borrowed bytes before allocating Strings.
+    for index in 0..6 {
+        if let rusqlite::types::ValueRef::Text(value) | rusqlite::types::ValueRef::Blob(value) =
+            row.get_ref(index)?
+        {
+            bytes = bytes.saturating_add(value.len());
+        }
+    }
+    Ok(bytes)
 }
 
 struct RawBaseline {

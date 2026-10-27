@@ -90,6 +90,18 @@ impl ScanEngine for DepHygieneScanner {
         "dep-hygiene"
     }
 
+    fn rebind_scoped_finding(&self, finding: &mut Finding, file_path: String) {
+        finding.file_path = file_path;
+        if let Some(locator) = finding.symbol_locator.as_deref() {
+            finding.fingerprint = crate::identity::discriminated_fingerprint_for_tool(
+                &finding.tool,
+                &finding.rule_id,
+                &finding.file_path,
+                locator,
+            );
+        }
+    }
+
     fn scan(&self, target: &Path, cancellation: &ScanCancellation) -> Result<Vec<Finding>> {
         let inspection = inspect_dependency_hygiene(target, cancellation)?;
         inspection.ensure_complete()?;

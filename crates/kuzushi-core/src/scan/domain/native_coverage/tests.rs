@@ -4,6 +4,7 @@ use super::*;
 fn partial_coverage_is_engine_specific_and_retains_all_scopes_and_gaps() {
     let coverage = NativeScanCoverage {
         schema_version: 2,
+        source_binding: None,
         engines: vec![
             NativeEngineCoverage {
                 engine: "partial".into(),
@@ -52,7 +53,7 @@ fn gap_preview_is_bounded_without_losing_the_original_message() {
     assert_eq!(bounded_gap(&error).chars().count(), 241);
     assert!(bounded_gap(&error).ends_with('…'));
     assert_eq!(bounded_gap("short\nmore details"), "short…");
-    assert_eq!(NativeScanCoverage::default().schema_version, 2);
+    assert_eq!(NativeScanCoverage::default().schema_version, 3);
     assert!(!NativeScanCoverage::default().has_gaps());
 }
 
@@ -94,4 +95,45 @@ fn an_unstarted_scope_is_visible_even_without_a_scanner_error() {
     let detail = coverage.engine_detail("semgrep").unwrap();
     assert!(detail.contains("1 scope job(s) (c)"));
     assert!(detail.contains("No automatic retry"));
+}
+
+#[test]
+fn source_retention_limit_is_distinct_from_scanner_coverage_and_survives_round_trip() {
+    let coverage = NativeScanCoverage {
+        engines: vec![NativeEngineCoverage {
+            engine: "owned".into(),
+            scope: None,
+            findings_count: 1,
+            scan_errors: Vec::new(),
+            disposition: NativeEngineDisposition::Complete,
+        }],
+        source_binding: Some(NativeSourceBindingReceipt {
+            snapshot_hash: "owned-snapshot".into(),
+            tree_hash: "owned-tree".into(),
+            authenticated: false,
+            captured_files: 0,
+            captured_bytes: 0,
+            max_capture_bytes: 64,
+            limitation: Some("Source capture limit exceeded".into()),
+        }),
+        ..Default::default()
+    };
+    assert!(coverage.has_gaps());
+    assert!(coverage.engine_has_gaps("owned"));
+    assert!(!coverage.engine_has_gaps("unselected"));
+    let detail = coverage.engine_detail("owned").unwrap();
+    assert!(detail.contains("source binding unavailable"));
+    assert!(!detail.contains("unread"));
+    assert!(coverage.engines[0].scan_errors.is_empty());
+    assert!(coverage
+        .require_source_binding()
+        .unwrap_err()
+        .to_string()
+        .contains("Raw observations retained"));
+    let saved = serde_json::to_value(&coverage).unwrap();
+    assert_eq!(saved["schemaVersion"], 3);
+    assert_eq!(
+        serde_json::from_value::<NativeScanCoverage>(saved).unwrap(),
+        coverage
+    );
 }

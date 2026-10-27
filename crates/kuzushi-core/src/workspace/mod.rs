@@ -12,6 +12,9 @@ pub mod attack_surface;
 pub mod coverage_ledger;
 pub mod diff_scope;
 mod domain;
+pub(crate) use domain::RejectedScopeCandidate;
+pub use domain::MAX_REJECTED_SCOPE_BYTES;
+pub use domain::{RejectedScopeRef, ScanScopeCorrection};
 mod git_history_mining;
 mod git_metadata;
 mod infrastructure;
@@ -117,6 +120,7 @@ pub(crate) use application::{
     scan_scope_proposal_files_cancellable,
 };
 
+pub(crate) use application::correct_rejected_scan_scope;
 pub use application::resolve_accepted_scan_scope_selection;
 pub(crate) use application::{suggest_scan_scope_proposal, validate_scan_scope_suggestion_input};
 pub use domain::{AcceptedScanScopeSelection, ScanScopeRef};

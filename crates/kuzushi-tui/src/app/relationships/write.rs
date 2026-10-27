@@ -20,7 +20,6 @@ impl ShellApp {
             kuzushi_core::workspace::record_finding_relationship_batch_review(
                 &workspace, &config, &request,
             )
-            .map(|_| ())
             .map_err(|e| format!("{e:#}"))
         });
         self.runtime_state.relationship_write = Some(RelationshipWrite {
@@ -54,7 +53,7 @@ impl ShellApp {
             kuzushi_core::workspace::record_finding_relationship_review(
                 &workspace, &config, &request,
             )
-            .map(|_| ())
+            .map(|record| vec![record])
             .map_err(|e| format!("{e:#}"))
         });
         self.runtime_state.relationship_write = Some(RelationshipWrite {
@@ -87,7 +86,7 @@ impl ShellApp {
         &mut self,
         target: PathBuf,
         draft: impl Into<RelationshipWriteDraft>,
-        result: Result<(), String>,
+        result: Result<Vec<FindingRelationship>, String>,
     ) {
         let draft = draft.into();
         if self.target() != Some(target.as_path()) {
@@ -97,8 +96,10 @@ impl ShellApp {
             );
             return;
         }
+        let result = result.and_then(|records| confirmed_records(&draft, records));
         match result {
-            Ok(()) => {
+            Ok(records) => {
+                self.acknowledge_relationship_records(&records);
                 self.router.relationships.note = None;
                 self.router.relationships.bulk = None;
                 if matches!(draft, RelationshipWriteDraft::Batch(_)) {
@@ -118,10 +119,48 @@ impl ShellApp {
         }
     }
 
+    fn acknowledge_relationship_records(&mut self, records: &[FindingRelationship]) {
+        self.pin_current_relationship();
+        let Some(pinned) = &self.router.relationships.pinned else {
+            return;
+        };
+        if let Some(record) = records.iter().find(|record| record.id == pinned.id) {
+            self.pin_relationship(record.clone());
+        }
+    }
+
     fn restore_relationship_write_draft(&mut self, draft: RelationshipWriteDraft) {
         match draft {
             RelationshipWriteDraft::Single(note) => self.router.relationships.note = Some(note),
             RelationshipWriteDraft::Batch(review) => self.router.relationships.bulk = Some(review),
         }
     }
+}
+
+fn confirmed_records(
+    draft: &RelationshipWriteDraft,
+    records: Vec<FindingRelationship>,
+) -> Result<Vec<FindingRelationship>, String> {
+    let expected = expected_records(draft).map_err(|error| error.to_string())?;
+    if records != expected {
+        return Err("Saved relationship receipt does not match the reviewed selection".into());
+    }
+    Ok(records)
+}
+
+fn expected_records(draft: &RelationshipWriteDraft) -> anyhow::Result<Vec<FindingRelationship>> {
+    let (records, state, note) = match draft {
+        RelationshipWriteDraft::Single(note) => (
+            std::slice::from_ref(&note.relationship),
+            note.state,
+            note.field.text(),
+        ),
+        RelationshipWriteDraft::Batch(review) => {
+            (review.records.as_slice(), review.state, review.field.text())
+        }
+    };
+    records
+        .iter()
+        .map(|record| record.review(state, note.trim().into(), record.revision))
+        .collect()
 }

@@ -5,8 +5,97 @@ env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NODE_OPTIONS NO_COLOR KUZUSHI_MODEL 
 env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART seed @TMP_HOME
 require-wrapper-flow:
+env: NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 READY THE MAP RUN | setup-no-color-120x36
+expect-not: shell route
+expect-not: Commands · view:
+expect-not: · Commands · target:
+expect-not: notify:
+expect-not: focus unknown
+resize: 160x48
+live-snap: setup-no-color-160x48
+expect-not: shell route
+expect-not: Commands · view:
+expect-not: · Commands · target:
+expect-not: notify:
+expect-not: focus unknown
+resize: 96x89
+live-snap: setup-no-color-96x89
+expect-not: shell route
+expect-not: Commands · view:
+expect-not: · Commands · target:
+expect-not: notify:
+expect-not: focus unknown
+resize: 80x24
+live-snap: setup-no-color-80x24
+expect-not: shell route
+expect-not: Commands · view:
+expect-not: · Commands · target:
+expect-not: notify:
+expect-not: focus unknown
+resize: 60x20
+live-snap: setup-no-color-60x20
+expect-not: shell route
+expect-not: Commands · view:
+expect-not: · Commands · target:
+expect-not: notify:
+expect-not: focus unknown
+resize: 40x12
+live-snap: setup-no-color-40x12
+expect-not: shell route
+expect-not: Commands · view:
+expect-not: · Commands · target:
+expect-not: notify:
+expect-not: focus unknown
+resize: 120x36
+keys: C-c
+require-exit: 10
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NODE_OPTIONS NO_COLOR KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
 launch: --target @TMP_TARGET
 require-live-snap: 30 READY THE MAP RUN | fresh-setup
+expect-not: shell route
+expect-not: Commands · view:
+expect-not: · Commands · target:
+expect-not: notify:
+expect-not: focus unknown
+resize: 160x48
+live-snap: setup-160x48
+expect-not: shell route
+expect-not: Commands · view:
+expect-not: · Commands · target:
+expect-not: notify:
+expect-not: focus unknown
+resize: 96x89
+live-snap: setup-96x89
+expect-not: shell route
+expect-not: Commands · view:
+expect-not: · Commands · target:
+expect-not: notify:
+expect-not: focus unknown
+resize: 80x24
+live-snap: setup-80x24
+expect-not: shell route
+expect-not: Commands · view:
+expect-not: · Commands · target:
+expect-not: notify:
+expect-not: focus unknown
+resize: 60x20
+live-snap: setup-60x20
+expect-not: shell route
+expect-not: Commands · view:
+expect-not: · Commands · target:
+expect-not: notify:
+expect-not: focus unknown
+resize: 40x12
+live-snap: setup-40x12
+expect-not: shell route
+expect-not: Commands · view:
+expect-not: · Commands · target:
+expect-not: notify:
+expect-not: focus unknown
+resize: 120x36
 keys: Down Enter
 require-live-snap: 20 Build threat model | map-selection
 keys: Down Down
@@ -73,10 +162,14 @@ require-live-snap: 20 Owned greeting application | context-result-returned
 keys: m
 require-live-snap: 30 RESULT READY | map-result-loading
 require-live-snap: 30 Rust greeting writer | pending-map
+require-live-snap: 20 repo index ready | pending-map-index-ready
+expect-not: repo index not built
 ask: Does the executed producer chain reach a source-grounded Map for explicit acceptance, with no injected completed queue, finding or global context activation?
 keys: u
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 1/6 workbench
 require-live-snap: 25 Map ✓ | accepted-map
+require-live-snap: 20 repo index ready | accepted-map-index-ready
+expect-not: repo index not built
 expect-not: workspace:stale inventory
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART map-accepted
 submit: scan batch
@@ -114,6 +207,8 @@ require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellatio
 submit: workbench
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 3/6 workbench
 require-live-snap: 20 calls 3/6 | admitted-workbench
+expect: LIVE
+expect-not: ○ idle
 expect-not: Ledger refresh failed
 expect: 1/3 complete
 expect: 1 running
@@ -144,21 +239,44 @@ expect-not: Ledger refresh failed
 resize: 40x12
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 3/6 workbench
 require-live-snap: 20 Held scan draft λ | admitted-workbench-40x12
+expect: LIVE
+expect-not: ○ idle
+expect: Ctrl+C
+expect: request abort
 expect: calls 3/6
 expect-not: Ledger refresh failed
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART active
 ask: While the request waits, are one completed, one running and one queued job clear, does c inspect the same study and return to Scan, and do the counter, typed draft, palette return and compact controls stay usable without extra work?
 resize: 120x36
 keys: C-u
+submit: quit-confirm
+require-live-snap: 20 CONFIRM SESSION EXIT | owned-study-exit-disclosure
+expect: may continue
+expect: unknown (owned study)
+expect-not: no active work
+resize: 40x12
+live-snap: owned-study-exit-40x12
+keys: End
+live-snap: owned-study-exit-tail-40x12
+ask: Does the exit disclosure identify the owned study and target, keep its unmetered cost unknown and explain that cleanup may continue, with Stay as the default?
+keys: n
+resize: 120x36
+require-live-snap: 20 LIVE | owned-study-stay
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART active
 nav-mode:
 keys: c
 require-live-snap: 20 Jobs: 3 | admitted-campaign-return
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART study
-keys: K
+keys: C-c
 require-live-snap: 20 Stop requested || Stopped by operator | cancellation-requested
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART canceled
 keys: r
 require-live-snap: 25 Stopped by operator | canceled-partial-work
+require-live-snap: 20 repo index ready | canceled-partial-work-index-ready
+expect-not: repo index not built
+expect: session:$0.00
+expect: cost unavailable
+expect-not: cost:$0.00
 expect: 2 parked
 expect: 1 completed
 expect-not: Review the recorded failure
@@ -170,11 +288,19 @@ require-live-snap: 20 Attempts per job | attempt-allowance-row
 keys: Enter
 require-live-snap: 20 Attempts per job | revise-attempts
 type: 2
-keys: Enter L End
+keys: Enter L Home
+require-live-snap: 25 Execution model: openai-oauth:gpt-5.5 | retry-work-overview
+expect: REVIEW PLAN & ALLOWANCE
+expect: Engines: agentic
+expect: Scope: whole repository
+expect: Execution model: openai-oauth:gpt-5.5
+expect-not: openai-codex:gpt-5.5
+keys: End
 require-live-snap: 25 y approve | retry-approval
 expect: Total provider calls: 6
 expect: Protected review calls: 2
-expect: Execution model: openai-oauth:gpt-5.5
+expect: Recorded calls: 3 committed · 1 unsettled
+expect: Left under proposed limits: 1 context/scan · 2 protected Review
 expect-not: openai-codex:gpt-5.5
 ask: Does retrying the canceled job require an explicit two-attempt approval for the same fixed plan, with prior call consumption and unknown cost retained?
 keys: y
@@ -186,6 +312,11 @@ require-live-snap: 25 dispatcher pid | retry-running
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART partial
 keys: r
 require-live-snap: 25 2 completed | stopped-at-limit
+require-live-snap: 20 repo index ready | stopped-at-limit-index-ready
+expect-not: repo index not built
+expect: session:$0.00
+expect: cost unavailable
+expect-not: cost:$0.00
 expect: 1 parked
 expect: Allowance reached
 expect-not: Review the recorded failure
@@ -221,6 +352,8 @@ resize: 40x12
 require-live-snap: 20 allowance exhausted | refused-40x12
 keys: NPage NPage NPage
 require-live-snap: 20 allowance exhausted | refused-paged-40x12
+expect: a plan/allowance
+expect-not: L resume
 ask: Does the blocked action remain visible while paging and resizing, with full details reachable and no focus, draft, job or spending change?
 resize: 120x36
 keys: Escape
@@ -275,6 +408,8 @@ require-live-snap: 25 deferred | deferred-decision
 submit: report
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 4/6 report
 require-live-snap: 25 0 pending · TP: 0 · FP: 1 · 1 deferred | partial-report
+expect: 1 canceled
+expect-not: outcome unavailable
 expect: 4 committed / 6 calls
 expect: 2 protected review remaining
 expect: 3 producer observations
@@ -302,6 +437,16 @@ require-live-snap: 25 y approve | specific-new-approval
 expect: Total provider calls: 7
 expect: Protected review calls: 2
 expect: 3 fixed jobs
+expect: Recorded calls: 4 committed · 1 unsettled
+expect: Left under proposed limits: 1 context/scan · 2 protected Review
+resize: 40x12
+keys: End
+require-live-snap: 25 Used 4 · left Scan 1 Review 2 | specific-new-approval-40x12
+expect: y approve
+resize: 120x36
+keys: End
+require-live-snap: 25 Recorded calls: 4 committed · 1 unsettled | specific-new-approval-restored
+expect: Left under proposed limits: 1 context/scan · 2 protected Review
 ask: Does the seven-call revision retain previous spending and the same three jobs, with exactly one new discovery call available and a separate approval decision?
 keys: y
 require-live-snap: 25 Approval saved | revised-approved
@@ -312,6 +457,11 @@ require-live-snap: 25 dispatcher pid | remaining-job-running
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART completed
 keys: r
 require-live-snap: 25 3 completed | original-plan-completed
+require-live-snap: 20 repo index ready | original-plan-completed-index-ready
+expect-not: repo index not built
+expect: session:$0.00
+expect: cost unavailable
+expect-not: cost:$0.00
 ask: Does explicit resume run only the original remaining pass, preserve prior attempts and decisions, and keep a missed nondeterministic observation separate from a fix?
 keys: Escape
 submit: workbench
@@ -330,6 +480,8 @@ paste-file: @ART/open-later-only.txt
 keys: Enter
 require-live-snap: 25 Labeled later-only observation | rediscovered-finding
 require-live-snap: 25 Later source identity is unverified | rediscovered-source-unverified
+require-live-snap: 20 repo index ready | rediscovered-source-unverified-index-ready
+expect-not: repo index not built
 ask: Does the rediscovered observation retain the prior deferral but request reassessment because a dirty commit alone cannot establish unchanged source?
 submit: decision deferred Reassessed the owned fixture after pass 3
 require-live-snap: 25 deferred | reassessed-deferral
@@ -339,6 +491,8 @@ expect-not: Saved choices unavailable
 expect: 4 producer observations
 expect: 2 protected review remaining
 require-live-snap: 25 0 pending · TP: 0 · FP: 1 · 1 deferred | final-reviewed-report
+expect: 1 canceled
+expect-not: outcome unavailable
 keys: p End
 require-live-snap: 25 Recent run cost records: | final-cost-records
 expect-not: missing metadata
@@ -381,6 +535,7 @@ require-live-snap: 20 format markdown-bundle (2/6) · all | bundle-recovery-path
 expect: study-bundle
 expect-not: EXPORT DESTINATION
 keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/report_bundle.py @TMP_TARGET @ART retry-export
 require-live-snap: 25 EXPORTED | bundle-exported-40x12
 expect-not: Saved choices unavailable
 expect: e path
@@ -433,6 +588,7 @@ require-live-snap: 25 CONFIRM SESSION EXIT | exit-confirmation
 expect: no active work
 keys: y
 require-exit: 10
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NODE_OPTIONS NO_COLOR KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE KUZUSHI_SKIP_ONBOARDING
 env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1
 launch: --target @TMP_TARGET
 require-live-snap: 30 KUZUSHI | restarted
@@ -446,6 +602,8 @@ resize: 120x36
 submit: report
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART 5/7 report
 require-live-snap: 25 5 committed / 7 calls | recovered-report
+expect: 1 canceled
+expect-not: outcome unavailable
 expect: 0 pending · TP: 0 · FP: 1 · 1 deferred
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART restart
 require-shell: python3 -B @REPO/scripts/devex/fixtures/report_bundle.py @TMP_TARGET @ART restart

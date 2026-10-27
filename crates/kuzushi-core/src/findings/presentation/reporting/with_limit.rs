@@ -524,7 +524,9 @@ fn exact_file_paths_match(paths: &[String], file: &str) -> bool {
 }
 
 fn normalized_exact_path(path: &str) -> String {
-    path.replace('\\', "/").trim_start_matches("./").to_string()
+    #[cfg(windows)]
+    let path = path.replace('\\', "/");
+    path.trim_start_matches("./").to_string()
 }
 
 fn run_id_matches(filter: &FindingListFilter, finding: &Finding) -> bool {

@@ -1,5 +1,6 @@
 use super::register_modules::{emit_scan_done, emit_scan_start};
 use super::*;
+use anyhow::Context;
 use crate::sbom_scan::{
     scan_sbom_with_options, InspectedSbomReport, SbomInspectionError, SbomScanOptions,
     DEFAULT_SBOM_TOTAL_BYTES, MAX_SBOM_FILE_BYTES, MAX_SBOM_TOTAL_BYTES,
@@ -32,8 +33,17 @@ pub(super) fn execute(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Va
 
 fn inspected_output(result: InspectedSbomReport) -> Result<Value> {
     let mut output = result.report.to_tool_json();
-    output["output"] = json!(format!("{}\nCaptured dependency inputs: {} files; {} source bytes read / {} allowed.\nParsers reuse captured bytes. Source freshness and complete repository coverage remain unverified.",
-        result.report.output(), result.inspection.captured_files,
+    let summary = output["output"]
+        .as_str()
+        .context("sbom-scan: export is missing its result summary")?
+        .to_owned();
+    let file_label = if result.inspection.captured_files == 1 {
+        "file"
+    } else {
+        "files"
+    };
+    output["output"] = json!(format!("{summary}\nCaptured dependency inputs: {} {file_label}; {} source bytes read / {} allowed.\nParsers reuse captured bytes. Source freshness and complete repository coverage remain unverified.",
+        result.inspection.captured_files,
         result.inspection.source_bytes_read, result.inspection.limits.max_total_bytes));
     output["data"]["inspection"] = serde_json::to_value(result.inspection)?;
     Ok(output)

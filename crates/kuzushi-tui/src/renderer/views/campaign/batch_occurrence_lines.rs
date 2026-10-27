@@ -12,12 +12,12 @@ pub(super) fn append_batch_occurrence(
     lines.extend(batch_wrapped(
         &batch_summary(report),
         area.width as usize,
-        theme::subtle(),
+        theme::primary(),
     ));
     lines.extend(batch_wrapped(
         &batch_severity_summary(report.gate.as_ref()),
         area.width as usize,
-        theme::subtle(),
+        theme::primary(),
     ));
     lines.extend(batch_wrapped(
         "Occurrence counts completed trials; it does not establish proof.",
@@ -92,7 +92,7 @@ fn batch_occurrence_row(row: &BatchOccurrenceRow, width: usize) -> Vec<Line<'sta
             row.seen, row.completed, row.planned, row.failed
         ),
         width,
-        theme::subtle(),
+        theme::primary(),
     ));
     lines.extend(batch_wrapped(
         &row.representative_location,

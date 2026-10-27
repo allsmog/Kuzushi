@@ -10,6 +10,8 @@ mod question;
 mod receipts;
 mod result;
 mod scope;
+mod scope_correction;
+pub(crate) use scope_correction::{correction_notice, CORRECTION_CONTROLS};
 mod summaries;
 use planning::*;
 pub(crate) use receipts::format_options;
@@ -99,9 +101,23 @@ fn non_answer_subview_lines(
     generation: &crate::app::StudyContextGeneration,
     width: usize,
 ) -> Option<Vec<String>> {
+    if let Some(state) = generation
+        .scope_correction
+        .as_ref()
+        .filter(|state| state.editing)
+    {
+        return Some(scope_correction::lines(state, width));
+    }
     if generation.guidance_editing {
         return Some(guidance_lines(generation, width));
     }
+    document_subview_lines(generation, width)
+}
+
+fn document_subview_lines(
+    generation: &StudyContextGeneration,
+    width: usize,
+) -> Option<Vec<String>> {
     if generation.show_rejected {
         return Some(diagnosis::lines(generation.rejected_output.as_ref(), width));
     }

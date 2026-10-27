@@ -297,6 +297,7 @@ fn run_started_sast_scan(
         primary_run_id: &primary_run_id,
         whitebox_static: whitebox_static.is_some(),
         threat_model_lease,
+        source: &source,
     }))?;
     let findings_count = executed.tally.distinct;
     let (artifacts, result) =
@@ -590,21 +591,31 @@ struct SastScanExecutionInput<'a> {
     primary_run_id: &'a str,
     whitebox_static: bool,
     threat_model_lease: &'a ScanThreatModelLease,
+    source: &'a crate::workspace::source_snapshot::SourceSnapshot,
 }
 
 impl SastScanExecutionInput<'_> {
     fn reports(&self, selected: &SastTaskSelection) -> Result<SastPipelineReports> {
-        run_selected_sast_pipeline_reports(
-            self.registry,
-            self.input,
-            self.ctx,
-            self.runtime,
-            self.option_store,
+        selected.ensure_non_empty()?;
+        selected.ensure_scoped_input(self.input, self.workspace.root())?;
+        let native = selected.run_native(
             self.workspace,
             self.store,
             self.options,
+            self.ctx,
+            self.source,
+        )?;
+        let mut reports = super::findings_count::initial_sast_pipeline_reports(selected, native);
+        fill_agentic_reports(
+            self.registry,
+            self.option_store,
+            &mut reports,
             selected,
-        )
+            self.input,
+            self.ctx,
+            self.runtime,
+        )?;
+        Ok(reports)
     }
 
     fn prepare_scan_stage(

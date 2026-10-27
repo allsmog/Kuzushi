@@ -1,5 +1,53 @@
 # Bounded investigations implementation
 
+The [bounded duplicate input correction](../assessments/dedupe-input-bounds-2026-10-25.md)
+removes full-ledger materialization before candidate selection and preserves literal
+paths in selection, source confirmation and JSONL import. Forty-eight focused Rust
+checks, Core Clippy, workspace build and risk pass. Final J359 has 23 machine
+passes, zero failures and four pending formal operator judgments through explicit
+limit correction, bounded source confirmation and no-color restart. Two requests
+are intercepted; no live inference or finding verdict is added. Broad module,
+relationship usefulness and reference-level TUI qualification remain open.
+
+The [reviewed-context follow-up](../assessments/lesson-context-followup-2026-10-24.md)
+opens a finite study directly from Lessons, preserving exact context, declared
+engine choices and durable spending. Fifty reported Rust checks, build, lint
+and risk pass. Final J357 has 66 machine passes, zero failures, 53 captures and
+seven pending operator judgments through three candidate passes, export,
+retirement and restart. Tall planners show all twelve choices. No live provider
+request, automatic follow-up or broad delivery closure is added.
+
+The [engine choice discovery correction](../assessments/engine-choice-discovery-2026-10-24.md)
+shows all fourteen choices in a tall stacked terminal, adds truthful compact
+continuation and identifies the legacy taint task's replacement. Final J356 has
+30 machine passes, zero failures and four pending operator judgments. All 42
+focused Rust checks, build, lint and risk pass. No model request or broad
+delivery milestone is added; the previous staged checkpoint remains intact.
+
+The [study engine readiness correction](../assessments/study-engine-readiness-2026-10-24.md)
+retains experimental catalog labels, separates scope, dependency and model
+states, and prioritizes actionable compact guidance. Final J355 records 38
+machine passes, zero failures and four pending operator judgments; 35 focused
+Rust checks, build, lint and risk pass. No model request or broad delivery
+closure is added. Tall-list discoverability remains follow-up craft work.
+
+The [approval and global-choice correction](../assessments/approval-reading-and-global-options-2026-10-24.md)
+puts frozen engine, scope and execution model ahead of spending details, removes
+duplicate body rows and repairs global saves under an ignored operator home.
+All 95 focused Rust checks, four I/O contract checks, build and lint pass. Sequential J259/J121 record
+296 machine passes, zero failures, 184 captures and 25 pending operator judgments.
+No live request, module promotion or broad delivery closure is added.
+
+The [owned study control correction](../assessments/owned-study-control-2026-10-24.md)
+uses the actual owned child for activity, cancellation and exit disclosure.
+The [Report retry correction](../assessments/report-retry-visibility-2026-10-24.md)
+keeps a refused export visible until an explicit retry. Combined with the
+source-move correction, these changes have 216 distinct focused Rust passes.
+Current J121 records 227 machine passes, zero failures, 134 capture pairs and
+21 pending operator judgments through cancellation, triage, export and restart.
+No live request or broad delivery closure is added. Four delivery items below
+have local acceptance evidence and five remain open.
+
 The [boundary-context reading correction](../assessments/boundary-context-reading-2026-10-24.md)
 puts inheritance or omission and preparation state ahead of long names and
 instructions while retaining exact receipts. All 90 focused checks, build and
@@ -996,14 +1044,14 @@ and three pending human judgments. This closes that concrete implementation gap
 without qualifying the complete operator experience or closing a broad milestone.
 
 - [x] Bounded iterative inventory and inventory-derived scope suggestions. See [acceptance evidence](../assessments/bounded-inventory-acceptance-2026-10-17.md).
-- [ ] Registry-derived per-tool functional matrix and curated phase readiness. [Coverage cancellation and current catalog evidence](../assessments/coverage-cancellation-2026-10-18.md) repair a supported path and refresh 118 visible descriptor rows. [Context catalog phase evidence](../assessments/context-catalog-phase-2026-10-24.md) corrects three supporting readers and their startup/history consumers; broader qualification remains open.
+- [ ] Registry-derived per-tool functional matrix and curated phase readiness. [Coverage cancellation and current catalog evidence](../assessments/coverage-cancellation-2026-10-18.md) repair a supported path and refresh 118 visible descriptor rows. [Context catalog phase evidence](../assessments/context-catalog-phase-2026-10-24.md) corrects three supporting readers and their startup/history consumers. [Source-move evidence](../assessments/coverage-source-moves-2026-10-24.md) prevents incorrect unchanged-source baselines and qualifies the recommendation consumer; broader qualification remains open. [SBOM metadata validation](../assessments/sbom-metadata-shapes-2026-10-25.md) repairs unsupported-input false success and verifies explicit correction through the Components consumer; full ecosystem qualification remains open.
 - [x] Explicit allowance, durable reservations, and honest unknown-cost states. See [acceptance evidence](../assessments/spending-control-acceptance-2026-10-17.md).
 - [x] Accepted context references independent of the global active model. See [acceptance evidence](../assessments/immutable-context-acceptance-2026-10-17.md).
 - [x] Finite study plans with three-pass defaults and restart recovery. See [acceptance evidence](../assessments/finite-study-acceptance-2026-10-17.md).
 - [ ] Optional AI scope proposals, coverage checks, and TUI scope editing. [Workload previews](../assessments/scope-workload-preview-2026-10-18.md) now expose all-boundary and selected-study job counts before approval; broader qualification remains open.
-- [ ] Comparable context experiments and complete observation provenance.
+- [ ] Comparable context experiments and complete observation provenance. [Interrupted matrix evidence](../assessments/matrix-limits-2026-10-25.md) now covers a failed pass, protected allowance halt, explicit retry revision, retained attempt history and operator reaffirmation through export and restart. Broader qualification remains open.
 - [ ] Reversible review relationships and accepted reusable lessons.
-- [ ] Complete TUI journey, report, layout and recovery verification.
+- [ ] Complete TUI journey, report, layout and recovery verification. [Current complete keyboard journey](../assessments/approval-spending-2026-10-24.md) has 239 machine passes and zero failures, including cancellation, limits, export recovery and restart. Spending remains visible at approval; broader experience qualification remains open.
 
 ## Verification
 
@@ -1011,6 +1059,15 @@ Record focused tests and integration results here as work completes. Live model
 validation requires an explicitly approved test allowance and runs sequentially.
 
 ## Current implementation evidence
+
+October 25, 2026: [Literal diagram links](../assessments/dfd-literal-links-2026-10-25.md)
+repair two conversions that confused a literal Unix backslash filename with a
+nested path. The real findings consumer now loads the exact single observation.
+Fifty-five focused Rust checks, build, lint and risk pass. Final J361 has 34
+machine passes, zero failures, nineteen captures and three pending operator
+judgments through six sizes and no-color restart. No source execution or model
+request is added. The separately observed imported-origin label gap remains open;
+four delivery items retain local acceptance and five remain open.
 
 October 19, 2026: [Diagram context planning](../assessments/diagram-context-2026-10-19.md)
 replaces the legacy regeneration hotkey with one evidence-bound architecture

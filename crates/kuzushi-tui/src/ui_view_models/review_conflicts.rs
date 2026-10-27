@@ -18,7 +18,7 @@ pub(crate) fn effective_review_decision_conflict_label(
 pub(crate) fn review_conflict_compact_label(conflict: &str) -> &'static str {
     match conflict {
         "runtime_verified_after_rejection" => "runtime-verified",
-        "reappeared_after_rejection" => "scanner-reappeared",
+        "reappeared_after_rejection" => "other-observation",
         "not_reproduced_after_confirmation" => "not-reproduced",
         _ => "re-review",
     }
@@ -27,14 +27,14 @@ pub(crate) fn review_conflict_compact_label(conflict: &str) -> &'static str {
 pub(crate) fn review_conflict_detail_label(conflict: &str) -> &'static str {
     match conflict {
         "runtime_verified_after_rejection" => {
-            "runtime proof contradicts an earlier false-positive decision"
+            "runtime proof conflicts with a false-positive decision on another observation"
         }
         "reappeared_after_rejection" => {
-            "a scanner reported this finding again after an earlier false-positive decision"
+            "the false-positive decision is based on a different recorded observation; check its source"
         }
         "not_reproduced_after_confirmation" => {
-            "runtime proof did not reproduce an earlier confirmed finding"
+            "runtime proof did not reproduce a finding confirmed on another observation"
         }
-        _ => "the current evidence conflicts with an earlier decision",
+        _ => "the displayed evidence differs from the recorded decision basis",
     }
 }

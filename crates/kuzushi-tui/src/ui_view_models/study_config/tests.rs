@@ -3,6 +3,38 @@ use kuzushi_core::allowance::{AllowanceLimits, AllowanceSnapshot};
 use ratatui::{backend::TestBackend, Terminal};
 
 #[test]
+fn stacked_study_list_uses_tall_space_and_keeps_compact_reading_bounds() {
+    for (width, height, rows) in [(96, 89, 12), (80, 24, 8), (60, 20, 7), (40, 12, 3)] {
+        let layout = study_config_layout(study_config_area(width, height));
+        assert_eq!(layout.list.height, rows, "{width}x{height}");
+        assert!(layout.list.bottom() < layout.detail.y);
+        assert!(layout.detail.bottom() <= layout.controls.y);
+    }
+}
+
+#[test]
+fn tall_study_exposes_every_choice_without_moving_the_cursor() {
+    let (_target, config) = configured_study();
+    let mut app = crate::ShellApp::new(kuzushi_core::V2Config::default(), None);
+    app.set_shell_view(crate::app::ShellView::Campaign);
+    app.router.campaign_mut().batch_scan_config = Some(config);
+    let mut terminal = Terminal::new(TestBackend::new(96, 89)).unwrap();
+    terminal
+        .draw(|frame| crate::renderer::render_app(frame, &app))
+        .unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    for row in BatchScanConfigRow::ALL {
+        assert!(text.contains(row.label()), "Missing {}", row.label());
+    }
+}
+
+#[test]
 fn preparation_preview_uses_frozen_limits_and_keeps_legacy_unknowns_honest() {
     let input = serde_json::json!({"tasks":["agentic"],"maxInventoryFiles":1,"maxBytesPerFile":64});
     let summary = agentic_preparation_summary(&input).unwrap();

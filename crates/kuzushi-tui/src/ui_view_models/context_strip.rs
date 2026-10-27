@@ -52,28 +52,50 @@ pub(crate) fn context_strip_model(app: &ShellApp) -> ContextStripModel {
 
 impl ContextStripModel {
     pub(crate) fn compact_segments(&self) -> Vec<String> {
-        let mut segments = vec![self.mode.clone(), format!("view:{}", self.view)];
-        segments.extend(self.phase.iter().map(|phase| format!("phase:{phase}")));
+        let mut segments = self.orientation_segments();
         segments.extend([
-            format!("target:{}", self.target),
             format!("model:{}", self.model),
             self.context_state_segment(),
         ]);
-        segments.extend(
-            self.compact_activity
-                .iter()
-                .map(|activity| format!("activity:{activity}")),
-        );
+        segments.extend(self.activity_segments());
+        segments.extend(self.cost.iter().map(|cost| format!("session:{cost}")));
+        segments
+    }
+
+    pub(crate) fn orientation_segments(&self) -> Vec<String> {
+        let mut segments = vec![self.mode.clone(), format!("view:{}", self.view)];
+        segments.extend(self.phase.iter().map(|phase| format!("phase:{phase}")));
+        segments.push(format!("target:{}", self.target));
+        segments
+    }
+
+    pub(crate) fn status_segments(&self) -> Vec<String> {
+        let mut segments: Vec<String> = self
+            .cost
+            .iter()
+            .map(|cost| format!("session:{cost}"))
+            .collect();
+        segments.push(self.context_state_segment());
+        segments.push(format!("model:{}", self.model));
+        segments.extend(self.activity_segments());
+        segments
+    }
+
+    fn activity_segments(&self) -> Vec<String> {
+        let mut segments: Vec<String> = self
+            .compact_activity
+            .iter()
+            .map(|activity| format!("activity:{activity}"))
+            .collect();
         segments.extend(
             self.stage
                 .iter()
                 .map(|stage| format!("{}:{}", stage.label, stage.value)),
         );
-        segments.extend(self.cost.iter().map(|cost| format!("cost:{cost}")));
         segments
     }
 
-    pub(super) fn context_state_segment(&self) -> String {
+    pub(crate) fn context_state_segment(&self) -> String {
         // This optional file index is distinct from an accepted threat model.
         if self.context_building && !self.context_present {
             return "repo index building…".to_string();
@@ -82,8 +104,8 @@ impl ContextStripModel {
     }
 
     fn stored_index_state(&self) -> &'static str {
-        if self.context_state == "malformed" {
-            return "malformed";
+        if matches!(self.context_state, "malformed" | "unavailable") {
+            return self.context_state;
         }
         if !self.context_present {
             return "not built";

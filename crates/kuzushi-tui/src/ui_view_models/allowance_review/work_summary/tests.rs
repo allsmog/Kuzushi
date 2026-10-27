@@ -39,13 +39,44 @@ fn fixture_with_engine(engine: &str) -> (tempfile::TempDir, BatchScanConfig, Val
     (root, draft, input)
 }
 
+fn summary_text(config: &BatchScanConfig, input: &Value) -> String {
+    let summary = summary(config, input).unwrap();
+    summary
+        .overview
+        .into_iter()
+        .chain(summary.details)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn simple_work_summary_puts_scope_first_without_repeating_its_frozen_terms() {
+    let (_root, config, input) = fixture();
+    let summary = summary(&config, &input).unwrap();
+    let overview = summary.overview.join("\n");
+    assert!(overview.contains("Engines: agentic"));
+    assert!(overview.contains("Scope: whole repository"));
+    assert!(overview.contains("Execution model: openai-oauth:gpt-5.5"));
+    let document = [overview, summary.details.join("\n")].join("\n");
+    for term in [
+        "Repository:",
+        "Scan: 3 passes",
+        "Engines:",
+        "Scope:",
+        "Execution model:",
+    ] {
+        assert_eq!(document.matches(term).count(), 1, "{term}: {document}");
+    }
+    assert!(document.contains("Threat context: explicitly omitted"));
+}
+
 #[test]
 fn summary_uses_frozen_conditions_instead_of_mutable_form_fields() {
     let (_root, mut config, input) = fixture();
     config.trials = 9;
     config.effective_workers = 8;
     config.study.scan_input = Some(json!({"tasks":["secret-scan"],"paths":["other"]}));
-    let lines = summary(&config, &input).unwrap().details.join("\n");
+    let lines = summary_text(&config, &input);
     assert!(lines.contains("Scan: 3 passes · 1 worker(s)"));
     assert!(lines.contains("Engines: agentic"));
     assert!(lines.contains("Scope: whole repository"));
@@ -72,7 +103,7 @@ fn native_work_does_not_present_the_configured_model_as_an_execution_model() {
     let (_root, config, input) = fixture_with_engine("license-scan");
     let receipt = config.study.receipt.as_ref().unwrap();
     assert!(receipt.equivalence.components.model.is_none());
-    let text = summary(&config, &input).unwrap().details.join("\n");
+    let text = summary_text(&config, &input);
     assert!(text.contains("Execution model: none; this frozen discovery uses native engines"));
     assert!(!text.contains("gpt-5.5"));
 }
@@ -99,10 +130,10 @@ fn compact_overview_keeps_every_frozen_model_and_discloses_missing_values() {
     assert_eq!(
         lines,
         [
-            "Model: model-a",
-            "Model: none (native engines)",
-            "Model: unrecorded; inspect plan details",
-            "Model: model-b"
+            "Execution model: model-a",
+            "Execution model: none; this frozen discovery uses native engines",
+            "Execution model: unrecorded; inspect the frozen plan before approval",
+            "Execution model: model-b"
         ]
     );
 }
@@ -120,7 +151,7 @@ fn overview_uses_frozen_work_and_keeps_receipts_in_details() {
     assert!(preview
         .overview
         .iter()
-        .any(|line| line == "Model: openai-oauth:gpt-5.5"));
+        .any(|line| line == "Execution model: openai-oauth:gpt-5.5"));
     assert!(!preview.overview.join("\n").contains("Threat context"));
     assert!(preview
         .details
@@ -210,23 +241,11 @@ fn an_existing_context_generation_does_not_hide_the_selected_scan_plan() {
         receipt: Some(context),
         ..Default::default()
     });
-    assert!(summary(&config, &input)
-        .unwrap()
-        .details
-        .join("\n")
-        .contains("Scan: 3 passes"));
+    assert!(summary_text(&config, &input).contains("Scan: 3 passes"));
     let context_input =
         json!({"campaignId":"older-map","campaignPlanSha256":"sha256:older","campaignJobs":1});
-    assert!(summary(&config, &context_input)
-        .unwrap()
-        .details
-        .join("\n")
-        .contains("Execution model: openai-oauth:gpt-5.5"));
-    assert!(summary(&config, &context_input)
-        .unwrap()
-        .details
-        .join("\n")
-        .contains("Context: 1 fixed jobs"));
+    assert!(summary_text(&config, &context_input).contains("Execution model: openai-oauth:gpt-5.5"));
+    assert!(summary_text(&config, &context_input).contains("Context: 1 fixed jobs"));
 }
 
 #[test]
@@ -267,6 +286,45 @@ fn matrix_and_scope_previews_keep_each_frozen_case_distinct() {
 }
 
 #[test]
+fn case_details_keep_each_execution_model_associated_with_its_own_boundary() {
+    let (_root, config, _) = fixture();
+    let receipt = config.study.receipt.as_ref().unwrap();
+    let mut native = receipt.equivalence.clone();
+    native.components.model = None;
+    let cases = [
+        FrozenContextCase {
+            id: "model".into(),
+            label: "Model boundary".into(),
+            passes: 2,
+            base_input: receipt.scan_input.clone(),
+            equivalence: receipt.equivalence.clone(),
+            omission_scope_sha256: None,
+        },
+        FrozenContextCase {
+            id: "native".into(),
+            label: "Native boundary".into(),
+            passes: 1,
+            base_input: json!({"tasks":["license-scan"],"threatModelRef":null}),
+            equivalence: native,
+            omission_scope_sha256: None,
+        },
+    ];
+    let frozen = case_summary("cases", "sha256:cases", 3, 1, "scopes", &cases);
+    let overview = model_overview(&frozen.models);
+    assert!(decision_lines(&frozen).is_empty());
+    let details = detail_lines(&frozen, &overview).join("\n");
+    let (model_case, native_case) = details.split_once("Native boundary:").unwrap();
+    assert!(model_case.contains("Model boundary: 2 passes"));
+    assert!(model_case.contains("Engines: agentic"));
+    assert!(model_case.contains("Execution model: openai-oauth:gpt-5.5"));
+    assert!(native_case.contains("Engines: license-scan"));
+    assert!(
+        native_case.contains("Execution model: none; this frozen discovery uses native engines")
+    );
+    assert!(!native_case.contains("gpt-5.5"));
+}
+
+#[test]
 fn review_preview_uses_the_frozen_strategy_and_workload() {
     let (_root, mut config, _input) = fixture();
     // Synthetic presenter fixture, never approved or executed.
@@ -278,7 +336,7 @@ fn review_preview_uses_the_frozen_strategy_and_workload() {
     config.study.review_receipt = Some(receipt);
     let input =
         json!({"campaignId":"review","campaignPlanSha256":"sha256:review","campaignJobs":1});
-    let text = summary(&config, &input).unwrap().details.join("\n");
+    let text = summary_text(&config, &input);
     assert!(text.contains("Review: 0 frozen observations · 1 worker"));
     assert!(text.contains("Strategy: standard"));
     assert!(text.contains("Execution model: openai-oauth:gpt-5.5"));
@@ -319,7 +377,7 @@ fn context_approval_keeps_frozen_inheritance_membership_and_inventory_extent() {
         ..Default::default()
     });
     let approval = json!({"campaignId":"evidence-context","campaignPlanSha256":"sha256:frozen","campaignJobs":1});
-    let text = summary(&config, &approval).unwrap().details.join("\n");
+    let text = summary_text(&config, &approval);
     assert!(text.contains("Threat context: inherited"));
     assert!(text.contains(reference.revision_id.as_str()));
     assert!(text.contains("Evidence: 2 exact files (quoted)"));
@@ -327,4 +385,30 @@ fn context_approval_keeps_frozen_inheritance_membership_and_inventory_extent() {
     assert!(text.contains("Repository enumeration: partial; all selected files are recorded"));
     assert!(text.contains("entry cap reached"));
     assert!(!text.contains("legacy selection") && !text.contains("unfrozen.py"));
+}
+
+#[test]
+fn lesson_approval_names_historical_evidence_without_implying_threat_context_use() {
+    let (_root, mut config, _) = fixture();
+    let receipt: ContextStudyReceipt = serde_json::from_value(json!({
+        "campaignId":"lesson","investigationId":"owned",
+        "generationTool":"findings:lesson-generate",
+        "planSha256":"sha256:lesson","sourceIdentity":"owned-source",
+        "configSha256":"owned-config","model":"openai-codex:gpt-5.5",
+        "input":{"findingId":123,"maxSourceBytes":1024},"preparationJobs":[]
+    }))
+    .unwrap();
+    config.context_generation = Some(crate::app::StudyContextGeneration {
+        receipt: Some(receipt),
+        ..Default::default()
+    });
+    let approval =
+        json!({"campaignId":"lesson","campaignPlanSha256":"sha256:lesson","campaignJobs":1});
+    let text = summary_text(&config, &approval);
+    assert!(text.contains("Action: findings:lesson-generate"));
+    assert!(
+        text.contains("Evidence: exact confirmed observation; current source is not substituted")
+    );
+    assert!(text.contains("Threat context: not used for lesson drafts"));
+    assert!(!text.contains("legacy selection"));
 }

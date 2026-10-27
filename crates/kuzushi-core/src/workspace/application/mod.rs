@@ -20,6 +20,7 @@ mod export_projection_model;
 mod export_relationships;
 mod export_review_context;
 mod export_sarif;
+mod export_source;
 mod export_vuln_findings;
 mod export_workspace_findings;
 mod finding_goals;
@@ -121,7 +122,7 @@ pub use scan_scope_proposal::{
     resolve_accepted_scan_scope_selection, scan_scope_proposal_files,
 };
 pub(crate) use scan_scope_proposal::{
-    suggest_scan_scope_proposal, validate_scan_scope_suggestion_input,
+    correct_rejected_scan_scope, suggest_scan_scope_proposal, validate_scan_scope_suggestion_input,
 };
 pub use since_filter::findings_since_filter_expression;
 pub use status::{workspace_status_for_target, WorkspaceStatus};

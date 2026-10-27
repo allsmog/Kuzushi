@@ -102,11 +102,7 @@ fn status_footer_model_reports_idle_shell_segments() {
     // so each session fact is stated once per screen.
     assert_eq!(
         model.left_segments,
-        [
-            "shell route",
-            "notify:unavailable · focus unknown",
-            "capabilities"
-        ]
+        ["Commands", "Desktop alerts unavailable", "capabilities"]
     );
     assert_eq!(model.right_segments, ["0 findings"]);
 }
@@ -323,11 +319,11 @@ fn dirty_history_requests_source_check_without_inventing_inventory_changes() {
     let (_root, mut app) = setup_fixture();
     app.domain_mut().set_returning_source_unverified(true);
     let model = status_footer_model(&app);
-    assert!(model.left_segments.contains(&"history:check source".into()));
+    assert!(model.left_segments.contains(&"Source unchecked".into()));
     assert!(model
         .compact_left_segments
         .iter()
-        .any(|s| s.contains("source check")));
+        .any(|s| s.contains("source unchecked")));
     assert!(app.workspace_stale().is_none());
     assert!(app.workspace_pending_changes().is_empty());
 
@@ -335,8 +331,8 @@ fn dirty_history_requests_source_check_without_inventing_inventory_changes() {
     let model = status_footer_model(&app);
     assert!(model
         .left_segments
-        .contains(&"workspace:stale inventory".into()));
-    assert!(!model.left_segments.contains(&"history:check source".into()));
+        .contains(&"Workspace changed (inventory)".into()));
+    assert!(!model.left_segments.contains(&"Source unchecked".into()));
     assert!(model
         .compact_left_segments
         .iter()
@@ -404,9 +400,9 @@ fn status_footer_model_prefers_active_scan_status() {
     assert_eq!(
         model.left_segments,
         [
-            "run route",
+            "Run active",
             "running: semgrep",
-            "notify:unavailable · focus unknown",
+            "Desktop alerts unavailable",
             "capabilities",
             "openai:gpt-5.2",
         ]
@@ -425,9 +421,9 @@ fn status_footer_model_reflects_active_tool_model_override() {
     assert_eq!(
         model.left_segments,
         [
-            "run route",
+            "Run active",
             "triage:run: active",
-            "notify:unavailable · focus unknown",
+            "Desktop alerts unavailable",
             "capabilities",
             "openai:gpt-tool (tool)",
         ]
@@ -442,7 +438,7 @@ fn status_footer_hides_notification_warning_when_focus_is_known_or_alerts_are_of
     assert!(!status_footer_model(&app)
         .left_segments
         .iter()
-        .any(|segment| segment.starts_with("notify:")));
+        .any(|segment| segment.to_lowercase().contains("desktop alerts")));
 
     app.ui_mut()
         .set_terminal_focus(crate::app::FocusState::Unknown);
@@ -450,7 +446,7 @@ fn status_footer_hides_notification_warning_when_focus_is_known_or_alerts_are_of
     assert!(!status_footer_model(&app)
         .left_segments
         .iter()
-        .any(|segment| segment.starts_with("notify:")));
+        .any(|segment| segment.to_lowercase().contains("desktop alerts")));
 }
 
 #[test]

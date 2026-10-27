@@ -72,7 +72,7 @@ pub(super) fn seed(app: &mut ShellApp, target: &Path) -> Result<(), String> {
     add_refused_split_proof(&mut findings[2]);
     add_audited_dataflow_finding(&mut findings[4]);
     let generations = persist_reference_findings(target, &findings)?;
-    bind_persisted_generations(&mut findings, &generations);
+    bind_persisted_generations(&mut findings, &generations, target)?;
     let selected = findings[0].clone();
     let counts = crate::ui_view_models::finding_ledger_counts(
         &findings,
@@ -102,10 +102,26 @@ fn reference_proof_snapshot(
 
 /// The in-memory ledger must name the generations the store actually holds:
 /// a refresh reselects by exact generation, never by fingerprint alone.
-fn bind_persisted_generations(findings: &mut [Finding], generations: &[i64]) {
+fn bind_persisted_generations(
+    findings: &mut [Finding],
+    generations: &[i64],
+    target: &Path,
+) -> Result<(), String> {
+    let workspace = WorkspaceTarget::new(target).map_err(|error| error.to_string())?;
+    let store = FindingStore::open_read_only(workspace.findings_db_path())
+        .map_err(|error| error.to_string())?;
     for (finding, id) in findings.iter_mut().zip(generations) {
-        finding.id = Some(*id);
+        let stored = store
+            .get_finding_by_reference(&format!("generation:{id}"))
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("Persisted reference generation {id} is unavailable"))?;
+        finding.id = stored.id;
+        finding.scan_id = stored.scan_id;
+        finding.identity_id = stored.identity_id;
+        finding.identity_basis = stored.identity_basis;
+        finding.identity_match_tier = stored.identity_match_tier;
     }
+    Ok(())
 }
 
 fn persist_reference_findings(target: &Path, findings: &[Finding]) -> Result<Vec<i64>, String> {

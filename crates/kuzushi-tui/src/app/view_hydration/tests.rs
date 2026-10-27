@@ -231,6 +231,9 @@ pub(super) fn missing_value(key: &ViewHydrationKey) -> ViewHydrationValue {
             ViewHydrationValue::TargetProfile(TargetProfile::conservative())
         }
         ViewHydrationKey::MapArtifacts => ViewHydrationValue::MapArtifacts(false),
+        ViewHydrationKey::RepositoryIndex => {
+            ViewHydrationValue::RepositoryIndex(Arc::new(default_context_snapshot_view(None)))
+        }
         ViewHydrationKey::CpgArtifacts => ViewHydrationValue::CpgArtifacts(false),
         ViewHydrationKey::ScanRecommendations => {
             ViewHydrationValue::ScanRecommendations(ScanRecommendationsState::Ready(Vec::new()))
@@ -662,24 +665,25 @@ fn target_generation_discards_a_stale_result() {
 }
 
 #[test]
-fn stale_target_generation_discards_a_target_profile_result() {
-    let first = tempfile::tempdir().unwrap();
-    let second = tempfile::tempdir().unwrap();
-    let reader = Arc::new(BlockingReader::default());
-    let mut runtime = ViewHydrationRuntime::default();
-    runtime.set_reader(reader.clone());
-    runtime.schedule(
-        first.path().to_path_buf(),
-        vec![ViewHydrationKey::TargetProfile],
-        None,
-    );
-    wait_for_reader_start(&reader);
+fn stale_target_generation_discards_target_metadata_results() {
+    for key in [
+        ViewHydrationKey::TargetProfile,
+        ViewHydrationKey::RepositoryIndex,
+    ] {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let reader = Arc::new(BlockingReader::default());
+        let mut runtime = ViewHydrationRuntime::default();
+        runtime.set_reader(reader.clone());
+        runtime.schedule(first.path().to_path_buf(), vec![key], None);
+        wait_for_reader_start(&reader);
 
-    runtime.schedule(second.path().to_path_buf(), Vec::new(), None);
-    release_reader(&reader);
-    wait_until(|| runtime.workers_finished());
+        runtime.schedule(second.path().to_path_buf(), Vec::new(), None);
+        release_reader(&reader);
+        wait_until(|| runtime.workers_finished());
 
-    assert!(runtime.drain_current().results.is_empty());
+        assert!(runtime.drain_current().results.is_empty());
+    }
 }
 
 #[derive(Debug, Default)]

@@ -30,7 +30,7 @@ def live(pid, *tokens):
 
 def admitted(root, evidence):
     plan = scan_plan(root)
-    deadline = time.monotonic() + 30
+    deadline = time.monotonic() + 60
     marker = evidence / "cancellation-admitted.json"
     while time.monotonic() < deadline:
         jobs = queue(root, plan)
@@ -102,6 +102,8 @@ if __name__ == "__main__":
     root, evidence = [Path(value).resolve() for value in sys.argv[1:3]]
     stage = sys.argv[3]
     if stage == "seed":
+        from investigation_environment import require_isolated_launches
+        require_isolated_launches((Path(__file__).resolve().parents[1] / "journeys/J121-complete-investigation.journey").read_text())
         investigation.seed(root, evidence, Path(sys.argv[4]).resolve())
         save(evidence, "cancellation-profile", {"cancelCall": 3, "liveProviderRequests": 0})
     elif stage == "admitted":

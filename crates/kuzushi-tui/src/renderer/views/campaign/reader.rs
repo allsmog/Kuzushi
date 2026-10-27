@@ -169,7 +169,7 @@ fn job_detail_controls(deck: &crate::app::CampaignRouteState) -> String {
 
 fn settled_control_text(commands: &[&str]) -> String {
     if commands.contains(&"work paused") {
-        "R report · a plan/allowance\nwork paused · L resume · ↑↓ jobs · r refresh · q list".into()
+        "R report · a plan/allowance\nwork paused · review plan to resume · ↑↓ jobs · r refresh · q list".into()
     } else if commands.contains(&"work ended") {
         "R report · a plan/allowance\nwork ended · new work needs a new plan".into()
     } else if commands.contains(&"work finished") {

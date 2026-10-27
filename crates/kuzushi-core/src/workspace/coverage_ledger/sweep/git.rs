@@ -68,6 +68,8 @@ pub(super) fn whole_repo_diff(
             "diff",
             "--no-ext-diff",
             "--no-textconv",
+            // A move must expose both paths before filtering by scope.
+            "--no-renames",
             "--name-only",
             "-z",
             &format!("{from}..{to}"),

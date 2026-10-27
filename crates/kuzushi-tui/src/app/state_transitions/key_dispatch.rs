@@ -1767,12 +1767,7 @@ impl ShellApp {
         {
             return false;
         }
-        self.advisory().notice.as_ref().is_some_and(|notice| {
-            matches!(
-                notice.severity,
-                crate::NoticeSeverity::Error | crate::NoticeSeverity::Warn
-            )
-        })
+        self.advisory().foreground_notice_pending()
     }
 
     pub(super) fn handle_confirm_key(&mut self, key: KeyEvent) -> InputUpdate {

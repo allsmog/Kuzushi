@@ -525,6 +525,7 @@ fn sarif_evidence_properties(record: &WorkspaceFindingExportRecord) -> serde_jso
         "kuzushiObservedOtherEvidenceCount": record.evidence.observed_other_count,
         "kuzushiModelGeneratedReasoningPresent": record.evidence.model_generated_reasoning_present,
         "kuzushiModelGeneratedReasoningCount": record.evidence.model_generated_reasoning_count,
+        "kuzushiReasoningAssertionCount": record.evidence.reasoning_assertion_count,
         "kuzushiDerivedSourcePresent": record.evidence.derived_source_present,
         "kuzushiEvidenceSourceCount": record.evidence.source_count,
         "kuzushiRawHttpBlobPresent": record.evidence.raw_http_blob_present,
@@ -562,6 +563,9 @@ fn sarif_provenance_properties(record: &WorkspaceFindingExportRecord) -> serde_j
         "kuzushiVersion": record.provenance.kuzushi_version,
         "kuzushiModel": record.provenance.model,
         "kuzushiRuntimePlatform": record.provenance.runtime_platform,
+        "kuzushiRunGit": record.provenance.run_git,
+        "kuzushiObservationSource": record.provenance.observation_source,
+        "kuzushiRelationshipSources": record.provenance.relationship_sources,
     })
 }
 

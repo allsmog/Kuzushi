@@ -252,6 +252,12 @@ fn canceled_capture_and_invalid_primary_lines_leave_no_observations() {
 fn captured_binding_cannot_be_reused_for_lines_outside_the_supplied_prefix() {
     let mut f = Fixture::new("owned.c");
     let source = f.capture(1024).unwrap();
+    f.finding.start_line = 0;
+    let error = f
+        .store
+        .insert_finding_with_sources("owned", &f.finding, &source)
+        .unwrap_err();
+    assert!(error.to_string().contains("no recorded line"), "{error:#}");
     f.finding.start_line = 2;
     f.finding.evidence.clear();
     assert!(f
@@ -407,4 +413,74 @@ fn snapshot_preflight_refuses_oversized_membership_and_wrong_workspace() {
         .unwrap();
     assert!(format!("{error:#}").contains("100000-entry"));
     assert_eq!(f.observations(), 0);
+}
+
+#[test]
+fn native_capture_uses_the_authenticated_full_file_without_widening_model_prefixes() {
+    let mut f = Fixture::new("owned.c");
+    f.finding.start_line = 2;
+    let ready = f
+        .store
+        .prepare_finding_source_snapshot(
+            f.workspace.root(),
+            &f.snapshot.snapshot_hash,
+            &f.snapshot.tree_hash,
+        )
+        .unwrap();
+    let model = f.capture(1024).unwrap();
+    assert!(model.grounding(&f.finding).is_err());
+    let native = ready
+        .capture_native(std::slice::from_ref(&f.finding), 1024, &|| false)
+        .unwrap();
+    assert!(native.grounding(&f.finding).unwrap().is_grounded());
+    assert_eq!(native.captured_counts(), (1, ORIGINAL.len()));
+}
+
+#[test]
+fn native_capture_honors_the_shared_byte_limit_and_cancellation_before_publication() {
+    let f = Fixture::new("owned.c");
+    let ready = f
+        .store
+        .prepare_finding_source_snapshot(
+            f.workspace.root(),
+            &f.snapshot.snapshot_hash,
+            &f.snapshot.tree_hash,
+        )
+        .unwrap();
+    assert!(ready
+        .capture_native(std::slice::from_ref(&f.finding), 1, &|| false)
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("Capture limit"));
+    assert!(ready
+        .capture_native(std::slice::from_ref(&f.finding), 1024, &|| true)
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("canceled"));
+    assert_eq!(f.observations(), 0);
+}
+
+#[test]
+fn unbound_native_publication_retains_claims_without_reading_or_grounding_live_source() {
+    let f = Fixture::new("owned.c");
+    let id = f
+        .store
+        .insert_unbound_native_finding("owned", &f.finding)
+        .unwrap();
+    let source = f.store.recorded_observation_source(id).unwrap().unwrap();
+    assert!(source.blob_hash.is_none());
+    assert!(source.git_commit.is_none());
+    let finding = f.store.list_all_findings().unwrap().remove(0);
+    assert!(matches!(
+        finding.grounding,
+        Some(GroundingStatus::Unavailable { .. })
+    ));
+    assert_eq!(finding.evidence[0].kind, "reasoning");
+    assert!(finding.evidence[0].confidence <= 25);
+    assert_eq!(finding.evidence[0].snippet, "// owned original source");
+    assert!(finding.evidence[0]
+        .rationale
+        .contains("native source snapshot could not be authenticated"));
 }

@@ -171,6 +171,9 @@ fn build_manifest_entry(
         "automatedReasoningPresent": record.analysis.automated_reasoning_present,
         "runId": record.provenance.run_id,
         "sourceHistory": record.provenance.source_history,
+        "runGit": record.provenance.run_git,
+        "observationSource": record.provenance.observation_source,
+        "relationshipSources": record.provenance.relationship_sources,
         "runStatus": record.provenance.run_status,
         "model": record.provenance.model,
         "path": file.path,
@@ -189,6 +192,7 @@ fn append_manifest_evidence(entry: &mut serde_json::Value, record: &WorkspaceFin
     entry["modelGeneratedReasoningPresent"] =
         json!(record.evidence.model_generated_reasoning_present);
     entry["modelGeneratedReasoningCount"] = json!(record.evidence.model_generated_reasoning_count);
+    entry["reasoningAssertionCount"] = json!(record.evidence.reasoning_assertion_count);
     entry["derivedSourcePresent"] = json!(record.evidence.derived_source_present);
 }
 

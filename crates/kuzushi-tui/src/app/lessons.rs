@@ -47,7 +47,29 @@ impl ShellApp {
         let ViewDataState::Ready(Ok(page)) = self.lesson_page() else {
             return None;
         };
-        page.rows.get(self.lesson_cursor(&page)?).cloned()
+        let visible = self
+            .lesson_cursor(&page)
+            .and_then(|index| page.rows.get(index));
+        preferred_lesson_record(visible, self.pinned_lesson_snapshot()).cloned()
+    }
+
+    pub(crate) fn pinned_lesson_snapshot(&self) -> Option<&FindingLesson> {
+        self.router
+            .lessons
+            .pinned_snapshot
+            .as_ref()
+            .filter(|record| self.router.lessons.pinned_id.as_deref() == Some(record.id.as_str()))
+    }
+
+    pub(super) fn pin_lesson_record(&mut self, record: FindingLesson) {
+        self.router.lessons.pinned_id = Some(record.id.clone());
+        self.router.lessons.pinned_snapshot = Some(record);
+    }
+
+    pub(super) fn pin_current_lesson(&mut self) {
+        if let Some(record) = self.selected_lesson() {
+            self.pin_lesson_record(record);
+        }
     }
 
     pub(crate) fn lesson_cursor(&self, page: &FindingLessonPage) -> Option<usize> {
@@ -70,8 +92,16 @@ impl ShellApp {
         if self.input_mode() != InputMode::Navigate {
             return None;
         }
-        self.handle_lesson_browse_key(key.code)
+        (self.handle_lesson_followup_key(key) || self.handle_lesson_browse_key(key.code))
             .then(state_transitions::InputUpdate::handled)
+    }
+
+    fn handle_lesson_followup_key(&mut self, key: KeyEvent) -> bool {
+        if key.code != KeyCode::Char('s') || !key.modifiers.is_empty() {
+            return false;
+        }
+        self.plan_lesson_context_scan();
+        true
     }
 
     fn handle_lesson_owned_input(
@@ -134,11 +164,16 @@ impl ShellApp {
         let ViewDataState::Ready(Ok(page)) = self.lesson_page() else {
             return;
         };
-        let current = self.lesson_cursor(&page).unwrap_or_default();
-        self.router.lessons.pinned_id = None;
-        self.router.lessons.cursor = current
-            .saturating_add_signed(delta)
+        let cursor = self
+            .lesson_cursor(&page)
+            .map_or(0, |current| current.saturating_add_signed(delta))
             .min(page.rows.len().saturating_sub(1));
+        self.router.lessons.pinned_id = None;
+        self.router.lessons.pinned_snapshot = None;
+        self.router.lessons.cursor = cursor;
+        if let Some(record) = page.rows.get(cursor) {
+            self.pin_lesson_record(record.clone());
+        }
         self.router.default_scroll_mut().set(0);
     }
 
@@ -156,12 +191,24 @@ impl ShellApp {
         };
         self.router.lessons.cursor = 0;
         self.router.lessons.pinned_id = None;
+        self.router.lessons.pinned_snapshot = None;
         self.router.default_scroll_mut().set(0);
     }
 
     pub(super) fn refresh_lessons(&mut self) {
+        self.pin_current_lesson();
         self.workbench_cache().borrow_mut().lesson_pages.clear();
         self.router.lessons.notice = None;
+    }
+}
+
+fn preferred_lesson_record<'a>(
+    visible: Option<&'a FindingLesson>,
+    recorded: Option<&'a FindingLesson>,
+) -> Option<&'a FindingLesson> {
+    match (visible, recorded) {
+        (Some(visible), Some(recorded)) if recorded.revision > visible.revision => Some(recorded),
+        (visible, recorded) => visible.or(recorded),
     }
 }
 

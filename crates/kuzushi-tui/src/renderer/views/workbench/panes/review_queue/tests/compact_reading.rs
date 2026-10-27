@@ -1,6 +1,32 @@
 use super::*;
 
 #[test]
+fn nested_service_locations_remain_distinct_in_compact_cards() {
+    let mut first = review_row();
+    first.location = format!("services/a/{}f064.py:2", "deep/".repeat(40));
+    let mut second = first.clone();
+    second.alias = "F-0002".into();
+    second.location = first.location.replacen("services/a/", "services/b/", 1);
+    second.selected = false;
+    let originals = [first.location.clone(), second.location.clone()];
+    let model = review_model(vec![first, second]);
+    for width in [28, 40, 42, 60] {
+        let lines = populated_review_queue_pane_lines(&model, Rect::new(0, 0, width, 16));
+        assert!(lines.iter().all(|line| line.width() <= usize::from(width)));
+        let text = lines_text(lines);
+        for prefix in ["services/a", "services/b"] {
+            assert!(
+                text.lines()
+                    .any(|line| line.contains(prefix) && line.ends_with("f064.py:2")),
+                "{width}: missing distinct {prefix}: {text}"
+            );
+        }
+    }
+    assert_eq!(model.rows[0].location, originals[0]);
+    assert_eq!(model.rows[1].location, originals[1]);
+}
+
+#[test]
 fn suppression_label_survives_compact_and_wide_queue_rendering() {
     let mut row = review_row();
     row.proof_confidence = ProofConfidence::Dismissed;

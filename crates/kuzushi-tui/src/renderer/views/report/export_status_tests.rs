@@ -108,3 +108,55 @@ fn failed_report_exposes_the_destination_editor_without_claiming_a_current_read(
     assert!(text.contains("save path"));
     assert_eq!((app.input(), app.cursor()), ("retained report draft λ", 5));
 }
+
+fn hydrate_empty_report(app: &ShellApp, target: &std::path::Path) {
+    use crate::app::{ViewHydrationKey, ViewHydrationResult, ViewHydrationValue};
+    app.workbench_cache()
+        .borrow_mut()
+        .apply_view_hydration(ViewHydrationResult {
+            target: target.into(),
+            key: ViewHydrationKey::WorkspaceReportReview {
+                findings_watermark: app.findings_read_watermark(),
+            },
+            value: ViewHydrationValue::WorkspaceReportReview(Ok(
+                kuzushi_core::workspace::WorkspaceReviewSummary::default(),
+            )),
+        });
+}
+
+#[test]
+fn refused_export_stays_visible_until_explicit_retry_with_a_current_report() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = report_app(false);
+    app.set_target(Some(root.path().into()));
+    app.set_shell_view(crate::ShellView::Report);
+    app.set_input_mode(crate::InputMode::Navigate);
+    app.router.report_mut().toggle_scope();
+    let retained = (app.input().to_owned(), app.cursor());
+    let update = app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(update.effects.is_empty());
+    assert!(app.router.report().export_read_error());
+    assert!(report_reader_header(&app, 40)[1]
+        .to_string()
+        .contains("NOT EXPORTED"));
+    hydrate_empty_report(&app, root.path());
+    for (width, height) in [(40, 11), (60, 19), (80, 23), (96, 88), (120, 35), (160, 47)] {
+        app.set_viewport(crate::TerminalViewport::new(width, height));
+        for code in [KeyCode::Home, KeyCode::End] {
+            app.reduce_key(KeyEvent::new(code, KeyModifiers::NONE));
+            let text = frame_text(&app, width, height);
+            assert!(text.contains("RETRY EXPORT"), "{width}x{height}: {text}");
+            assert!(!app.report_export_pending());
+        }
+    }
+    let plain = crate::renderer::render_plain_app(&app, 40);
+    assert!(plain.contains("RETRY EXPORT") && !plain.contains('\u{1b}'));
+    assert_eq!((app.input().to_owned(), app.cursor()), retained);
+    assert!(!root.path().join(".kuzushi/reports").exists());
+    let retry = app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(matches!(
+        retry.effects.as_slice(),
+        [crate::app::ShellEffect::ExportReport(_)]
+    ));
+    assert!(!app.router.report().export_read_error());
+}

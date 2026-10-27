@@ -54,6 +54,7 @@ def inspect_scan(root, run_id):
 
 
 def seed(root, evidence, home):
+    subprocess.run(["git", "init", "--quiet", "--initial-branch=main", str(home)], check=True)
     for name in ["app.py", "config.env"]:
         (root / name).unlink(missing_ok=True)
     (root / "hello.py").write_text('# Owned greeting. Never executed.\nprint("owned source")\n')

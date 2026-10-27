@@ -95,7 +95,7 @@ pub(crate) const SAST_TASK_CAPABILITIES: &[SastTaskCapability] = &[
         id: "taint-iris",
         scan_task: "taint-iris",
         cost: "high",
-        notes: "source-to-sink analysis; run via sast:scan",
+        notes: "compatibility task alias for taint-iris-next; no additional engine",
         default_enabled: false,
         toggleable: true,
     },

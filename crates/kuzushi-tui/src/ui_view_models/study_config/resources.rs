@@ -4,6 +4,7 @@ use kuzushi_core::capabilities::campaign::{
     ScanResourceEvidence, ScopeStudyDraft, StudyResourceProjection,
 };
 mod campaign_resources;
+mod native_work;
 
 pub(super) fn row_value(config: &BatchScanConfig) -> String {
     if let Some(campaign) = &config.prior_campaign_id {
@@ -43,6 +44,9 @@ pub(crate) fn study_resource_lines(config: &BatchScanConfig) -> Vec<String> {
     if config.review_plan.is_some() {
         return crate::ui_view_models::review_study::review_budget_lines(config);
     }
+    if let Some(lines) = native_work::lines(config) {
+        return lines;
+    }
     let mut lines = history_lines(config);
     lines.extend(selected_resource_lines(config));
     lines
@@ -67,7 +71,7 @@ fn selected_resource_lines(config: &BatchScanConfig) -> Vec<String> {
     if !config.study.matrix.cases.is_empty() {
         return matrix_resource_lines(config);
     }
-    selected_single_resource_lines(config)
+    historical_single_resource_lines(config)
 }
 
 fn scope_resource_lines(config: &BatchScanConfig, draft: &ScopeStudyDraft) -> Vec<String> {
@@ -92,10 +96,6 @@ fn uncalibrated_capacity_lines(config: &BatchScanConfig) -> Vec<String> {
         |available| vec![format!("Under the proposed limits: {available} context/scan calls available after commitments and protected review."),
             "This is spending capacity, not an estimate that all jobs will finish. Approve any new allowance separately.".into()],
     )
-}
-
-fn selected_single_resource_lines(config: &BatchScanConfig) -> Vec<String> {
-    native_resource_lines(config).unwrap_or_else(|| historical_single_resource_lines(config))
 }
 
 fn historical_single_resource_lines(config: &BatchScanConfig) -> Vec<String> {
@@ -136,21 +136,6 @@ fn historical_single_resource_lines(config: &BatchScanConfig) -> Vec<String> {
     lines.push(format!("Usage evidence: {}", prior.run_id));
     lines.extend(identity_lines(evidence));
     lines
-}
-
-fn native_resource_lines(config: &BatchScanConfig) -> Option<Vec<String>> {
-    let receipt = config.study.receipt.as_ref()?;
-    if receipt.equivalence.components.model.is_some()
-        || kuzushi_core::modules::tool_needs_runtime("sast:scan", &receipt.scan_input)
-    {
-        return None;
-    }
-    Some(vec![
-        format!("Frozen discovery: {} native jobs · 0 model-provider requests.", receipt.job_count),
-        "Model-provider charges for these jobs: $0. Local compute and scanner-service costs are not estimated.".into(),
-        format!("Protected Review limit: {}. Model-backed follow-ups require separately approved work.",
-            config.study.protected_review_calls.map_or_else(|| "not set".into(), |calls| format!("{calls} calls within the total"))),
-    ])
 }
 
 fn matrix_resource_lines(config: &BatchScanConfig) -> Vec<String> {

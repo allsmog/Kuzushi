@@ -30,7 +30,8 @@ impl ShellApp {
     }
 
     fn handle_study_editor_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
-        self.handle_context_case_name_key(key)
+        self.handle_scope_correction_key(key)
+            .or_else(|| self.handle_context_case_name_key(key))
             .or_else(|| self.handle_brief_key(key))
             .or_else(|| self.handle_regeneration_guidance_key(key))
             .or_else(|| self.handle_context_edit_key(key))

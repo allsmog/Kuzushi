@@ -84,6 +84,7 @@ mod catalog;
 mod command_palette;
 mod command_router;
 mod coverage;
+mod dfd_evidence;
 mod editor_state;
 mod effect_runtime;
 mod effects;
@@ -170,6 +171,8 @@ mod workspace_context;
 
 mod devex_phase_fixture;
 mod domain_cache;
+#[cfg(all(test, unix))]
+pub(crate) mod owned_dispatcher_test_support;
 mod shell_lifecycle;
 mod shellapp;
 #[cfg(test)]

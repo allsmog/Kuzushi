@@ -54,6 +54,41 @@ authority. Use inline one-shot input, shell `set`, or home-scoped `setg` when a
 full prompt replacement is intentional. This rule applies identically to
 scan, shell, and run because all three use canonical registry preparation.
 
+### Duplicate proposal input limits (`triage:dedupe`)
+
+Advanced options distinguish ledger inspection from candidate selection:
+
+| Option | Default | Allowed range |
+| --- | --- | --- |
+| `maxLedgerObservations` | 10,000 | 1 to 100,000 |
+| `maxLedgerBytes` | 8 MiB | 1 to 128 MiB |
+| `maxLedgerReadMs` | 10,000 ms | 1 to 60,000 ms |
+| `maxJudgePromptBytes` | 128 KiB | 1 to 512 KiB |
+| `maxConfirmationBytes` | 256 KiB | 1 to 8 MiB |
+
+All have snake-case aliases and share prepared dispatch, stored-option precedence
+and unknown-key rejection. The ledger byte budget counts raw observations and
+projected finding/source JSON together. The SQL deadline is cooperative; lock
+waits and bounded decoding may finish later. These limits do not bound all SQLite
+memory, wall-clock IO, output tokens or provider transport framing.
+
+The prompt limit counts system and user UTF-8 text for each request. All metadata
+batches are checked before the first request. Optional low-confidence
+confirmations use complete, contained UTF-8 files under one aggregate source
+allowance, cached once per literal path. A read can probe one extra byte.
+Unavailable or oversized files, missing citations and oversized confirmation
+prompts drop that group without confirmation. Failed reads retain their reserved
+bytes and disclose unknown consumption. Receipts identify current workspace
+source, which can differ from historical findings. Neither model request can
+invoke tools; both allow one model turn. Existing durable request accounting and
+same-model transport retry policy still apply. Malformed model output fails without an automatic repair request.
+
+A read refusal preserves observations and decisions. Correct the declared limit
+explicitly before retrying; the action never expands it. `inputCoverage` reports
+eligible, selected and omitted candidates. `confirmationInputs` records source
+availability and digests without embedding source text. A proposal still requires
+human acceptance and never demonstrates complete repository coverage.
+
 ### Deep-auditor dataflow tools (`taintTools`)
 
 `triage:run` and `deep-audit:run` expose a non-advanced `taintTools` enum
@@ -116,6 +151,11 @@ as JSON. If both are present for the same canonical option, `--input` wins.
 For a `path` option (for example a scanner target), inline JSON or a session
 `--option` may establish the workspace when `--target` is absent; when a
 workspace is already explicit, the resolved path must remain inside it.
+Relative inline path values and equivalent `target`/`cwd` choices use that
+explicit workspace as their base. For example,
+`kuzushi --target /repos/monorepo run license-scan:scan --option target=packages/client`
+inspects the client while retaining state in the monorepo workspace. Its finding
+locations use paths such as `packages/client/package.json` in that workspace.
 Persisted `target`/`cwd` values are checked at the shared dispatch boundary and
 cannot steer execution outside the workspace that owns the finding store and
 run artifacts. For a `string` option (for example `recon:nmap` or
@@ -1094,6 +1134,15 @@ exact confirmation and observation, approve its allowance, then start it
 separately. Generation uses Learning calls, preserving the protected Review
 allocation. It returns a draft; `a`, `r` and `t` still require a reason and an
 explicit confirmation. Acceptance and inclusion in a context copy are separate.
+
+After `u` creates an inactive context copy, `s` plans a follow-up using that
+exact copy. Review its source scope, engines and allowance before preparing
+and approving the fixed jobs. The initial draft has three passes, one worker
+and one attempt per job. Existing spending and unresolved requests are retained;
+no earlier approval authorizes new work. Back restores Lessons and its draft.
+An open study or pending context write must be finished or closed first. Retired
+or changed lessons block reuse. Model-guided engines read the lesson text;
+native scanners use their rules. Planning itself makes no provider request.
 
 `findings:lesson-generate` declares `findingId`, optional frozen `originRef`,
 `guidance`, `maxSourceBytes`, `maxOutputTokens`, `thinkingLevel`, `model` and

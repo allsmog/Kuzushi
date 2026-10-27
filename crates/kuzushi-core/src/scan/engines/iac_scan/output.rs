@@ -115,10 +115,10 @@ pub struct IacScanFinding {
 
 impl IacScanFinding {
     pub(crate) fn rebase_path(&mut self, prefix: &Path) {
-        self.file_path = prefix
-            .join(&self.file_path)
-            .to_string_lossy()
-            .replace('\\', "/");
+        self.file_path = crate::workspace::inventory::repo_relative(
+            Path::new(""),
+            &prefix.join(&self.file_path),
+        );
         let discriminator = self
             .locator
             .clone()

@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(all(test, unix))]
+mod dispatcher_tests;
+
 impl ShellApp {
     pub fn handle_command(&mut self, command: ShellCommand) {
         update_and_execute_effects(self, Msg::Cmd(command));
@@ -96,7 +99,7 @@ impl ShellApp {
         trimmed: &str,
         parsed: &ShellCommand,
     ) -> bool {
-        if !self.has_running_work() || !is_steerable_submission(parsed) {
+        if !self.has_local_running_work() || !is_steerable_submission(parsed) {
             return false;
         }
         self.enqueue_steer_command(trimmed);

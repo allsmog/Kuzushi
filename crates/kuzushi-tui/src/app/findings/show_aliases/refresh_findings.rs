@@ -161,10 +161,26 @@ impl ShellApp {
             count,
             snapshot.watermark,
         );
+        self.apply_snapshot_review_trend(snapshot.review_trend);
         self.domain_mut().set_findings_page(snapshot.page);
         self.domain_mut()
             .set_findings_batch_id(request.batch_id.clone());
         self.restore_snapshot_filter(request.filter.as_deref(), count);
+    }
+
+    fn apply_snapshot_review_trend(
+        &mut self,
+        trend: kuzushi_core::capabilities::campaign::trend::TrendMetrics,
+    ) {
+        self.domain_mut().set_review_trend(trend);
+        let Some(previous) = self.router.campaign().trend else {
+            return;
+        };
+        let spend = kuzushi_core::capabilities::campaign::trend::WorkspaceCampaignSpend {
+            observed_usd: previous.campaign_spend_usd,
+            provider_spend_unresolved: previous.provider_spend_unresolved,
+        };
+        self.router.campaign_mut().trend = Some(trend.with_spend(spend));
     }
 
     fn restore_snapshot_filter(&mut self, expression: Option<&str>, count: usize) {

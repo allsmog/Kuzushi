@@ -1,9 +1,9 @@
 use super::*;
 use crate::ui_view_models::study_engines::{
     engine_apply_controls, engine_area, engine_detail, engine_layout, engine_line,
-    engine_read_position, engine_rows,
+    engine_read_position, engine_rows, engine_window,
 };
-use ratatui::widgets::{Block, Borders};
+use ratatui::widgets::{Block, Borders, Scrollbar, ScrollbarOrientation, ScrollbarState};
 
 pub(super) fn render_engine_picker(frame: &mut Frame<'_>, app: &ShellApp) {
     let Some(picker) = app.study_engine_picker() else {
@@ -20,7 +20,7 @@ pub(super) fn render_engine_picker(frame: &mut Frame<'_>, app: &ShellApp) {
         Paragraph::new(vec![
             Line::styled(
                 format!(
-                    "↑↓ · Space · PgUp/Dn {}",
+                    "↑↓ Space PgUp/Dn r check {}",
                     engine_read_position(app, layout.detail)
                 ),
                 theme::muted(),
@@ -50,15 +50,19 @@ fn render_engine_list(
     area: Rect,
     cursor: usize,
 ) {
-    let start = cursor.saturating_sub((area.height as usize).saturating_sub(1));
+    let window = engine_window(rows.len(), cursor, area.height as usize);
+    let mut text_area = area;
+    if rows.len() > area.height as usize {
+        text_area.width = text_area.width.saturating_sub(1);
+    }
     let visible = rows
         .iter()
         .enumerate()
-        .skip(start)
-        .take(area.height as usize)
+        .skip(window.start)
+        .take(window.len())
         .map(|(index, row)| {
             Line::styled(
-                fit(&engine_line(row, index == cursor), area.width as usize),
+                fit(&engine_line(row, index == cursor), text_area.width as usize),
                 if index == cursor {
                     theme::selection()
                 } else {
@@ -67,7 +71,36 @@ fn render_engine_list(
             )
         })
         .collect::<Vec<_>>();
-    frame.render_widget(Paragraph::new(visible), area);
+    frame.render_widget(Paragraph::new(visible), text_area);
+    render_engine_scrollbar(frame, area, rows.len(), window);
+}
+
+fn render_engine_scrollbar(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    count: usize,
+    window: std::ops::Range<usize>,
+) {
+    if count <= area.height as usize {
+        return;
+    }
+    let mut state = ScrollbarState::new(count.saturating_sub(window.len()).saturating_add(1))
+        .position(window.start)
+        .viewport_content_length(window.len());
+    let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+        .begin_symbol(Some(continuation_marker(window.start > 0, "↑")))
+        .end_symbol(Some(continuation_marker(window.end < count, "↓")))
+        .thumb_symbol("█")
+        .track_symbol(Some("│"))
+        .thumb_style(theme::accent())
+        .track_style(theme::muted())
+        .begin_style(theme::muted())
+        .end_style(theme::muted());
+    frame.render_stateful_widget(scrollbar, area, &mut state);
+}
+
+fn continuation_marker(more: bool, marker: &'static str) -> &'static str {
+    more.then_some(marker).unwrap_or(" ")
 }
 
 fn render_engine_detail(frame: &mut Frame<'_>, app: &ShellApp, area: Rect, scroll: usize) {

@@ -109,14 +109,27 @@ pub(super) fn render_regeneration_controls(frame: &mut Frame<'_>, area: Rect, ha
     );
 }
 
-pub(super) fn render_diagnostic_controls(frame: &mut Frame<'_>, area: Rect) {
+pub(super) fn render_diagnostic_controls(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    scopes: bool,
+    corrected: bool,
+) {
     frame.render_widget(
         Paragraph::new(vec![
             Line::styled("d / Esc back · PgUp/Dn read", theme::accent()),
-            Line::styled("Unaccepted · source text", theme::muted()),
+            Line::styled(diagnostic_action(scopes, corrected), theme::muted()),
         ]),
         area,
     );
+}
+
+fn diagnostic_action(scopes: bool, corrected: bool) -> &'static str {
+    match (scopes, corrected) {
+        (true, true) => "e corrected scopes · unaccepted",
+        (true, false) => "e edit JSON · unaccepted",
+        _ => "Unaccepted · source text",
+    }
 }
 
 pub(super) fn render_generation_document(
@@ -183,7 +196,11 @@ pub(super) fn regeneration_title(has_result: bool) -> &'static str {
 
 fn generation_title(has_result: bool, scopes: bool, diagnostic: bool) -> &'static str {
     if diagnostic {
-        return " REJECTED CONTEXT OUTPUT ";
+        return if scopes {
+            " REJECTED SCOPE OUTPUT "
+        } else {
+            " REJECTED CONTEXT OUTPUT "
+        };
     }
     if scopes {
         return " SUGGEST SCAN SCOPES ";
@@ -238,7 +255,7 @@ fn generation_controls_navigation(
     editable: bool,
 ) -> String {
     if scopes {
-        return "t calls · r review · M model · Tab".into();
+        return scope_navigation(rejected_available, editable).into();
     }
     if rejected_available {
         return "d output · Tab options · PgUp/Dn".into();
@@ -247,6 +264,16 @@ fn generation_controls_navigation(
         return "t calls · r review · s save · Tab".into();
     }
     generation_navigation(width, has_context, position.0, position.1)
+}
+
+fn scope_navigation(rejected_available: bool, editable: bool) -> &'static str {
+    if rejected_available {
+        return "d output · Tab options · PgUp/Dn";
+    }
+    if editable {
+        return "t/r calls · M model · s save · Tab";
+    }
+    "t calls · r review · M model · Tab"
 }
 
 fn generation_navigation(width: u16, has_context: bool, offset: usize, max: usize) -> String {

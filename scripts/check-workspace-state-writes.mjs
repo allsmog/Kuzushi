@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 const root = process.cwd();
+const optionStoreFile = "crates/kuzushi-core/src/options/option_store_persistence.rs";
 const contracts = [
   ["crates/kuzushi-core/src/modules/context/attack_surface_routes.rs", "save_context_snapshot"],
   [
@@ -50,7 +51,7 @@ const contracts = [
     "crates/kuzushi-core/src/workspace/application/load_program_scope.rs",
     "write_program_scope_scaffold",
   ],
-  ["crates/kuzushi-core/src/options/option_store_persistence.rs", "save_to_path"],
+  [optionStoreFile, "save_scoped_path"],
   ["crates/kuzushi-core/src/config/config_file_io.rs", "write_config_body"],
   ["crates/kuzushi-core/src/run_artifacts/canonical_run_markers.rs", "write_marker_text"],
   ["crates/kuzushi-core/src/prompt_stack/mod.rs", "save_prompt_mutations"],
@@ -131,7 +132,31 @@ function braceDelta(character) {
   return 0;
 }
 
+function workspaceOptionDelegationFailures(source) {
+  const body = functionBody(source, "save_to_path");
+  if (body === null) return [`${optionStoreFile} is missing save_to_path()`];
+  const expected = "{self.save_scoped_path(path,OptionScope::Workspace)}";
+  return body.replace(/\s+/g, "") === expected
+    ? []
+    : [`${optionStoreFile}:save_to_path must delegate only to workspace-scoped persistence`];
+}
+
+function globalOptionDelegationFailures(source) {
+  const body = functionBody(source, "save_persistent");
+  if (body === null) return [`${optionStoreFile} is missing save_persistent()`];
+  const expected =
+    ".scope_only(OptionScope::Global).save_scoped_path(global_path,OptionScope::Global)?;";
+  return body.replace(/\s+/g, "").includes(expected)
+    ? []
+    : [
+        `${optionStoreFile}:save_persistent must save global values through operator-scoped persistence`,
+      ];
+}
+
 const failures = [];
+const optionStoreSource = readFileSync(path.join(root, optionStoreFile), "utf8");
+failures.push(...workspaceOptionDelegationFailures(optionStoreSource));
+failures.push(...globalOptionDelegationFailures(optionStoreSource));
 for (const [file, functionName] of contracts) {
   const source = readFileSync(path.join(root, file), "utf8");
   const body = functionBody(source, functionName);

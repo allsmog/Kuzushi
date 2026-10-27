@@ -7,7 +7,7 @@ mod scan_reports;
 mod threat_model_digest;
 pub(crate) use native_coverage::{
     native_scan_failure, NativeEngineCoverage, NativeEngineDisposition, NativeScanCoverage,
-    NativeScanFailure, NativeScanReport,
+    NativeScanFailure, NativeScanReport, NativeSourceBindingReceipt,
 };
 pub(crate) use scan_context_ref::ScanContextDocument;
 pub use scan_context_ref::ScanContextRef;

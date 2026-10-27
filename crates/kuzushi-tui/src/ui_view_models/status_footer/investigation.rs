@@ -13,7 +13,8 @@ fn applies(app: &ShellApp) -> bool {
 fn investigation_reader(view: ShellView) -> bool {
     matches!(
         view,
-        ShellView::Report
+        ShellView::Setup
+            | ShellView::Report
             | ShellView::Scene
             | ShellView::Lessons
             | ShellView::Relationships
@@ -110,10 +111,11 @@ fn operational_segments(app: &ShellApp) -> impl Iterator<Item = String> {
 }
 
 fn reader_orientation(app: &ShellApp) -> Option<String> {
-    if matches!(app.shell_view(), ShellView::Workbench | ShellView::Report) {
-        return None;
+    match app.shell_view() {
+        ShellView::Setup => Some("Setup".into()),
+        ShellView::Workbench | ShellView::Report => None,
+        _ => journey_footer_segment(app),
     }
-    journey_footer_segment(app)
 }
 
 #[cfg(test)]

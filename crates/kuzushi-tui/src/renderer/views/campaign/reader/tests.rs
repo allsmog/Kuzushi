@@ -125,6 +125,10 @@ fn large_fixed_job_controls_and_keyboard_selection_remain_visible() {
             draw(&app).contains("work paused"),
             "Paused guidance hidden at {width}x{height}"
         );
+        let screen = draw(&app);
+        assert!(screen.contains("R report"), "{screen}");
+        assert!(screen.contains("a plan/allowance"), "{screen}");
+        assert!(!screen.contains("L resume"), "{screen}");
         for job in &mut app.router.campaign_mut().campaigns[0].jobs {
             job.state = "failed".into();
             job.attempts = 1;

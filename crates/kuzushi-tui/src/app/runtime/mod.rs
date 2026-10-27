@@ -29,6 +29,7 @@ mod refresh_terminal_redraw_state;
 mod render_plain_scripted_session;
 mod run_focus_visibility_hold;
 mod run_shell;
+mod synchronized_output;
 mod terminal_event_queue;
 mod terminal_loop_event;
 #[cfg(test)]

@@ -12,15 +12,20 @@ const NPM_DEPENDENCY_SCOPES: &[&str] = &[
     "optionalDependencies",
 ];
 
+struct PackageDependency {
+    name: String,
+    version: String,
+    scope: &'static str,
+}
+
 pub(super) fn package_components(
     target: &Path,
     path: &Path,
     text: &str,
 ) -> Result<Vec<SbomComponent>> {
-    let value: Value = serde_json::from_str(text).context("sbom-scan: parse package.json")?;
-    Ok(NPM_DEPENDENCY_SCOPES
-        .iter()
-        .flat_map(|scope| json_dependency_entries(value.get(*scope), target, path, scope))
+    Ok(package_dependencies(target, path, text)?
+        .into_iter()
+        .map(|entry| component(target, path, "npm", entry.scope, &entry.name, Some(&entry.version)))
         .collect())
 }
 
@@ -33,42 +38,60 @@ pub(super) fn is_package_json(path: &Path) -> bool {
 pub(super) fn package_edges(target: &SbomInputs, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text = fs::read_to_string(target, path)
         .with_context(|| format!("sbom-scan: read {}", path.display()))?;
-    let value: Value = serde_json::from_str(&text).context("sbom-scan: parse package.json")?;
     let source = relative_display(target, path);
-    Ok(NPM_DEPENDENCY_SCOPES
-        .iter()
-        .flat_map(|scope| json_dependency_names(value.get(*scope)))
-        .map(|to| SbomDependencyEdge {
+    Ok(package_dependencies(target, path, &text)?
+        .into_iter()
+        .map(|entry| SbomDependencyEdge {
             from: "root".to_string(),
-            to,
+            to: entry.name,
             source: source.clone(),
         })
         .collect())
 }
 
-fn json_dependency_entries(
-    value: Option<&Value>,
+fn package_dependencies(
     target: &Path,
     path: &Path,
-    scope: &str,
-) -> Vec<SbomComponent> {
-    value
-        .and_then(Value::as_object)
-        .into_iter()
-        .flat_map(|deps| deps.iter())
-        .filter_map(|(name, value)| json_dependency_version(value).map(|version| (name, version)))
-        .map(|(name, version)| component(target, path, "npm", scope, name, Some(version)))
-        .collect()
+    text: &str,
+) -> Result<Vec<PackageDependency>> {
+    let path = path.strip_prefix(target).unwrap_or(path);
+    let value: Value = serde_json::from_str(text)
+        .with_context(|| format!("sbom-scan: parse {}", path.display()))?;
+    let document = value.as_object().with_context(|| {
+        format!("sbom-scan: {} must contain a JSON object", path.display())
+    })?;
+    let mut dependencies = Vec::new();
+    for &scope in NPM_DEPENDENCY_SCOPES {
+        append_scope_dependencies(document.get(scope), path, scope, &mut dependencies)?;
+    }
+    Ok(dependencies)
 }
 
-fn json_dependency_names(value: Option<&Value>) -> Vec<String> {
-    value
-        .and_then(Value::as_object)
-        .into_iter()
-        .flat_map(|deps| deps.keys())
-        .map(ToString::to_string)
-        .collect()
+fn append_scope_dependencies(
+    value: Option<&Value>,
+    path: &Path,
+    scope: &'static str,
+    entries: &mut Vec<PackageDependency>,
+) -> Result<()> {
+    let Some(value) = value else { return Ok(()) };
+    let dependencies = value.as_object().with_context(|| {
+        format!("sbom-scan: {}: {scope} must be an object mapping package names to version specifications", path.display())
+    })?;
+    for (name, value) in dependencies {
+        let version = json_dependency_version(value).with_context(|| {
+            format!("sbom-scan: {}: {scope}.{name} needs a string specification or an object with a string version", path.display())
+        })?;
+        entries.push(PackageDependency {
+            name: name.clone(),
+            version: version.to_string(),
+            scope,
+        });
+    }
+    Ok(())
 }
+
+#[cfg(test)]
+mod tests;
 
 fn json_dependency_version(value: &Value) -> Option<&str> {
     value

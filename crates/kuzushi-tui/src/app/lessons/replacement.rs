@@ -2,6 +2,7 @@ use super::*;
 
 impl ShellApp {
     pub(super) fn request_lesson_form(&mut self, form: LessonForm) {
+        self.pin_current_lesson();
         if self
             .router
             .lessons

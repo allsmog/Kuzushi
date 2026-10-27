@@ -27,7 +27,7 @@ fn push_source_section(lines: &mut Vec<Line<'static>>, detail: &FindingDetailMod
     let Some(snippet) = detail.source_snippet.as_ref() else {
         return;
     };
-    push_section_header(lines, source_section_label(budget));
+    push_section_header(lines, source_section_label(snippet, budget));
     if let Some(note) = snippet.note.as_deref() {
         push_wrapped(lines, note, budget, "  ", theme::warn());
     }
@@ -43,11 +43,25 @@ fn push_source_section(lines: &mut Vec<Line<'static>>, detail: &FindingDetailMod
     }
 }
 
-fn source_section_label(budget: usize) -> &'static str {
+fn source_section_label(
+    snippet: &crate::ui_view_models::SourceSnippetModel,
+    budget: usize,
+) -> String {
+    if let Some(checkout) = snippet.retained_run_checkout.as_deref() {
+        return retained_source_label(checkout, budget);
+    }
     if budget < 42 {
-        "SOURCE · observed excerpt"
+        "SOURCE · observed excerpt".into()
     } else {
-        "SOURCE · observation (on-disk excerpt)"
+        "SOURCE · observation (on-disk excerpt)".into()
+    }
+}
+
+fn retained_source_label(checkout: &str, budget: usize) -> String {
+    if budget < 48 {
+        format!("SOURCE · saved · run Git {checkout}")
+    } else {
+        format!("SOURCE · retained · run checkout {checkout}")
     }
 }
 
@@ -418,7 +432,10 @@ fn push_detail_kv(lines: &mut Vec<Line<'static>>, key: &'static str, value: &str
     push_wrapped(lines, &format!("{key}: {value}"), width, "", theme::muted());
 }
 
-fn push_section_header(lines: &mut Vec<Line<'static>>, label: &'static str) {
+fn push_section_header(
+    lines: &mut Vec<Line<'static>>,
+    label: impl Into<std::borrow::Cow<'static, str>>,
+) {
     if !lines.last().is_some_and(is_blank_line) {
         lines.push(blank_line());
     }
@@ -429,7 +446,8 @@ fn is_blank_line(line: &Line<'static>) -> bool {
     line.spans.iter().all(|span| span.content.trim().is_empty())
 }
 
-fn section_line(label: &'static str) -> Line<'static> {
+fn section_line(label: impl Into<std::borrow::Cow<'static, str>>) -> Line<'static> {
+    let label: std::borrow::Cow<'static, str> = label.into();
     Line::from(vec![
         Span::styled("── ", theme::subtle()),
         Span::styled(label, theme::label()),
@@ -625,6 +643,7 @@ mod tests {
                 "}".to_string(),
             ],
             note: None,
+            retained_run_checkout: None,
         });
     }
 
@@ -750,8 +769,8 @@ mod tests {
                 "DECISION",
                 "SOURCE",
                 "EVIDENCE",
-                "REVIEW ACTIONS",
                 "SCANNER MESSAGE",
+                "REVIEW ACTIONS",
                 "PROVENANCE",
             ],
         );
@@ -815,6 +834,7 @@ mod tests {
             focus_line: 42,
             lines: Vec::new(),
             note: Some("source unavailable · No such file or directory".to_string()),
+            retained_run_checkout: None,
         });
         let text = detail_text_for_width(&detail, 120, None);
 
@@ -1169,6 +1189,38 @@ mod review_yield_tests {
                 ],
                 "{text}"
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod retained_source_tests {
+    use super::*;
+
+    #[test]
+    fn retained_identity_stays_in_the_heading_without_displacing_code_rows() {
+        let detail = FindingDetailModel {
+            source_snippet: Some(crate::ui_view_models::SourceSnippetModel {
+                start_line: 1,
+                focus_line: 2,
+                lines: vec!["// owned source".into(), "observed();".into()],
+                retained_run_checkout: Some("7cac9e2".into()),
+                note: None,
+            }),
+            ..Default::default()
+        };
+        for width in [36, 46, 80] {
+            let mut lines = Vec::new();
+            push_source_section(&mut lines, &detail, width);
+            assert_eq!(lines.len(), 4, "Metadata must not consume a code row");
+            let heading = lines[1].to_string();
+            assert!(heading.contains("7cac9e2"));
+            assert!(heading.contains(if width < 48 {
+                "run Git"
+            } else {
+                "run checkout"
+            }));
+            assert!(lines[3].to_string().contains("▶ 2"));
         }
     }
 }

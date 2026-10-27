@@ -3,15 +3,39 @@ use kuzushi_core::NestedProjectKind;
 use std::path::{Path, PathBuf};
 
 pub(crate) fn compact_target_path(value: &str) -> String {
-    let trimmed = value.trim_end_matches('/');
-    let name = trimmed
-        .rsplit('/')
-        .find(|part| !part.is_empty())
-        .unwrap_or(trimmed);
-    if name.is_empty() {
-        "target:/".to_string()
-    } else {
-        format!("./{name}")
+    if value.is_empty() {
+        return "target:unknown".to_string();
+    }
+    let path = Path::new(value);
+    match path.file_name() {
+        Some(name) => format!("./{}", name.to_string_lossy()),
+        None => format!("target:{}", path.display()),
+    }
+}
+
+#[cfg(test)]
+mod compact_target_labels {
+    use super::*;
+
+    #[test]
+    fn empty_or_parent_paths_are_not_named_as_repository_roots() {
+        assert_eq!(compact_target_path(""), "target:unknown");
+        assert_eq!(compact_target_path("repo/.."), "target:repo/..");
+        assert_eq!(compact_target_path("repo/./"), "./repo");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_root_and_literal_backslashes_keep_their_meaning() {
+        assert_eq!(compact_target_path("/"), "target:/");
+        assert_eq!(compact_target_path("/tmp/owned\\repo/"), "./owned\\repo");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_roots_and_directory_separators_keep_their_meaning() {
+        assert_eq!(compact_target_path(r"C:\"), r"target:C:\");
+        assert_eq!(compact_target_path(r"C:\owned\repo"), "./repo");
     }
 }
 

@@ -1,0 +1,58 @@
+name: Owned study preserves independent local dispatch, external findings refresh and operator Stop
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NODE_OPTIONS NO_COLOR KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dispatcher_liveness.py @TMP_TARGET @ART @TMP_HOME prepare
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: campaign held-liveness-context
+require-live-snap: 25 Jobs: 1 | approved-context
+nav-mode:
+keys: L
+require-live-snap: 25 dispatcher pid | owned-context-running
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dispatcher_liveness.py @TMP_TARGET @ART @TMP_HOME admitted
+submit: logs
+require-live-snap: 20 LOGS | independent-local-origin
+submit: setg ui.auto_open_activity true
+submit: run sbom-scan:scan
+require-live-snap: 30 sbom-scan: 1 component | independent-local-result
+require-live-snap: 20 LOGS | independent-local-return
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dispatcher_liveness.py @TMP_TARGET @ART @TMP_HOME local-completed
+ask: Does the explicit local inventory finish and return to Logs while the separately approved one-job study remains running, without delaying the command until study exit or creating more study jobs?
+type: Held draft λ
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dispatcher_liveness.py @TMP_TARGET @ART @TMP_HOME import
+require-live-snap: 20 1 finding | external-ledger-refreshed
+expect: LOGS
+expect: Held draft λ
+resize: 160x48
+live-snap: refreshed-160x48
+resize: 96x89
+live-snap: refreshed-96x89
+resize: 80x24
+live-snap: refreshed-80x24
+resize: 60x20
+live-snap: refreshed-60x20
+resize: 40x12
+live-snap: refreshed-40x12
+expect: Held draft λ
+ask: Does the external observation appear during the held study without manual refresh, losing the draft or changing focus, with visible cancellation controls across terminal sizes?
+resize: 120x36
+keys: C-c
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dispatcher_liveness.py @TMP_TARGET @ART @TMP_HOME stopped
+require-live-snap: 20 Ctrl+C exit | operator-stopped-study
+expect: Stopped by operator: 0 completed, 1 parked
+expect-not: Review the recorded failure and current source
+expect: Held draft λ
+expect: 1 finding
+ask: Does operator Stop cancel only the admitted fixed attempt, preserve its unresolved accounting and the external observation, and keep the draft without launching queued work?
+keys: C-c
+require-live-snap: 20 CONFIRM SESSION EXIT | exit-with-held-draft
+expect: no active work
+expect: command draft
+ask: Does the idle exit confirmation identify the held unsaved command draft, offer Stay as the default and leave disposal to an explicit exit choice?
+keys: y
+require-exit: 10

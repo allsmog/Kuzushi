@@ -1,0 +1,116 @@
+name: Unsupported dependency metadata clears stale claims and recovers after explicit correction
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_shapes.py @TMP_TARGET @ART prepare
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+require-live-snap: 20 LOGS | inventory-origin
+submit: run sbom-scan:scan
+require-live-snap: 30 sbom-scan: 3 components | first-inventory
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_shapes.py @TMP_TARGET @ART initial
+submit: scene
+require-live-snap: 20 KUZUSHI VIZ | initial-gallery
+keys: Tab
+require-live-snap: 20 COMPONENT STACK | initial-components
+expect: owned-root
+expect: compat-owned
+expect: owned-child
+keys: Escape
+submit: logs
+require-live-snap: 20 LOGS | invalid-input-origin
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_shapes.py @TMP_TARGET @ART break
+submit: run sbom-scan:scan
+require-live-snap: 30 devDependencies must be an object | invalid-input-result
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_shapes.py @TMP_TARGET @ART failed
+submit: scene
+require-live-snap: 20 Component inventory failed | failed-components
+expect: packages/child/package.json
+expect: devDependencies must be an object
+expect-not: owned-root
+expect-not: compat-owned
+expect-not: owned-child
+resize: 160x48
+live-snap: failed-160x48
+resize: 96x89
+live-snap: failed-96x89
+resize: 80x24
+live-snap: failed-80x24
+resize: 60x20
+live-snap: failed-60x20
+resize: 40x12
+live-snap: failed-40x12
+keys: NPage
+live-snap: failure-page-1-40x12
+keys: NPage
+live-snap: failure-page-2-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_shapes.py @TMP_TARGET @ART failure-pages
+ask: Does the failed nested manifest identify the unsupported field and provide keyboard-reachable recovery at every size without displaying the previous package claims?
+resize: 120x36
+keys: Escape
+submit: logs
+require-live-snap: 20 LOGS | correction-origin
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_shapes.py @TMP_TARGET @ART correct
+submit: run sbom-scan:scan
+require-live-snap: 30 sbom-scan: 3 components | corrected-inventory
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_shapes.py @TMP_TARGET @ART corrected
+submit: scene
+require-live-snap: 20 COMPONENT STACK | corrected-components
+expect: owned-root
+expect: compat-owned
+expect: owned-child
+expect: declared ^1.0
+expect: declared ~2.0
+expect: file:../shared
+expect: Source freshness is unverified
+expect-not: Map ✓
+expect-not: Scan ✓
+resize: 160x48
+live-snap: corrected-160x48
+resize: 96x89
+live-snap: corrected-96x89
+resize: 80x24
+live-snap: corrected-80x24
+resize: 60x20
+live-snap: corrected-60x20
+resize: 40x12
+live-snap: corrected-40x12
+keys: NPage
+live-snap: corrected-page-1-40x12
+keys: NPage
+live-snap: corrected-page-2-40x12
+keys: NPage
+live-snap: corrected-page-3-40x12
+keys: NPage
+live-snap: corrected-page-4-40x12
+keys: NPage
+live-snap: corrected-page-5-40x12
+keys: NPage
+live-snap: corrected-page-6-40x12
+ask: Is the corrected three-package inventory readable across the viewport matrix, with declared versions distinct from verified source or phase completion?
+resize: 120x36
+keys: Escape
+keys: C-c
+require-exit: 10
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: scene
+require-live-snap: 20 KUZUSHI VIZ | restart-gallery
+keys: Tab
+require-live-snap: 20 declared ^1.0 | restarted-components
+expect: owned-root
+expect: compat-owned
+expect: owned-child
+expect-not: Map ✓
+expect-not: Scan ✓
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_shapes.py @TMP_TARGET @ART restarted
+ask: Does no-color restart recollect the corrected inventory while retaining the failed and successful runs without new model calls, source execution or invented workflow progress?
+keys: C-c
+require-exit: 10

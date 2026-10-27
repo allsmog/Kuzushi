@@ -99,6 +99,7 @@ type SnapshotCache = fn(&mut ShellApp, &str, &serde_json::Value) -> bool;
 const SNAPSHOT_CACHES: &[SnapshotCache] = &[
     ShellApp::cache_context_history_result,
     ShellApp::cache_study_result,
+    ShellApp::cache_scope_correction_result,
     ShellApp::cache_scope_review_result,
     cache_recon_snapshot,
     cache_exploit_chain_snapshot,

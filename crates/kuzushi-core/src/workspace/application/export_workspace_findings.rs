@@ -442,6 +442,7 @@ fn enriched_export_records(
     );
     attach_remediation_records(store, &mut records)?;
     super::export_relationships::attach_relationships(store, &filtered.findings, &mut records)?;
+    super::export_source::attach_observation_sources(store, &filtered.findings, &mut records)?;
     super::export_lessons::attach_lessons(store, &filtered.findings, &mut records)?;
     super::export_goals::attach_goals(store, &filtered.findings, &mut records)?;
     attach_filtered_decision_basis(workspace, store, filtered, &mut records)?;
@@ -918,6 +919,10 @@ const CSV_FINDINGS_HEADER: &[&str] = &[
     "observation_event_hash",
     "observation_last_seen_run_id",
     "observation_compared_run_id",
+    "reasoning_assertion_count",
+    "run_git",
+    "observation_source",
+    "relationship_sources",
 ];
 
 fn write_csv_header(writer: &mut csv::Writer<Vec<u8>>) -> Result<()> {
@@ -1005,6 +1010,8 @@ fn csv_finding_row(record: &WorkspaceFindingExportRecord, metadata: &[String; 4]
     row.extend(csv_remediation_fields(record));
     row.extend(metadata.iter().cloned());
     row.extend(csv_observation_fields(record));
+    row.push(record.evidence.reasoning_assertion_count.to_string());
+    row.extend(super::export_source::csv_source_fields(record));
     row
 }
 

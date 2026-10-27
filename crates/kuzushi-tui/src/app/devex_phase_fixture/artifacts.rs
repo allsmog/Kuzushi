@@ -70,8 +70,8 @@ fn seed_attack_surface(target: &Path) -> Result<(), String> {
 }
 
 // The reference finding sits at src/auth/login.rs:17, so the seeded file
-// keeps a real sink on that exact line — the Review detail pane's SOURCE
-// snippet in the canonical snapshots renders live code, not a drift note.
+// keeps the cited source on that exact line before persistence. Canonical
+// Review snapshots read the retained bytes from the real finding store.
 const LOGIN_FIXTURE_SOURCE: &str = r#"use crate::db::query;
 use crate::http::{Request, Response};
 

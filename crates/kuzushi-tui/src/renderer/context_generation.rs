@@ -4,6 +4,7 @@ use ratatui::widgets::{Block, Borders};
 
 mod controls;
 mod document;
+mod scope_correction;
 
 use controls::{
     generation_controls_area, generation_title_override, render_generation_state_controls,
@@ -16,6 +17,14 @@ pub(super) fn render_context_generation(frame: &mut Frame<'_>, app: &ShellApp, a
     let Some(generation) = app.context_generation() else {
         return;
     };
+    if let Some(editor) = generation
+        .scope_correction
+        .as_ref()
+        .filter(|editor| editor.editing)
+    {
+        scope_correction::render(frame, area, editor);
+        return;
+    }
     if generation.guidance_editing {
         render_regeneration_guidance(frame, generation, area);
         return;

@@ -111,10 +111,12 @@ fn picker_paging_resize_and_cancel_preserve_selection_and_the_composer() {
     app.set_shell_view(ShellView::Campaign);
     app.router.campaign_mut().batch_scan_config = Some(draft());
     app.set_input("held resource draft");
-    let mut seen = String::new();
     for (width, height) in [(40, 12), (60, 20), (80, 24), (120, 36), (160, 48), (96, 89)] {
         app.set_viewport(TerminalViewport::new(width, height));
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        let mut seen = String::new();
+        let mut tail_visible = false;
+        let mut last_frame = String::new();
         for _ in 0..20 {
             terminal
                 .draw(|frame| crate::renderer::render_app(frame, &app))
@@ -131,12 +133,27 @@ fn picker_paging_resize_and_cancel_preserve_selection_and_the_composer() {
                 body.contains("HISTORICAL USAGE") && body.contains("Esc back"),
                 "{width}x{height}: {body}"
             );
-            seen.push_str(&body);
+            let normalized = body
+                .replace('│', " ")
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            tail_visible |= normalized.contains("window remains available.");
+            seen.push_str(&normalized);
+            seen.push('\n');
+            last_frame = body;
             app.handle_study_resource_key(KeyCode::PageDown);
         }
         assert_eq!(app.study_resource_picker().unwrap().cursor, 0);
+        assert!(
+            tail_visible,
+            "{width}x{height}: detail tail was unreachable\n{last_frame}"
+        );
+        assert!(
+            seen.contains("prices stay unknown") && seen.contains("starts no jobs"),
+            "{width}x{height}: {seen}"
+        );
     }
-    assert!(seen.contains("prices stay unknown") && seen.contains("starts no jobs"));
     app.handle_study_resource_key(KeyCode::Esc);
     assert!(app.study_resource_picker().is_none());
     assert_eq!(app.input(), "held resource draft");

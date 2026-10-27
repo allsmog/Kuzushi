@@ -108,7 +108,13 @@ def verify(root, evidence, stage):
     early = stage in ["map-completed", "map-accepted", "scan-draft", "scan-approved"]
     expected_calls = 0 if stage == "map-draft" else 1 if early else (4 if complete else 3) + int(canceled)
     if stage == "map-completed":
-        wait_jobs(root, context, {"completed"})
+        jobs = wait_jobs(root, context, {"completed"})
+        writer = jobs[context["jobs"][0]["jobId"]]
+        indexed = json.loads((root / ".kuzushi/v3/runs" / writer["runId"] / "result.json").read_text())["data"]
+        assert indexed["root"] == str(root)
+        assert indexed["snapshotPath"] == str(root / ".kuzushi/context-snapshot.json")
+        assert (root / ".kuzushi/context-snapshot.json").is_file()
+        assert indexed["snapshot"]["filesIndexed"] == 3
     scans = [plan for plan in plans(root) if plan["kind"] == "scan-batch"]
     if stage not in ["map-draft", "map-completed", "map-accepted"]:
         assert len(scans) == 1
@@ -176,6 +182,12 @@ def verify(root, evidence, stage):
         assert receipt["reviewedCount"] == 2
         assert receipt["observationCount"] == (4 if complete else 3)
         assert receipt["occurrence"]["completed"] == (3 if complete else 2)
+        if canceled:
+            stopped = json.loads((evidence / "after-stop.json").read_text())
+            canceled_run = next(job["runId"] for job in stopped["jobs"].values() if job.get("reason") == "canceled")
+            attempt = next(row for row in receipt["attempts"] if row["runId"] == canceled_run)
+            assert attempt["runStatus"] == "canceled"
+            assert attempt["scan"] is None, "Cancellation must not fabricate an engine outcome"
         with closing(query_ledger(root)) as db:
             assert db.execute("select count(*) from review_decisions").fetchone()[0] == (3 if complete else 2)
     (evidence / (stage + "-check.json")).write_text(json.dumps({"stage": stage, "interceptedRequests": expected_calls,

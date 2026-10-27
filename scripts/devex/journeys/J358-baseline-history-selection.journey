@@ -1,0 +1,82 @@
+name: Equal-second Git history selects the last stored SHA and oversized metadata fails honestly
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/baseline_history.py prepare @TMP_TARGET @ART @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: run coverage:baselines {}
+submit: logs
+keys: End
+require-live-snap: 25 last-recorded-not-a-scan | baseline-records
+expect: Historical Git baseline records: 1
+expect: Run summaries alone do not establish complete scope coverage.
+nav-mode:
+keys: z
+require-live-snap: 20 READ TRANSCRIPT | history-reader
+resize: 160x48
+live-snap: history-160x48
+resize: 96x89
+live-snap: history-96x89
+resize: 80x24
+live-snap: history-80x24
+resize: 60x20
+live-snap: history-60x20
+resize: 40x12
+live-snap: history-40x12
+keys: End
+live-snap: history-tail-40x12
+keys: PPage
+live-snap: history-page-40x12
+ask: Is the selected stored run and complete SHA readable at every size without implying scan coverage, commit ancestry, or a fixed finding?
+keys: q
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/baseline_history.py inspected @TMP_TARGET @ART
+submit: run coverage:sweep {}
+submit: logs
+keys: End
+require-live-snap: 25 tracked source unchanged | same-sha-consumer
+expect: does not establish complete scan coverage or a fixed finding.
+require-shell: python3 -B @REPO/scripts/devex/fixtures/baseline_history.py oversized @TMP_TARGET @ART
+submit: run coverage:baselines {}
+submit: logs
+keys: End
+require-live-snap: 25 8388608-byte read limit | bounded-read-failure
+nav-mode:
+keys: z
+require-live-snap: 20 READ TRANSCRIPT | failure-reader
+resize: 40x12
+keys: End
+live-snap: failure-tail-40x12
+keys: PPage
+live-snap: failure-page-40x12
+ask: Is the oversized-history refusal readable with its recovery guidance, preserving the recorded source and avoiding a partial-success or empty-history claim?
+keys: q
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/baseline_history.py blocked @TMP_TARGET @ART
+require-shell: python3 -B @REPO/scripts/devex/fixtures/baseline_history.py restore @TMP_TARGET @ART
+submit: run coverage:baselines {}
+submit: logs
+keys: End
+require-live-snap: 25 last-recorded-not-a-scan | explicit-recovery
+submit: setup
+require-live-snap: 25 SETUP · READY THE MAP RUN | setup-not-completed
+expect-not: Map ✓
+require-shell: python3 -B @REPO/scripts/devex/fixtures/baseline_history.py recovered @TMP_TARGET @ART
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: run coverage:baselines {}
+submit: logs
+keys: End
+require-live-snap: 25 last-recorded-not-a-scan | restarted-latest-record
+require-shell: python3 -B @REPO/scripts/devex/fixtures/baseline_history.py restarted @TMP_TARGET @ART
+ask: Does no-color restart preserve both source revisions and select the same last stored record, with no model calls, finding decisions or jobs?
+keys: C-c
+require-exit: 10

@@ -11,21 +11,22 @@ pub(super) fn owned_bindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
     if app.input_mode() != InputMode::Navigate {
         return None;
     }
-    Some(browser_bindings(app))
+    Some(with_saved_context_action(app, browser_bindings(app)))
+}
+
+fn with_saved_context_action(
+    app: &ShellApp,
+    mut bindings: Vec<FooterKeybinding>,
+) -> Vec<FooterKeybinding> {
+    if app.router.lessons.saved_context.is_some() {
+        bindings.insert(0, bind("s", "plan follow-up"));
+    }
+    bindings
 }
 
 fn browser_bindings(app: &ShellApp) -> Vec<FooterKeybinding> {
-    if app.viewport().columns < 60 {
-        return vec![
-            bind("j/k", "select"),
-            bind("PgUp/Dn", "read"),
-            bind("Home/End", "ends"),
-            bind("Esc", "back"),
-            interrupt_binding(app),
-        ];
-    }
-    vec![
-        bind("j/k", "select"),
+    let mut bindings = vec![
+        bind("j/k", "browse"),
         bind("PgUp/PgDn", "read"),
         bind("Home/End", "first/last"),
         bind("n", "new draft"),
@@ -33,14 +34,26 @@ fn browser_bindings(app: &ShellApp) -> Vec<FooterKeybinding> {
         bind("e", "edit"),
         bind("d", "resume draft"),
         bind("a/r/t", "review"),
-        bind("Space", "select lesson"),
+        bind("Space", "select"),
         bind("u", "context copy"),
         bind("c", "clear selection"),
         bind("[/]", "pages"),
         bind("R", "refresh"),
         bind("Esc", "back"),
         interrupt_binding(app),
-    ]
+    ];
+    if app.viewport().columns < 60 {
+        bindings.sort_by_key(compact_browser_priority);
+    }
+    bindings
+}
+
+fn compact_browser_priority(binding: &FooterKeybinding) -> u8 {
+    match binding.key.as_str() {
+        "Space" => 0,
+        "[/]" => 1,
+        _ => 2,
+    }
 }
 
 fn dialog_bindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {

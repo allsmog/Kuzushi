@@ -1,4 +1,5 @@
-use crate::findings::FindingEvidence;
+pub(in crate::workspace::application) use crate::findings::presentation::evidence_origin_label as finding_evidence_origin_label;
+use crate::findings::{FindingEvidence, FindingEvidenceOrigin};
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(in crate::workspace::application) struct EvidenceOriginCounts {
@@ -7,6 +8,7 @@ pub(in crate::workspace::application) struct EvidenceOriginCounts {
     pub observed_capture_count: usize,
     pub observed_other_count: usize,
     pub model_generated_reasoning_count: usize,
+    pub reasoning_assertion_count: usize,
 }
 
 pub(in crate::workspace::application) fn evidence_origin_counts(
@@ -20,9 +22,12 @@ pub(in crate::workspace::application) fn evidence_origin_counts(
 }
 
 fn increment_evidence_origin_counts(counts: &mut EvidenceOriginCounts, evidence: &FindingEvidence) {
-    match finding_evidence_origin(evidence) {
+    match evidence.origin_class() {
         FindingEvidenceOrigin::ModelGeneratedReasoning => {
             counts.model_generated_reasoning_count += 1;
+        }
+        FindingEvidenceOrigin::ReasoningAssertion => {
+            counts.reasoning_assertion_count += 1;
         }
         FindingEvidenceOrigin::ObservedCapture => {
             counts.observed_count += 1;
@@ -39,53 +44,30 @@ fn increment_evidence_origin_counts(counts: &mut EvidenceOriginCounts, evidence:
     }
 }
 
-enum FindingEvidenceOrigin {
-    ObservedCode,
-    ObservedCapture,
-    ObservedOther,
-    ModelGeneratedReasoning,
-}
-
-fn finding_evidence_origin(evidence: &FindingEvidence) -> FindingEvidenceOrigin {
-    if evidence.kind.trim().eq_ignore_ascii_case("reasoning") {
-        return FindingEvidenceOrigin::ModelGeneratedReasoning;
-    }
-    if evidence.request_blob.is_some() || evidence.response_blob.is_some() {
-        return FindingEvidenceOrigin::ObservedCapture;
-    }
-    if !evidence.file_path.trim().is_empty() || !evidence.snippet.trim().is_empty() {
-        return FindingEvidenceOrigin::ObservedCode;
-    }
-    FindingEvidenceOrigin::ObservedOther
-}
-
-pub(in crate::workspace::application) fn finding_evidence_origin_label(
-    evidence: &FindingEvidence,
-) -> &'static str {
-    match finding_evidence_origin(evidence) {
-        FindingEvidenceOrigin::ObservedCode => "observed code evidence",
-        FindingEvidenceOrigin::ObservedCapture => "observed capture evidence",
-        FindingEvidenceOrigin::ObservedOther => "observed evidence",
-        FindingEvidenceOrigin::ModelGeneratedReasoning => "model-generated reasoning",
-    }
-}
-
 pub(in crate::workspace::application) fn evidence_state_label(
-    has_observed: bool,
-    has_model_generated_reasoning: bool,
+    counts: &EvidenceOriginCounts,
     has_multiple_sources: bool,
     has_source_link: bool,
 ) -> &'static str {
-    match (
-        has_observed,
-        has_model_generated_reasoning,
-        has_multiple_sources,
-        has_source_link,
-    ) {
-        (true, _, _, _) => "observed",
-        (_, true, _, _) => "model_generated_reasoning",
-        (_, _, true, _) => "corroborated",
-        (_, _, _, true) => "source_linked",
+    if counts.observed_count > 0 {
+        return "observed";
+    }
+    if counts.model_generated_reasoning_count > 0 {
+        return "model_generated_reasoning";
+    }
+    if counts.reasoning_assertion_count > 0 {
+        return "reasoning_assertion";
+    }
+    derived_evidence_state_label(has_multiple_sources, has_source_link)
+}
+
+fn derived_evidence_state_label(has_multiple_sources: bool, has_source_link: bool) -> &'static str {
+    match (has_multiple_sources, has_source_link) {
+        (true, _) => "corroborated",
+        (_, true) => "source_linked",
         _ => "message_only",
     }
 }
+
+#[cfg(test)]
+mod tests;

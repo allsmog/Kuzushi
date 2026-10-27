@@ -38,6 +38,20 @@ impl FindingStore {
             .capture(supplied, findings, maximum, canceled)
     }
 
+    pub(crate) fn insert_unbound_native_finding(
+        &self,
+        run_id: &str,
+        finding: &Finding,
+    ) -> Result<i64> {
+        let mut writer = self.storage_writer_session()?;
+        self.insert_finding_at_source(
+            run_id,
+            finding,
+            &mut writer,
+            ObservationSourceWrite::Unavailable,
+        )
+    }
+
     pub(crate) fn insert_finding_with_sources(
         &self,
         run_id: &str,
@@ -45,13 +59,14 @@ impl FindingStore {
         source: &CapturedFindingSources,
     ) -> Result<i64> {
         source.require_target(self, run_id)?;
-        source.evidence(&finding.evidence)?;
-        anyhow::ensure!(
-            source.grounding(finding)?.is_grounded(),
-            "Primary anchor does not match captured source"
-        );
+        source.validate_finding(finding)?;
         let mut writer = self.storage_writer_session()?;
-        self.insert_finding_at_source(run_id, finding, &mut writer, Some(source))
+        self.insert_finding_at_source(
+            run_id,
+            finding,
+            &mut writer,
+            ObservationSourceWrite::Captured(source),
+        )
     }
 }
 
@@ -70,7 +85,13 @@ impl FindingSourceSnapshot {
         let workspace = WorkspaceTarget::new(&self.root)?;
         let store = ContentStore::open(workspace.objects_dir())?;
         let files = capture_files(
-            &store, &self.root, &self.tree, supplied, findings, maximum, canceled,
+            &store,
+            &self.root,
+            &self.tree,
+            Some(supplied),
+            findings,
+            maximum,
+            canceled,
         )?;
         Ok(CapturedFindingSources {
             root: self.root.clone(),
@@ -78,13 +99,39 @@ impl FindingSourceSnapshot {
             files,
         })
     }
+
+    pub(crate) fn capture_native(
+        &self,
+        findings: &[Finding],
+        maximum: usize,
+        canceled: &dyn Fn() -> bool,
+    ) -> Result<CapturedFindingSources> {
+        anyhow::ensure!(
+            (1..=512 * 1024 * 1024).contains(&maximum),
+            "Invalid native source capture limit"
+        );
+        let workspace = WorkspaceTarget::new(&self.root)?;
+        let store = ContentStore::open(workspace.objects_dir())?;
+        let files = capture_files(
+            &store, &self.root, &self.tree, None, findings, maximum, canceled,
+        )?;
+        let source = CapturedFindingSources {
+            root: self.root.clone(),
+            snapshot: self.snapshot.clone(),
+            files,
+        };
+        for finding in findings {
+            source.validate_finding(finding)?;
+        }
+        Ok(source)
+    }
 }
 
 fn capture_files(
     store: &ContentStore,
     root: &Path,
     tree: &ReviewSourceTree,
-    supplied: &BTreeMap<String, String>,
+    supplied: Option<&BTreeMap<String, String>>,
     findings: &[Finding],
     maximum: usize,
     canceled: &dyn Fn() -> bool,
@@ -96,10 +143,7 @@ fn capture_files(
             !canceled(),
             "Observation source capture canceled before publication"
         );
-        let prefix = supplied
-            .get(&path)
-            .context("Cited source was not supplied to discovery")?;
-        anyhow::ensure!(!prefix.is_empty(), "Supplied source prefix is empty");
+        let prefix = supplied_prefix(supplied, &path)?;
         let file = capture_file(store, root, tree, &path, prefix, remaining)?;
         remaining = remaining
             .checked_sub(file.text.len())
@@ -113,7 +157,30 @@ fn capture_files(
     Ok(files)
 }
 
+fn supplied_prefix<'a>(
+    supplied: Option<&'a BTreeMap<String, String>>,
+    path: &str,
+) -> Result<Option<&'a str>> {
+    let Some(supplied) = supplied else {
+        return Ok(None);
+    };
+    let prefix = supplied
+        .get(path)
+        .context("Cited source was not supplied to discovery")?;
+    anyhow::ensure!(!prefix.is_empty(), "Supplied source prefix is empty");
+    Ok(Some(prefix))
+}
+
 impl CapturedFindingSources {
+    fn validate_finding(&self, finding: &Finding) -> Result<()> {
+        self.evidence(&finding.evidence)?;
+        anyhow::ensure!(
+            self.grounding(finding)?.is_grounded(),
+            "Primary anchor does not match captured source"
+        );
+        Ok(())
+    }
+
     pub(crate) fn captured_counts(&self) -> (usize, usize) {
         (
             self.files.len(),
@@ -204,8 +271,9 @@ impl CapturedFindingSources {
             .files
             .get(path)
             .context("Source anchor is outside captured membership")?;
+        anyhow::ensure!(line > 0, "Source anchor has no recorded line: {path}");
         anyhow::ensure!(
-            line > 0 && line as usize <= file.supplied_lines,
+            line as usize <= file.supplied_lines,
             "Source anchor is outside the supplied prefix: {path}:{line}"
         );
         Ok(())
@@ -262,7 +330,7 @@ fn capture_file(
     root: &Path,
     tree: &ReviewSourceTree,
     path: &str,
-    prefix: &str,
+    prefix: Option<&str>,
     remaining: usize,
 ) -> Result<CapturedFile> {
     let expected = tree
@@ -281,17 +349,25 @@ fn capture_file(
         "Observation source changed before capture: {path}"
     );
     let text = String::from_utf8(bytes).context("Observation source is not UTF-8")?;
+    let supplied_lines = source_line_limit(&text, prefix, path)?;
+    let blob = store.put_blob(text.as_bytes())?;
+    Ok(CapturedFile {
+        text,
+        supplied_lines,
+        hash: blob.hash.clone(),
+        storage_path: store.object_path(&blob.hash),
+    })
+}
+
+fn source_line_limit(text: &str, prefix: Option<&str>, path: &str) -> Result<usize> {
+    let Some(prefix) = prefix else {
+        return Ok(text.lines().count());
+    };
     anyhow::ensure!(
         text.starts_with(prefix),
         "Supplied source prefix does not match the captured tree: {path}"
     );
-    let blob = store.put_blob(text.as_bytes())?;
-    Ok(CapturedFile {
-        text,
-        supplied_lines: prefix.lines().count(),
-        hash: blob.hash.clone(),
-        storage_path: store.object_path(&blob.hash),
-    })
+    Ok(prefix.lines().count())
 }
 
 fn read_capture_bytes(root: &Path, full: &Path, relative: &str, limit: usize) -> Result<Vec<u8>> {

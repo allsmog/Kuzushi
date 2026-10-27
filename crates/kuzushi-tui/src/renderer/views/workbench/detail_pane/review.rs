@@ -26,10 +26,10 @@ pub(in crate::renderer::views::workbench) fn review_detail_lines(
         detail.dataflow_overflow,
         budget,
     );
+    push_message_section(&mut lines, detail, budget);
     push_review_actions(&mut lines, detail, budget);
     push_review_history(&mut lines, detail, budget);
     push_review_yield_section(&mut lines, detail.review_yield.as_ref(), budget);
-    push_message_section(&mut lines, detail, budget);
     push_provenance_section(&mut lines, detail, budget);
     push_decision_source_provenance(&mut lines, detail, budget);
     lines
@@ -73,6 +73,7 @@ mod literal_header_tests {
                 focus_line: 2,
                 lines: vec!["// owned source".into(), "// selected source line".into()],
                 note: None,
+                retained_run_checkout: None,
             }),
             ..Default::default()
         };
@@ -84,6 +85,25 @@ mod literal_header_tests {
         let before_actions = text.split("REVIEW ACTIONS").next().unwrap();
         assert_eq!(before_actions.matches(&detail.location).count(), 1);
         assert!(before_actions.contains("selected source line"));
+    }
+
+    #[test]
+    fn scanner_explanation_precedes_actions_without_claiming_structured_evidence() {
+        let detail = FindingDetailModel {
+            message_lines: vec!["manifest license = apache-2.0; source SPDX = MIT".into()],
+            ..Default::default()
+        };
+        for width in [36, 56, 76, 92, 116, 156] {
+            let text = review_detail_lines(&detail, width)
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n");
+            let before_actions = text.split("REVIEW ACTIONS").next().unwrap();
+            assert!(before_actions.contains("SCANNER MESSAGE"));
+            assert!(before_actions.contains("source SPDX = MIT"));
+            assert!(before_actions.contains("no evidence rows recorded"));
+        }
     }
 }
 
@@ -98,7 +118,7 @@ fn push_review_decision(lines: &mut Vec<Line<'static>>, detail: &FindingDetailMo
         let note = crate::ui_view_models::review_conflicts::review_conflict_detail_label(conflict);
         push_wrapped(
             lines,
-            &format!("Conflicting decisions: {note}"),
+            &format!("Decision source check: {note}"),
             width,
             "  ",
             theme::warn(),

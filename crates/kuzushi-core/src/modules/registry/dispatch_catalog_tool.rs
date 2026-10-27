@@ -506,7 +506,7 @@ pub(in crate::modules) fn run_dep_hygiene_tool(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
     let target = resolve_tool_target(input, ctx)?;
-    crate::workspace::source_snapshot::run_source_bound_tool(
+    crate::workspace::source_snapshot::run_workspace_source_bound_tool(
         ctx,
         "dep-hygiene:check",
         &target,
@@ -550,6 +550,19 @@ pub(in crate::modules) fn run_secret_scan_tool(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
     let target = resolve_tool_target(input, ctx)?;
+    crate::workspace::source_snapshot::run_workspace_source_bound_tool(
+        ctx,
+        "secret-scan:scan",
+        &target,
+        || run_secret_scan_inspection(input, ctx, &target),
+    )
+}
+
+fn run_secret_scan_inspection(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    target: &std::path::Path,
+) -> Result<Value> {
     if let Some(trace) = ctx.trace {
         let _ = trace
             .step(
@@ -560,9 +573,9 @@ pub(in crate::modules) fn run_secret_scan_tool(
             .emit();
     }
     let options = SecretScanOptions::from_tool_input(input)?;
-    let report = match ctx.with_cancellation(|cancel| scan_for_secrets(&target, &options, cancel)) {
+    let report = match ctx.with_cancellation(|cancel| scan_for_secrets(target, &options, cancel)) {
         Ok(report) => report,
-        Err(error) => return Ok(failed_tool_output("secret-scan:scan", &target, error)),
+        Err(error) => return Ok(failed_tool_output("secret-scan:scan", target, error)),
     };
     let store_result = store_secret_scan_findings(&report, ctx)?;
     if let Some(trace) = ctx.trace {
@@ -584,12 +597,13 @@ fn store_dep_hygiene_findings(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<StoredCoreFindings> {
     let target = std::path::Path::new(&report.target);
+    let origin = ctx.workspace.map_or(target, crate::WorkspaceTarget::root);
     let findings = report
         .findings
         .iter()
-        .map(|finding| finding.to_core_finding(target))
+        .map(|finding| finding.to_core_finding(origin))
         .collect::<Vec<_>>();
-    let persisted = crate::findings::persist_tool_findings(ctx, target, &findings)?;
+    let persisted = crate::findings::persist_tool_findings(ctx, origin, &findings)?;
     let core_findings = output_core_findings(findings, &persisted, ctx.findings_store)?;
     Ok(StoredCoreFindings {
         core_findings,
@@ -602,12 +616,21 @@ fn store_secret_scan_findings(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<StoredCoreFindings> {
     let target = std::path::Path::new(&report.target);
+    let origin = ctx.workspace.map_or(target, crate::WorkspaceTarget::root);
+    target
+        .strip_prefix(origin)
+        .context("Secret discovery target must stay inside its workspace")?;
     let findings = report
         .findings
         .iter()
-        .map(|finding| finding.to_core_finding())
+        .map(|finding| {
+            let mut core = finding.to_core_finding();
+            core.file_path =
+                crate::workspace::inventory::repo_relative(origin, &target.join(&core.file_path));
+            core
+        })
         .collect::<Vec<_>>();
-    let persisted = crate::findings::persist_tool_findings(ctx, target, &findings)?;
+    let persisted = crate::findings::persist_tool_findings(ctx, origin, &findings)?;
     let core_findings = output_core_findings(findings, &persisted, ctx.findings_store)?;
     Ok(StoredCoreFindings {
         core_findings,

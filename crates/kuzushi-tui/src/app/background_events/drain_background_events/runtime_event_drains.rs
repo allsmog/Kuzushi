@@ -489,7 +489,7 @@ impl ShellApp {
     }
 
     fn run_focus_sequence_is_settled(&self) -> bool {
-        !self.has_running_work()
+        !self.has_local_running_work()
             && !self.run_focus_continuation_pending()
             && self.steer_queue().len() == 0
     }

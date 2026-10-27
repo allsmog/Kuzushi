@@ -38,7 +38,7 @@ impl PhaseReferenceFixture {
     }
 
     pub(super) fn normalize(&self, rendered: String) -> String {
-        rendered
+        normalize_identity_aliases(rendered, self.app.findings())
             .replace(
                 &self.canonical_target_root.display().to_string(),
                 "/tmp/phase-target",
@@ -57,7 +57,12 @@ fn hydrate_selected_source(app: &mut ShellApp, target: &std::path::Path) {
         return;
     };
     let hydration_target = app.target_owned().unwrap_or_else(|| target.to_path_buf());
-    let source = std::path::PathBuf::from(finding.file_path);
+    let retained = crate::ViewHydrationKey::ScannedSnippet {
+        stable_fp: kuzushi_core::findings::finding_observation_identity(&finding).to_owned(),
+        scan_id: finding.scan_id.clone(),
+        focus_line: finding.start_line,
+    };
+    let source = std::path::PathBuf::from(&finding.file_path);
     let path = if source.is_absolute() {
         source
     } else {
@@ -65,7 +70,7 @@ fn hydrate_selected_source(app: &mut ShellApp, target: &std::path::Path) {
     };
     app.hydrate_view_keys_blocking(
         &hydration_target,
-        vec![crate::ViewHydrationKey::SourceFile { path }],
+        vec![crate::ViewHydrationKey::SourceFile { path }, retained],
     );
 }
 
@@ -118,4 +123,18 @@ fn target_name(target: &std::path::Path) -> String {
         .and_then(|name| name.to_str())
         .unwrap_or("phase-target")
         .to_string()
+}
+
+// Identity aliases include the temporary target root. Canonical snapshots keep
+// their type and sequence; fixture tests separately check the actual store IDs.
+fn normalize_identity_aliases(mut rendered: String, findings: &[kuzushi_core::Finding]) -> String {
+    for (index, finding) in findings.iter().enumerate() {
+        if finding.identity_id.is_some() {
+            rendered = rendered.replace(
+                &crate::ui_view_models::finding_identity_label(finding),
+                &format!("FI-{:08}", index + 1),
+            );
+        }
+    }
+    rendered
 }

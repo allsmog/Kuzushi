@@ -3,6 +3,7 @@ use crate::app::{ShellApp, ViewDataState};
 use kuzushi_core::findings::{FindingRelationship, FindingRelationshipState};
 mod bulk;
 mod groups;
+mod selection;
 pub(crate) use groups::finding_group_page_rows;
 
 pub(super) fn relationship_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
@@ -18,11 +19,27 @@ pub(super) fn relationship_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static
     relationship_browser_lines(app, area)
 }
 
+pub(super) fn browser_or_batch_page_rows(app: &ShellApp) -> Option<usize> {
+    if let Some(review) = &app.router.relationships.bulk {
+        return Some(bulk::page_rows(app, review));
+    }
+    if app.router.relationships.show_groups {
+        return None;
+    }
+    let viewport = app.viewport();
+    let area = crate::renderer::workbench_primary_area(
+        app,
+        Rect::new(0, 0, viewport.columns, viewport.rows),
+    );
+    Some(usize::from(area.height).max(1))
+}
+
 fn relationship_browser_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
-    let mut lines = vec![
-        Line::styled("FINDING RELATIONSHIPS", theme::accent()),
-        Line::raw("Grouping only; verdicts stay separate."),
-    ];
+    let mut lines = vec![Line::styled("FINDING RELATIONSHIPS", theme::accent())];
+    if area.width >= 60 {
+        lines.push(Line::raw("Grouping only; verdicts stay separate."));
+    }
+    lines.extend(selection::recorded_heading(app, area.width as usize));
     lines.extend(narrow_relationship_actions(app, area.width));
     lines.extend(browser_lines(app, area));
     if let Some(notice) = &app.router.relationships.notice {
@@ -49,10 +66,10 @@ fn narrow_relationship_actions(app: &ShellApp, width: u16) -> Vec<Line<'static>>
     if width >= 60 || app.input_mode() != crate::InputMode::Navigate {
         return Vec::new();
     }
-    vec![Line::styled(
-        "a accept · r separate · u unlink",
-        theme::accent(),
-    )]
+    vec![
+        Line::styled("a accept · r separate · u unlink", theme::accent()),
+        Line::styled("Space/A review · n/p pages · R refresh", theme::accent()),
+    ]
 }
 
 fn browser_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
@@ -72,10 +89,12 @@ fn browser_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         }
     };
     if page.rows.is_empty() {
-        return vec![
-            Line::raw("No relationships recorded for this selection."),
-            Line::raw("triage:dedupe proposes duplicates under an approved allowance."),
-        ];
+        return selection::recorded_details(app, area.width as usize).unwrap_or_else(|| {
+            vec![
+                Line::raw("No relationships recorded for this selection."),
+                Line::raw("triage:dedupe proposes duplicates under an approved allowance."),
+            ]
+        });
     }
     relationship_rows(app, area, &page)
 }
@@ -85,16 +104,17 @@ fn relationship_rows(
     area: Rect,
     page: &kuzushi_core::findings::FindingRelationshipPage,
 ) -> Vec<Line<'static>> {
-    let selected = app.router.relationships.cursor.min(page.rows.len() - 1);
+    let selected = app.relationship_cursor(page);
     let capacity = usize::from(area.height).saturating_sub(9).clamp(1, 7);
     let start = selected
+        .unwrap_or(0)
         .saturating_sub(capacity / 2)
         .min(page.rows.len().saturating_sub(capacity));
     let mut lines = vec![Line::raw(format!(
-        "{} relationships · {} selected · page {}{}",
+        "{} relationships on page {} · {} selected{}",
         page.rows.len(),
-        app.router.relationships.selection.len(),
         page.offset / 50 + 1,
+        app.router.relationships.selection.len(),
         if page.has_more {
             " · more available"
         } else {
@@ -107,9 +127,13 @@ fn relationship_rows(
             .enumerate()
             .skip(start)
             .take(capacity)
-            .flat_map(|(i, row)| row_lines(app, row, i == selected, area.width as usize)),
+            .flat_map(|(i, row)| row_lines(app, row, Some(i) == selected, area.width as usize)),
     );
-    lines.extend(detail_lines(&page.rows[selected], area.width as usize));
+    if let Some(detail) = selection::recorded_details(app, area.width as usize) {
+        lines.extend(detail);
+    } else if let Some(index) = selected {
+        lines.extend(detail_lines(&page.rows[index], area.width as usize));
+    }
     lines
 }
 
@@ -163,7 +187,16 @@ fn endpoint_label(
 fn detail_lines(row: &FindingRelationship, width: usize) -> Vec<Line<'static>> {
     let reason = kuzushi_core::run_lifecycle::SafeText::operator_visible(&row.note);
     let text=format!("Reason: {reason}\nAuthority: {} · revision {}\nRecorded ids: #{} / #{}\nRecorded runs: {} / {}\nOther source revisions need separate review; grouping does not confirm a vulnerability.",row.author,row.revision,row.from.finding_id,row.to.finding_id,row.from.run_id.as_deref().unwrap_or("not recorded"),row.to.run_id.as_deref().unwrap_or("not recorded"));
-    wrap_text(&text, width).into_iter().map(Line::raw).collect()
+    let mut lines = wrap_text(&text, width)
+        .into_iter()
+        .map(Line::raw)
+        .collect::<Vec<_>>();
+    lines.extend(
+        wrap_text(&format!("Relationship: {}", row.id), width)
+            .into_iter()
+            .map(Line::raw),
+    );
+    lines
 }
 
 fn note_view_lines(

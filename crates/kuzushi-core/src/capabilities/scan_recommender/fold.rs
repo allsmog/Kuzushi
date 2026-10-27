@@ -90,7 +90,7 @@ fn staleness_rows(inputs: &RecommenderInputs<'_>) -> Vec<ScanRecommendation> {
                 ReasonTag::Changed,
                 changed_score(files),
                 format!(
-                    "{files} file(s) changed since {}",
+                    "{files} path(s) changed since {}",
                     short_sha(&entry.baseline_sha)
                 ),
             )),

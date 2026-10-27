@@ -15,10 +15,10 @@ pub(super) fn append_campaign_summary(
     let fields = summary_fields(deck, campaign);
     let joined = fields.join(" · ");
     if display_width(&joined) <= width.saturating_sub(4) {
-        push_deck_text(lines, &joined, width, theme::subtle());
+        push_deck_text(lines, &joined, width, theme::primary());
     } else {
         for field in fields {
-            push_deck_text(lines, &field, width, theme::subtle());
+            push_deck_text(lines, &field, width, theme::primary());
         }
     }
     append_operational_detail(lines, campaign, width);

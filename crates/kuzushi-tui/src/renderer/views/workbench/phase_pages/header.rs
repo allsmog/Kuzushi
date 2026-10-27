@@ -609,7 +609,10 @@ fn context_style(context: &str) -> ratatui::style::Style {
     let normalized = context.to_ascii_lowercase();
     if normalized.contains("not built") || normalized.contains("missing") {
         theme::muted()
-    } else if normalized.contains("stale") || normalized.contains("partial") {
+    } else if normalized.contains("stale")
+        || normalized.contains("partial")
+        || normalized.contains("unavailable")
+    {
         theme::warn()
     } else {
         theme::success()

@@ -27,6 +27,12 @@ pub(crate) fn context_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         lines.push(pipeline_row(running.glyph, &running.tool, running.message));
     } else if let Some(details) = &model.details {
         append_context_details(&mut lines, details, area);
+    } else if matches!(model.state, "malformed" | "unavailable") {
+        lines.extend(detail_wrapped(
+            "next",
+            "Resolve the index status above, then use context status to retry.",
+            area.width,
+        ));
     } else {
         append_missing_context(&mut lines);
     }

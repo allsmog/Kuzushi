@@ -71,6 +71,43 @@ fn numeric_editor_preserves_error_and_controls_at_forty_columns() {
 }
 
 #[test]
+fn numeric_editor_keeps_allowance_and_field_on_distinct_rows() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(root.path().to_path_buf()));
+    app.open_batch_scan_config(None);
+    app.router
+        .campaign_mut()
+        .batch_scan_config
+        .as_mut()
+        .unwrap()
+        .begin_number_edit(BatchScanConfigRow::Attempts);
+    for (width, height) in [(40, 12), (60, 20), (80, 24), (96, 89), (120, 36), (160, 48)] {
+        app.reduce_resize(width, height);
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| crate::renderer::render_app(frame, &app))
+            .unwrap();
+        let rows = terminal
+            .backend()
+            .buffer()
+            .content
+            .chunks(width as usize)
+            .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+            .collect::<Vec<_>>();
+        let allowance = rows
+            .iter()
+            .position(|line| line.contains("Allowance not approved"))
+            .expect("Numeric editing must retain the allowance header");
+        let field = rows
+            .iter()
+            .position(|line| line.contains("Attempts per job"))
+            .unwrap();
+        assert!(allowance < field, "{width}x{height}: {rows:?}");
+    }
+}
+
+#[test]
 fn study_failure_is_readable_and_dismisses_without_losing_the_draft() {
     let root = tempfile::tempdir().unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);

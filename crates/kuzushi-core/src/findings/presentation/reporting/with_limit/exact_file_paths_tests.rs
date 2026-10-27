@@ -18,7 +18,7 @@ fn exact_paths_match_any_path_without_substring_or_case_expansion() {
         "filePaths": ["src/a b.rs", "src/a,b.rs"]
     }))
     .unwrap();
-    for path in ["src/a b.rs", "./src/a,b.rs", r"src\a b.rs"] {
+    for path in ["src/a b.rs", "./src/a,b.rs"] {
         assert!(
             filter.matches_with_review_decision(&finding(path), None),
             "{path}"
@@ -30,6 +30,34 @@ fn exact_paths_match_any_path_without_substring_or_case_expansion() {
             "{path}"
         );
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn exact_paths_keep_literal_backslashes_distinct_from_directory_separators() {
+    for selected in [r"src/a\b.rs", "src/a/b.rs"] {
+        let filter = FindingListFilter::from_tool_input(&serde_json::json!({
+            "filePaths": [selected]
+        }))
+        .unwrap();
+        for candidate in [r"src/a\b.rs", "src/a/b.rs"] {
+            assert_eq!(
+                filter.matches_with_review_decision(&finding(candidate), None),
+                selected == candidate,
+                "selected {selected:?}, candidate {candidate:?}"
+            );
+        }
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn exact_paths_accept_native_directory_separators() {
+    let filter = FindingListFilter::from_tool_input(&serde_json::json!({
+        "filePaths": ["src/a b.rs"]
+    }))
+    .unwrap();
+    assert!(filter.matches_with_review_decision(&finding(r"src\a b.rs"), None));
 }
 
 #[test]

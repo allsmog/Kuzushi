@@ -70,6 +70,21 @@ fn empty_completion_restores_navigation_without_a_new_command() {
     assert!(app.input().is_empty());
 }
 
+#[cfg(unix)]
+#[test]
+fn held_dispatcher_does_not_delay_foreground_origin_and_draft_return() {
+    let mut app = returning_to(ShellView::Logs);
+    app.set_input("keep this α draft");
+    app.set_cursor(5);
+    let mut held = crate::app::owned_dispatcher_test_support::HeldDispatcher::hold(&mut app);
+
+    assert!(held.finalize_run_focus_if_idle());
+    assert_eq!(held.shell_view(), ShellView::Logs);
+    assert_eq!((held.input(), held.cursor()), ("keep this α draft", 5));
+    assert!(held.has_running_work());
+    assert!(!held.directory().join("dispatcher-stop.json").exists());
+}
+
 #[test]
 fn background_completion_keeps_the_operators_new_view_and_draft() {
     let mut app = returning_to(ShellView::Logs);

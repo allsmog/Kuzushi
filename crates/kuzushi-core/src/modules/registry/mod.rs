@@ -46,6 +46,8 @@ pub(in crate::modules) use run_taint_iris_tool::*;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 #[cfg(test)]
+mod child_target_contract_tests;
+#[cfg(test)]
 mod coverage_contract_tests;
 #[cfg(test)]
 mod cpg_contract_tests;
@@ -84,6 +86,8 @@ mod chunked_input_contract_tests;
 #[cfg(test)]
 mod classifier_contract_tests;
 #[cfg(test)]
+mod dedupe_input_contract_tests;
+#[cfg(test)]
 mod external_recon_contract_tests;
 #[cfg(test)]
 mod map_source_identity_tests;
@@ -107,6 +111,8 @@ mod scan_scope_proposal_tests;
 mod shinsa_allowance_contract_tests;
 #[cfg(test)]
 mod sink_import_contract_tests;
+#[cfg(test)]
+mod supplied_options_contract_tests;
 #[cfg(test)]
 mod taint_candidate_contract_tests;
 #[cfg(test)]

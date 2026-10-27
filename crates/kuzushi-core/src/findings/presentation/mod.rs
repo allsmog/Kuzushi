@@ -2,6 +2,8 @@ use super::domain::*;
 use serde::Serialize;
 
 mod detail;
+mod evidence_origin;
+pub use evidence_origin::evidence_origin_label;
 mod finding_lines;
 mod observation_gap;
 pub mod pr_comment;

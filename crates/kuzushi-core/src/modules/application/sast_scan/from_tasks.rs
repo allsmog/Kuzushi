@@ -141,6 +141,7 @@ impl SastTaskSelection {
         store: &crate::findings::FindingStore,
         options: &SastScanOptions,
         ctx: &ToolExecutionContext<'_>,
+        source: &crate::workspace::source_snapshot::SourceSnapshot,
     ) -> Result<Option<NativeScanReport>> {
         self.ensure_explicit_native_prerequisites(workspace, options)?;
         if self.scanners.is_empty() {
@@ -155,13 +156,15 @@ impl SastTaskSelection {
                         &options.run,
                         files,
                         cancellation,
+                        Some(source),
                     ),
-                    None => run_native_scan_with_cancellation(
+                    None => run_native_scan_at_source(
                         workspace,
                         store,
                         &self.scanners,
                         &options.run,
                         cancellation,
+                        Some(source),
                     ),
                 }
                 .map(Some)
@@ -218,7 +221,7 @@ fn iac_scan_settings(input: &Value) -> Value {
     Value::Object(settings)
 }
 
-fn semgrep_settings(input: &Value) -> Value {
+pub(in crate::modules) fn semgrep_settings(input: &Value) -> Value {
     let mut settings = serde_json::Map::new();
     for (parent, child) in [
         ("semgrepConfig", "config"),

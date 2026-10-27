@@ -1,5 +1,196 @@
 # Bounded investigation acceptance ledger
 
+The [dependency child-source follow-up](../assessments/cargo-child-source-2026-10-26.md)
+repairs parent snapshot ownership, literal paths and the package source anchor
+that an installed-scanner visual audit found missing. All 51 distinct focused
+Rust checks, workspace build, Core/TUI/CLI Clippy and changed-code risk pass.
+Final J384 has 27 machine passes, zero failures, 27 capture pairs and four
+answered agent reviews with polish findings. Six installed offline module scans
+retain five observations, two findings and one scripted deferral through Report
+and no-color restart. The empty parent scan resolves neither child. All source
+and copied database files stay unchanged. Earlier product and observer failures
+remain recorded. No model request, accepted phase or broad acceptance follows.
+
+The [real scope-context variant](../assessments/live-scope-context-variant-2026-10-26.md)
+uses one separately approved request on the same 602-file fixture. Seven primary
+scopes cover 601 files, with one uncovered root file and context-only shared
+contracts. The revision stays unaccepted. The same investigation preserves its
+earlier failed request and consumes two of two calls after an explicit allowance
+revision. Cumulative experiments reach nineteen with zero remaining allowance;
+dollars remain unknown. This changed-priority variant does not establish causal
+instruction effects, unfamiliar-repository usefulness or complete coverage.
+The proposal-context reading correction passes all 80 scope-review TUI checks.
+Final read-only J385 has 18 machine passes, zero failures, 15 capture pairs and
+four answered agent screen reviews with findings. The exact saved proposal
+context remains separate from future Scan context. Six sizes and no-color
+restart preserve the root omission and original spending without another model
+request, scope acceptance or source execution. Its earlier observer and context
+display failures remain recorded. Combined focused Rust passes total 131;
+full operator and reference-product acceptance remain open.
+
+The [IaC child-source follow-up](../assessments/iac-child-source-2026-10-26.md)
+repairs parent snapshot ownership and preserves literal Unix paths through
+observations, coverage and retained source. Its first complete J383 has 23
+machine passes but fails agent screen review on contradictory plan guidance and
+a Report coverage-reader defect. Final J383 has 26 machine passes, zero failures,
+24 capture pairs and four answered agent reviews with polish findings. Six
+explicit scans retain seven observations, two findings and one scripted deferral
+through Report and no-color restart. All 113 focused Rust checks, workspace
+build, Clippy and risk pass. Earlier failures stay recorded, including a later
+observer assumption about an absent optional drawer. No model request, accepted
+phase, automatic follow-up or broad milestone closure follows.
+
+The [rejected scope correction](../assessments/rejected-scope-correction-2026-10-26.md)
+adds bounded opt-in local output retention and runtime-free manual recovery of a
+failed scope proposal. The original job and spending remain failed/consumed;
+the correction is a separate unaccepted revision with authenticated history.
+There are 248 distinct focused Rust passes, workspace build, Core/TUI/CLI Clippy
+and passing changed-code risk. Final J382 has 41 machine passes, zero failures,
+32 capture pairs and seven answered agent reviews with findings over six editor
+sizes, paste, invalid saves, preserved drafts and no-color restart. One labeled
+intercepted response is used; there is no new live inference or source execution.
+All five fixture files remain unchanged; the operator explicitly includes two
+initially uncovered root files before a separate boundary acceptance. Scan
+planning retains the original spent investigation without new work or approval.
+Missing or foreign accounting fails instead of resetting the allowance.
+Earlier failed attempts remain recorded. Dense receipts, compact JSON editing,
+unsaved-draft durability, live grouping usefulness and the broad goal stay open.
+
+The [larger live scope experiment](../assessments/live-monorepo-scope-failure-2026-10-26.md)
+uses one separately approved request on 602 owned files and fails dependency
+validation. One attempt and settled reservation remain; source and the inactive
+architecture are unchanged. No scopes, scans or follow-ups are accepted.
+Cumulative experiments reach eighteen with no live allowance remaining; dollars
+remain unknown. J380 preapproval inspection passes with findings. The first
+J381 machine run passes but its agent screen audit fails on contradictory Enter
+guidance. The local correction passes 82 focused checks, build, Clippy and all
+ten summary gates. Final J381 has sixteen machine passes, zero failures and
+three answered agent reviews with findings through inspection, six sizes and
+no-color restart. The actual model failure remains recorded. Larger monorepo
+grouping usefulness and broad workflow acceptance remain open.
+
+The [current complete keyboard repeat](../assessments/repository-index-refresh-2026-10-26.md)
+repairs stale index presentation after an owned producer and distinguishes
+session dollars from unknown study cost. Final J121 has 331 machine passes,
+zero failures and 154 authenticated capture pairs. All 21 visual questions are
+answered with an agent verdict of `PASS_WITH_FINDINGS`; the two preceding failed
+visual audits remain recorded. There are 443 distinct focused TUI passes, two
+serial performance tests, passing build, Clippy and risk gates, and zero new live
+provider requests. This qualifies the named integrated flow; monorepo scope,
+experiments, learning usefulness and full reference-level experience remain open.
+
+The [literal-result correction](../assessments/operator-status-2026-10-26.md#literal-result-wrapping)
+preserves complete paths and printable whitespace in Logs and long plain rows.
+Startup and launch copy use compact labels while canonical evidence stays exact.
+All 387 focused TUI checks and three serial performance gates pass. Final J375
+has 50 machine passes, zero failures, 21 no-color captures and three agent reviews
+with findings. Seven compact reader captures match the full raw result, including
+two spaces in the repository name. Earlier failed observer runs remain recorded.
+Drafts, source bindings and one auxiliary run survive resize and restart without
+provider work. Short-screen status, diagnostic density and overall reference UX
+remain open; this does not close broad workflow or model-quality acceptance.
+
+The [compact-header followup](../assessments/operator-status-2026-10-26.md#compact-header-followup)
+keeps cost, index and model whole at 80 and 96 columns, preserves the short-area
+order and Logs reading height, and synchronizes interactive frame output.
+All 332 focused checks and three serial performance gates pass. Final J374 has
+49 machine passes, zero failures, fourteen no-color captures and two agent
+reviews with findings. Both earlier failed audits remain recorded. Log density,
+short-screen status and broader reference UX remain open; no provider work occurs.
+
+The [operator-status correction](../assessments/operator-status-2026-10-26.md)
+keeps the full header's optional repository-index state consistent with its
+compact view model and clarifies routing, desktop alerts and singular counts.
+All 61 focused TUI checks pass. J373 has 33 machine passes, zero failures,
+thirteen no-color captures and two agent-reviewed visual items with findings.
+Narrow status visibility, log density and reference-level UX remain open.
+This runtime-free correction creates no provider request or accepted Map.
+
+The [shared dependency-export correction](../assessments/sbom-cyclonedx-source-references-2026-10-26.md)
+removes duplicate CycloneDX references, undefined links and cross-source guesses.
+Both formats retain all 427 raw links, map 384 and disclose 43 omissions. SPDX
+identifiers and relationships remain stable. One combined warning reaches the
+operator, and CycloneDX leaves graph completeness explicitly unknown or
+incomplete. All 113 focused Core checks, build, Clippy and risk pass. J372 has
+25 machine passes, zero failures, 27 no-color captures and two visual review
+items judged `PASS_WITH_FINDINGS`. Schema/reference evidence is scoped; unsupported format validators,
+full semantic conformance, source freshness and reference UX remain open.
+No provider request, maturity change or broad acceptance closure follows.
+
+The [SPDX reference correction](../assessments/sbom-spdx-source-references-2026-10-25.md)
+gives all 285 captured package records distinct identifiers and removes undefined
+references. All 427 raw dependency links remain; 43 missing or ambiguous export
+links are disclosed. The shared adapter preserves this warning before its
+resource receipt. All 106 focused Core checks, build, Clippy and risk pass.
+Final J371 has 25 machine passes, zero failures, 28 no-color captures and two
+pending formal judgments. Full semantic conformance, CycloneDX, authenticated
+source identity and reference UX remain open. No provider request or broad
+acceptance closure follows.
+
+The [owned-study liveness correction](../assessments/owned-study-liveness-2026-10-25.md)
+keeps external findings refresh, local tool dispatch and foreground draft return
+working during a finite owned study. Session-budget Stop stays separate from
+operator study Stop, and early cancellation retains honest partial-work guidance.
+Eighty-one distinct TUI checks, build, lint and formatting pass. Final J370 has
+20 machine passes, zero failures, fourteen no-color captures and four pending
+formal operator judgments. Its single intercepted request produces no model
+response or live inference. No broad delivery or reference UX item closes.
+
+The [pnpm snapshot correction](../assessments/sbom-pnpm-snapshots-2026-10-25.md)
+recovers all 350 missing links in copied actual dependency metadata while
+preserving all prior links. Nine Core integration tests pass. J369 has 39 machine
+passes, zero failures and three pending formal judgments through Components
+failure, correction and restart. SPDX identifier uniqueness remains defective;
+complete SBOM conformance, source freshness and general module usefulness remain
+unqualified. No provider request or maturity change follows from this evidence.
+
+The [literal diagram-link correction](../assessments/dfd-literal-links-2026-10-25.md)
+keeps literal Unix backslashes distinct in both diagram navigation and shared
+exact-file queries. All 55 focused Rust checks, build, lint and risk pass. Final
+J361 has 34 machine passes, zero failures, nineteen captures and three pending
+operator judgments. Source, observations, decisions and accounting remain
+unchanged through six sizes and no-color restart. Visual review retains a
+separate imported-origin wording gap; no broad delivery item closes.
+
+The [bounded duplicate input correction](../assessments/dedupe-input-bounds-2026-10-25.md)
+removes full-ledger materialization before candidate selection and preserves literal
+paths in selection, source confirmation and JSONL import. Forty-eight focused Rust
+checks, Core Clippy, workspace build and risk pass. Final J359 has 23 machine
+passes, zero failures and four pending formal operator judgments through explicit
+limit correction, bounded source confirmation and no-color restart. Two requests
+are intercepted; no live inference or finding verdict is added. Broad module,
+relationship usefulness and reference-level TUI qualification remain open.
+
+The [reviewed-context follow-up](../assessments/lesson-context-followup-2026-10-24.md)
+connects an inactive lesson copy to the existing finite planner and retains
+spent calls, protected limits and unresolved reservations. Fifty reported Rust
+checks, build, lint and risk pass. Final J357 has 66 machine passes, zero failures,
+53 captures and seven pending operator judgments through exact-context scanning,
+export, retirement and restart. All twelve planner choices fit the tall layout.
+No live request, general variant qualification or broad delivery checkbox follows.
+
+The [engine choice discovery correction](../assessments/engine-choice-discovery-2026-10-24.md)
+closes the reproduced tall-list and continuation gap while preserving compact
+reading and controls. J356 records 30 machine passes, zero failures, 21 capture
+pairs and four pending operator judgments through all six sizes and no-color
+restart. All 42 focused checks, build, lint and risk pass. No model request,
+default change or broad delivery closure follows.
+
+The [study engine readiness correction](../assessments/study-engine-readiness-2026-10-24.md)
+retains catalog maturity and distinguishes unsupported scope, missing dependency,
+missing model and deferred checks without starting work. Final native J355 has
+38 machine passes, zero failures, 23 capture pairs and four pending operator
+judgments. All 35 focused Rust checks, build, lint and risk pass. No provider
+request, module promotion or broad delivery milestone is added.
+
+The [approval and global-choice correction](../assessments/approval-reading-and-global-options-2026-10-24.md)
+keeps distinct model roles and complete frozen terms while reducing repeated
+body rows. Global options now use contained operator storage, while workspace
+tracking guards remain strict. All 95 focused Rust checks, four I/O contract
+checks, build and lint pass.
+Sequential J259/J121 have 296 machine passes, zero failures, 184 captures and
+25 pending operator judgments. No live request or broad delivery item closes.
+
 The [boundary-context reading correction](../assessments/boundary-context-reading-2026-10-24.md)
 makes association and preparation state visible before instructions at 40
 columns, retaining exact source and context provenance. Final J128 records 44
@@ -731,7 +922,7 @@ original requirements remain open. No new live model request is made.
 | Optional AI proposal, one request, no delegation/repair, at most eight primary scopes plus shared scope | `modules/pack_module/suggest_scopes.rs`; accepted/rejected real-model receipts in [scope proposal evidence](../assessments/live-scope-proposal-2026-10-14.md) | Scoped. Larger architectural usefulness remains open. Regeneration and further splitting still need separate approved work. |
 | Validate paths, overlap, uncovered files and shared dependencies; review and edit boundaries visually | `workspace/domain/scan_scope_proposal`; scope edit journeys including J206/J260; [workload previews](../assessments/scope-workload-preview-2026-10-18.md) add 142 focused checks and final sequential J206/J263 with 119 machine passes | Scoped. All-boundary and selected-study defaults are visible before work approval. Shared context adds no discovery; explicit shared discovery recomputes work. Ten human judgments and broader qualification remain open. |
 | Fixed jobs and one-worker/three-pass defaults; no recursive job creation | [Finite study acceptance](../assessments/finite-study-acceptance-2026-10-17.md): 186 focused checks and sequential J130/J131/J121 with 267 machine passes, fixed membership, exact approval, cancellation and restart | Implemented and verified locally for this delivery item. Current source/context/model/prompt/configuration/worker guards, finite attempts and partial/completed selection are reconciled. General adapter usefulness, broader spending and the 28 formal human judgments remain open in their respective requirements. |
-| Per-tool purpose, phase, inputs, real executor, outputs, failures, resources, interfaces and value | [118-tool matrix](../assessments/bounded-investigation-tools.json) and linked per-tool assessments; [internal contract repairs](../assessments/internal-tool-limits-2026-10-16.md) add structured-input and finding-cap evidence | Open. All nine dimensions are populated for the 110 in-scope visible rows. No hidden action remains in Core awaiting curation. UAF is auxiliary Labs with bounded local resource and selected-compiler evidence from shell/headless execution. Full command/context recovery, source grounding and detector usefulness remain open; see the [compiler-input audit](../assessments/clang-database-selection-2026-10-17.md). The [source-prefix qualification](../assessments/source-prefix-fidelity-2026-10-17.md) demonstrates the systems context producer's bounded deterministic role, exact source and default handoff; semantic model quality and formal human UX remain open. Zero unknown source-only boundaries remain after two trigger-generation actions were classified as excluded and committed-path review was curated to auxiliary Labs Map. The [committed-path audit](../assessments/changed-path-review-2026-10-17.md) verifies exact Git identities, no filename-derived findings, bounded partial output and rejection of standalone stages that previously expanded into the excluded legacy pipeline. The bundled taint entry is now Labs after a false-success defect was reproduced and repaired; its failure evidence does not qualify general engine usefulness. Model-assisted database preparation is now auxiliary Labs Map under Context allowance and separate execution consent; its successful build remains unqualified. See the [preparation audit](../assessments/repository-preparation-allowance-2026-10-17.md). The [classifier audit](../assessments/classifier-review-2026-10-16.md) moves the metadata-only scorer to auxiliary Labs Review and preserves existing decisions. The [draft artifact audit](../assessments/randori-artifacts-2026-10-16.md) moves generation to auxiliary Labs Context and its reader to Compatibility. See the [vendor context contracts](../assessments/vendor-context-2026-10-16.md). The [catalog draft audit](../assessments/taint-catalog-drafts-2026-10-16.md) separates auxiliary Labs generation from two runtime-free Core helpers and removes implicit generation. The [bounded CWE proposal audit](../assessments/bounded-cwe-proposals-2026-10-16.md) moves class planning to auxiliary Labs Map with scoped source, charging, output and class-handoff evidence; downstream discovery remains unqualified. The [coverage cancellation repair](../assessments/coverage-cancellation-2026-10-18.md) adds SQL/child interruption, transactional skip rollback and actual native retry/restart evidence. Visible metadata is refreshed for all 118 catalog rows without a maturity change. Registration does not qualify execution, and excluded operations will not be run. |
+| Per-tool purpose, phase, inputs, real executor, outputs, failures, resources, interfaces and value | [118-tool matrix](../assessments/bounded-investigation-tools.json) and linked per-tool assessments; [internal contract repairs](../assessments/internal-tool-limits-2026-10-16.md) add structured-input and finding-cap evidence | Open. All nine dimensions are populated for the 110 in-scope visible rows. No hidden action remains in Core awaiting curation. UAF is auxiliary Labs with bounded local resource and selected-compiler evidence from shell/headless execution. Full command/context recovery, source grounding and detector usefulness remain open; see the [compiler-input audit](../assessments/clang-database-selection-2026-10-17.md). The [source-prefix qualification](../assessments/source-prefix-fidelity-2026-10-17.md) demonstrates the systems context producer's bounded deterministic role, exact source and default handoff; semantic model quality and formal human UX remain open. Zero unknown source-only boundaries remain after two trigger-generation actions were classified as excluded and committed-path review was curated to auxiliary Labs Map. The [committed-path audit](../assessments/changed-path-review-2026-10-17.md) verifies exact Git identities, no filename-derived findings, bounded partial output and rejection of standalone stages that previously expanded into the excluded legacy pipeline. The bundled taint entry is now Labs after a false-success defect was reproduced and repaired; its failure evidence does not qualify general engine usefulness. Model-assisted database preparation is now auxiliary Labs Map under Context allowance and separate execution consent; its successful build remains unqualified. See the [preparation audit](../assessments/repository-preparation-allowance-2026-10-17.md). The [classifier audit](../assessments/classifier-review-2026-10-16.md) moves the metadata-only scorer to auxiliary Labs Review and preserves existing decisions. The [draft artifact audit](../assessments/randori-artifacts-2026-10-16.md) moves generation to auxiliary Labs Context and its reader to Compatibility. See the [vendor context contracts](../assessments/vendor-context-2026-10-16.md). The [catalog draft audit](../assessments/taint-catalog-drafts-2026-10-16.md) separates auxiliary Labs generation from two runtime-free Core helpers and removes implicit generation. The [bounded CWE proposal audit](../assessments/bounded-cwe-proposals-2026-10-16.md) moves class planning to auxiliary Labs Map with scoped source, charging, output and class-handoff evidence; downstream discovery remains unqualified. The [coverage cancellation repair](../assessments/coverage-cancellation-2026-10-18.md) adds SQL/child interruption, transactional skip rollback and actual native retry/restart evidence. Visible metadata is refreshed for all 118 catalog rows without a maturity change. Registration does not qualify execution, and excluded operations will not be run. The [SBOM metadata audit](../assessments/sbom-metadata-shapes-2026-10-25.md) adds supported-shape validation, five truthful headless failures/successes and J364 correction/restart evidence with 39 machine passes and three pending operator judgments. Full ecosystem and broader module qualification remain open. |
 | Curated Core/Labs/Compatibility defaults, distinct readiness and evidence-backed retirement proposals | Registry maturity/readiness policy, [retirement candidates](../assessments/module-retirement-candidates.md) | Scoped. No speculative deletion or promotion; keep exact dispatch and public compatibility. |
 | Phase consumers and scope enforcement are real execution behavior | Shared prepared dispatch; Context study producer jobs; exact native/agentic scope adapters; J121/J206; [scope membership audit](../assessments/scope-membership-2026-10-15.md) adds staging-aware inventory, legacy migration and real study consumption in J278 | Scoped. Unsupported adapters require separately reviewed whole-repository work. General DAG metadata is not credited as execution ordering. J278's three-job draft remains unapproved and unstarted; it proves no new scan completion. |
 
@@ -741,16 +932,23 @@ original requirements remain open. No new live model request is made.
 | --- | --- | --- |
 | Exact immutable context, source, scope, model and prompt binding without changing global active context | `scan/application/threat_model_digest.rs`, `campaign/batch/equivalence.rs`; [immutable context acceptance](../assessments/immutable-context-acceptance-2026-10-17.md), [frozen text](../assessments/frozen-scanner-context-2026-10-14.md) and [receipt matching](../assessments/context-receipt-matching-2026-10-14.md) | Accepted-context references are implemented and verified locally. Current shared-dispatch and TUI checks cover saved text, explicit omission, active-context isolation, missing/corrupt objects, historical source and exact downstream requests. Source/lesson eligibility is rechecked without rewriting saved bytes. Full study/source/model/prompt equivalence remains with finite-plan qualification; context generation quality and overall UX remain open. |
 | Generate, question, edit, selectively regenerate, diff and accept context; preserve operator edits and show supplied text/omissions | `app/batch_scan/context_edit`, context generation/question readers and immutable revision tools; [diagram context](../assessments/diagram-context-2026-10-19.md) adds one evidence-bound architecture draft, exact inherited-text comparison and retained source receipts | Scoped. J339 has 46 machine passes, zero failures and three pending operator judgments through approval, result navigation and no-color restart. Transport is intercepted. Complete structural comparison and local architecture edits are now covered by the [current comparison](../assessments/context-structure-comparison-2026-10-23.md) and [architecture edit](../assessments/context-architecture-edits-2026-10-23.md) checks. The [general context correction](../assessments/general-context-inventory-2026-10-23.md) binds the actual bounded filename list to its saved receipt, distinguishes complete enumeration from partial content and retains historical synthesis receipts on refine. Final J347 has 42 machine passes, zero failures and three pending operator judgments through three local passes, triage, export and restart. Partial-enumeration generation usefulness, general model quality and broader failure/UX qualification remain open. |
-| Fresh repetitions versus explicit context experiments with a finite matrix and baseline | `campaign/context_matrix`, `context_experiment`; J121 and matrix journeys; [current result and identity evidence](../assessments/context-matrix-evidence-2026-10-23.md); [Report and source comparison](../assessments/report-source-recap-2026-10-24.md) | Scoped. J348 reconciles nine fixed jobs, three exact contexts, separate recurrence, complete result receipts, no-color recovery and retained protected Review allowance. Report locations and recorded-content notes are corrected. Transport is intercepted; failed attempts and retries remain separate. A matrix does not prove statistical improvement. Broader delivery qualification remains open. |
+| Fresh repetitions versus explicit context experiments with a finite matrix and baseline | `campaign/context_matrix`, `context_experiment`; J121 and matrix journeys; [current result and identity evidence](../assessments/context-matrix-evidence-2026-10-23.md); [Report and source comparison](../assessments/report-source-recap-2026-10-24.md); [interrupted matrix evidence](../assessments/matrix-limits-2026-10-25.md) | Scoped. J348 reconciles nine fixed jobs and three exact contexts. J363 adds six fixed jobs, seven retained attempts, a failed request, explicit allowance revision, separate case recurrence, operator reaffirmation, export and restart. Its 78 machine checks pass; eight operator judgments remain. Attempt history and recovery choices stay readable across six sizes. Transport is intercepted. A matrix does not prove statistical improvement. Broader delivery qualification remains open. |
 | Raw observations, provenance, reversible duplicates/relationships and human decisions | Findings ledger/application services; relationship and Review journeys; [literal Review and two-SHA decisions](../assessments/literal-review-2026-10-19.md) | Scoped. Exact paths, reversible decisions and own-write acknowledgement have focused and native evidence. Keep related variants and uncertain matches distinct from duplicates. Reconcile scale and all interface paths. |
 | Report totals, selected membership and original severity | [Report decision summary](../assessments/report-decision-summary-2026-10-17.md); shared source-applicability fold; J279/J199 | Scoped. Study/workspace counts stay distinct, FP and deferred states survive export/restart, and known missing/regressed ledgers are unavailable. Eight human judgments, large-ledger behavior, metadata density and reference parity remain open. |
-| SHA/content-aware comparison and honest recurrence | Finding identity/source history, batch occurrence, J121 dirty-source reassessment and retained FP/deferral decisions; [attempt and recurrence evidence](../assessments/attempts-and-recurrence-2026-10-15.md) adds exact run membership and canceled/superseded-only zero recurrence; [scope source comparison](../assessments/scope-source-comparison-2026-10-15.md) adds visible revision differences and unchecked matching SHAs before new work; [current SHA workflow](../assessments/source-identity-header-2026-10-17.md) adds actual two-commit, same-SHA dirty-content and source-qualified review in J196/J199 | Scoped. A missing later observation never establishes a fix or safe cross-branch decision reuse. Current J196/J199 have 90 machine passes and five pending human judgments over deterministic policy observations; nondeterministic model quality and other scanner bindings remain open. J275 is explicitly synthetic reader evidence, not discovery quality validation. J277 has 33 machine passes and six pending human judgments; it contains no findings and establishes no fix. |
+| SHA/content-aware comparison and honest recurrence | Finding identity/source history, batch occurrence, J121 dirty-source reassessment and retained FP/deferral decisions; [attempt and recurrence evidence](../assessments/attempts-and-recurrence-2026-10-15.md) adds exact run membership and canceled/superseded-only zero recurrence; [scope source comparison](../assessments/scope-source-comparison-2026-10-15.md) adds visible revision differences and unchecked matching SHAs before new work; [current SHA workflow](../assessments/source-identity-header-2026-10-17.md) adds actual two-commit, same-SHA dirty-content and source-qualified review in J196/J199 | Scoped. A missing later observation never establishes a fix or safe cross-branch decision reuse. The [source-move repair](../assessments/coverage-source-moves-2026-10-24.md) prevents a committed rename from hiding its departed boundary or advancing that baseline; the same comparison feeds recommendations. J353/J334/J148 have 45 machine passes, zero failures, 68 capture pairs and eleven pending human judgments. Compact J353 reaches every transcript row, while narrow diagnostic density remains open. Current J196/J199 have 90 machine passes and five pending human judgments over deterministic policy observations; nondeterministic model quality and other scanner bindings remain open. J275 is explicitly synthetic reader evidence, not discovery quality validation. J277 has 33 machine passes and six pending human judgments; it contains no findings and establishes no fix. |
 | Severity, confidence, recurrence and scope views | Review queue, canonical filters, batch occurrence, scope-case views and [recorded scope filtering](../assessments/recorded-scope-findings-2026-10-17.md) | Scoped. `findings:list`, CLI and shell share authenticated accepted-scope membership before paging. Scope, run, study and source predicates must match the same observation run. Missing metadata is partial; global aliases and human decisions stay authoritative. Scale, cancellation and full UX qualification remain open. |
 | Goal-relevance view separate from finding verdicts | `findings:goals`, `findings:goal-assess`, Review `O`/`goals`, immutable audit history and export; [goal relevance evidence](../assessments/goal-relevance-2026-10-15.md) | Scoped. Manual assessments bind exact saved briefs and recorded observations, with reversible clears and conflict review. J274 verifies the six-size browser, compact forms and no-color restart. Large histories, rapid key sequences and human UX acceptance remain open. |
-| Accepted findings produce draft lessons; only reviewed lessons enter future accepted context | [Named J118 choices](../assessments/named-lesson-copy-choices-2026-10-18.md) add selected names, exact references and bounded compact controls. [Current J118 draft preservation](../assessments/lesson-draft-preservation-2026-10-18.md) verifies explicit acceptance, inactive copying and retirement with one retained human finding decision; finding lesson tools, `threat-model:reuse-lessons`, eligibility validation and retirement tests; [integrated J304](../assessments/reviewed-learning-loop-2026-10-16.md) verifies exact frozen lesson text in three actual adapter requests, six completed local jobs, retirement refusal and restart | Scoped. Transport is intercepted and the lesson is manually reviewed policy guidance. This is not live inference or generated-lesson usefulness evidence; keep legacy imported patterns explicitly unverified. The [current learning route](../assessments/learning-readers-current-2026-10-23.md) verifies the exact accepted context in six intercepted adapter requests across two studies, retired-context refusal and restart on the present build. J304 has 55 machine passes and seven pending operator judgments; generated-lesson usefulness and broader relationship/scale qualification remain open. |
+| Accepted findings produce draft lessons; only reviewed lessons enter future accepted context | [Named J118 choices](../assessments/named-lesson-copy-choices-2026-10-18.md) add selected names, exact references and bounded compact controls. [Current J118 draft preservation](../assessments/lesson-draft-preservation-2026-10-18.md) verifies explicit acceptance, inactive copying and retirement with one retained human finding decision; finding lesson tools, `threat-model:reuse-lessons`, eligibility validation and retirement tests; [integrated J304](../assessments/reviewed-learning-loop-2026-10-16.md) verifies exact frozen lesson text in three actual adapter requests, six completed local jobs, retirement refusal and restart | Scoped. Transport is intercepted and the lesson is manually reviewed policy guidance. This is not live inference or generated-lesson usefulness evidence; keep legacy imported patterns explicitly unverified. The [current learning route](../assessments/learning-readers-current-2026-10-23.md) verifies the exact accepted context in six intercepted adapter requests across two studies, retired-context refusal and restart on the present build. J304 has 55 machine passes and seven pending operator judgments. The [current J357 follow-up](../assessments/lesson-followup-current-2026-10-26.md) verifies an inactive copy, separate three-job approval, exact delivery, retirement refusal and no-color restart with 70 machine passes, zero failures and all seven agent screen reviews answered. A compact Lessons identity defect is fixed. Raw harness review status and remaining density findings are preserved. That route remains manual policy guidance with intercepted transport. The [fresh real lesson draft](../assessments/live-lesson-generation-2026-10-26.md) adds one approved tool-free OAuth synthesis, 31 controlled J119 checks and 25 real-result J376 reader checks with all nine agent questions answered. The real result stays Draft; cumulative live use reaches 17 with zero capacity left. This single benign case does not qualify general generated-lesson usefulness or broader relationship/scale behavior. |
 | Source-only variants and next-investigation proposals have their own approved question, scope and allowance | Proposal/context study machinery and experimental source-pattern adapters | Scoped. Do not credit unaccepted drafts as executed follow-ups or useful variant coverage. |
 
 ## Spending, interfaces and operator acceptance
+
+The [current complete keyboard journey](../assessments/approval-spending-2026-10-24.md)
+records 239 machine passes, zero failures, 137 capture pairs and 21 formal operator
+questions. It retains actual held-request cancellation, partial work, explicit
+allowance revision, Report retry and no-color recovery. Spending remains visible
+at the approval control. Agent screen review is recorded separately from formal
+operator judgments; the full TUI/report qualification item remains open.
 
 | Requirement | Current evidence | State and remaining work |
 | --- | --- | --- |
@@ -762,7 +960,7 @@ original requirements remain open. No new live model request is made.
 | Versioned brief, scope proposal, immutable context reference, study plan, reservation and accepted lesson artifacts | Existing campaign/workspace/CAS/findings/spend contracts; documented additive migrations | Scoped. Keep shared prepared dispatch and public module/artifact compatibility; do not add parallel orchestration. |
 | Keyboard-only journey, visible actions, palette/composer ownership, draft/selection/scroll continuity, six sizes and plain/no-color | J121/J206 and focused input, context, findings and recovery tests; [Review readers](../assessments/review-reader-controls-2026-10-15.md) adds distinct groups/goals controls, retained draft and paste reading, protected filter drafting, visible bulk return and native reversible triage | Scoped. Per-journey human judgments remain pending; machine state checks are not operator delight approval. |
 | Typing/scroll/resize under active work; background focus and cancellation | Logs and inventory probes, warmed Review tests, and [approved study progress](../assessments/approved-study-progress-2026-10-17.md) through study navigation, palette return and 40-column resize | Scoped. Native checks retain the original dispatcher/request, draft, fixed queue, completed-pass findings and accounting. Recorded queue states are not process-liveness claims. This does not qualify every active surface or physical/reference latency. |
-| One complete journey including cancellation, partial work, exhausted allowance and restart | [Current J121 evidence](../assessments/approved-study-progress-2026-10-17.md): 185 machine passes, zero failures, 115 capture pairs, one retained cancellation and no live requests | Scoped. The held request preserves completed-pass membership, finite counts, study navigation, draft and call accounting without a refresh error or premature completion. Partial Report, explicit attempt/call approvals, final acceptance and restart remain covered. Nineteen human judgments, historical attribution and other failure combinations remain open. J275 separately qualifies cumulative attempt presentation on retained reader history. |
+| One complete journey including cancellation, partial work, exhausted allowance and restart | [Current J121](../assessments/approval-spending-2026-10-24.md): 239 machine passes, zero failures, 137 capture pairs, recorded screen review, one retained cancellation and zero live requests | Implemented and verified locally for this combined keyboard journey. The original three Scan jobs retain four attempts, exact context, decisions and shared spending through partial export, explicit revision, bundle retry and restart. Formal operator judgments, general model usefulness and full reference-level experience remain separate. |
 | DFD links to context/evidence/findings/scoped actions and understandable next proposals | Map/DFD view models, linked readers, [bounded scan planning](../assessments/dfd-study-2026-10-18.md) and [bounded context planning](../assessments/diagram-context-2026-10-19.md) | Scoped. Both actions bind the displayed immutable context and literal evidence files without automatic work. J339 adds result/origin recovery and shared accounting. Remaining element/action links, literal formatting in existing diagram rows, proposal quality and human diagram usefulness remain open; six J337 and three J339 judgments are pending. The [large-diagram route](../assessments/large-dfd-investigation-2026-10-23.md) removes the 64-element cutoff, preserves selected neighbors and flow direction, and reaches three installed-engine passes through triage/export/restart: final J346 has 48 machine passes and three pending operator judgments. The [study receipt correction](../assessments/pending-study-receipts-2026-10-23.md) resolves the startup refresh error with typed pending reads and unchanged terminal authentication: J346 records 49 machine passes, zero failures and three pending operator judgments. The [outcome correction](../assessments/study-outcome-clarity-2026-10-23.md) distinguishes severity policy from work completion and preserves authenticated gate metadata during findings refresh. Current J346 has 60 machine passes, zero failures, 50 captures and three pending operator judgments; 170 focused checks pass with zero provider requests. |
 | Sequential real-model validation under approved allowance | [Owned application Scan](../assessments/live-application-scan-2026-10-15.md), [standard Review](../assessments/live-application-review-2026-10-15.md), [source-input Review](../assessments/live-source-review-2026-10-15.md) and [supporting-code Review](../assessments/live-supporting-review-2026-10-15.md): three Scan calls and three separately approved Review calls, with durable observations, opinions, export and restart | Scoped. Fourteen cumulative experiment requests used, reaching the approved maximum. All six current-investigation calls are settled, including three protected Review calls. No capacity or follow-up approval remains. One supporting-code opinion establishes the source path while disclosing unproven deployed exposure; general model usefulness and full investigation qualification remain open. |
 | Focused checks, shared dispatch, workspace build, risk proxy and exact summary verification | Named assessment receipts and signed clean-commit verification | Scoped. Local quick checks do not prove the full Rust suite, CI/platform matrix, release qualification or the complete product outcome. |
@@ -941,3 +1139,48 @@ Review calls, unknown dollar cost and unchanged export bytes after restart. Sixt
 focused Rust checks pass. Scopes and root Map are manually supplied, transport is
 intercepted, and source is inert under a dirty borrowed HEAD. This does not close
 real-model scope quality, cross-SHA fix adjudication or reference-level UX.
+
+The [local package license correction](../assessments/license-package-boundaries-2026-10-26.md)
+removes one reproduced false positive and detects one missed local metadata
+mismatch. Parsed declarations are shared and headers respect package boundaries.
+Review presents the scanner explanation before action instructions. There are
+96 focused Rust passes; final J377 has 30 machine passes, zero failures and
+five answered agent screen reviews with remaining polish findings. Its five
+local scans retain three observations, one scripted deferral, changed content,
+covered absence, export and no-color recovery with no new model work. The
+fixture has unknown Git revisions and does not close cross-SHA adjudication,
+aggregate resource bounds, broader module qualification or full UX acceptance.
+
+The [child-target source correction](../assessments/child-target-source-evidence-2026-10-26.md)
+fixes reproduced parent-file substitution in normalized license, dependency and
+secret observations. Direct and directory-scoped SAST scans keep one durable
+identity per finding and child path. Relative inline targets resolve against the
+explicit workspace. Existing ambiguous history is retained for explicit
+reassessment. The combined package and source checkpoint has 237 distinct
+focused Rust passes, workspace build and Core/CLI Clippy. Final J378 has 22
+machine passes, zero failures, 26 capture pairs and four answered agent reviews
+with remaining polish findings. Nine explicit native scans retain nine
+observations, six findings, one scripted deferral, exact child bytes, draft,
+export and no-color restart. A fresh J367 adds 38 machine passes, 25 capture
+pairs and four answered reviews over two existing real commits; five export
+formats preserve current observation and historical relationship SHAs. No
+model request or target source execution is added. These are source-retention
+and export checks, with no automatic fix verdict, full guided acceptance,
+general detector quality or reference-product UX claim.
+
+The [workspace source and guidance follow-up](../assessments/workspace-source-guidance-2026-10-26.md)
+corrects another reproduced defect: standalone tool receipts could imply Map
+completion, and child-owned snapshot claims could not be authenticated by the
+parent workflow. Three native adapters now keep source identity at the selected
+workspace while retaining child-only discovery coverage. Global NEXT follows
+the reality-derived required step across pages, with local result actions kept
+on their own card. There are 1,452 distinct passing checks across current Core
+and TUI selections, including all 1,258 TUI view-model checks after a screen
+review caught a second header override. Final J379 has 31 machine passes, zero
+failures, 27 capture pairs and five answered agent screen reviews with remaining
+polish findings. Nine scans retain nine observations, six findings, one decision
+and five valid pending Scan results through export and no-color restart without
+accepting Map/Scan or starting follow-up work. Raw failures and review status
+remain retained. No model request is added. Source-identity IO is separate from
+discovery limits; large-monorepo performance, all other adapters and the full
+investigation goal remain open.

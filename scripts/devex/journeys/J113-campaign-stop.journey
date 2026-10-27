@@ -39,7 +39,7 @@ require-live-snap: 25 partial acknowledged | partial-accepted
 keys: Escape
 submit: report
 require-live-snap: 25 1 unresolved | partial-report
-expect: 1 / 2 attempted jobs recorded; 1 unavailable
+expect: 1 / 2 attempts recorded; 1 unavailable
 ask: Does the report preserve the completed observation and unresolved provider reservation, disclose missing evidence for the interrupted job and avoid complete coverage claims?
 resize: 40x12
 keys: Home

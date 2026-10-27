@@ -1,0 +1,108 @@
+name: Retain a rejected scope response and correct it locally without another request or acceptance
+size: 120x36
+# One labeled intercepted response. No real inference or target source execution.
+cwd: @TMP_TARGET
+env-unset: NODE_OPTIONS KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE KUZUSHI_AGENT_MCPS ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_recovery.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: campaign owned-scope-recovery
+require-live-snap: 25 1 planned | fixed-proposal
+nav-mode:
+keys: a
+require-live-snap: 25 SUGGEST SCAN SCOPES | retained-output-choice
+expect: retain at most 16 KiB
+ask: Before execution, does the fixed proposal disclose local rejected-text retention, its sensitive-data boundary and the single shared request allowance?
+keys: Escape
+require-live-snap: 25 CAMPAIGN owned-scope-recovery | back-from-proposal
+keys: L
+require-live-snap: 25 dispatcher pid | one-proposal-started
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_recovery.py @TMP_TARGET @ART failed
+keys: r
+require-live-snap: 25 1 failed | recorded-failure
+keys: L
+require-live-snap: 25 new approved plan | consumed-attempt-refused
+keys: a
+require-live-snap: 25 contracts | failed-scope-form
+expect: d output
+expect-not: LABELED_OFFLINE_SCOPE_CANDIDATE
+keys: d
+require-live-snap: 25 REJECTED SCOPE OUTPUT | explicit-private-inspection
+expect: LABELED_OFFLINE_SCOPE_CANDIDATE
+expect: UNACCEPTED MODEL OUTPUT
+ask: Is the retained candidate available only through explicit local inspection, labeled unaccepted, with the original failure and spending preserved?
+keys: e C-Home
+require-live-snap: 25 CORRECT SCOPE JSON | correction-editor
+keys: Enter C-s
+require-live-snap: 30 Correction not saved | invalid-correction-kept
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_recovery.py @TMP_TARGET @ART invalid
+ask: Does invalid scope JSON fail local membership validation while keeping the edited text, original one-request failure and unaccepted scope unchanged?
+resize: 160x48
+live-snap: editor-160x48
+resize: 96x89
+live-snap: editor-96x89
+resize: 80x24
+live-snap: editor-80x24
+resize: 60x20
+live-snap: editor-60x20
+resize: 40x12
+live-snap: editor-40x12
+expect: Ctrl+S save
+expect: Esc kept
+keys: NPage
+live-snap: editor-page-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_recovery.py @TMP_TARGET @ART paged
+ask: Across six sizes, do the correction editor, cursor and visible save/read/back controls remain usable without exposing hidden workflow shortcuts?
+resize: 120x36
+keys: C-End C-u
+paste-file: @ART/labeled-corrected-scope.json
+live-snap: corrected-json-draft
+keys: Escape
+require-live-snap: 20 REJECTED SCOPE OUTPUT | editor-return-kept
+keys: Escape
+require-live-snap: 20 SUGGEST SCAN SCOPES | correction-form-return
+keys: n
+require-live-snap: 20 Your JSON draft is kept | new-proposal-preserves-draft
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_recovery.py @TMP_TARGET @ART kept
+keys: d e
+require-live-snap: 20 CORRECT SCOPE JSON | restored-correction-editor
+keys: C-s
+require-live-snap: 30 Review corrected scope draft | corrected-unaccepted-receipt
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_recovery.py @TMP_TARGET @ART corrected
+expect: Original job remains failed
+ask: Does saving produce a separate manually corrected revision with recomputed coverage, while the producer remains failed and no request, acceptance or scan is added?
+keys: Enter
+require-live-snap: 25 DRAFT SCOPES | corrected-scope-tree
+expect: Manually corrected
+expect: Original proposal job remains failed
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: campaign owned-scope-recovery
+require-live-snap: 25 1 failed | recovered-failed-producer
+nav-mode:
+keys: a
+require-live-snap: 25 Review corrected scope draft | recovered-correction-link
+keys: Enter
+require-live-snap: 25 DRAFT SCOPES | recovered-unaccepted-scopes
+expect: Manually corrected
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_recovery.py @TMP_TARGET @ART restarted
+ask: Does no-color restart recover the manually corrected scope tree through the failed campaign without rewriting its history, spending again or accepting boundaries?
+keys: a
+require-live-snap: 20 Accept exact boundaries | explicit-corrected-boundary-approval
+keys: Enter End Enter
+require-live-snap: 30 ACCEPTED SCOPES | explicitly-accepted-correction
+keys: p
+require-live-snap: 25 PLAN A STUDY | corrected-scope-planning
+expect: 1 committed / 1 total
+keys: Down Down Down Down Down
+require-live-snap: 20 owned-scope-recovery-accounting | inherited-investigation-detail
+expect: 1 committed / 1 total
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_recovery.py @TMP_TARGET @ART planning
+ask: After explicit boundary acceptance, does scan planning retain the original investigation and its spent call, with no scan approval, new job, request or allowance reset?
+keys: C-c
+require-exit: 10

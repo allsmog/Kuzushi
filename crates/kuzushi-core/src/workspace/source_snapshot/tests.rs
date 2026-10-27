@@ -193,3 +193,81 @@ fn a_library_capture_without_an_observed_call_creates_no_start_receipt() {
     SourceSnapshot::capture(&ctx, "sast:scan", target.path()).unwrap();
     assert!(!crate::run_artifacts::run_dir(target.path(), "absent").exists());
 }
+
+#[test]
+fn child_inspection_keeps_identity_in_its_selected_workspace() {
+    let root = tempfile::tempdir().unwrap();
+    let child = root.path().join("client");
+    std::fs::create_dir(&child).unwrap();
+    std::fs::write(child.join("owned.txt"), "child source").unwrap();
+    let workspace = WorkspaceTarget::new(root.path()).unwrap();
+    let config = crate::V2Config::default();
+    let ctx = ToolExecutionContext {
+        config: &config,
+        workspace: Some(&workspace),
+        findings_store: None,
+        trace: None,
+        cancellation: None,
+        authorization: Default::default(),
+    };
+    let expected = crate::incremental_index::current_workspace_tree_hash(root.path()).unwrap();
+    let result = run_workspace_source_bound_tool(&ctx, "test:source", &child, || {
+        Ok(json!({"status":"completed","data":{}}))
+    })
+    .unwrap();
+    assert_eq!(result["data"]["treeHash"], expected);
+    assert_eq!(result["data"]["sourceCheckCurrent"], true);
+    assert!(workspace.findings_db_path().exists());
+    assert!(!child.join(".kuzushi").exists());
+}
+
+#[test]
+fn workspace_source_guard_detects_edits_outside_discovery_subtree() {
+    let root = tempfile::tempdir().unwrap();
+    let child = root.path().join("client");
+    std::fs::create_dir(&child).unwrap();
+    std::fs::write(root.path().join("owned.txt"), "before").unwrap();
+    let workspace = WorkspaceTarget::new(root.path()).unwrap();
+    let config = crate::V2Config::default();
+    let ctx = ToolExecutionContext {
+        config: &config,
+        workspace: Some(&workspace),
+        findings_store: None,
+        trace: None,
+        cancellation: None,
+        authorization: Default::default(),
+    };
+    let result = run_workspace_source_bound_tool(&ctx, "test:source", &child, || {
+        std::fs::write(root.path().join("owned.txt"), "after")?;
+        Ok(json!({"status":"completed","data":{"retained":1}}))
+    })
+    .unwrap();
+    assert_eq!(result["status"], "partial");
+    assert_eq!(result["data"]["sourceCheckCurrent"], false);
+    assert_eq!(result["data"]["retained"], 1);
+}
+
+#[test]
+fn workspace_source_guard_refuses_an_outside_target_before_work() {
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(root.path()).unwrap();
+    let config = crate::V2Config::default();
+    let ctx = ToolExecutionContext {
+        config: &config,
+        workspace: Some(&workspace),
+        findings_store: None,
+        trace: None,
+        cancellation: None,
+        authorization: Default::default(),
+    };
+    let called = std::cell::Cell::new(false);
+    let error = run_workspace_source_bound_tool(&ctx, "test:source", outside.path(), || {
+        called.set(true);
+        Ok(json!({"status":"completed","data":{}}))
+    })
+    .unwrap_err();
+    assert!(error.to_string().contains("outside the selected workspace"));
+    assert!(!called.get());
+    assert!(!outside.path().join(".kuzushi").exists());
+}

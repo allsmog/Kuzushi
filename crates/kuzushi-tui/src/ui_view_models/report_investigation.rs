@@ -3,6 +3,7 @@ use crate::app::{ShellApp, ViewDataState};
 use kuzushi_core::workspace::InvestigationReportDocument;
 use kuzushi_core::workspace::InvestigationReportReceipt;
 
+mod attempt_history;
 mod context_evidence;
 mod context_guidance;
 mod engine_details;
@@ -11,9 +12,9 @@ mod models;
 mod scan_receipt;
 mod scope;
 mod scopes;
-use engine_details::{
-    append_document_engine_details, engine_detail_line, scan_detail_lines, summarize_engine_details,
-};
+use engine_details::append_document_engine_details;
+#[cfg(test)]
+use engine_details::{engine_detail_line, scan_detail_lines, summarize_engine_details};
 use models::discovery_model_line;
 
 pub(crate) fn report_source_notice(app: &ShellApp) -> Option<&'static str> {
@@ -293,10 +294,17 @@ mod tests;
 mod receipt_detail_tests {
     use super::*;
     #[test]
+    fn retried_work_is_counted_as_attempts_without_inventing_more_jobs() {
+        let lines = scan_detail_lines(7, 7).join("\n");
+        assert!(lines.contains("7 / 7 attempts recorded"), "{lines}");
+        assert!(!lines.contains("jobs"), "{lines}");
+    }
+
+    #[test]
     fn absent_engine_details_are_disclosed_without_claiming_attempts_or_coverage() {
         assert!(scan_detail_lines(0, 0).is_empty());
         let lines = scan_detail_lines(0, 1).join("\n");
-        assert!(lines.contains("0 / 1 attempted jobs recorded; 1 unavailable"));
+        assert!(lines.contains("0 / 1 attempts recorded; 1 unavailable"));
         assert!(lines.contains("do not establish coverage"));
         assert_eq!(scan_detail_lines(1, 1).len(), 1);
     }
@@ -328,7 +336,7 @@ mod receipt_detail_tests {
         ]);
         assert_eq!(lines.len(), 2);
         assert!(lines[0].contains("Preparation is partial"));
-        assert!(lines[0].contains("Recorded in 2 attempted jobs"));
+        assert!(lines[0].contains("Recorded in 2 attempts"));
         assert!(lines[1].contains("Missing coverage receipt"));
     }
 }

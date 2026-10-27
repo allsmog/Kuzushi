@@ -9,7 +9,7 @@ fn context_strip_model_reports_idle_shell_state() {
 
     let model = context_strip_model(&app);
 
-    assert_eq!(model.mode, "shell route");
+    assert_eq!(model.mode, "Commands");
     assert_eq!(model.target, "none");
     assert!(!model.context_present);
     assert_eq!(model.context_state, "missing");
@@ -21,12 +21,12 @@ fn context_strip_model_reports_idle_shell_state() {
     assert_eq!(
         model.compact_segments(),
         [
-            "shell route",
+            "Commands",
             "view:capabilities",
             "target:none",
             "model:unconfigured",
             "repo index not built",
-            "cost:$0.00"
+            "session:$0.00"
         ]
     );
 }
@@ -123,7 +123,7 @@ fn context_strip_model_reports_active_scan_stage() {
 
     let model = context_strip_model(&app);
 
-    assert_eq!(model.mode, "run route");
+    assert_eq!(model.mode, "Run active");
     assert_eq!(
         model.stage,
         Some(ContextStripSegment {

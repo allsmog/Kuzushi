@@ -7,6 +7,13 @@ pub(super) fn summary(config: &BatchScanConfig, width: usize) -> Vec<String> {
     let mut lines = vec![generation.action(config).into()];
     append_outcome(&mut lines, generation);
     lines.push("One scope proposal job · one worker · one attempt".into());
+    lines.push(
+        super::diagnosis::scope_retention_label(
+            generation.receipt.as_ref(),
+            &generation.context_input,
+        )
+        .into(),
+    );
     lines.extend(allowance_status_lines(config));
     lines.extend([
         format!("Total calls: {}", limit(config.study.max_provider_calls)),
@@ -14,7 +21,7 @@ pub(super) fn summary(config: &BatchScanConfig, width: usize) -> Vec<String> {
         "Dollar estimate: unavailable. No dollar ceiling is enforced.".into(),
         "Scope planning, context, scans and review share accounting. Internal turns and retries consume calls; existing commitments remain.".into(),
         "At most eight primary scopes and optional shared context. No tools, recursive subdivision, output repair or scan jobs.".into(),
-        "Enter reviews the fixed plan, then the shared allowance. A completed result opens scope review; boundary acceptance remains separate.".into(),
+        "Boundary acceptance and scan approval remain separate.".into(),
         architecture_line(generation),
     ]);
     lines.extend(config.notice.iter().cloned());
@@ -29,17 +36,44 @@ pub(super) fn summary(config: &BatchScanConfig, width: usize) -> Vec<String> {
 fn append_outcome(lines: &mut Vec<String>, generation: &StudyContextGeneration) {
     if let Some(error) = &generation.result_error {
         lines.push(error.clone());
-        lines.push("Enter opens the recorded job. n prepares a replacement with separate approval. No automatic repair or rerun.".into());
+        lines.push(if generation.has_corrected_scopes() {
+            "Original job remains failed. Enter reviews your corrected scope draft; boundary acceptance is separate. No new model request."
+        } else {
+            "Enter opens the recorded job. n prepares a replacement with separate approval. No automatic repair or rerun."
+        }.into());
     }
+    lines.extend(
+        generation
+            .scope_correction
+            .as_ref()
+            .and_then(|state| state.notice.clone()),
+    );
 }
 
 fn architecture_line(generation: &StudyContextGeneration) -> String {
     let context = if generation.context_input["threatModelRef"].is_null() {
         "explicitly omitted"
     } else {
-        "exact accepted Map revision"
+        "exact saved revision"
     };
     format!("Architecture context: {context}")
+}
+
+pub(super) fn receipt_lines(
+    receipt: &kuzushi_core::capabilities::campaign::ContextStudyReceipt,
+) -> Vec<String> {
+    let reasoning = receipt.input["thinkingLevel"]
+        .as_str()
+        .unwrap_or("recorded runtime setting");
+    vec![
+        format!("Model: {} · reasoning: {reasoning}", crate::app::display_model_selector(&receipt.model)),
+        format!("Source: {}", receipt.source_identity),
+        format!("Plan: {}", receipt.campaign_id),
+        format!("Plan digest: {}", receipt.plan_sha256),
+        format!("Requested output: {} tokens. Subscription OAuth may not enforce this ceiling.", receipt.input["maxOutputTokens"]),
+        "Model data: at most 64 KiB, using the saved inventory and bounded architecture. Omitted rows and incomplete inventory are disclosed in the resulting scope draft.".into(),
+        "Tab shows every exact proposal option. M chooses a model for a new draft.".into(),
+    ]
 }
 
 #[cfg(test)]

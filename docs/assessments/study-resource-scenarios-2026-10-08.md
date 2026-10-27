@@ -74,3 +74,53 @@ live inference or source execution occurs.
 Live model usefulness, broader context-matrix TUI acceptance, direct bounded
 history loading, complete per-tool validation and the full investigation journey
 remain open. This increment does not close the broad delivery milestones.
+
+## Current historical-usage qualification, October 24, 2026
+
+J133 now reaches the current spending reader and allowance review again. Its
+first attempt stopped in fixture setup: a direct Python SQLite read could not
+open the checkpointed ledger. The shared read-only ledger helper returned the
+six settled records from the same database. The fixture now uses that helper.
+A second captured failure showed six planned jobs with zero attempts while the
+journey waited for an obsolete job-count label. The journey now checks the
+current label and navigates explicitly to the current Usage evidence row.
+
+The renderer regression previously combined text from all viewport sizes.
+It now requires the uncertainty text and final disclosure at each size,
+independently, while preserving selection and the composer. The first stronger
+assertion failed because frame borders separated wrapped words. The retained
+final frame proves that the disclosure was visible. The corrected assertion
+normalizes those borders and wrapping; no production paging change was needed.
+All five focused picker tests and TUI all-target Clippy pass. The native journey separately pages the
+40-column reader to its final disclosure and checks both final lines.
+
+Final J133 records **25 machine passes, zero failures, seventeen capture pairs
+and four pending formal operator judgments**. Thirteen ANSI cell replays were
+inspected, including all six sizes, the detail tail, approval, cancellation and
+no-color restart. These are terminal-cell reconstructions, not OS screenshots.
+
+| Review prompt | Scoped judgment and evidence |
+| --- | --- |
+| Historical scenario and future limits | The reader shows six historical requests, unknown dollars, zero available discovery calls under the existing allowance, and a six-call shortfall. History is explicitly not a future upper bound. |
+| Prior-study reading and cancellation | Selection and controls remain visible across all six sizes. The final disclosure is reachable at 40 columns. Cancel returns to the same prior study without starting new work. |
+| Proposed allowance | Approval shows fourteen proposed total calls, two protected Review calls, six remaining discovery calls and six fixed jobs. Cancel preserves the original eight-call approval. |
+| Restart | Public allowance reads retain revision one, the eight-call limit, two protected Review calls, six commitments, zero unresolved calls and the original approved work plan. The new plan's exact file digest and source files remain unchanged, with no new queue. |
+
+The public allowance result also retains unavailable dollar completeness. The
+fixture uses six intercepted responses for its completed baseline, three
+matching passes per boundary. No live request, target execution, new allowance
+or new discovery job follows from reading, cancellation or restart. Cumulative
+live experiment usage remains sixteen; no live allowance remains.
+
+Thirteen frozen programs and 6,527 repository inputs stayed unchanged during
+the final journey. The executable SHA-256 is
+`308a06045f19d2d5ae6455ad2f526927cf46a74a3c03522c7625ae519f5b6ea9`.
+Evidence root: `scripts/devex/artifacts/historical-usage-current-20261024/`.
+Earlier failed attempts, assertion diagnostics, public results and capture
+provenance remain retained. The cold-history sibling uses the same unchanged
+prepare/verify entry points; it was not run in this increment.
+
+This correction changes tests and qualification evidence only. It leaves the
+separately staged nineteen-file checkpoint intact. Formal operator acceptance,
+live usefulness, broader history failures and full investigation qualification
+remain open. No broader delivery milestone or module maturity changes here.

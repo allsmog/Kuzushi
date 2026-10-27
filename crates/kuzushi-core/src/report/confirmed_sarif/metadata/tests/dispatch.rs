@@ -72,6 +72,8 @@ fn shared_sarif_keeps_confirmation_and_discloses_changed_cited_source() {
     let before = serde_json::to_value(store.list_all_findings().unwrap()).unwrap();
     let document = export(&workspace, &store, json!({"output":"owned-history.sarif"}));
     assert_eq!(document["runs"][0]["results"].as_array().unwrap().len(), 1);
+    assert_eq!(document["runs"][0]["properties"]["kuzushiTrend"]["confirmedFindings"], 1);
+    assert_eq!(document["runs"][0]["properties"]["kuzushiTrend"]["decidedFindings"], 1);
     let properties = &document["runs"][0]["results"][0]["properties"];
     assert_eq!(properties["kuzushiReviewDecision"], "confirmed");
     assert_eq!(properties["kuzushiReviewDecisionAuthor"], "human");
@@ -169,6 +171,12 @@ fn later_human_rejection_reverses_a_historical_confirmation() {
         .as_array()
         .unwrap()
         .is_empty());
+    let trend = &document["runs"][0]["properties"]["kuzushiTrend"];
+    assert_eq!(trend["confirmedFindings"], 0);
+    assert_eq!(trend["decidedFindings"], 1);
+    assert_eq!(trend["rejectedFalsePositives"], 1);
+    assert_eq!(trend["fpRate"], 1.0);
+    assert!(trend["costPerConfirmedUsd"].is_null());
     assert_eq!(store.list_all_review_decisions().unwrap().len(), 2);
 }
 

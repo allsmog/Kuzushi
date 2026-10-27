@@ -11,6 +11,7 @@ use kuzushi_core::capabilities::campaign::snapshot::{
     campaign_ids, load_campaign_snapshot, CampaignSnapshot,
 };
 use std::path::Path;
+mod dispatcher_control;
 mod dispatcher_results;
 mod observations;
 mod scan_progress;
@@ -82,10 +83,16 @@ impl ShellApp {
         unreadable: usize,
     ) {
         let spend = campaign_snapshot_spend(campaigns, unreadable);
-        let trend = kuzushi_core::capabilities::campaign::trend::trend_metrics_with_spend(
-            self.review_decisions(),
-            spend,
-        );
+        let trend = self
+            .domain()
+            .review_trend()
+            .unwrap_or_else(|| {
+                kuzushi_core::capabilities::campaign::trend::trend_metrics_from_ledger(
+                    kuzushi_core::capabilities::campaign::trend::DecisionLedger::Unreadable,
+                    Default::default(),
+                )
+            })
+            .with_spend(spend);
         let history = refresh_trend_history(target, &trend);
         let deck = self.router.campaign_mut();
         deck.trend = Some(trend);
@@ -241,6 +248,7 @@ impl ShellApp {
                 let pid = child.id();
                 self.runtime_state
                     .hold_dispatcher(child, target, campaign_id.clone());
+                self.runtime_state.refresh_owned_study_allowance();
                 let deck = self.router.campaign_mut();
                 deck.dispatcher_pid = Some(pid);
                 deck.dispatcher_stop_requested = false;
@@ -319,18 +327,7 @@ impl ShellApp {
     /// Request Stop through the held child's original campaign. Keep its
     /// handle while the dispatcher settles children and saves partial work.
     fn campaign_kill(&mut self) {
-        match self.runtime_state.request_dispatcher_stop() {
-            Ok(pid) => {
-                let deck = self.router.campaign_mut();
-                deck.dispatcher_stop_requested = true;
-                deck.notice = Some(format!(
-                    "Stop requested for dispatcher {pid}; saving partial work"
-                ));
-            }
-            Err(error) => {
-                self.router.campaign_mut().notice = Some(format!("Stop unavailable: {error:#}"))
-            }
-        }
+        self.request_owned_dispatcher_stop();
     }
 
     pub(crate) fn poll_campaign_completion(&mut self) -> bool {

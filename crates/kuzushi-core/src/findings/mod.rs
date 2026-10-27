@@ -7,9 +7,12 @@ mod domain;
 pub use domain::distinct_recorded_source_count;
 pub(crate) use domain::merge_ordered_source_histories;
 pub(crate) use domain::normalize_reported_source_path;
+pub use domain::FindingEvidenceOrigin;
+pub use domain::RecordedObservationSource;
 pub(crate) use domain::FINDING_LESSON_SUBJECT;
 pub(crate) use domain::GOAL_RELEVANCE_SUBJECT;
 pub(crate) use domain::{validate_relationship_selection, FINDING_RELATIONSHIP_BATCH_SUBJECT};
+pub(crate) use domain::{DedupeLedgerLimits, DedupeLedgerRead};
 pub use domain::{FindingGoalAssessment, FindingGoalBasis, GoalRelevance};
 pub use domain::{
     FindingLesson, LessonContent, LessonGeneration, LessonOrigin, LessonRef, LessonState,

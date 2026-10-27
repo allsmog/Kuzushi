@@ -32,7 +32,9 @@ live-snap: review-40x12
 expect: F-0001
 nav-mode:
 keys: Enter
-require-live-snap: 20 SELECTED FINDING | finding-focus-40x12
+require-live-snap: 20 q review list | finding-focus-40x12
+expect: main.rs:1
+expect: confirmed
 expect: F-0001
 keys: NPage
 live-snap: decision-40x12-page-1

@@ -333,7 +333,7 @@ pub(crate) fn apply_watcher_messages_with_outcome(
     let Some(watcher) = watcher else {
         return WatcherMessageOutcome::default();
     };
-    let work_running = app.has_running_work();
+    let work_running = app.has_local_running_work();
     let drained = watcher.drain_changes(!work_running);
     let health_changed = report_watcher_registration_health(app, drained.registration_health);
     let workspace_changed = apply_watcher_batch(app, watcher, drained.batch, work_running);
@@ -606,6 +606,43 @@ mod tests {
             refreshed,
             JsonFileState::Present(value) if value["value"] == "after"
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn held_dispatcher_keeps_state_artifact_refresh_live() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        workspace.ensure_state_dir().unwrap();
+        let artifact = workspace.state_dir().join("external.json");
+        std::fs::write(&artifact, r#"{"value":"before"}"#).unwrap();
+        let (_input, wake) = TerminalLoopInbox::channel_for_test();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        let mut watcher = watcher_for_test(wake);
+        let mut held = crate::app::owned_dispatcher_test_support::HeldDispatcher::hold(&mut app);
+        assert!(matches!(
+            held.workbench_cache().borrow_mut().json_file(&artifact),
+            JsonFileState::Present(_)
+        ));
+        std::fs::write(&artifact, r#"{"value":"after"}"#).unwrap();
+        watcher
+            .tx
+            .try_send(WorkspaceWatcherBatch {
+                changes: Vec::new(),
+                state_artifact_paths: vec![PathBuf::from(".kuzushi/v3/external.json")],
+            })
+            .unwrap();
+        assert!(
+            !apply_watcher_messages_with_outcome(&mut held, Some(&mut watcher.runtime)).changed
+        );
+        std::thread::sleep(STATE_ARTIFACT_DEBOUNCE + Duration::from_millis(10));
+
+        assert!(apply_watcher_messages_with_outcome(&mut held, Some(&mut watcher.runtime)).changed);
+        assert!(matches!(
+            held.workbench_cache().borrow_mut().json_file(&artifact),
+            JsonFileState::Present(value) if value["value"] == "after"
+        ));
+        assert!(held.has_running_work());
     }
 
     /// Bounded refresh under a write burst: hundreds of state-artifact

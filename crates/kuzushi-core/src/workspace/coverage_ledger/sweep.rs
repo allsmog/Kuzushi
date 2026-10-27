@@ -19,7 +19,8 @@ pub const SWEEP_RUN_ID: &str = "deterministic-sweep";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case", tag = "kind")]
 pub enum SweepVerdict {
-    /// Files under the scope changed since the baseline revision.
+    /// Paths under the scope changed since the baseline revision. A move
+    /// contributes both its removed path and its added path.
     Changed { files: usize },
     /// Whole-repo diff shows no change under the scope since the baseline.
     Current,

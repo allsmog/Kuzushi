@@ -2251,6 +2251,7 @@ mod tests {
                 observed_other_count: 1,
                 model_generated_reasoning_present: true,
                 model_generated_reasoning_count: 2,
+                reasoning_assertion_count: 5,
                 derived_source_present: true,
                 source_count: 4,
                 raw_http_blob_present: true,
@@ -2304,6 +2305,9 @@ mod tests {
                 kuzushi_version: Some("sentinel-provenance-kuzushi-version".to_string()),
                 model: Some("sentinel-provenance-model".to_string()),
                 runtime_platform: Some("sentinel-provenance-runtime-platform".to_string()),
+                run_git: None,
+                observation_source: None,
+                relationship_sources: Vec::new(),
             },
             remediation: Some(WorkspaceRemediationExportSummary {
                 application_id: "sentinel-remediation-application-id".to_string(),

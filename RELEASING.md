@@ -1,5 +1,396 @@
 # Releasing Kuzushi
 
+## Recorded context in scope review
+
+Generated scope drafts now show their recorded proposal-context revision
+separately from context for future scans. The detail retains its full model id
+and content digest. A missing historical reference remains unrecorded; reading
+the draft does not activate context or accept Map. Stored scope formats and
+dispatch options are unchanged. See the
+[live variant and reading qualification](docs/assessments/live-scope-context-variant-2026-10-26.md).
+
+## Selected dependency source and package declarations
+
+Direct child-directory advisory scans now register and verify source in their
+explicit parent workspace while preserving child-only discovery coverage.
+Native path rebinding keeps literal Unix backslashes separate from directory
+separators. Direct and scoped execution agree on finding identity.
+
+Package source locations come from the exact captured lockfile bytes supplied
+to the scanner. Unique package/version declarations now anchor retained source
+at the package name. Missing, ambiguous or malformed declarations retain raw
+observations with unavailable locations; scoped source binding keeps that work
+partial. No live-file reread or historical observation rewrite occurs.
+
+Tool names, descriptor options and stored field names stay compatible. Existing
+line-1 observations retain their original locations and decisions. A new scan
+can supply a new source anchor; absence alone cannot establish a fix. See the
+[qualification and limits](docs/assessments/cargo-child-source-2026-10-26.md).
+
+## IaC child source and literal coverage
+
+Direct `iac-scan:scan` now registers and verifies source identity in its explicit
+parent workspace. Discovery stays in the selected child. Literal Unix
+backslashes remain distinct from nested directories in finding paths,
+fingerprints, inspected membership and authenticated coverage readers.
+Review's follow-up drawer accurately names drafting and opening planning;
+work approval remains separate.
+
+Tool names, options and stored field names are unchanged. Existing ambiguous
+child records and human decisions are preserved. Rescan the intended directory
+and review historical relationships against retained source. Updating or a
+later missed finding does not establish a fix. Source identity IO remains
+separate from discovery limits. See the
+[qualification and limits](docs/assessments/iac-child-source-2026-10-26.md).
+
+## Workspace-owned native source identity and phase guidance
+
+License, dependency-policy and secret tool runs now register and verify source
+identity in the selected workspace, including child-directory inspection. Child
+discovery coverage stays at the child. Source identity IO is separate from
+scanner read limits. Standalone secret results add the shared snapshot hashes
+and source-currentness field. Existing observations and decisions are retained;
+previous unverifiable workflow results require a new scan for reusable identity.
+
+Standalone tool history no longer implies accepted Map or Scan checkpoints.
+Genuine legacy scan history remains readable. When Map is missing, its next
+step stays first while completed or partial later results remain available for
+explicit selection. Failed recovery and stale accepted-Map guidance remain.
+See [the source and guidance assessment](docs/assessments/workspace-source-guidance-2026-10-26.md).
+
+## Rejected scope diagnostics and manual correction
+
+`pack:suggest-scopes` adds optional `saveRejectedOutput` with alias
+`save_rejected_output`. Omission preserves the earlier no-retention behavior;
+there is no injected descriptor default. New `campaign:context-study` scope
+plans explicitly choose retention unless the operator sets false, and include
+that choice in the frozen input. Existing plans are not rewritten.
+
+Retained `rejected-scope-output.json` has schema version 1, at most 16 KiB of
+candidate text, an original byte count, completeness and a bounded failure
+reason. Partial output remains readable but cannot enter the recovery action.
+The file can contain sensitive text and stays separate from valid revisions.
+
+`pack:scopes` adds `operation=recover` and optional `recoveryRef`. Together with
+`draft`, these authenticate one failed campaign's retained output, current scope
+head and source before saving an unaccepted revision. This starts no model
+request and preserves the failed job and consumed allowance. Exclusions and
+shared discovery must match the original draft.
+Subsequent scope-backed study planning retains the failed producer's original
+investigation and spending through authenticated run accounting, including after
+acceptance or boundary edits. Missing or foreign accounting is an error, not a
+new allowance.
+
+Scope revisions add optional `correction` metadata, omitted when absent. It
+records the failed output reference, model/context and corrected-draft SHA-256;
+the retained artifact hash remains its existing typed content hash. Old records
+remain readable without conversion. No old rejected response can be recovered
+unless its text was retained. See the
+[qualification](docs/assessments/rejected-scope-correction-2026-10-26.md).
+
+Older binaries that reject unknown revision fields cannot read new correction
+records. Upgrade readers before using recovery; the original revisions remain
+unchanged for historical reading. This does not rewrite a saved old plan.
+
+## Package boundaries and child-target source locations
+
+License header checks use the nearest package declarations, including explicit
+boundaries for private or undeclared packages. Parsed declarations are shared
+across the license checks. Root-license recognition remains heuristic.
+
+Normalized license, dependency-policy and secret findings from a child directory
+now use paths relative to the explicit parent workspace. Retained source bytes
+come from that child file. Direct and SAST directory scans converge on the same
+durable finding identity, and sibling packages remain distinct. License and
+dependency producer fingerprints use the workspace path. Opaque secret producer
+fingerprints remain compatibility aliases. License paths retain literal Unix
+backslashes. Relative inline targets and equivalent `target`/`cwd`
+choices are resolved inside an explicitly selected workspace before containment
+checks; its findings store and run artifacts remain at the parent.
+
+Field names, tool names and source-snapshot formats are unchanged. Raw scanner
+APIs continue to use their supplied scan root. Resolve normalized `coreFindings`
+paths, ledger locations and exports against the explicit workspace. The result's
+target still names the inspected subtree. Secret scanner `data.findings` retains
+its engine-relative paths and legacy producer fingerprints.
+
+Existing observations and human decisions are preserved. Earlier child-target
+records can contain ambiguous locations or source captured from the parent
+file. Updating does not repair that history. Rescan the intended child and
+reassess affected decisions against its new source receipt. Corrected child paths
+can produce different identities; review historical duplicate relationships
+explicitly. A missed later finding still does not establish a fix.
+
+## Repository index refresh and session dollars
+
+Workspace artifact refresh now updates the optional repository-index view after
+owned studies and external writers. The existing background hydration path
+keeps reads bound to the active target and rejects stale target generations.
+Read failures remain unavailable, with an explicit retry, rather than suggesting
+that a snapshot is absent. Accepted context, investigation jobs and spending
+retain their existing identities.
+
+The global dollar chip says `session:`. Study and investigation totals retain
+their own unknown-cost qualifiers and shared allowance. Structured results,
+persisted artifacts and tool options retain their contracts.
+
+## Literal whitespace in terminal evidence
+
+Logs now wraps each message once, preserving printable path whitespace and
+complete graphemes across timestamp and continuation widths. Plain output also
+preserves internal spaces when wrapping long rows; repeated spaces alone no
+longer cause a row to be treated as a column heading and truncated. Existing
+control stripping and right-padding cleanup in plain output remain.
+
+Long human-readable rows can therefore occupy additional lines. Structured JSON
+results, source identities and persisted artifacts retain their contracts.
+
+## Source-qualified CycloneDX references
+
+New `sbom-scan:scan` CycloneDX documents use opaque `bom-ref` values for complete
+recorded component identities. The `purl` field remains package metadata and
+must not be reconstructed as a reference. Consumers must join each actual
+`bom-ref`. The root reference remains `kuzushi:root`. Saved exports are preserved;
+re-run inventory for corrected documents.
+
+SPDX and CycloneDX now consume one source-qualified export graph. The shared
+extraction preserves the corrected SPDX package identifiers and relationships.
+Both formats omit and disclose missing or ambiguous endpoints while retaining
+all canonical component records and raw edges. One combined message names the
+omitted count. The additive `data.cycloneDxExport` records counts and candidate
+references. Both diagnostic objects add `uniqueComponentCount`.
+
+CycloneDX metadata retains omission details in
+`kuzushi:omittedDependencyRelationships`. Its dependency compositions are
+`incomplete` when an observed edge cannot be mapped and `unknown` otherwise.
+Absence of outgoing evidence does not create a dependency-free leaf. Each
+generated document has a fresh serial number, which identifies that document
+and does not authenticate a Git revision or installed dependency resolution.
+Public options, report structs and stored artifacts need no migration. See the
+[verification and limits](docs/assessments/sbom-cyclonedx-source-references-2026-10-26.md).
+
+## Source-qualified SPDX package references
+
+New `sbom-scan:scan` SPDX exports use opaque package identifiers derived from the
+complete recorded component identity: ecosystem, name, version, manifest path,
+scope and package URL. Identical component records share one SPDX package.
+Consumers must read each package's `SPDXID` and join relationships by that value;
+do not construct the former ecosystem/name identifier. Saved historical exports
+are preserved. Re-run inventory to obtain corrected exports.
+
+Dependency endpoints resolve only within their recorded source manifest or
+lockfile. Missing or ambiguous endpoints produce no guessed SPDX relationship.
+The additive `data.spdxExport` records emitted counts and every omitted edge with
+its source and candidate IDs. Raw `data.components` and `data.dependencies`
+retain their contracts and full observations. The output summary discloses
+omissions, and the standalone SPDX document retains them as annotations.
+
+Each export now has creation and annotation timestamps, a fresh document
+namespace and explicit document-to-package `DESCRIBES` relationships. The
+namespace identifies the generated document, not a Git revision or an atomic
+source snapshot. Version-specific relationships remain unknown when the raw
+name-level graph cannot distinguish them. CycloneDX has the separate reference
+and composition correction above. Full semantic and ecosystem qualification
+remain open. Public tool options, report structs and stored artifacts need no
+migration.
+
+## Setup context drafts after restart
+
+Setup now captures supplied options through shared descriptor validation before
+freezing context work. Stored global runtime-role settings remain in their
+operator configuration instead of becoming unknown threat-model options after
+restart. Canonical aliases, explicit overrides and workspace policy checks are
+preserved. Shared context-study preparation applies its finite-action defaults
+before approval. This repair selects no model, allowance or additional job.
+
+## Recorded execution status in investigation reports
+
+Investigation attempt receipts add optional `runStatus`, read from the saved run
+metadata without repair. It remains separate from `scan`, which is the engine's
+phase receipt. Cancellation can be known even when no engine outcome exists.
+TUI attempt history now names recorded cancellation, interruption or failure
+rather than presenting those executions as missing outcomes or successful scans.
+Missing or malformed run metadata remains unknown; names never imply a status.
+
+JSON, JSONL, SARIF and Markdown investigation receipts include this additive field
+when recorded; schema version 1 remains. Old receipts and unknown status values
+remain readable. Consumers constructing the public Rust
+`InvestigationAttemptReceipt` must initialize `run_status`, using `None` when no
+recorded metadata is available. Re-export to obtain recorded statuses in new
+reports. Stored historical exports are preserved.
+
+## Current review counts across scan passes
+
+Campaign status, the TUI trend, shared confirmed SARIF and the CLI gate now read
+recorded decisions against current canonical findings. A carried confirmation
+survives a new observation row; a later human FP replaces that confirmation once.
+Human priority and exact-row decision scope follow the shared review resolver.
+Filtering or paging the Review list does not change workspace trend totals.
+
+Field names and legacy observation-row selection APIs remain compatible.
+Previously saved trend-history points may contain observation-based counts and
+are preserved. Re-run a current status or export to obtain corrected totals;
+old snapshots are not rewritten. Exact zero no longer displays as a negative
+spend, and unknown-spend flags remain unchanged.
+
+## Native observation sources and exported revisions
+
+The aggregate native scan now binds observations to the authenticated source
+snapshot captured before execution and retains cited files as content-addressed
+blobs. SAST reuses its existing snapshot. Standalone native orchestration captures
+one snapshot before discovery. Native source retention has a 64 MiB aggregate
+limit per batch. Changed source, invalid citations, cancellation or exhausted
+retention leave observations unbound and disclose a source-binding limitation.
+Nontext or unavailable cited files cannot receive this source binding.
+This path does not reread live files to manufacture substitute source evidence.
+Previously recorded observations are preserved, including unknown Git metadata.
+
+Native coverage writers use schema version 3 and add optional `sourceBinding`.
+Readers continue accepting versions 1 and 2. A source-binding limitation makes
+coverage partial independently of scanner errors; it does not assert that the
+scanner failed to inspect the cited file. Strict coverage consumers must accept
+version 3 and distinguish these two limitations.
+
+Workspace export provenance adds `runGit`, `observationSource` and
+`relationshipSources`. The first describes the matching saved run checkout.
+The second identifies the exact observation generation, run, snapshot, tree,
+blob and recorded Git metadata. The third contains the distinct generations
+referenced by exported relationships, including older endpoints after every
+current finding has been observed again. It is not a full observation-history
+export. Unknown source metadata remains null even when run metadata is known.
+Neither a later checkout nor a missing later observation proves a fix.
+
+JSON and JSONL include these fields in provenance. SARIF adds `kuzushiRunGit`,
+`kuzushiObservationSource` and `kuzushiRelationshipSources`. Markdown bundle
+manifests include the same camel-case fields and finding documents display their
+recorded identities. CSV appends `run_git`, `observation_source` and
+`relationship_sources` after all prior columns; each cell is JSON. Existing
+column positions and workspace export markers remain unchanged.
+
+Rust consumers constructing `WorkspaceRunExportContext` must initialize
+`run_git`; consumers constructing `WorkspaceFindingProvenanceSummary` must also
+initialize `observation_source` and `relationship_sources`, or use
+`..Default::default()`. The additive `RecordedObservationSource` reader accepts
+schema version 1 only. Re-export to obtain these fields; historical exports are
+not rewritten or assigned missing SHAs.
+
+Review now uses retained source for every saved observation, including the
+current generation. Missing or loading retained source never substitutes current
+bytes. Unsaved previews compare the entire displayed excerpt, including spacing,
+before choosing live text. Retained-source captions identify saved run-checkout
+metadata explicitly; they do not relabel it as authenticated observation Git
+metadata. A current file preview with missing or unchecked retained source is
+explicitly labeled as a current preview.
+
+A decision carried through a durable finding identity can belong to either an
+earlier or later observation than the selected generation. Review labels this
+as a decision source check without asserting chronological order. Existing
+conflict tokens and review authority remain unchanged. In particular, the legacy
+`reappeared_after_rejection` token identifies a check against another observation;
+its name alone does not establish that a scan happened after a human decision.
+
+## Unsupported dependency metadata
+
+`sbom-scan:scan` now fails when a `package.json` document is not an object,
+when one of its four supported dependency sections is not an object, or when
+a dependency lacks a supported string specification. These inputs previously
+could return a completed empty inventory or dependency edges without packages.
+Failure names the manifest and field, retains available byte/hash inspection,
+and publishes no components, dependency edges, CycloneDX or SPDX document.
+
+Correct the source metadata and explicitly rerun the tool. Strings, including
+empty ranges, aliases, URLs, local paths and Git specifications, remain accepted.
+The existing object with a string `version` is retained for compatibility.
+This is shape validation, not complete package-manager validation or resolution.
+Tool names, options, output schemas and existing run receipts are unchanged.
+The shell clears stale package claims on failure and recollects facts on restart.
+
+## Evidence origin classification in reports
+
+Generic `reasoning` evidence now displays as `reasoning assertion`. Explicit
+`model-claim-unscored` evidence retains its model-generated classification and
+stays excluded from observed-code and capture counts, including when it carries
+a filepath or capture reference. The TUI and export projections share the
+findings-domain classification. Existing stored observations and human decisions
+are preserved.
+
+Workspace JSON/JSONL evidence summaries add `reasoningAssertionCount`.
+Its presence identifies the corrected classification in v2 exports.
+`modelGeneratedReasoningCount` and its presence flag now describe explicit model
+claims; generic reasoning no longer establishes automated analysis. A record
+with only generic reasoning uses evidence state `reasoning_assertion`. Treat
+this state as an unverified assertion. Strict state consumers must accept the
+new value. Existing v2 export markers and finding-store formats are retained.
+
+CSV appends `reasoning_assertion_count` after all existing columns. SARIF adds
+`kuzushiReasoningAssertionCount`; Markdown bundle manifests add the matching
+camel-case count and their detail text shows the shared origin labels. Rust
+consumers constructing `WorkspaceEvidenceExportSummary` with a struct literal
+must supply `reasoning_assertion_count` or use `..Default::default()`. Historical
+exports keep their recorded counts; inspect original evidence kinds before
+interpreting older model-origin or observed-evidence totals.
+
+## Literal diagram links and exact finding filters
+
+On Unix, `findings:list` `filePaths` and shell `files:[...]` filters now keep
+literal backslashes distinct from directory separators. A query for `src/a\b.rs`
+no longer matches `src/a/b.rs`. Windows keeps native separator equivalence, and
+leading `./` remains accepted. Existing findings and decisions are not rewritten.
+Queries that relied on the former Unix alias must supply the intended recorded
+path explicitly. No schema or option migration is required.
+
+Diagram finding links and scoped planning now share lexical containment checks
+and preserve the same native filename spelling. A path match can include saved
+revisions; it does not establish current-source equivalence or a finding verdict.
+
+## Bounded duplicate proposal inputs
+
+`triage:dedupe` keeps its name, existing result fields and reversible proposal
+behavior. Five additive advanced options govern ledger preparation and supplied
+source: `maxLedgerObservations` (10,000), `maxLedgerBytes` (8 MiB),
+`maxLedgerReadMs` (10,000), `maxJudgePromptBytes` (128 KiB) and
+`maxConfirmationBytes` (256 KiB). Matching snake-case aliases are supported.
+
+Excess ledger or metadata prompt input now refuses before inference instead of
+materializing the entire history. No observation is removed or silently omitted
+from that read. A successful candidate selection discloses whole-file buckets
+omitted by `maxCandidates`. Confirmation source reads share one invocation-local
+allowance, reject symlinks, retain literal paths and report current-file digests.
+Unavailable source, missing citations or oversized confirmation prompts drop the
+proposal without a confirmation request. Failed source reads conservatively
+retain their allowance; unknown bytes remain unknown.
+
+`maxCandidates` values below two now select no complete duplicate bucket; the old implicit increase to two is removed.
+
+New JSONL imports also preserve literal file aliases in findings and evidence.
+Previously imported rows are retained as recorded. Replaying a completed import
+keeps its old run; it cannot recover stripped characters. If original payloads
+exist, use a separately reviewed import with a distinct tool label to record
+corrected observations, and review their relationships explicitly.
+
+Ordinary ledgers need no schema migration. Existing exports and full-history
+readers are unchanged. Automatic dedupe prepasses use conservative defaults;
+revise these limits through a separately reviewed `triage:dedupe` action.
+Previously frozen work may need a fresh plan because declared defaults are part
+of prepared input. Existing approvals do not authorize revised work or spending. Malformed model output fails without an automatic repair request.
+
+
+## Historical baseline read limits and timestamp ties
+
+Coverage ledger readers now enforce an 8 MiB aggregate retained-text limit in
+addition to the existing 10,000-row limit. Oversized metadata returns an explicit
+error without truncating or removing history. Ordinary histories need no
+migration. Existing `.kuzushi/v3/coverage.sqlite3` schema version 1, findings,
+context objects, run receipts and public options are unchanged. Back up and
+archive oversized derived metadata deliberately before requesting history advice;
+the reader performs no automatic cleanup. Restoring a valid saved ledger restores
+inspection without altering finding decisions or source.
+
+Equal baseline timestamps now select the last stored row across modes. This
+tie-breaker describes database storage order, not finer completion time, Git
+ancestry or a fixed finding. See the
+[history reader evidence](docs/assessments/baseline-history-selection-2026-10-24.md).
+
 ## Boundary context reading order
 
 Boundary-context detail now leads with the association and preparation state,

@@ -1,6 +1,7 @@
 use super::*;
 use crate::content_store::ContentStore;
 use crate::identity::Blake3Hash;
+mod provenance;
 
 /// Pointer to the scanned-time copy of a finding's cited source file:
 /// the observation row that stored the file as a content-addressed blob.

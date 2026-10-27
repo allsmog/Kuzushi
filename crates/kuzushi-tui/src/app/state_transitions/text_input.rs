@@ -143,7 +143,7 @@ impl ShellApp {
             || self.capture_context_case_name_paste(text)
             || self.capture_brief_paste(text)
             || self.capture_bound_brief_paste()
-            || self.capture_regeneration_guidance_paste(text)
+            || self.capture_study_text_paste(text)
             || self.capture_context_edit_paste(text)
     }
 

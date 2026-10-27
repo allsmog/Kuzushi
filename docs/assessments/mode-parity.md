@@ -1,5 +1,14 @@
 # Mode Parity Assessment
 
+The Lessons `s` shortcut is shell navigation into the existing finite Scan
+planner. A shared Core reader authenticates the saved reviewed context and
+retains durable investigation accounting. It creates no plan or approval.
+Headless callers continue using the same prepared `threat-model:reuse-lessons`,
+`campaign:study` and allowance tools; discovery still executes through shared
+prepared dispatch. Plain output exposes the same follow-up affordance and
+planning state. Native rule scanners and model-guided context consumers keep
+their distinct inputs.
+
 Report retains a labeled previous read during refresh, requires current data
 for export, and keeps repeated metadata in `p details`. Its
 [qualification](report-reader-2026-10-17.md) has 212 focused passes,

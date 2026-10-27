@@ -24,6 +24,33 @@ pub(crate) fn run_source_bound_tool(
     Ok(snapshot.finish(ctx, tool, target, output))
 }
 
+/// Discovery may inspect a subtree while its run and source belong to the
+/// selected workspace. Keep that ownership separate from discovery coverage.
+pub(crate) fn run_workspace_source_bound_tool(
+    ctx: &ToolExecutionContext<'_>,
+    tool: &str,
+    target: &Path,
+    run: impl FnOnce() -> Result<Value>,
+) -> Result<Value> {
+    let workspace = workspace_source_owner(ctx, target)?;
+    run_source_bound_tool(ctx, tool, workspace.root(), run)
+}
+
+pub(crate) fn workspace_source_owner(
+    ctx: &ToolExecutionContext<'_>,
+    target: &Path,
+) -> Result<WorkspaceTarget> {
+    let inspected = WorkspaceTarget::new(target)?;
+    let Some(owner) = ctx.workspace else {
+        return Ok(inspected);
+    };
+    anyhow::ensure!(
+        inspected.root().starts_with(owner.root()),
+        "Source inspection target is outside the selected workspace"
+    );
+    Ok(owner.clone())
+}
+
 pub(crate) fn mark_source_unverified(output: &mut Value, error: &anyhow::Error) {
     match tool_result_status(output) {
         ToolResultStatus::Completed | ToolResultStatus::Partial => {

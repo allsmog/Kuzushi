@@ -7,6 +7,7 @@ pub(crate) struct RelationshipsRouteState {
     pub(crate) finding_id: Option<i64>,
     pub(crate) offset: usize,
     pub(crate) cursor: usize,
+    pub(crate) pinned: Option<FindingRelationship>,
     pub(crate) note: Option<RelationshipNote>,
     pub(crate) notice: Option<String>,
     pub(crate) selection: Vec<FindingRelationship>,
@@ -24,7 +25,7 @@ pub(crate) struct RelationshipNote {
 pub(crate) struct RelationshipWrite {
     pub(crate) target: PathBuf,
     pub(crate) draft: RelationshipWriteDraft,
-    pub(crate) handle: std::thread::JoinHandle<Result<(), String>>,
+    pub(crate) handle: std::thread::JoinHandle<Result<Vec<FindingRelationship>, String>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

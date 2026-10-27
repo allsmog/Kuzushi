@@ -167,6 +167,8 @@ pub struct WorkspaceEvidenceExportSummary {
     pub observed_other_count: usize,
     pub model_generated_reasoning_present: bool,
     pub model_generated_reasoning_count: usize,
+    /// Generic reasoning carries no reliable model-authorship claim.
+    pub reasoning_assertion_count: usize,
     pub derived_source_present: bool,
     pub source_count: usize,
     pub raw_http_blob_present: bool,
@@ -226,6 +228,12 @@ pub struct WorkspaceFindingProvenanceSummary {
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_platform: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_git: Option<crate::run_artifacts::RunTargetGitMetadata>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observation_source: Option<crate::findings::RecordedObservationSource>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub relationship_sources: Vec<crate::findings::RecordedObservationSource>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -234,6 +242,7 @@ pub struct WorkspaceRunExportContext {
     pub kuzushi_version: Option<String>,
     pub model: Option<String>,
     pub runtime_platform: Option<String>,
+    pub run_git: Option<crate::run_artifacts::RunTargetGitMetadata>,
 }
 
 impl WorkspaceRunExportContext {
@@ -243,6 +252,7 @@ impl WorkspaceRunExportContext {
             kuzushi_version: summary.kuzushi_version.clone(),
             model: summary.model.clone(),
             runtime_platform: summary.platform.clone(),
+            run_git: summary.target_git.clone(),
         }
     }
 }

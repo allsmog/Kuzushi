@@ -130,11 +130,25 @@ fn verify_evidence_item(target_root: Option<&Path>, evidence: &FindingEvidence) 
         return evidence.clone();
     };
 
+    downgrade_citation(evidence, note)
+}
+
+fn downgrade_citation(evidence: &FindingEvidence, note: &str) -> FindingEvidence {
     let mut downgraded = evidence.clone();
     downgraded.kind = "reasoning".to_string();
     downgraded.confidence = downgraded.confidence.min(25);
     downgraded.rationale = append_citation_note(&downgraded.rationale, note);
     downgraded
+}
+
+pub(super) fn unbound_native_evidence(evidence: &[FindingEvidence]) -> Vec<FindingEvidence> {
+    evidence.iter().map(|row| {
+        if is_target_source_citation(row) {
+            downgrade_citation(row, "citation-verification-unavailable: native source snapshot could not be authenticated")
+        } else {
+            row.clone()
+        }
+    }).collect()
 }
 
 fn citation_verification(

@@ -105,17 +105,63 @@ fn long_scope_names_cannot_hide_pass_numbers_in_fixed_job_rows() {
             "{} · pass 3/3",
             "Long architecture boundary ".repeat(8)
         ));
-        let lines = campaign_lines(&app, Rect::new(0, 0, width, 24));
-        let marker = lines
-            .iter()
-            .position(|line| line.to_string().starts_with("▸ "))
-            .unwrap();
-        let row = lines[marker..marker + 2]
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join(" ");
+        let row = selected_job_rows(&app, width);
         assert!(row.contains("pass 3/3"), "{width}: {row}");
-        assert!(lines.iter().all(|line| line.width() <= usize::from(width)));
     }
+}
+
+fn selected_job_rows(app: &ShellApp, width: u16) -> String {
+    let lines = campaign_lines(app, Rect::new(0, 0, width, 24));
+    assert!(lines.iter().all(|line| line.width() <= usize::from(width)));
+    let marker = lines
+        .iter()
+        .position(|line| line.to_string().starts_with("▸ "))
+        .unwrap();
+    lines[marker..marker + 2]
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[test]
+fn cancellation_reason_keeps_unstarted_jobs_distinct_from_admitted_attempts() {
+    for width in [40, 60, 80, 96, 120, 160] {
+        let mut app = named_reader(width, 24);
+        for attempts in [0, 1] {
+            let job = &mut app.router.campaign_mut().campaigns[0].jobs[0];
+            job.state = "parked".into();
+            job.reason = Some("canceled".into());
+            job.attempts = attempts;
+            job.dispatches = Some(attempts);
+            let usage = crate::ui_view_models::campaign_job_attempt_summary(job);
+            let row = selected_job_rows(&app, width);
+            assert!(row.contains("parked: canceled"), "{width}: {row}");
+            assert!(row.contains(&usage), "{width}: {row}");
+        }
+    }
+}
+
+#[test]
+fn cancellation_labels_require_recorded_state_and_reason() {
+    let mut app = named_reader(80, 24);
+    let job = &mut app.router.campaign_mut().campaigns[0].jobs[0];
+    job.display_label = Some("canceled · pass 1/3".into());
+    job.state = "parked".into();
+    job.reason = None;
+    assert_eq!(
+        crate::ui_view_models::campaign_job_state_label(job),
+        "parked"
+    );
+    job.reason = Some("canceled by another actor".into());
+    assert_eq!(
+        crate::ui_view_models::campaign_job_state_label(job),
+        "parked"
+    );
+    job.state = "pending".into();
+    job.reason = Some("canceled".into());
+    assert_eq!(
+        crate::ui_view_models::campaign_job_state_label(job),
+        "pending"
+    );
 }

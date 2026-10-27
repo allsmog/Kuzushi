@@ -164,6 +164,7 @@ live-snap: report-60x20
 resize: 40x12
 live-snap: report-40x12
 expect-not: module route · view:report
+expect-not: Module selected · view:report
 expect-not: e edits path · Enter exports · Esc returns
 keys: NPage
 live-snap: report-page-1-40x12

@@ -15,6 +15,7 @@ pub(super) fn append_document_engine_details(
         engine_details.extend(engine_detail_lines(document));
     }
     insert_engine_details(lines, engine_details);
+    attempt_history::insert_after_scope(lines, attempts, details);
 }
 
 pub(super) fn insert_engine_details(lines: &mut Vec<String>, details: Vec<String>) {
@@ -54,7 +55,7 @@ pub(super) fn summarize_engine_details(lines: impl IntoIterator<Item = String>) 
             if count == 1 {
                 line
             } else {
-                format!("{line} Recorded in {count} attempted jobs.")
+                format!("{line} Recorded in {count} attempts.")
             }
         })
         .collect()
@@ -75,7 +76,7 @@ pub(super) fn scan_detail_lines(recorded: usize, attempted: usize) -> Vec<String
     }
     let missing = attempted.saturating_sub(recorded);
     let mut lines = vec![format!(
-        "Engine details: {recorded} / {attempted} attempted jobs recorded; {missing} unavailable."
+        "Engine details: {recorded} / {attempted} attempts recorded; {missing} unavailable."
     )];
     if missing > 0 {
         lines.push("Missing engine details do not establish coverage. Inspect incomplete run records before further work.".into());

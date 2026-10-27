@@ -2,6 +2,8 @@ use super::tests::{approval, context};
 use super::*;
 use crate::{FindingStore, V2Config, WorkspaceTarget};
 
+mod frozen_options;
+
 fn draft(registry: &ModuleRegistry, ctx: &ToolExecutionContext<'_>) -> Value {
     registry
         .execute_tool(

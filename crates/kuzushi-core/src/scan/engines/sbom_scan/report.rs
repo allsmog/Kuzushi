@@ -1,5 +1,6 @@
-use super::cyclonedx::cyclonedx_document;
-use super::spdx::spdx_document;
+use super::cyclonedx::cyclonedx_export;
+use super::export_graph::ExportGraph;
+use super::spdx::spdx_export;
 use super::*;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -36,8 +37,11 @@ impl SbomScanReport {
     }
 
     pub fn to_tool_json(&self) -> Value {
+        let graph = ExportGraph::new(self);
+        let spdx = spdx_export(self, &graph);
+        let cyclonedx = cyclonedx_export(self, &graph);
         crate::scan::completed_scan_tool_json(
-            self.output(),
+            export_summary(self, graph.omitted_count()),
             json!({
                 "target": self.target,
                 "manifestsScanned": self.manifests_scanned,
@@ -48,11 +52,23 @@ impl SbomScanReport {
                 "componentCount": self.components.len(),
                 "components": self.components,
                 "byEcosystem": self.by_ecosystem,
-                "cycloneDx": cyclonedx_document(self),
-                "spdx": spdx_document(self),
+                "cycloneDx": cyclonedx.document,
+                "cycloneDxExport": cyclonedx.diagnostics,
+                "spdx": spdx.document,
+                "spdxExport": spdx.diagnostics,
             }),
         )
     }
+}
+
+fn export_summary(report: &SbomScanReport, omitted: usize) -> String {
+    if omitted == 0 {
+        return report.output();
+    }
+    format!(
+        "{}\nSPDX and CycloneDX omitted {omitted} dependency relationship{} with missing or ambiguous endpoints; raw dependency links remain available.",
+        report.output(), plural_suffix(omitted)
+    )
 }
 
 fn plural_suffix(count: usize) -> &'static str {

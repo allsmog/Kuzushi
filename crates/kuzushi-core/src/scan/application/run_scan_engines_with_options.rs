@@ -1,4 +1,5 @@
 use super::*;
+mod source;
 
 #[cfg(test)]
 mod exact_tests;
@@ -36,6 +37,7 @@ pub fn run_scan_engines_with_options_and_cancellation(
     for engine in &report.coverage.engines {
         ensure_aggregate_scan_coverage(&engine.engine, &engine.scan_errors)?;
     }
+    report.coverage.require_source_binding()?;
     Ok(report.run)
 }
 
@@ -46,10 +48,29 @@ pub(crate) fn run_native_scan_with_cancellation(
     options: &ScanRunOptions,
     cancellation: &ScanCancellation,
 ) -> Result<NativeScanReport> {
+    run_native_scan_at_source(workspace, store, scanners, options, cancellation, None)
+}
+
+pub(crate) fn run_native_scan_at_source(
+    workspace: &WorkspaceTarget,
+    store: &FindingStore,
+    scanners: &[Box<dyn ScanEngine>],
+    options: &ScanRunOptions,
+    cancellation: &ScanCancellation,
+    source: Option<&crate::workspace::source_snapshot::SourceSnapshot>,
+) -> Result<NativeScanReport> {
     ensure_scan_active(cancellation)?;
     let roots = scan_roots(workspace.root(), options)?;
     ensure_file_scopes_supported(scanners, &roots)?;
-    run_native_scan_on_roots(workspace, store, scanners, options, &roots, cancellation)
+    run_native_scan_on_roots(
+        workspace,
+        store,
+        scanners,
+        options,
+        &roots,
+        cancellation,
+        source,
+    )
 }
 
 pub(crate) fn run_native_scan_files_with_cancellation(
@@ -59,6 +80,7 @@ pub(crate) fn run_native_scan_files_with_cancellation(
     options: &ScanRunOptions,
     files: &[String],
     cancellation: &ScanCancellation,
+    source: Option<&crate::workspace::source_snapshot::SourceSnapshot>,
 ) -> Result<NativeScanReport> {
     ensure_scan_active(cancellation)?;
     anyhow::ensure!(
@@ -67,7 +89,15 @@ pub(crate) fn run_native_scan_files_with_cancellation(
     );
     validate_exact_engine_contract(scanners)?;
     let roots = exact_file_root(workspace.root(), files)?;
-    run_native_scan_on_roots(workspace, store, scanners, options, &roots, cancellation)
+    run_native_scan_on_roots(
+        workspace,
+        store,
+        scanners,
+        options,
+        &roots,
+        cancellation,
+        source,
+    )
 }
 
 fn run_native_scan_on_roots(
@@ -77,43 +107,53 @@ fn run_native_scan_on_roots(
     options: &ScanRunOptions,
     roots: &[ScanRoot],
     cancellation: &ScanCancellation,
+    source: Option<&crate::workspace::source_snapshot::SourceSnapshot>,
 ) -> Result<NativeScanReport> {
     preflight_scan_engines(scanners)?;
     workspace.ensure_state_dir()?;
 
     let run_id = scan_run_id(options);
+    let environment = NativeRunEnvironment {
+        workspace,
+        store,
+        cancellation,
+        source,
+    };
     store.with_scan_lifecycle_before_receipt(&run_id, workspace.root(), || {
-        settle_native_scan(
-            workspace,
-            store,
-            roots,
-            scanners,
-            options,
-            cancellation,
-            &run_id,
-        )
+        settle_native_scan(&environment, roots, scanners, options, &run_id)
     })?
 }
 
+struct NativeRunEnvironment<'a> {
+    workspace: &'a WorkspaceTarget,
+    store: &'a FindingStore,
+    cancellation: &'a ScanCancellation,
+    source: Option<&'a crate::workspace::source_snapshot::SourceSnapshot>,
+}
+
 fn settle_native_scan(
-    workspace: &WorkspaceTarget,
-    store: &FindingStore,
+    environment: &NativeRunEnvironment<'_>,
     roots: &[ScanRoot],
     scanners: &[Box<dyn ScanEngine>],
     options: &ScanRunOptions,
-    cancellation: &ScanCancellation,
     run_id: &str,
 ) -> Result<(
     Result<NativeScanReport>,
     usize,
     crate::run_lifecycle::RunItemStatus,
 )> {
+    let NativeRunEnvironment {
+        workspace,
+        store,
+        cancellation,
+        source: expected_source,
+    } = environment;
+    let source =
+        source::NativeFindingSource::capture(workspace, store, cancellation, *expected_source)?;
     let mut output = planned_scan_outputs(roots, scanners);
     let execution = collect_scan_engine_outputs(roots, scanners, cancellation, &mut output);
     apply_scan_run_options(workspace.root(), &mut output.findings, options);
-    for finding in &output.findings {
-        store.insert_finding(run_id, finding)?;
-    }
+    source.persist(workspace, store, run_id, &mut output, cancellation)?;
     let execution = execution
         .and_then(|_| ensure_scan_active(cancellation))
         .and_then(|_| index_scan_static_evidence(workspace, options, &output));
@@ -715,6 +755,12 @@ mod aggregate_coverage_tests {
     #[test]
     fn legacy_aggregate_scan_reports_coverage_failure_after_retaining_observations() {
         let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir(tmp.path().join("src")).unwrap();
+        fs::write(
+            tmp.path().join("src/app.rs"),
+            "// owned analyzed source\n".repeat(12),
+        )
+        .unwrap();
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let scanners: Vec<Box<dyn ScanEngine>> = vec![Box::new(PartialCoverageScanner)];

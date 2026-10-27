@@ -5,8 +5,9 @@ pub(super) fn descriptor() -> ToolDescriptor {
         "Build bounded inventory and review source-bound scan scope drafts. Edits preserve immutable revisions. Acceptance approves boundaries only, never scans or spending. No model calls.",
         vec![
             opt("operation", OptionType::Enum, "Scope action.")
-                .choices(&["create", "latest", "read", "edit", "accept", "files"]).default(json!("create")),
-            opt("draft", OptionType::Json, "Scope draft for create. Omit to keep the whole repository together."),
+                .choices(&["create", "latest", "read", "edit", "accept", "files", "recover"]).default(json!("create")),
+            opt("draft", OptionType::Json, "Scope draft for create, or the operator-corrected draft for recover. Omit for create to keep the whole repository together."),
+            opt("recoveryRef", OptionType::Json, "Exact failed scope job and authenticated retained candidate for recover. Saving creates an unaccepted revision with correction history, never model work or scan approval."),
             opt("proposalRef", OptionType::Json, "Exact saved scope revision. Required for read, edit, accept, and files."),
             opt("edit", OptionType::Json, "One explicit scope addition, rename, merge, split, exclusion, boundary edit, shared-context creation/removal, shared-discovery choice, or whole-repository edit."),
             opt("acknowledgements", OptionType::Json, "Acceptance acknowledgements for inventory limitations, overlapping discovery, and exclusions. Required for accept."),
@@ -27,20 +28,34 @@ pub(in crate::modules) fn execute(input: &Value, ctx: &ToolExecutionContext<'_>)
     if operation == "files" {
         return file_page(input, ctx);
     }
-    let review = if operation == "create" {
-        let draft = input
-            .get("draft")
-            .map(|value| serde_json::from_value(value.clone()))
-            .transpose()?;
-        crate::workspace::create_scan_scope_proposal(ctx, draft)?
-    } else {
-        execute_review(input, ctx, operation)?
-    };
+    let review = change_scope(input, ctx, operation)?;
     Ok(
         json!({"ok":true, "status":"completed", "summary":format!("Scope revision {} saved or read. {} inventoried files; {} uncovered; {} overlap; {} without content identity. Scope acceptance does not approve scans or spending.",
         review.reference.revision, review.coverage.enumerated_files, review.coverage.uncovered_files.total, review.coverage.overlaps.total, review.identity_omissions.total),
         "data":review}),
     )
+}
+
+fn change_scope(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    operation: &str,
+) -> Result<crate::workspace::ScanScopeReview> {
+    match operation {
+        "create" => crate::workspace::create_scan_scope_proposal(
+            ctx,
+            input
+                .get("draft")
+                .map(|value| serde_json::from_value(value.clone()))
+                .transpose()?,
+        ),
+        "recover" => crate::capabilities::campaign::recover_scope_draft(
+            ctx,
+            &required_json(input, "recoveryRef")?,
+            required_json(input, "draft")?,
+        ),
+        _ => execute_review(input, ctx, operation),
+    }
 }
 
 fn latest_review(ctx: &ToolExecutionContext<'_>) -> Result<Value> {
@@ -107,20 +122,22 @@ fn required_json<T: serde::de::DeserializeOwned>(input: &Value, key: &str) -> Re
 }
 
 fn validate_action_options(input: &Value, operation: &str) -> Result<()> {
-    for (key, owner) in [
-        ("draft", "create"),
-        ("edit", "edit"),
-        ("acknowledgements", "accept"),
-        ("fileFilter", "files"),
+    for (key, owners) in [
+        ("draft", &["create", "recover"][..]),
+        ("recoveryRef", &["recover"][..]),
+        ("edit", &["edit"][..]),
+        ("acknowledgements", &["accept"][..]),
+        ("fileFilter", &["files"][..]),
     ] {
         anyhow::ensure!(
-            input.get(key).is_none() || operation == owner,
-            "scope {key} is only valid for {owner}"
+            input.get(key).is_none() || owners.contains(&operation),
+            "scope {key} is only valid for {}",
+            owners.join("/")
         );
     }
     anyhow::ensure!(
-        !matches!(operation, "create" | "latest") || input.get("proposalRef").is_none(),
-        "create/latest does not accept a saved revision"
+        !matches!(operation, "create" | "latest" | "recover") || input.get("proposalRef").is_none(),
+        "create/latest/recover does not accept a separate saved revision"
     );
     Ok(())
 }

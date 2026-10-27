@@ -36,6 +36,9 @@ pub struct ScanScopeRevision {
     /// The exact model input receipt survives edits; acceptance is always separate.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generation: Option<ScanScopeGeneration>,
+    /// Manual correction of authenticated rejected output, never a model verdict.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correction: Option<super::ScanScopeCorrection>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -10,10 +10,12 @@
 use anyhow::{Context, Result};
 use kuzushi_core::capabilities::campaign::snapshot::{campaign_ids, load_campaign_snapshot};
 use kuzushi_core::capabilities::campaign::trend::{
-    latest_confirmed_finding_ids, trend_json, trend_metrics_with_spend,
-    workspace_campaign_spend_report, TrendMetrics,
+    trend_json, trend_metrics_for_findings, workspace_campaign_spend_report, TrendMetrics,
 };
-use kuzushi_core::findings::ReviewDecisionRecord;
+use kuzushi_core::findings::{
+    review_verdict_is_actionable, EffectiveReviewStateIndex, ReviewDecisionRecord,
+    ReviewDecisionSubject,
+};
 use kuzushi_core::{Finding, FindingStore, Severity, WorkspaceTarget};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -57,10 +59,14 @@ fn confirmed_findings<'a>(
     findings: &'a [Finding],
     records: &[ReviewDecisionRecord],
 ) -> Vec<&'a Finding> {
-    let confirmed_ids = latest_confirmed_finding_ids(records);
+    let index = EffectiveReviewStateIndex::from_findings_and_decisions(&[], records);
     findings
         .iter()
-        .filter(|finding| finding.id.is_some_and(|id| confirmed_ids.contains(&id)))
+        .filter(|finding| {
+            index
+                .verdict_for_subject(&ReviewDecisionSubject::from(*finding))
+                .is_some_and(review_verdict_is_actionable)
+        })
         .collect()
 }
 
@@ -74,7 +80,8 @@ fn evaluate_and_report(
     let root = workspace.root();
     let baseline = load_baseline(root)?;
     let gate = evaluate_gate(confirmed, baseline.as_ref(), options.fail_on);
-    let trend = trend_metrics_with_spend(records, workspace_campaign_spend_report(root));
+    let trend =
+        trend_metrics_for_findings(findings, records, workspace_campaign_spend_report(root));
     let summary_path = write_summary(root, options, findings, confirmed, &gate, &trend)?;
     print_plain_summary(root, findings, confirmed, baseline.as_ref(), &gate, &trend);
     println!("ci: summary written to {}", summary_path.display());
@@ -342,7 +349,7 @@ fn print_plain_summary(
         severity_strip(findings)
     );
     println!(
-        "ci: confirmed {} (latest review decision wins)",
+        "ci: confirmed {} (human review takes priority)",
         confirmed.len()
     );
     match baseline {
@@ -442,6 +449,40 @@ mod tests {
         }
         let target = tmp.path().to_path_buf();
         (tmp, target)
+    }
+
+    #[test]
+    fn trend_carried_confirmation_and_later_fp_agree_with_ci_summary() {
+        let (_tmp, target) = workspace_with_confirmed(&[Severity::High]);
+        let workspace = WorkspaceTarget::new(&target).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let original = store.list_all_findings().unwrap().remove(0);
+        store
+            .record_run_started("repeated", &target, "completed")
+            .unwrap();
+        let later = store.insert_finding("repeated", &original).unwrap();
+        assert_eq!(
+            ci_command(target.clone(), options(Severity::High, false)).unwrap(),
+            1
+        );
+        let path = summary_path(&target, &options(Severity::High, false)).unwrap();
+        let before: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(before["confirmedCount"], 1);
+        store
+            .append_user_review_decision(
+                later,
+                &decision(ReviewDecisionVerdict::RejectedFalsePositive),
+            )
+            .unwrap();
+        assert_eq!(
+            ci_command(target, options(Severity::High, false)).unwrap(),
+            0
+        );
+        let after: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(after["confirmedCount"], 0);
+        assert_eq!(after["trend"]["confirmedFindings"], 0);
+        assert_eq!(after["trend"]["decidedFindings"], 1);
+        assert_eq!(store.list_all_review_decisions().unwrap().len(), 2);
     }
 
     fn options(fail_on: Severity, update_baseline: bool) -> CiOptions {

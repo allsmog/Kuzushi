@@ -217,3 +217,69 @@ fn completed_empty_direct_scan_records_a_gap_without_overriding_human_review() {
         "{comparison:#?}"
     );
 }
+
+fn monorepo_fixture() -> (tempfile::TempDir, WorkspaceTarget, FindingStore) {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(root.path().join("LICENSE"), "Owned inert text.\n").unwrap();
+    for (name, license) in [("client", "MIT"), ("service", "Apache-2.0")] {
+        let directory = root.path().join(name);
+        fs::create_dir(&directory).unwrap();
+        fs::write(
+            directory.join("package.json"),
+            json!({"name":name,"license":license}).to_string(),
+        )
+        .unwrap();
+        fs::write(
+            directory.join("example.rs"),
+            format!("// SPDX-License-Identifier: {license}\n"),
+        )
+        .unwrap();
+    }
+    let workspace = WorkspaceTarget::new(root.path()).unwrap();
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    (root, workspace, store)
+}
+
+#[test]
+fn package_boundaries_survive_shared_dispatch_and_later_covered_absence() {
+    let (root, workspace, store) = monorepo_fixture();
+    let clean = dispatch(
+        &workspace,
+        &store,
+        "local-clean",
+        "license-scan:scan",
+        json!({}),
+    );
+    assert_eq!(clean["data"]["count"], 0);
+    let source = root.path().join("service/example.rs");
+    fs::write(&source, "// SPDX-License-Identifier: MIT\n").unwrap();
+    let mismatch = dispatch(
+        &workspace,
+        &store,
+        "local-mismatch",
+        "sast:scan",
+        sast_input("local-mismatch"),
+    );
+    assert_eq!(mismatch["data"]["findingsCount"], 1);
+    let finding = store.list_all_findings().unwrap().remove(0);
+    assert_eq!(finding.rule_id, "license-scan/spdx-header-mismatch");
+    assert_eq!(finding.file_path, "service/example.rs");
+    assert!(finding.message.contains("apache-2.0"));
+    confirm_policy_fixture(&store, &finding);
+    fs::write(source, "// SPDX-License-Identifier: Apache-2.0\n").unwrap();
+    let later = dispatch(
+        &workspace,
+        &store,
+        "local-later",
+        "license-scan:scan",
+        json!({}),
+    );
+    assert_eq!(later["data"]["count"], 0);
+    assert_eq!(store.list_all_review_decisions().unwrap().len(), 1);
+    let comparison = compare_scan_runs(&store, "local-mismatch", "local-later").unwrap();
+    assert_eq!(
+        comparison.findings[0].observation_presence(),
+        ScanObservationPresence::NotObserved
+    );
+    assert_ne!(mismatch["data"]["treeHash"], later["data"]["treeHash"]);
+}

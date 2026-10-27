@@ -1,22 +1,22 @@
-//! Model-driven corpus dedupe over the whole findings ledger.
+//! Bounded model-assisted duplicate proposals from the findings ledger.
 //!
 //! `triage:dedupe` is the nondeterministic counterpart of the ingest-time
 //! `dedup_key` collision merge: repeated hunts and imports word the same bug
 //! differently, so fingerprints and identities diverge even though the defect
 //! is one. A judge model proposes duplicate groups over the fingerprint-keyed
 //! ledger, code validates every membership, low-confidence groups escalate to
-//! one bounded code-reading confirmation pass, and surviving groups link
-//! through the first production `FindingRekeyed` producer: the duplicate row
-//! rekeys onto the canonical stable key, receives a `FalsePositive` /
-//! `RefuteReason::Duplicate` verdict with a `[duplicate_of=…]` rationale, and
-//! its fingerprint attaches to the canonical identity.
+//! one bounded code-reading confirmation pass. The default records reversible
+//! relationship proposals without changing identities or human decisions.
+//! Explicit legacyRekey retains the older linking contract for compatibility.
 
 mod candidates;
 mod dedupe_prompt;
 mod dedupe_result;
 mod escalate;
+mod input_limits;
 mod link;
 mod proposals;
+mod source_inputs;
 #[cfg(test)]
 mod tests;
 mod validate;
@@ -44,21 +44,48 @@ pub fn execute_triage_dedupe(
 ) -> Result<Value> {
     let (runtime, workspace, store) = dedupe_context(ctx, runtime)?;
     let options = DedupeOptions::from_input(&input)?;
-    let candidates = candidates::dedupe_candidates(store, options.max_candidates)?;
+    ctx.ensure_active()?;
+    let selected = candidates::dedupe_candidates(
+        store,
+        options.max_candidates,
+        options.ledger_limits,
+        ctx.cancellation,
+    )?;
+    let result =
+        execute_selected_dedupe(&input, ctx, runtime, workspace, store, &options, &selected)?;
+    dedupe_result::with_input_coverage(result, &selected.coverage)
+}
+
+fn execute_selected_dedupe(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: &dyn AgentRuntime,
+    workspace: &crate::workspace::WorkspaceTarget,
+    store: &FindingStore,
+    options: &DedupeOptions,
+    selected: &candidates::DedupeCandidates,
+) -> Result<Value> {
+    let candidates = &selected.findings;
     if candidates.len() < 2 {
-        return Ok(dedupe_result::empty_dedupe_result(candidates.len()));
+        return Ok(dedupe_result::empty_dedupe_result(
+            candidates.len(),
+            selected.coverage.omitted_candidates,
+        ));
     }
-    let model = resolve_dedupe_model(&input, ctx)?;
-    let by_fingerprint = fingerprint_index(&candidates);
+    ctx.ensure_active()?;
+    let model = resolve_dedupe_model(input, ctx)?;
+    validate_judge_inputs(&model, workspace.root(), candidates, options)?;
+    let by_fingerprint = fingerprint_index(candidates);
     let (confirmed, cost) = judge_and_escalate(
         runtime,
         &model,
         workspace.root(),
-        &candidates,
+        candidates,
         &by_fingerprint,
-        &options,
+        options,
     )?;
-    let report = record_dedupe_groups(store, ctx, &confirmed.groups, &by_fingerprint, &options)?;
+    ctx.ensure_active()?;
+    let report = record_dedupe_groups(store, ctx, &confirmed.groups, &by_fingerprint, options)?;
     Ok(dedupe_result::dedupe_result(
         &confirmed,
         &report,
@@ -135,7 +162,8 @@ fn judge_and_escalate(
         if remaining == 0 {
             break;
         }
-        let request = dedupe_prompt::dedupe_request(model, root, batch);
+        let request =
+            dedupe_prompt::dedupe_request(model, root, batch, options.max_judge_prompt_bytes)?;
         let batch_judged =
             dedupe_prompt::query_dedupe(runtime, request, remaining, by_fingerprint)?;
         cost = cost.checked_add(batch_judged.cost_report()?, "dedupe judge batch cost")?;
@@ -151,10 +179,25 @@ fn judge_and_escalate(
         root,
         judged,
         by_fingerprint,
-        options.max_escalations,
+        options,
         &mut cost,
     )?;
     Ok((confirmed, cost))
+}
+
+fn validate_judge_inputs(
+    model: &str,
+    root: &std::path::Path,
+    candidates: &[Finding],
+    options: &DedupeOptions,
+) -> Result<()> {
+    if options.max_groups == 0 {
+        return Ok(());
+    }
+    for batch in bucket_batches(candidates) {
+        dedupe_prompt::dedupe_request(model, root, batch, options.max_judge_prompt_bytes)?;
+    }
+    Ok(())
 }
 
 /// Consecutive whole-file runs packed into batches of at most
@@ -181,10 +224,10 @@ fn bucket_batches(candidates: &[Finding]) -> Vec<&[Finding]> {
 }
 
 fn end_of_file_run(candidates: &[Finding], start: usize) -> usize {
-    let path = normalized_path(&candidates[start].file_path);
+    let path = &candidates[start].file_path;
     candidates[start..]
         .iter()
-        .position(|finding| normalized_path(&finding.file_path) != path)
+        .position(|finding| &finding.file_path != path)
         .map(|offset| start + offset)
         .unwrap_or(candidates.len())
 }
@@ -210,6 +253,8 @@ struct ConfirmedGroups {
     groups: Vec<DuplicateGroup>,
     dropped: BTreeMap<String, usize>,
     escalated: usize,
+    confirmation_inputs: Value,
+    confirmation_refusals: Vec<Value>,
 }
 
 struct DedupeOptions {
@@ -218,11 +263,17 @@ struct DedupeOptions {
     max_escalations: usize,
     dry_run: bool,
     legacy_rekey: bool,
+    ledger_limits: crate::findings::DedupeLedgerLimits,
+    max_judge_prompt_bytes: usize,
+    max_confirmation_bytes: usize,
 }
 
 impl DedupeOptions {
     fn from_input(input: &Value) -> Result<Self> {
         Ok(Self {
+            ledger_limits: input_limits::ledger_limits(input)?,
+            max_judge_prompt_bytes: input_limits::judge_prompt_limit(input)?,
+            max_confirmation_bytes: input_limits::confirmation_limit(input)?,
             legacy_rekey: input
                 .get("legacyRekey")
                 .and_then(Value::as_bool)
@@ -245,7 +296,7 @@ fn bounded_count(input: &Value, key: &str, default: usize) -> Result<usize> {
     let count = value
         .as_u64()
         .with_context(|| format!("triage:dedupe: {key} must be a non-negative integer"))?;
-    Ok(count as usize)
+    usize::try_from(count).with_context(|| format!("triage:dedupe: {key} is too large"))
 }
 
 fn resolve_dedupe_model(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<String> {
@@ -264,14 +315,4 @@ fn fingerprint_index(candidates: &[Finding]) -> BTreeMap<&str, &Finding> {
         .iter()
         .map(|finding| (finding.fingerprint.as_str(), finding))
         .collect()
-}
-
-/// Normalized path used both for candidate bucketing and the same-file group
-/// rule: dedupe v1 only merges findings that anchor to one file.
-fn normalized_path(file_path: &str) -> String {
-    file_path
-        .trim()
-        .trim_start_matches("./")
-        .replace('\\', "/")
-        .to_ascii_lowercase()
 }

@@ -276,6 +276,7 @@ fn report_document(root: &std::path::Path) -> kuzushi_core::workspace::Investiga
         .into_iter()
         .map(|run| kuzushi_core::workspace::InvestigationAttemptReceipt {
             run_id: run.into(),
+            run_status: None,
             source_identity: kuzushi_core::workflow_attempts::TargetContentIdentity::Unavailable {
                 reason: kuzushi_core::run_lifecycle::SafeText::operator_visible(
                     "Owned screen-only receipt fixture",

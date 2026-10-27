@@ -403,3 +403,36 @@ fn repeated_observations_do_not_claim_corroborated_proof() {
     assert_eq!(lifecycle_status_label(&candidate), "candidate");
     assert!(candidate.static_proof_state.is_none());
 }
+
+#[test]
+fn older_generation_with_a_later_identity_decision_does_not_invent_chronology() {
+    let mut earlier = finding("owned-history", 2, "Owned earlier observation");
+    earlier.id = Some(1);
+    earlier.identity_id = Some("fi_owned".into());
+    earlier.scan_id = Some("earlier".into());
+    let mut later = earlier.clone();
+    later.id = Some(2);
+    later.scan_id = Some("later".into());
+    let record = decision_record(
+        9,
+        2,
+        "fi_owned",
+        "Reviewed the later observation",
+        "2026-10-25T12:00:00Z",
+    );
+    let index = EffectiveReviewStateIndex::from_findings_and_decisions(&[later], &[record]);
+    let decision = index.effective_decision_for(&earlier).unwrap();
+    assert_eq!(decision.record_id(), Some(9));
+    assert_eq!(
+        decision.verdict(),
+        ReviewDecisionVerdict::RejectedFalsePositive
+    );
+    let conflict = effective_review_decision_conflict_label(&earlier, Some(&decision)).unwrap();
+    let label = crate::ui_view_models::review_conflicts::review_conflict_detail_label(&conflict);
+    assert!(label.contains("different recorded observation"));
+    assert!(!label.contains("after") && !label.contains("earlier"));
+    assert_eq!(
+        crate::ui_view_models::review_conflicts::review_conflict_compact_label(&conflict),
+        "other-observation"
+    );
+}

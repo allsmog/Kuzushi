@@ -3,7 +3,7 @@
 //! fingerprint, groups stay within one file, and no fingerprint plays two
 //! roles across the accepted set.
 
-use super::{normalized_path, DuplicateGroup, Finding, JudgedGroups};
+use super::{DuplicateGroup, Finding, JudgedGroups};
 use anyhow::Result;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -69,8 +69,8 @@ impl<'a> GroupGate<'a> {
             self.drop("canonical_is_duplicate");
             return None;
         }
-        let duplicates =
-            self.validated_duplicates(item, &canonical, &normalized_path(&canonical_finding.file_path));
+        let canonical_path = canonical_finding.file_path.clone();
+        let duplicates = self.validated_duplicates(item, &canonical, &canonical_path);
         if duplicates.is_empty() {
             self.drop("no_valid_members");
             return None;
@@ -128,7 +128,7 @@ impl<'a> GroupGate<'a> {
         let Some(finding) = self.by_fingerprint.get(fingerprint) else {
             return Some("hallucinated_member");
         };
-        if normalized_path(&finding.file_path) != canonical_path {
+        if finding.file_path != canonical_path {
             return Some("cross_file");
         }
         if self.assigned_duplicates.contains(fingerprint) || self.canonicals.contains(fingerprint) {

@@ -37,7 +37,7 @@ ask: Does the optional action preserve multiline priorities and make clear that 
 keys: F2
 require-live-snap: 20 SUGGEST SCAN SCOPES | proposal-form
 expect: One scope proposal job
-expect: exact accepted Map revision
+expect: exact saved revision
 keys: M
 require-live-snap: 20 MODEL | model-picker
 keys: Escape

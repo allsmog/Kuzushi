@@ -13,6 +13,15 @@ def allowance(root, evidence, plan):
     return output["data"]["allowance"]
 
 
+def saved_ui_choices(evidence):
+    path = evidence / "home/.kuzushi/v3/options.json"
+    bindings = json.loads(path.read_text())["bindings"]
+    values = {key: value for options in bindings.values() for key, value in options.items()}
+    assert values.get("ui.auto_open_activity") is False, "setg must save the operator's activity choice"
+    assert values.get("ui.auto_open_viz") is False, "setg must save the operator's visualization choice"
+    return {"activity": values["ui.auto_open_activity"], "visualizations": values["ui.auto_open_viz"]}
+
+
 def inspect(root, evidence, stage):
     assert shared_monorepo.hashes(root) == json.loads((evidence / "source-before.json").read_text())
     assert json.loads((root / ".kuzushi/threat-models/manifest.json").read_text()).get("active") is None
@@ -25,6 +34,7 @@ def inspect(root, evidence, stage):
         value = output["data"]["allowance"]
     else:
         value = allowance(root, evidence, plan)
+    preferences = saved_ui_choices(evidence)
     counts = current_counts(root, evidence)
     assert all(count in [None, 0] for count in counts.values()), counts
     assert value["committedCalls"] == value["unresolvedCalls"] == 0
@@ -37,7 +47,8 @@ def inspect(root, evidence, stage):
         assert value["revision"] == 1 and value["limits"] == {"maxProviderCalls":3, "protectedReviewCalls":1}
         assert value.get("workPlan") is None
     save(evidence, stage + "-hierarchy-check", {"revision":value["revision"], "limits":value["limits"],
-        "jobsStarted":0, "providerCalls":0, "sourceExecuted":False, "counts":counts})
+        "jobsStarted":0, "providerCalls":0, "sourceExecuted":False, "counts":counts,
+        "savedGlobalUiChoices":preferences})
 
 
 if __name__ == "__main__":

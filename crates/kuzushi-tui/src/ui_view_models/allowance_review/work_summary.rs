@@ -37,17 +37,46 @@ pub(super) fn summary(
         .file_name()
         .unwrap_or(config.target.as_os_str())
         .to_string_lossy();
-    let repository = format!("Repository: {name}");
-    let mut overview = vec![repository.clone()];
+    let mut overview = vec![format!("Repository: {name}")];
     overview.extend(frozen.lines.first().cloned());
+    overview.extend(decision_lines(frozen));
     overview.extend(model_overview(&frozen.models));
-    let mut details = vec![repository];
-    details.extend(frozen.lines.iter().filter(|line| !line.is_empty()).cloned());
+    let details = detail_lines(frozen, &overview);
     Some(super::AllowanceWorkSummary {
         overview,
         details,
         workers: Some(frozen.workers),
     })
+}
+
+fn decision_lines(frozen: &FrozenWorkSummary<'_>) -> Vec<String> {
+    if frozen.models.len() != 1 {
+        return Vec::new();
+    }
+    frozen
+        .lines
+        .iter()
+        .filter(|line| is_decision_line(line))
+        .cloned()
+        .collect()
+}
+
+fn is_decision_line(line: &str) -> bool {
+    ["Action:", "Engines:", "Scope:", "Strategy:", "Evidence:"]
+        .iter()
+        .any(|prefix| line.starts_with(prefix))
+}
+
+fn detail_lines(frozen: &FrozenWorkSummary<'_>, overview: &[String]) -> Vec<String> {
+    let multiple_cases = frozen.models.len() > 1;
+    frozen
+        .lines
+        .iter()
+        .skip(1)
+        .filter(|line| !line.is_empty())
+        .filter(|line| multiple_cases || !overview.contains(line))
+        .cloned()
+        .collect()
 }
 
 fn frozen_summaries(config: &BatchScanConfig) -> Vec<FrozenWorkSummary<'_>> {
@@ -131,7 +160,7 @@ fn context_summary(receipt: &ContextStudyReceipt) -> FrozenWorkSummary<'_> {
 }
 
 fn context_action_lines(receipt: &ContextStudyReceipt, jobs: usize) -> Vec<String> {
-    vec![
+    let mut lines = vec![
         format!("Context: {jobs} fixed jobs · 1 worker"),
         format!("Action: {}", receipt.generation_tool),
         format!("Preparation jobs: {}", receipt.preparation_jobs.len()),
@@ -140,8 +169,19 @@ fn context_action_lines(receipt: &ContextStudyReceipt, jobs: usize) -> Vec<Strin
             .as_str()
             .map(|question| format!("Frozen question: {question}"))
             .unwrap_or_default(),
-        context_line(&receipt.input),
-    ]
+    ];
+    lines.extend(generation_context_lines(receipt));
+    lines
+}
+
+fn generation_context_lines(receipt: &ContextStudyReceipt) -> Vec<String> {
+    if receipt.generation_tool == "findings:lesson-generate" {
+        return vec![
+            "Evidence: exact confirmed observation; current source is not substituted".into(),
+            "Threat context: not used for lesson drafts".into(),
+        ];
+    }
+    vec![context_line(&receipt.input)]
 }
 
 fn context_source_lines(receipt: &ContextStudyReceipt) -> Vec<String> {

@@ -97,8 +97,16 @@ impl ShellApp {
     pub(crate) fn refresh_context_view(&mut self) -> Result<()> {
         let workspace = self.current_workspace()?;
         let snapshot_path = kuzushi_core::context_snapshot_path(workspace.root());
-        self.domain_mut()
-            .set_context_view(load_context_snapshot_view(snapshot_path)?);
+        let view = std::sync::Arc::new(load_context_snapshot_view(snapshot_path.clone())?);
+        self.invalidate_view_hydration();
+        self.domain_mut().set_context_view((*view).clone());
+        let mut cache = self.workbench_cache().borrow_mut();
+        cache.invalidate_json_file(&snapshot_path);
+        cache.apply_view_hydration(ViewHydrationResult {
+            target: workspace.root().to_path_buf(),
+            key: ViewHydrationKey::RepositoryIndex,
+            value: ViewHydrationValue::RepositoryIndex(view),
+        });
         Ok(())
     }
 }

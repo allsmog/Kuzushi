@@ -10,6 +10,7 @@ pub(super) fn descriptor() -> ToolDescriptor {
             opt("model", OptionType::String, "Explicit model; otherwise use the operator's selected model with no fallback."),
             opt("thinkingLevel", OptionType::Enum, "Reasoning effort. Omit to inherit the selected runtime effort.").choices(&["low","medium","high","xhigh"]),
             opt("maxOutputTokens", OptionType::Int, "Requested output tokens. Subscription OAuth may not enforce this ceiling; shared provider-request limits still apply.").integer_range(1024,8192).default(json!(4096)),
+            opt("saveRejectedOutput", OptionType::Bool, "Retain at most 16 KiB of rejected model text in this local run for explicit inspection and manual correction. May contain source or sensitive text. Omitted means not retained.").aliases(&["save_rejected_output"]),
             opt("allowanceRef", OptionType::Json, "Approved investigation revision and work item. Every provider attempt, including transport retries, must reserve from this allowance.").required(),
         ]).without_phase_result()
 }

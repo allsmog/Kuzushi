@@ -2,6 +2,7 @@ use super::EditorState;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
+mod visual_rows;
 
 /// Form fields use the composer's Unicode-aware editing operations without
 /// exposing command history, completion, or submission to the shell.

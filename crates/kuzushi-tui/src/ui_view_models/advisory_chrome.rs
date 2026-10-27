@@ -1,3 +1,4 @@
+use crate::app::StudyAllowance;
 use crate::{Notice, NoticeSeverity, ShellApp, ThrottleAdvisory};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,15 +65,32 @@ pub(crate) fn cost_cap_halt_model(app: &ShellApp) -> Option<CostCapHaltModel> {
         app.session().session_cost_report(),
         app.session().cost_accounting_error(),
     );
-    let (compact, actions) = budget_halt_actions(app.advisory().budget_halt_acknowledged);
+    let owned_study = app.runtime_state.owned_study_allowance();
+    let (compact, actions) =
+        budget_halt_actions(app.advisory().budget_halt_acknowledged, owned_study);
+    let label = budget_halt_label(owned_study.is_some());
     Some(CostCapHaltModel {
-        header: format!("■ COST CAP HALT · {spent} / cap ${:.4}", halt.limit_usd),
+        header: format!("■ {label} · {spent} / cap ${:.4}", halt.limit_usd),
         compact,
         actions,
     })
 }
 
-fn budget_halt_actions(acknowledged: bool) -> (&'static str, &'static str) {
+fn budget_halt_label(owned_study: bool) -> &'static str {
+    if owned_study {
+        "SESSION COST CAP HALT"
+    } else {
+        "COST CAP HALT"
+    }
+}
+
+fn budget_halt_actions(
+    acknowledged: bool,
+    owned_study: Option<StudyAllowance>,
+) -> (&'static str, &'static str) {
+    if let Some(allowance) = owned_study {
+        return owned_study_budget_actions(acknowledged, allowance);
+    }
     if acknowledged {
         (
             "SPENDING HALTED · cost / report",
@@ -83,6 +101,51 @@ fn budget_halt_actions(acknowledged: bool) -> (&'static str, &'static str) {
             "COST CAP · Esc inspect · c cap · a abort",
             "Esc inspect/report   c review cap   a abort work",
         )
+    }
+}
+
+fn owned_study_budget_actions(
+    acknowledged: bool,
+    allowance: StudyAllowance,
+) -> (&'static str, &'static str) {
+    if acknowledged {
+        (
+            "SESSION HALT · cost / report",
+            acknowledged_study_actions(allowance),
+        )
+    } else {
+        (
+            "SESSION CAP · a local · Ctrl+C study",
+            halted_study_actions(allowance),
+        )
+    }
+}
+
+fn acknowledged_study_actions(allowance: StudyAllowance) -> &'static str {
+    match allowance {
+        StudyAllowance::Set => {
+            "Type cost or report. Session spending is halted; the study uses its own allowance."
+        }
+        StudyAllowance::NotSet => {
+            "Type cost or report. Session spending is halted; the study has no allowance set and is not bounded by the session cap."
+        }
+        StudyAllowance::Unknown => {
+            "Type cost or report. Session spending is halted; the study's allowance could not be determined."
+        }
+    }
+}
+
+fn halted_study_actions(allowance: StudyAllowance) -> &'static str {
+    match allowance {
+        StudyAllowance::Set => {
+            "Study allowance is separate. Esc inspect · c cap · a stop session work · Ctrl+C study"
+        }
+        StudyAllowance::NotSet => {
+            "Study has no allowance set and is not bounded by the session cap. Esc inspect · c cap · a stop session work · Ctrl+C study"
+        }
+        StudyAllowance::Unknown => {
+            "Study allowance could not be determined. Esc inspect · c cap · a stop session work · Ctrl+C study"
+        }
     }
 }
 

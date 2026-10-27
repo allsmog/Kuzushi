@@ -9,13 +9,20 @@ pub(crate) fn campaign_job_scope_label(job: &CampaignJobSnapshot) -> String {
     }
 }
 
+pub(crate) fn campaign_job_state_label(job: &CampaignJobSnapshot) -> &str {
+    match (job.state.as_str(), job.reason.as_deref()) {
+        ("parked", Some("canceled")) => "parked: canceled",
+        _ => &job.state,
+    }
+}
+
 pub(crate) fn campaign_job_detail_lines(job: &CampaignJobSnapshot) -> Vec<String> {
     let mut lines = vec![
         job.display_label.as_deref().unwrap_or(&job.job_id).into(),
         format!(
             "{} · {} · {}",
             job.tool.as_deref().unwrap_or("Tool not recorded"),
-            job.state,
+            campaign_job_state_label(job),
             campaign_job_attempt_summary(job)
         ),
         format!(

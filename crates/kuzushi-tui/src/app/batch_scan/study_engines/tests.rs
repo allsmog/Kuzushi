@@ -2,6 +2,9 @@ use super::*;
 use crate::app::BatchScanConfigRow;
 use kuzushi_core::V2Config;
 use ratatui::{backend::TestBackend, Terminal};
+mod discovery;
+mod inactive_options;
+mod readiness;
 
 fn fixture(scoped: bool) -> (tempfile::TempDir, ShellApp) {
     let root = tempfile::tempdir().unwrap();
@@ -145,12 +148,14 @@ fn engine_changes_preserve_scope_context_custom_options_and_investigation_limits
     let options = app.option_store().clone();
     focus(&mut app, "secret-scan");
     app.handle_study_engine_key(KeyCode::Enter);
+    focus(&mut app, "semgrep");
+    app.handle_study_engine_key(KeyCode::Enter);
     let update = app.handle_study_engine_key(KeyCode::Char('a'));
     assert!(update.effects.is_empty());
     assert!(app.study_engine_picker().is_none());
     let config = app.router.campaign().batch_scan_config.as_ref().unwrap();
     let input = config.study.scan_input.as_ref().unwrap();
-    assert_eq!(input["tasks"], json!(["secret-scan"]));
+    assert_eq!(input["tasks"], json!(["secret-scan", "semgrep"]));
     for key in ["scanScopeRef", "threatModelRef", "semgrepConfig"] {
         assert_eq!(input[key], source[key]);
     }
@@ -243,13 +248,11 @@ fn task_order_survives_unchanged_selection_and_deliberate_edits() {
         picker.prepared_selection()["tasks"],
         json!(["secret-scan", "semgrep"])
     );
-    let row = crate::ui_view_models::study_engines::StudyEngineRow {
-        id: Some("secret-scan".into()),
-        label: "secret-scan".into(),
-        notes: String::new(),
-        selected: true,
-        unsupported: None,
-    };
+    let (_root, app) = fixture(false);
+    let row = crate::ui_view_models::study_engines::engine_rows(&app)
+        .into_iter()
+        .find(|row| row.id.as_deref() == Some("secret-scan"))
+        .unwrap();
     toggle_explicit_engine(&mut picker, &row);
     assert_eq!(picker.prepared_selection()["tasks"], json!(["semgrep"]));
     toggle_explicit_engine(&mut picker, &row);
@@ -262,7 +265,7 @@ fn task_order_survives_unchanged_selection_and_deliberate_edits() {
 #[test]
 fn applying_unchanged_engines_retains_the_saved_study() {
     let (_root, mut app) = fixture(true);
-    focus(&mut app, "secret-scan");
+    focus(&mut app, "semgrep");
     app.handle_study_engine_key(KeyCode::Enter);
     app.handle_study_engine_key(KeyCode::Char('a'));
     let config = app
@@ -339,7 +342,7 @@ fn path_conflict_fixture(scoped: bool) -> (tempfile::TempDir, ShellApp) {
         .unwrap();
     let input = config.study.scan_input.as_mut().unwrap();
     input["taskMode"] = json!("manual");
-    input["tasks"] = json!(["secret-scan"]);
+    input["tasks"] = json!(["semgrep"]);
     input["paths"] = json!(["older/scope"]);
     config.study.campaign_id = Some("saved-study".into());
     config.study.max_provider_calls = Some(8);

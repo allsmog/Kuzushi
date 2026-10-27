@@ -1,11 +1,39 @@
 # Kuzushi modules
 
+Normalized native license, dependency-policy and secret findings keep locations
+relative to the explicit workspace, including child-directory scans. Their saved
+source comes from the cited child file. Direct and SAST directory scans retain
+one durable identity per finding and child path. License and dependency producer
+fingerprints follow that path; opaque secret fingerprints remain compatibility
+aliases. The reported target names the inspected subtree. Raw scanner APIs and
+secret `data.findings` retain engine-relative paths; normalized `coreFindings`,
+ledger locations and exports use workspace paths. Relative inline targets resolve
+inside an explicit workspace. Existing ambiguous child observations require a fresh scan and source
+reassessment; see [the migration note](../RELEASING.md#package-boundaries-and-child-target-source-locations).
+
+The three native tools above bind source identity in the selected workspace,
+with child discovery coverage recorded separately. Identity hashing can read
+parent source outside the inspected child and has separate IO limits. A
+standalone tool receipt does not accept a guided Map or Scan checkpoint;
+results and findings remain readable. See [source ownership and phase guidance](assessments/workspace-source-guidance-2026-10-26.md).
+
 Scope inventory completeness and content inspection are separate facts.
 `pack:scopes` uses the recorded enumeration receipt for
 `coverage.enumerationComplete`; a content-prefix limit still makes
 `inventoryLimited` true and requires the existing inventory-limit acknowledgement
 before acceptance. Legacy inventories without recorded enumeration completeness
 remain readable and limited. Scope acceptance never approves scans or spending.
+
+Failed scope proposals can retain at most 16 KiB of local candidate text through
+the declared `saveRejectedOutput` option. Explicit inspection can open a bounded
+JSON editor. `pack:scopes operation=recover` authenticates the failed run and
+current source before saving a manually corrected, unaccepted revision. It
+starts no model work and preserves the failed producer and spent request. See
+[rejected scope correction](assessments/rejected-scope-correction-2026-10-26.md)
+for the additive contract and qualification limits.
+Later scan planning retains the original investigation through its authenticated
+run accounting. Missing, foreign or damaged history blocks planning instead of
+starting fresh spending.
 
 Report retains a labeled previous read during refresh, requires current data
 for export, and keeps repeated metadata in `p details`. Its
@@ -644,6 +672,23 @@ covered absence establishes a fix or a compliance verdict.
 `sbom-scan:scan` is an auxiliary Map inventory action. It reads declared
 dependencies and lockfile versions, emits dependency edges plus CycloneDX and
 SPDX documents, and creates no vulnerability findings or phase checkpoint.
+SPDX package identifiers are opaque and distinguish the complete recorded
+component identity, including source, scope and version. Dependency endpoints
+must be unique within the edge's recorded source. Missing and ambiguous
+endpoints are omitted from SPDX relationships and disclosed in the output,
+document annotations and additive `data.spdxExport` diagnostics. The canonical
+components and raw dependency graph remain intact. Export timestamps and a
+fresh namespace identify the document, not authenticated repository freshness.
+Consumers must join actual package identifiers rather than reconstructing them.
+See [the compatibility notes](../RELEASING.md#source-qualified-spdx-package-references).
+Both formats now consume one source-qualified export graph. CycloneDX `bom-ref`
+values identify recorded components independently of their package URLs;
+consumers must join actual reference values. Its additive `data.cycloneDxExport`
+and standalone metadata preserve omissions. Dependency compositions are
+`incomplete` when observed links cannot be mapped and `unknown` otherwise.
+Missing outgoing evidence does not establish a dependency-free component.
+Fresh serial numbers identify generated documents, not source revisions. See
+[the CycloneDX compatibility notes](../RELEASING.md#source-qualified-cyclonedx-references).
 The `context:build` DAG dependency is display metadata; shared dispatch does
 not require a prior context snapshot. The selected target is the inventory
 root. This adapter does not accept an exact-file discovery scope.
@@ -658,6 +703,17 @@ so raising the allowance increases memory consumption. These limits bound
 source content, not parser allocation, CPU time or all filesystem metadata IO.
 Exceeding a limit fails without publishing components. Ignored and unsupported
 material remains outside the dependency inventory.
+
+For `package.json`, the document must be an object. Present `dependencies`,
+`devDependencies`, `peerDependencies` and `optionalDependencies` fields must be
+objects mapping package names to string specifications. The existing
+compatibility form `{ "version": "..." }` remains accepted for a dependency.
+Empty strings, aliases, URLs and local or Git specifications remain declared
+strings; inventory does not install or resolve them. Unsupported shapes fail
+with the relative manifest path and field instead of becoming an empty SBOM
+or an edge without a component. One unsupported nested manifest fails the
+inventory without publishing parent packages or SBOM documents. Available
+captured-input inspection remains attached to the failed result.
 
 Direct tool results add `data.inspection`: configured limits, reserved source
 bytes, actual source bytes read, captured files/bytes, per-input content hashes
@@ -1006,6 +1062,9 @@ The `files:["app/a b.rs","app/a,b.rs"]` expression matches the same paths in
 the shell, CLI filters and findings tools. Paths use OR within this selection
 and AND with other filters. The legacy `file:` expression and `filePath` option
 retain substring matching. Use JSON array entries for literal commas and spaces.
+Exact selections preserve case and literal backslashes on Unix; `src/a\b.rs`
+and `src/a/b.rs` identify different files. Windows accepts its native directory
+separators. A leading `./` is accepted on both platforms.
 
 ### Fleet history and revision comparisons
 
@@ -1098,6 +1157,15 @@ duplicates false positive by default. `dryRun` writes no proposal;
 default proposals. Remaining per-finding triage can therefore cost more than
 the old identity-rekey path and stays subject to the approved allowance.
 
+`triage:dedupe` prepares its ledger through a bounded snapshot reader before
+candidate selection. The five advanced [input limits](operator-control-surfaces.md#duplicate-proposal-input-limits-triagededupe)
+apply through shared prepared dispatch. Excess ledger and metadata prompt input
+refuses before inference; candidate omissions and confirmation-source limits stay
+in the result. Whole-file buckets use exact recorded paths, including case and
+whitespace. Optional confirmation reads reject symlink components and disclose
+current workspace digests, without claiming those bytes match a historical SHA.
+No full-history export or identity alias reader inherits these input caps.
+
 `triage:run` distinguishes classification from applying a review decision.
 Storage policy can retain an existing human decision while the run records the
 model's opinion with `decisionApplied=false`, `applicationStatus=not_applied`
@@ -1149,6 +1217,15 @@ phase. File exports retain descriptor authorization. The Report phase permits
 read, workspace-write and target-write effects; repository-execute and
 external-action descriptors are rejected. Phase metadata never schedules work.
 
+Report and TUI origin labels share `FindingEvidence::origin_class()`. Generic
+`reasoning` is a reasoning assertion with unspecified authorship. Explicit
+`model-claim-unscored` remains model reasoning, including when source or capture
+fields are present. Both stay excluded from observed-code and capture counts.
+Export summaries expose the separate `reasoningAssertionCount`; a reasoning-only
+record uses state `reasoning_assertion`. Existing findings and human decisions
+stay intact. See [the migration notes](../RELEASING.md#evidence-origin-classification-in-reports)
+for CSV ordering, SARIF, bundle manifests and Rust struct construction.
+
 `workspace:export-findings` accepts optional `campaignId` (`campaign_id` alias).
 The CLI equivalent is `kuzushi export --campaign-id <id>`. This selects the
 study's authenticated parent and engine observations, including retained partial
@@ -1175,6 +1252,21 @@ SARIF embed it too; Markdown links it and hashes it in the bundle manifest. CSV
 and external scanner files preserve their existing rows. Omission of `campaignId`
 retains the existing workspace-history export. Completeness filters describe
 human review, not repository coverage. Unknown dollar totals remain unknown.
+
+Each attempt may include `runStatus` from its recorded run metadata. This is
+separate from the optional `scan` engine receipt: a canceled run may have no
+engine outcome. Report preserves that cancellation without repairing metadata,
+inventing coverage or interpreting status from a run name. Missing metadata
+remains unrecorded. Existing exports retain their original contents; re-export
+to obtain recorded statuses. See [the migration notes](../RELEASING.md#recorded-execution-status-in-investigation-reports)
+for the additive JSON field and public Rust struct construction.
+
+Setup context drafts resolve supplied options through the registry's descriptor
+validation, including canonical aliases, stored precedence and workspace policy checks.
+Global runtime-role settings remain outside tool input. Explicit unknown options
+still fail. Context-study preparation binds its finite-action defaults before
+approval, so capturing settings does not select legacy scope, activate context or
+add recursive work. Reading these settings grants no allowance and starts no jobs.
 
 The external scanner format's `scan_completed` flag is true only for a selected
 authenticated study with nonzero planned work, every job completed and no failed
@@ -1513,6 +1605,54 @@ a stable path digest suffix. Existing saved manifests are not changed by
 generating a draft. Explicit `emitScopes` keeps its existing scope-tree output,
 but refuses partial inventory; emitted child scopes inherit parent context and
 threat-model sections. No proposal launches a scan or performs model calls.
+
+## Native observation source receipts
+
+Aggregate native execution authenticates its pre-execution repository snapshot
+before persisting cited source. SAST passes its existing snapshot into the native
+executor. Standalone native orchestration captures one snapshot before discovery.
+Cited files must match the captured tree and all cited locations must be valid.
+Retained files share a 64 MiB batch limit. Cancellation, source drift, invalid
+citations and retention failures preserve raw observations with unavailable
+grounding, without substituting bytes from the live checkout.
+Nontext or unavailable cited files remain unbound. This qualifies text-source
+retention in native orchestration, not every engine's citation quality.
+
+`NativeScanCoverage` writes schema version 3 and reads versions 1, 2 and 3.
+Optional `sourceBinding` records the source snapshot and tree, authentication,
+retained file/byte counts, retention limit and any limitation. Source-binding
+limitations make the result partial separately from engine coverage errors.
+Successful inspection alone does not establish retained source evidence.
+
+`FindingStore::recorded_observation_source` reads the exact stored generation.
+Its version-1 `RecordedObservationSource` names the generation, run and snapshot,
+with nullable tree, blob, Git commit, branch and dirty hash. It never fills
+unknown source metadata from a run summary or the current checkout. Existing
+observations are not backfilled.
+
+Workspace exports retain matching run-checkout metadata as `provenance.runGit`,
+the exact generation as `provenance.observationSource`, and distinct relationship
+endpoint generations as `provenance.relationshipSources`. Older endpoints remain
+available after all current findings are observed again. These endpoint sources
+are not the complete raw observation log. JSON/JSONL, SARIF, CSV and Markdown
+bundles carry these references. See `RELEASING.md` for additive format fields,
+CSV column order and Rust struct-literal migrations. A source reference records
+where an observation came from; it does not determine current applicability or
+whether a finding was fixed.
+
+Every saved generation selected in Review reads its retained source. While that
+copy is unavailable or loading, the reader discloses the gap and does not display
+current checkout bytes in its place. Unsaved previews compare the whole displayed
+window, including neighboring lines and spacing. A retained-source caption labels
+saved run-checkout metadata separately from observation source metadata. A live
+preview with absent or unchecked retained source is labeled as current file text,
+not recorded evidence.
+
+Review keeps a durable identity decision visible when an earlier generation is
+selected. Its source check names the different supporting observation without
+asserting which came first. Existing conflict tokens remain compatibility values;
+`reappeared_after_rejection` alone is not evidence of event order. Verdict
+authority, source reassessment and stored decisions are unchanged.
 
 ## Source-bound model Scan results
 
@@ -4063,6 +4203,17 @@ retired, forged and unavailable lessons prevent scan-context loading. Exact
 inspection remains available with `lessonState.usable=false` and the reason so
 the operator can create a replacement copy. The active context and original
 immutable objects remain unchanged.
+
+After copying accepted lessons in the shell, `s` opens the existing finite Scan
+planner with that exact saved context. It keeps declared engine, source-scope
+and prompt choices, defaults to three passes, one worker and one attempt per
+job, and returns to Lessons on Back. No plan or approval is inherited. Existing
+investigation limits, spent calls and unresolved reservations remain recorded;
+missing recorded accounting blocks the handoff. Historical runs without
+accounting are disclosed as unknown. Lessons spanning multiple investigations
+need a deliberate current investigation. Model-guided engines receive lesson
+text as context; native scanners continue using their declared rules. This
+shortcut creates no recursive jobs or automatic variant search.
 
 Lesson action runs are excluded from automatic artifact context. Saved run
 documents carrying reviewed lesson snapshots, and the shared reviewed-lesson

@@ -280,6 +280,12 @@ impl ModuleRegistry {
         ctx: &ToolExecutionContext<'_>,
         option_store: Option<&ToolOptionStore>,
     ) -> Result<Value> {
+        let option_store = crate::modules::allowance_dispatch::preparation_option_store(
+            name,
+            &input,
+            ctx,
+            option_store,
+        )?;
         let mut input = self.prepare_tool_input(name, input, option_store)?;
         normalize_workspace_path_options(self, name, &mut input, ctx, false, None)?;
         let input = input_with_declared_prompt_defaults(self, name, input, ctx)?;
@@ -306,6 +312,23 @@ impl ModuleRegistry {
             value,
             authorization: ExecutionAuthorization::default(),
         })
+    }
+
+    /// Resolve supplied settings for a draft without injecting descriptor defaults.
+    /// Execution still requires the shared prepared-dispatch boundary.
+    pub fn prepare_supplied_tool_options(
+        &self,
+        name: &str,
+        input: Value,
+        option_store: Option<&ToolOptionStore>,
+    ) -> Result<Value> {
+        let tool = self.resolve_tool(name)
+            .with_context(|| format!("{name:?} has no tool descriptor"))?;
+        let input = prepare_input_with_stored_options(name, input, option_store, Some(tool))?;
+        let mut canonical_options = validate_tool_options_with_sources(tool, input)?;
+        canonical_options.value.as_object_mut().unwrap()
+            .retain(|key, _| canonical_options.supplied.contains(key));
+        Ok(canonical_options.value)
     }
 
     pub fn prepare_tool_input(

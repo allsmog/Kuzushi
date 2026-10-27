@@ -19,7 +19,7 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37
 │ F-0002 H unverified         │verdict: needs_review
 │  Template input reaches     │source: none
 │  renderer                   │
-│  sources:1 · @– · open      │── SOURCE · observation (on-disk excerpt) ──
+│  sources:1 · @– · open      │── SOURCE · saved · run Git unknown ──
 │  src/web/template.rs:8      │    14 │ }
 │                             │    15 │
 │                             │    16 │ pub fn login(attempt: &LoginAttemp...

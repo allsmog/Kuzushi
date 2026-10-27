@@ -8,6 +8,8 @@ use super::{
 use kuzushi_core::ScanCancellation;
 use std::path::PathBuf;
 mod dispatcher;
+mod study_allowance;
+pub(crate) use study_allowance::StudyAllowance;
 
 #[derive(Debug, Default)]
 pub(crate) struct RuntimeState {
@@ -47,6 +49,9 @@ pub(crate) struct RuntimeState {
     /// instead of a possibly recycled one.
     dispatcher_child: Option<std::process::Child>,
     dispatcher_origin: Option<(PathBuf, String)>,
+    dispatcher_stop_requested: bool,
+    /// Spending bound of the owned study, resolved from its campaign state.
+    dispatcher_allowance: StudyAllowance,
     /// Idle-tick stat probe that notices findings written by other processes.
     findings_store_probe: FindingsStoreProbe,
     pub(crate) findings_refresh: super::FindingsRefreshState,

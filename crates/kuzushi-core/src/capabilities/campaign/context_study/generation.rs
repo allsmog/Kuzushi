@@ -48,6 +48,7 @@ pub(super) fn prepare(
     let object = draft
         .as_object_mut()
         .context("contextInput must be an object")?;
+    default_scope_retention(tool, object);
     // This is shape validation only. The placeholder is removed before freezing
     // and never reaches dispatch, approval, accounting or a model runtime.
     object.insert("allowanceRef".into(), json!({"schemaVersion":1,"investigationId":"planning-only","revision":1,"workId":"planning-only"}));
@@ -62,6 +63,16 @@ pub(super) fn prepare(
     }
     validate_selected_input(tool, &frozen, ctx)?;
     Ok(frozen)
+}
+
+fn default_scope_retention(tool: &str, input: &mut serde_json::Map<String, Value>) {
+    if tool != SCOPE_TOOL
+        || input.contains_key("saveRejectedOutput")
+        || input.contains_key("save_rejected_output")
+    {
+        return;
+    }
+    input.insert("saveRejectedOutput".into(), json!(true));
 }
 
 fn validate_selected_input(

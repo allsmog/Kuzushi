@@ -1,0 +1,94 @@
+name: Honest engine maturity, dependency presence and missing-model readiness
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR SEMGREP_APP_TOKEN SEMGREP_AGENT_TOKEN
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/engine_readiness.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+submit: run context:build {"enrichment":false}
+require-live-snap: 35 context:build indexed | source-indexed
+submit: use sast
+submit: options sast:scan
+submit: setg taskMode manual
+submit: setg tasks semgrep
+paste-file: @ART/binary-setting.txt
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/engine_readiness.py @TMP_TARGET @ART globals
+submit: scan batch
+require-live-snap: 25 PLAN A STUDY | study
+keys: Home Down Down Enter
+require-live-snap: 25 DEPENDENCY MISSING: semgrepBinary | missing-executable
+expect: r check
+expect: [x] semgrep
+resize: 40x12
+require-live-snap: 15 DEPENDENCY MISSING: semgrepBinary | missing-executable-40x12
+expect: r check
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/engine_readiness.py @TMP_TARGET @ART nonexecutable
+keys: r
+require-live-snap: 20 DEPENDENCY MISSING: semgrepBinary | nonexecutable
+require-shell: python3 -B @REPO/scripts/devex/fixtures/engine_readiness.py @TMP_TARGET @ART executable
+keys: r
+require-live-snap: 20 Executable found (presence only) | presence-only
+expect: CHECKS PENDING
+ask: Does missing and nonexecutable input become only a presence result after explicit recheck, without implying scanner compatibility or starting work?
+keys: Down
+require-live-snap: 20 [Labs] codeql | experimental-codeql
+expect: Experimental (Labs)
+expect: No database is created here.
+resize: 160x48
+require-live-snap: 15 [Labs] codeql | experimental-160x48
+resize: 96x89
+require-live-snap: 15 [Labs] codeql | experimental-96x89
+resize: 80x24
+require-live-snap: 15 [Labs] codeql | experimental-80x24
+resize: 60x20
+require-live-snap: 15 [Labs] codeql | experimental-60x20
+resize: 40x12
+require-live-snap: 15 [Labs] codeql | experimental-40x12
+expect: r check
+keys: NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage
+require-live-snap: 15 guarantee. | detail-tail-40x12
+ask: Is experimental status visible at all six sizes, with scope, pending checks, apply, cancel and presence recheck understandable and complete details reachable at 40 columns?
+resize: 120x36
+keys: Down Down Down Down Down Down Down Down
+require-live-snap: 20 offense-review:threat-hunt | model-prerequisite
+expect: PREREQUISITE MISSING
+expect: Experimental (Labs)
+resize: 40x12
+require-live-snap: 15 PREREQUISITE MISSING | model-prerequisite-40x12
+expect: model required
+resize: 120x36
+keys: Space
+require-live-snap: 20 [x] [Labs] offense-review | explicit-experimental-draft
+keys: Escape
+require-live-snap: 20 Discovery engines  current settings | canceled-draft
+require-shell: python3 -B @REPO/scripts/devex/fixtures/engine_readiness.py @TMP_TARGET @ART cancelled
+keys: Enter
+require-live-snap: 20 [x] semgrep | restored-selection
+keys: Escape
+require-shell: python3 -B @REPO/scripts/devex/fixtures/engine_readiness.py @TMP_TARGET @ART complete
+ask: Does a missing model remain a prerequisite, with experimental choices requiring explicit selection and Cancel preserving the original study and globals without approving any jobs or model requests?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | no-color-restart
+submit: scan batch
+require-live-snap: 25 PLAN A STUDY | restarted-study
+keys: Home Down Down Enter
+require-live-snap: 25 Executable found (presence only) | restarted-presence
+expect: [x] semgrep
+keys: Down
+require-live-snap: 20 [Labs] codeql | restarted-experimental
+expect: Experimental (Labs)
+keys: Escape
+require-shell: python3 -B @REPO/scripts/devex/fixtures/engine_readiness.py @TMP_TARGET @ART restarted
+ask: Does no-color restart retain the original engine and dependency setting, recheck presence honestly, and preserve experimental labels without creating a plan or spending?
+keys: C-c
+require-exit: 10

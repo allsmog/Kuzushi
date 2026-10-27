@@ -19,7 +19,7 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · 
 │  Template input reaches renderer  │verdict: needs_review
 │  sources:1 · @– · open            │source: none
 │  src/web/template.rs:8            │
-│ F-0003 H unverified               │── SOURCE · observation (on-disk excerpt) ──
+│ F-0003 H unverified               │── SOURCE · retained · run checkout unknown ──
 │  Order identifier crosses trust   │    14 │ }
 │  boundary                         │    15 │
 │  sources:1 · @– · open            │    16 │ pub fn login(attempt: &LoginAttempt) ->...
@@ -35,7 +35,10 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · 
 │ F-0006 L unverified               │    request_input -> database_query
 │  Debug endpoint remains enabled   │    attacker-controlled input reaches a security...
 │  sources:1 · @– · open            │
-│  src/config.rs:5                  │── REVIEW ACTIONS ──
+│  src/config.rs:5                  │── SCANNER MESSAGE ──
+│                                   │  SQL injection reaches query
+│                                   │
+│                                   │── REVIEW ACTIONS ──
 │                                   │  Reopen this observation: open
 │                                   │  generation:1364509416246451584
 │                                   │  This reference belongs to this workspace. List aliases
@@ -49,9 +52,6 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · 
 │                                   │  --days 90`
 │                                   │  report · export findings and decisions
 │                                   │
-│                                   │── SCANNER MESSAGE ──
-│                                   │  SQL injection reaches query
-│                                   │
 │                                   │── PROVENANCE ──
 │                                   │rule: phase.rule.0
 │                                   │location: src/auth/login.rs:17
@@ -63,7 +63,7 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · 
 │                                   │source signature:
 │                                   │login.rs:17:sql-injection-reaches-query
 │                                   │corroboration: 1
-│                                   │identity: phase-findi…
+│                                   │identity: FI-00000001
 │                                   │fingerprint: fp3_ed97bede6bddb852…
 │                                   │
 │                                   │

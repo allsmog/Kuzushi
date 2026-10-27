@@ -57,7 +57,7 @@ pub(crate) fn allowance_review_model(
         .into_iter()
         .flat_map(|line| wrap_text(&line, width))
         .collect::<Vec<_>>();
-    let pinned = pinned_terms::lines(app, width);
+    let pinned = pinned_terms::lines(app, width, usize::from(rows.saturating_sub(7)));
     let page_rows = usize::from(rows.saturating_sub(6)).saturating_sub(pinned.len());
     let max_offset = lines.len().saturating_sub(page_rows);
     Some(AllowanceReviewModel {

@@ -58,6 +58,7 @@ fn unavailable_source_snapshot(findings: Vec<Finding>) -> FindingsReadSnapshot {
         },
         corpus: findings,
         review_decisions: vec![],
+        review_trend: Default::default(),
         completion: Err("Labeled unavailable source".into()),
         legacy_lifecycles: vec![],
         warnings: vec![],

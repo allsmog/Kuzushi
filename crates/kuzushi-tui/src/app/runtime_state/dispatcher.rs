@@ -1,5 +1,6 @@
 //! Ownership of the detached child, independent of the selected target or row.
-use super::RuntimeState;
+use super::study_allowance::resolve_study_allowance;
+use super::{RuntimeState, StudyAllowance};
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::process::Child;
@@ -10,6 +11,18 @@ pub(crate) struct DispatcherExit {
 }
 
 impl RuntimeState {
+    pub(crate) fn has_owned_dispatcher(&self) -> bool {
+        self.dispatcher_child.is_some()
+    }
+
+    pub(crate) fn owned_dispatcher_stop_requested(&self) -> bool {
+        self.has_owned_dispatcher() && self.dispatcher_stop_requested
+    }
+
+    pub(crate) fn owned_dispatcher_needs_stop(&self) -> bool {
+        self.has_owned_dispatcher() && !self.dispatcher_stop_requested
+    }
+
     pub(crate) fn owned_dispatcher_origin(&self) -> Option<(&std::path::Path, &str)> {
         self.dispatcher_child.as_ref()?;
         self.dispatcher_origin
@@ -20,6 +33,22 @@ impl RuntimeState {
     pub(crate) fn hold_dispatcher(&mut self, child: Child, target: PathBuf, campaign: String) {
         self.dispatcher_child = Some(child);
         self.dispatcher_origin = Some((target, campaign));
+        self.dispatcher_stop_requested = false;
+        self.dispatcher_allowance = StudyAllowance::Unknown;
+    }
+
+    /// The owned study's spending bound; `None` when no study is owned.
+    pub(crate) fn owned_study_allowance(&self) -> Option<StudyAllowance> {
+        self.dispatcher_child.as_ref()?;
+        Some(self.dispatcher_allowance)
+    }
+
+    /// Re-read the owned study's campaign state for its spending bound.
+    pub(crate) fn refresh_owned_study_allowance(&mut self) {
+        let Some((target, campaign)) = self.owned_dispatcher_origin() else {
+            return;
+        };
+        self.dispatcher_allowance = resolve_study_allowance(target, campaign);
     }
 
     pub(crate) fn request_dispatcher_stop(&mut self) -> Result<u32> {
@@ -39,6 +68,7 @@ impl RuntimeState {
         kuzushi_core::capabilities::campaign::request_campaign_dispatcher_stop(
             target, campaign, pid,
         )?;
+        self.dispatcher_stop_requested = true;
         Ok(pid)
     }
 
@@ -46,17 +76,20 @@ impl RuntimeState {
     pub(crate) fn set_dispatcher_child(&mut self, child: Option<Child>) {
         self.dispatcher_child = child;
         self.dispatcher_origin = None;
+        self.dispatcher_stop_requested = false;
     }
 
     #[cfg(test)]
     pub(crate) fn take_dispatcher_child(&mut self) -> Option<Child> {
         self.dispatcher_origin = None;
+        self.dispatcher_stop_requested = false;
         self.dispatcher_child.take()
     }
 
     pub(crate) fn reap_exited_dispatcher(&mut self) -> Option<DispatcherExit> {
         let status = self.dispatcher_child.as_mut()?.try_wait().ok()??;
         self.dispatcher_child = None;
+        self.dispatcher_stop_requested = false;
         Some(DispatcherExit {
             status,
             origin: self.dispatcher_origin.take(),

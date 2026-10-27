@@ -69,6 +69,7 @@ impl ShellApp {
             limit_usd,
             spent_usd,
         });
+        self.runtime_state.refresh_owned_study_allowance();
     }
 
     pub(crate) fn budget_halt_owns_input(&self) -> bool {
@@ -103,11 +104,30 @@ impl ShellApp {
 
     pub(crate) fn abort_for_budget(&mut self) {
         let requested = self.request_active_abort_with_reason(AbortReason::Budget);
+        self.runtime_state.refresh_owned_study_allowance();
+        let study = owned_study_abort_note(self.runtime_state.owned_study_allowance());
         self.log(
             "budget",
             format!(
-                "aborting due to cost cap (abort requested: {requested}); budget halt remains armed",
+                "session work abort requested: {requested}; session budget remains halted.{study}",
             ),
         );
     }
 }
+
+/// Discloses whether a still-running owned study is bounded at all.
+fn owned_study_abort_note(allowance: Option<StudyAllowance>) -> &'static str {
+    match allowance {
+        None => "",
+        Some(StudyAllowance::Set) => " The owned study has its own allowance; Ctrl+C requests Stop.",
+        Some(StudyAllowance::NotSet) => {
+            " The owned study has no allowance set and is not bounded by the session cap; Ctrl+C requests Stop."
+        }
+        Some(StudyAllowance::Unknown) => {
+            " The owned study's allowance could not be determined; Ctrl+C requests Stop."
+        }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod held_study_tests;

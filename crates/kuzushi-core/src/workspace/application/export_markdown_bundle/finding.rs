@@ -39,6 +39,7 @@ fn push_bundle_relationships(out: &mut String, record: &WorkspaceFindingExportRe
         ));
     }
     out.push('\n');
+    push_bundle_relationship_sources(out, record);
 }
 
 fn push_bundle_security_context(out: &mut String, record: &WorkspaceFindingExportRecord) {
@@ -106,6 +107,7 @@ fn push_bundle_header(out: &mut String, record: &WorkspaceFindingExportRecord) {
         markdown_code_span(&record.fingerprint)
     ));
     push_bundle_run_provenance(out, record);
+    push_bundle_observation_provenance(out, record);
     push_bundle_source_history(out, record);
     push_bundle_remediation(out, record);
     out.push_str(&format!(
@@ -198,13 +200,14 @@ fn push_bundle_evidence_summary(out: &mut String, record: &WorkspaceFindingExpor
         record.evidence.observed_count
     ));
     out.push_str(&format!(
-        "- **Evidence origin:** observed={} code={} capture={} other={} model-generated-reasoning={} derived-source={}\n",
+        "- **Evidence origin:** observed={} code={} capture={} other={} model-generated-reasoning={} derived-source={} reasoning assertions={}\n",
         record.evidence.observed_evidence_present,
         record.evidence.observed_code_count,
         record.evidence.observed_capture_count,
         record.evidence.observed_other_count,
         record.evidence.model_generated_reasoning_count,
-        record.evidence.derived_source_present
+        record.evidence.derived_source_present,
+        record.evidence.reasoning_assertion_count
     ));
 }
 
@@ -255,6 +258,56 @@ fn push_bundle_run_provenance(out: &mut String, record: &WorkspaceFindingExportR
         out.push_str(&format!(" model {}", markdown_code_span(model)));
     }
     out.push('\n');
+}
+
+fn push_bundle_observation_provenance(out: &mut String, record: &WorkspaceFindingExportRecord) {
+    if let Some(git) = &record.provenance.run_git {
+        out.push_str(&format!(
+            "- **Run checkout:** {} (dirty: {})\n",
+            markdown_code_span(&git.sha),
+            git.dirty
+        ));
+    }
+    if let Some(source) = &record.provenance.observation_source {
+        push_bundle_source_reference(out, source);
+    }
+}
+
+fn push_bundle_source_reference(
+    out: &mut String,
+    source: &crate::findings::RecordedObservationSource,
+) {
+    out.push_str(&format!(
+        "- **Observation generation:** {} · run {}\n",
+        source.generation_id,
+        markdown_code_span(&source.run_id)
+    ));
+    out.push_str(&format!(
+        "- **Observation snapshot:** {}\n",
+        markdown_code_span(&source.snapshot_hash)
+    ));
+    out.push_str(&format!(
+        "- **Observation Git:** {}\n",
+        markdown_code_span(source.git_commit.as_deref().unwrap_or("not recorded"))
+    ));
+    out.push_str(&format!(
+        "- **Observation tree:** {}\n",
+        markdown_code_span(source.tree_hash.as_deref().unwrap_or("not recorded"))
+    ));
+    out.push_str(&format!(
+        "- **Observation source blob:** {}\n",
+        markdown_code_span(source.blob_hash.as_deref().unwrap_or("not recorded"))
+    ));
+}
+
+fn push_bundle_relationship_sources(out: &mut String, record: &WorkspaceFindingExportRecord) {
+    if record.provenance.relationship_sources.is_empty() {
+        return;
+    }
+    out.push_str("\n### Relationship source references\n\n");
+    for source in &record.provenance.relationship_sources {
+        push_bundle_source_reference(out, source);
+    }
 }
 
 fn push_bundle_source_history(out: &mut String, record: &WorkspaceFindingExportRecord) {

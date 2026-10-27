@@ -182,6 +182,7 @@ pub struct DomainCache {
     findings_batch_id: Option<String>,
     review_decisions: Vec<ReviewDecisionRecord>,
     review_decisions_revision: u64,
+    review_trend: Option<kuzushi_core::capabilities::campaign::trend::TrendMetrics>,
     finding_ledger_counts: Option<FindingLedgerCounts>,
     review_source_applicabilities:
         BTreeMap<String, kuzushi_core::workspace::WorkspaceReviewSourceApplicability>,
@@ -233,6 +234,7 @@ impl DomainCache {
             findings_batch_id: None,
             review_decisions: Vec::new(),
             review_decisions_revision: 0,
+            review_trend: None,
             finding_ledger_counts: None,
             review_source_applicabilities: BTreeMap::new(),
             patch_lifecycles_by_reverify_run: BTreeMap::new(),
@@ -764,7 +766,21 @@ impl DomainCache {
 
     pub(crate) fn set_review_decisions(&mut self, decisions: Vec<ReviewDecisionRecord>) {
         self.review_decisions = decisions;
+        self.review_trend = None;
         self.bump_review_decisions_revision();
+    }
+
+    pub(crate) fn review_trend(
+        &self,
+    ) -> Option<kuzushi_core::capabilities::campaign::trend::TrendMetrics> {
+        self.review_trend
+    }
+
+    pub(crate) fn set_review_trend(
+        &mut self,
+        trend: kuzushi_core::capabilities::campaign::trend::TrendMetrics,
+    ) {
+        self.review_trend = Some(trend);
     }
 
     pub(crate) fn review_decisions_revision(&self) -> u64 {

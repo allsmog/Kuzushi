@@ -100,6 +100,7 @@ pub(super) fn confirmation_document_lines(
         format!("CONFIRM {}", form_title(form)),
         theme::accent(),
     )];
+    lines.extend(field_summary(form, area.width));
     lines.extend(wrapped(
         "Enter records this action · Esc edits · PgUp/PgDn inspect · Home/End first/last",
         area.width,
@@ -124,7 +125,7 @@ pub(super) fn confirmation_document_lines(
 }
 
 fn draft_confirmation_lines(form: &LessonForm, width: u16) -> Vec<Line<'static>> {
-    let mut lines = field_summary(form, width);
+    let mut lines = Vec::new();
     for (label, field) in ["Title", "Lesson", "Applies", "Limits"]
         .iter()
         .zip(&form.fields)

@@ -1,0 +1,65 @@
+name: Read one real model lesson draft with exhausted allowance and no automatic acceptance
+size: 120x36
+# Owned unversioned fixture. The receipt helper authenticates source and state;
+# this reader makes no Git HEAD continuity claim.
+cwd: @REPO/scripts/devex/artifacts/live-lesson-prepared-20261026/target
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@REPO/scripts/devex/artifacts/live-lesson-prepared-20261026/target/../home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_lesson_receipts.py @REPO/scripts/devex/artifacts/live-lesson-prepared-20261026/target @ART before
+require-wrapper-flow:
+launch: --target @REPO/scripts/devex/artifacts/live-lesson-prepared-20261026/target
+require-live-snap: 30 KUZUSHI | ready
+submit: campaign live-owned-lesson-20261026
+require-live-snap: 25 1 completed | completed-real-lesson
+expect: findings:lesson-generate · completed
+expect: 1 total attempt · cost unknown
+expect-not: L resume
+nav-mode:
+keys: L
+require-live-snap: 25 new approved plan | completed-work-refusal
+ask: Does the completed real lesson retain one consumed job and unknown cost while refusing another launch without a new approved plan?
+keys: r a
+require-live-snap: 25 GENERATED LESSON DRAFT | generated-result
+expect: Inspect model-proposed lesson
+keys: Enter
+require-live-snap: 25 Draft · Treat review labels | model-draft
+expect: gpt-6-luna
+expect: Captured historical source supplied.
+expect: Evidence text: 2572 B
+resize: 160x48
+live-snap: draft-160x48
+resize: 96x89
+live-snap: draft-96x89
+resize: 80x24
+live-snap: draft-80x24
+resize: 60x20
+live-snap: draft-60x20
+resize: 40x12
+require-live-snap: 20 Draft | draft-40x12
+keys: NPage
+require-live-snap: 20 Captured historical source | historical-source-40x12
+ask: Across six sizes and compact paging, is the actual lesson visibly a draft with its model, historical source receipt and limits, without accepting it or changing the finding verdict?
+resize: 120x36
+keys: Home
+require-live-snap: 20 Draft · Treat review labels | restored-draft
+keys: C-c
+require-exit: 10
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_lesson_receipts.py @REPO/scripts/devex/artifacts/live-lesson-prepared-20261026/target @ART after-reading
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@REPO/scripts/devex/artifacts/live-lesson-prepared-20261026/target/../home NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+launch: --target @REPO/scripts/devex/artifacts/live-lesson-prepared-20261026/target
+require-live-snap: 30 KUZUSHI | restarted
+submit: campaign live-owned-lesson-20261026
+require-live-snap: 25 1 completed | recovered-job
+nav-mode:
+keys: a
+require-live-snap: 25 GENERATED LESSON DRAFT | recovered-result
+keys: Enter
+require-live-snap: 25 Draft · Treat review labels | recovered-draft
+expect: gpt-6-luna
+expect: Captured historical source supplied.
+expect: current source was not read
+ask: Does no-color restart preserve the same draft revision, source limitations and single settled real request without new work or automatic acceptance?
+keys: C-c
+require-exit: 10
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_lesson_receipts.py @REPO/scripts/devex/artifacts/live-lesson-prepared-20261026/target @ART restarted

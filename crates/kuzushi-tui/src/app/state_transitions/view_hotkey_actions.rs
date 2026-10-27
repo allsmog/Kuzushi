@@ -502,14 +502,13 @@ impl ShellApp {
     }
 
     /// Enter on the Next-Investigation-Plan drawer loads the journey planner
-    /// command into the prompt. The recommended follow-up passes run only
-    /// when the operator submits it.
+    /// command into the prompt. Submitting opens planning; work needs approval.
     fn draft_review_next_plan_command(&mut self) {
         self.set_input("next".to_string());
         self.set_input_mode(InputMode::Prompt);
         self.log(
             "review",
-            "recommended plan loaded — Enter to run the follow-up pass",
+            "next drafted · Enter to open planning; approve work separately",
         );
     }
 

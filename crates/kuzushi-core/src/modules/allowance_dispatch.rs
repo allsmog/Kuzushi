@@ -11,6 +11,9 @@ use self::descriptor::phase_work;
 
 const OPTION: &str = "allowanceRef";
 
+mod frozen_options;
+pub(super) use frozen_options::preparation_option_store;
+
 pub(super) fn validate_reference(input: &Value) -> Result<()> {
     reference(input).map(|_| ())
 }

@@ -8,7 +8,7 @@
 //! sees effectiveness alongside the findings. Deterministic; no model calls.
 
 use crate::capabilities::campaign::trend::{
-    latest_confirmed_finding_ids, trend_json, trend_metrics_with_spend,
+    latest_confirmed_finding_ids, trend_json, trend_metrics_for_findings, trend_metrics_with_spend,
     workspace_campaign_spend_report,
 };
 use crate::findings::{extract_cwe, Finding, ReviewDecisionRecord};
@@ -73,10 +73,13 @@ fn export_selection(
     metadata: &[crate::workspace::WorkspaceFindingExportRecord],
 ) -> Result<Value> {
     let confirmed = confirmed_findings_with_metadata(findings, records, metadata);
-    let trend = trend_json(&trend_metrics_with_spend(
-        records,
-        workspace_campaign_spend_report(root),
-    ));
+    let spend = workspace_campaign_spend_report(root);
+    let metrics = if metadata.is_empty() {
+        trend_metrics_with_spend(records, spend)
+    } else {
+        trend_metrics_for_findings(findings, records, spend)
+    };
+    let trend = trend_json(&metrics);
     let mut document = sarif_document(&confirmed, trend.clone());
     metadata::attach_export_metadata(
         &mut document,

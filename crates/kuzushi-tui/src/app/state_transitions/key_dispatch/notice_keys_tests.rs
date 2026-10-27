@@ -46,6 +46,29 @@ fn warning_notice_dismissal_keeps_the_trace_open() {
 }
 
 #[test]
+fn background_warning_keeps_back_navigation_and_warning_severity() {
+    let mut app = trace_reader();
+    app.set_background_warn_notice("recovery", "Recovered an interrupted run");
+    assert_eq!(
+        app.advisory().notice.as_ref().unwrap().severity,
+        NoticeSeverity::Warn
+    );
+    assert!(!app.notice_captures_escape());
+    escape(&mut app);
+    assert!(!app.router.workbench().trace_view_open());
+}
+
+#[test]
+fn a_later_foreground_warning_still_requires_acknowledgement() {
+    let mut app = trace_reader();
+    app.set_background_warn_notice("recovery", "Recovered an interrupted run");
+    app.set_warn_notice("scan", "Coverage is incomplete");
+    assert!(app.notice_captures_escape());
+    escape(&mut app);
+    assert!(app.router.workbench().trace_view_open());
+}
+
+#[test]
 fn error_notice_dismissal_keeps_the_trace_open() {
     let mut app = trace_reader();
     app.set_error_notice("run", "could not save output");

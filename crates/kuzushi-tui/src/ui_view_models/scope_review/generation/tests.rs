@@ -35,3 +35,42 @@ fn legacy_limitations_are_displayed_without_inventing_context_counts() {
     assert!(!summary.contains("Context sections:"));
     assert!(generation_summary(None).is_empty());
 }
+
+#[test]
+fn proposal_summary_names_its_saved_context_without_claiming_map_acceptance() {
+    let mut value = generation(Vec::new());
+    value.context_ref = Some(
+        serde_json::from_value(serde_json::json!({
+            "modelId":"owned-model", "revisionId":"owned-revision", "sha256":"owned-hash"
+        }))
+        .unwrap(),
+    );
+    let summary = generation_summary(Some(&value)).join("\n");
+    assert!(summary.contains("Proposal context: saved revision owned-revision"));
+    assert!(!summary.contains("accepted"));
+    assert!(!summary.contains("active"));
+}
+
+#[test]
+fn legacy_proposal_does_not_claim_context_was_omitted() {
+    let summary = generation_summary(Some(&generation(Vec::new()))).join("\n");
+    assert!(summary.contains("Proposal context reference: not recorded"));
+    assert!(!summary.contains("omitted"));
+}
+
+#[test]
+fn proposal_detail_preserves_the_full_reference_for_a_later_reader() {
+    let mut value = generation(Vec::new());
+    value.context_ref = Some(
+        serde_json::from_value(serde_json::json!({
+            "modelId":"owned-model", "revisionId":"owned-revision", "sha256":"owned-hash"
+        }))
+        .unwrap(),
+    );
+    let detail = proposal_context_detail(&value).join("\n");
+    assert!(detail.contains("saved revision owned-revision"));
+    assert!(detail.contains("Proposal context model: owned-model"));
+    assert!(detail.contains("Proposal context SHA-256: owned-hash"));
+    assert!(detail.contains("Map acceptance and scan context are reviewed separately"));
+    assert_eq!(proposal_context_detail(&generation(Vec::new())).len(), 1);
+}

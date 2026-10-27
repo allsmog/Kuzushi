@@ -1,7 +1,8 @@
 //! Interrupt ledger SQL and remove its callback before returning the connection.
 use crate::ScanCancellation;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use rusqlite::Connection;
+use std::time::{Duration, Instant};
 
 pub(crate) fn check(cancellation: Option<&ScanCancellation>) -> Result<()> {
     anyhow::ensure!(
@@ -16,11 +17,46 @@ pub(crate) fn read<T>(
     cancellation: Option<&ScanCancellation>,
     query: impl FnOnce() -> Result<T>,
 ) -> Result<T> {
-    let mut guard = ReadCancellation::install(connection, cancellation)?;
+    controlled_read(connection, cancellation, None, query)
+}
+
+pub(crate) fn read_with_timeout<T>(
+    connection: &Connection,
+    cancellation: Option<&ScanCancellation>,
+    timeout: Duration,
+    query: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    let deadline = Instant::now()
+        .checked_add(timeout)
+        .context("Invalid read timeout")?;
+    controlled_read(connection, cancellation, Some(deadline), query)
+}
+
+fn controlled_read<T>(
+    connection: &Connection,
+    cancellation: Option<&ScanCancellation>,
+    deadline: Option<Instant>,
+    query: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    let mut guard = ReadCancellation::install(connection, cancellation, deadline)?;
     let result = query();
     guard.clear()?;
     check(cancellation)?;
+    check_deadline(deadline)?;
     result
+}
+
+fn check_deadline(deadline: Option<Instant>) -> Result<()> {
+    anyhow::ensure!(
+        !deadline.is_some_and(|end| Instant::now() >= end),
+        "Read exceeded its cooperative time allowance"
+    );
+    Ok(())
+}
+
+fn interrupted(cancellation: Option<&ScanCancellation>, deadline: Option<Instant>) -> bool {
+    cancellation.is_some_and(ScanCancellation::is_cancelled)
+        || deadline.is_some_and(|end| Instant::now() >= end)
 }
 
 struct ReadCancellation<'a> {
@@ -32,15 +68,20 @@ impl<'a> ReadCancellation<'a> {
     fn install(
         connection: &'a Connection,
         cancellation: Option<&ScanCancellation>,
+        deadline: Option<Instant>,
     ) -> Result<Self> {
         check(cancellation)?;
+        check_deadline(deadline)?;
         let mut guard = Self {
             connection,
             installed: false,
         };
-        if let Some(cancellation) = cancellation {
-            let cancellation = cancellation.clone();
-            connection.progress_handler(1000, Some(move || cancellation.is_cancelled()))?;
+        if cancellation.is_some() || deadline.is_some() {
+            let cancellation = cancellation.cloned();
+            connection.progress_handler(
+                1000,
+                Some(move || interrupted(cancellation.as_ref(), deadline)),
+            )?;
             guard.installed = true;
         }
         Ok(guard)
@@ -65,6 +106,37 @@ impl Drop for ReadCancellation<'_> {
 mod tests {
     use super::*;
     const QUERY: &str = "WITH RECURSIVE n(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM n WHERE x<5000) SELECT max(x) FROM n";
+
+    #[test]
+    fn an_expired_read_does_not_execute_or_poison_the_connection() {
+        let connection = Connection::open_in_memory().unwrap();
+        let result: Result<()> = read_with_timeout(&connection, None, Duration::ZERO, || {
+            panic!("expired read must not run")
+        });
+        assert!(result.unwrap_err().to_string().contains("time allowance"));
+        assert_eq!(
+            connection
+                .query_row("select 1", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_deadline_interrupts_sql_and_removes_its_callback() {
+        let connection = Connection::open_in_memory().unwrap();
+        let result = read_with_timeout(&connection, None, Duration::from_millis(5), || {
+            Ok(connection.query_row("WITH RECURSIVE n(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM n WHERE x<100000000) SELECT max(x) FROM n",
+                [], |row| row.get::<_, i64>(0))?)
+        });
+        assert!(result.unwrap_err().to_string().contains("time allowance"));
+        assert_eq!(
+            connection
+                .query_row(QUERY, [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            5000
+        );
+    }
 
     #[test]
     fn cancellation_during_sql_interrupts_work_and_clears_the_handler() {

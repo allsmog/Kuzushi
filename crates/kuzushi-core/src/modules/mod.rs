@@ -57,8 +57,11 @@ mod agentic_sast;
 mod allowance_dispatch;
 mod application;
 mod scan_planning;
-pub use scan_planning::validate_scan_scope_contract;
 pub(crate) use scan_planning::validate_study_scan_selection;
+pub use scan_planning::{
+    inactive_scan_task_options, validate_scan_scope_contract, InactiveScanTaskOptions,
+    ScanTaskPreview,
+};
 pub mod autonomy;
 mod builtins;
 mod catalog_query;

@@ -69,8 +69,8 @@ mod tests {
     fn status_footer_preserves_operator_ceiling_and_finding_count_at_every_width() {
         let left = vec![
             "⛭ autonomy:review ⚠".to_string(),
-            "shell route".to_string(),
-            "notify:unavailable · focus unknown".to_string(),
+            "Commands".to_string(),
+            "Desktop alerts unavailable".to_string(),
         ];
         let right = "6 findings · 1 C · 2 H · 2 M".to_string();
         for width in [40, 60, 80, 96, 120, 160] {

@@ -11,7 +11,7 @@ submit: setg ui.auto_open_activity false
 submit: setg ui.auto_open_viz false
 submit: logs
 submit: run context:build {"enrichment":false}
-require-live-snap: 35 Build project context: | source-context
+require-live-snap: 35 context:build indexed 131 files | source-context
 submit: use threat-model
 submit: options threat-model:import
 submit: set path .kuzushi/manual-context.json
@@ -29,6 +29,8 @@ submit: options sast:scan
 submit: set taskMode manual
 submit: set tasks semgrep
 paste-file: @ART/rule-setting.txt
+keys: Enter
+paste-file: @ART/scanner-setting.txt
 keys: Enter
 submit: set semgrepTimeoutMs 60000
 submit: scopes
@@ -94,6 +96,7 @@ resize: 120x36
 keys: Enter
 require-live-snap: 25 r4 | shared-copy
 expect: all: 9 jobs
+expect: PgUp/Dn
 require-shell: python3 -B @REPO/scripts/devex/fixtures/shared_monorepo.py @TMP_TARGET @ART shared
 expect: Shared context
 ask: Does copying Root files into shared context preserve 65/65/1 primary discovery memberships and add no duplicate work or new model request?
@@ -123,6 +126,10 @@ require-live-snap: 15 ACCEPTED SCOPES | scopes-60x20
 resize: 40x12
 require-live-snap: 15 ACCEPTED SCOPES | scopes-40x12
 expect: all: 9 jobs
+expect: PgUp/Dn
+expect: p plan
+expect: Enter menu
+expect: f files
 keys: Down Down Down
 require-live-snap: 15 · context | shared-context-40x12
 keys: Up Up Up
@@ -165,6 +172,10 @@ live-snap: after-active-review-typing
 require-shell: python3 -B @REPO/scripts/devex/fixtures/shared_monorepo.py @TMP_TARGET @ART completed
 require-live-snap: 20 retained-review-draft | review-draft-after-completion
 expect: Viewing Review
+require-live-snap: 25 services/b/ | distinct-service-locations
+expect: services/a/
+expect: f064.py:2
+ask: Can the operator distinguish the two deeply nested service findings by their path labels before opening them, while the exact paths and draft remain intact?
 ask: Does Review keep its draft, reading origin and usable controls while the remaining approved native jobs complete, with no background focus change or extra work?
 keys: C-u
 paste-file: @ART/resume-command.txt
@@ -215,6 +226,7 @@ require-live-snap: 25 Scope study: | original-report
 expect: 3 boundaries
 keys: C-c
 require-exit: 10
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR SEMGREP_APP_TOKEN SEMGREP_AGENT_TOKEN
 env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0 NO_COLOR=1
 launch: --target @TMP_TARGET
 require-live-snap: 30 KUZUSHI | restarted
