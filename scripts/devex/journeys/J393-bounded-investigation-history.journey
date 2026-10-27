@@ -1,0 +1,82 @@
+name: Bounded history preserves exact investigation access and explains damaged records
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/campaign_history.py @TMP_TARGET @ART seed
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI || READY THE MAP RUN | ready
+submit: campaign
+require-live-snap: 25 History partial | bounded-history
+expect-not: no campaigns planned
+ask: Does the history browser disclose its bounded result and incomplete spending without claiming that it lists the whole workspace?
+paste-file: @ART/history-exact-command.txt
+keys: Enter
+require-live-snap: 25 held-1 | exact-investigation
+expect: held-2
+nav-mode:
+keys: Down Enter
+require-live-snap: 20 held-2 | selected-recorded-job
+expect: 0 total attempts
+keys: r
+require-live-snap: 20 held-2 | exact-identity-after-refresh
+ask: Can an operator open the requested investigation beyond the browse limit, inspect its exact recorded job and refresh without changing identity or starting work?
+resize: 160x48
+keys: Home
+live-snap: history-detail-160x48
+expect: History partial
+resize: 96x89
+keys: Home
+live-snap: history-detail-96x89
+expect: History partial
+resize: 80x24
+keys: Home
+live-snap: history-detail-80x24
+expect: History partial
+resize: 60x20
+keys: Home
+live-snap: history-detail-60x20
+expect: History partial
+resize: 40x12
+keys: Home
+live-snap: history-detail-40x12
+expect: History partial
+keys: NPage
+live-snap: history-read-page-1
+keys: NPage
+live-snap: history-read-page-2
+keys: NPage
+live-snap: history-read-page-3
+require-shell: python3 -B @REPO/scripts/devex/fixtures/campaign_history.py @TMP_TARGET @ART paging
+ask: Are partial history, the selected job and its inspection/back controls readable by paging across the six viewport sizes?
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/campaign_history.py @TMP_TARGET @ART damage
+keys: r Home
+require-live-snap: 25 1 unreadable, 1 symlink(s) skipped | damaged-history
+expect: held-2
+expect-not: limit of 100 investigations reached
+expect-not: no campaigns planned
+ask: Does damaged history preserve the readable selected investigation and disclose unreadable records and skipped symlinks without treating missing cost as zero?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/campaign_history.py @TMP_TARGET @ART block
+keys: r Home
+require-live-snap: 25 History unavailable | directory-unavailable
+expect-not: no campaigns planned
+resize: 40x12
+keys: Home
+live-snap: directory-unavailable-40x12
+keys: End
+live-snap: directory-recovery-controls-40x12
+ask: Does a blocked history directory produce an honest unavailable state with a recovery action instead of a successful empty workspace?
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/campaign_history.py @TMP_TARGET @ART restore
+keys: r
+require-live-snap: 25 History partial | restored-history
+paste-file: @ART/history-exact-command.txt
+keys: Enter
+require-live-snap: 25 held-1 | recovered-investigation
+expect: held-2
+require-shell: python3 -B @REPO/scripts/devex/fixtures/campaign_history.py @TMP_TARGET @ART verify
+ask: After explicit repair and refresh, can the operator inspect the same untouched plan without new queues, reservations, findings or model requests?
+keys: C-c
+require-exit: 10

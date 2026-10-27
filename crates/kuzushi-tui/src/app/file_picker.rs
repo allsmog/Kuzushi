@@ -3,6 +3,7 @@ use crate::app::state_transitions::InputUpdate;
 use std::path::{Path, PathBuf};
 
 mod discovery;
+mod lesson_evidence;
 mod review_evidence;
 #[cfg(test)]
 use discovery::{
@@ -114,6 +115,10 @@ impl ShellApp {
     }
 
     fn accept_file_picker_selection(&mut self) -> InputUpdate {
+        if self.router.file_picker().purpose() == FilePickerPurpose::LessonEvidence {
+            self.apply_lesson_source_files();
+            return InputUpdate::handled();
+        }
         if self.router.file_picker().purpose() == FilePickerPurpose::ReviewEvidence {
             self.apply_review_source_files();
             return InputUpdate::handled();

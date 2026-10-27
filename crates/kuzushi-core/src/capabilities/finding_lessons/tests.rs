@@ -6,6 +6,8 @@ use crate::runtime::{AgentQueryRequest, AgentQueryResponse};
 use crate::{ModuleRegistry, V2Config, WorkspaceTarget};
 use std::sync::{Arc, Mutex};
 mod captured_source;
+mod native_fixture;
+mod supporting_sources;
 
 struct Fixture {
     root: tempfile::TempDir,
@@ -18,7 +20,13 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
+        Self::with_sources(&[])
+    }
+    fn with_sources(sources: &[(&str, &[u8])]) -> Self {
         let root = tempfile::tempdir().unwrap();
+        for (path, bytes) in sources {
+            std::fs::write(root.path().join(path), bytes).unwrap();
+        }
         std::fs::write(
             root.path().join("hello.txt"),
             "Owned source for defensive lesson review. Never executed.\n",
@@ -28,7 +36,9 @@ impl Fixture {
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         store
             .with_run_lifecycle("lesson-source", root.path(), || {
-                store.insert_finding(
+                insert_recorded_finding(
+                    &store,
+                    &workspace,
                     "lesson-source",
                     &Finding::new_tool(
                         "owned-fixture",
@@ -102,6 +112,27 @@ impl Fixture {
     fn input(&self) -> Value {
         json!({"findingId":self.id,"allowanceRef":{"schemaVersion":1,"investigationId":"lesson-test","revision":1,"workId":"one-lesson"}})
     }
+}
+
+fn insert_recorded_finding(
+    store: &FindingStore,
+    workspace: &WorkspaceTarget,
+    run: &str,
+    finding: &Finding,
+) -> Result<()> {
+    let indexed = crate::incremental_index::index_workspace_snapshot(workspace)?;
+    let text = std::fs::read_to_string(workspace.root().join(&finding.file_path))?;
+    let supplied = std::collections::BTreeMap::from([(finding.file_path.clone(), text)]);
+    let sources = store.capture_finding_sources(
+        &indexed.snapshot_hash,
+        &indexed.tree_hash,
+        &supplied,
+        std::slice::from_ref(finding),
+        65536,
+        &|| false,
+    )?;
+    store.insert_finding_with_sources(run, finding, &sources)?;
+    Ok(())
 }
 
 #[derive(Clone)]

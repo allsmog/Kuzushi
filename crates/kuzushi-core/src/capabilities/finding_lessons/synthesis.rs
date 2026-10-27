@@ -13,22 +13,16 @@ pub(super) fn request(
     runtime: &dyn AgentRuntime,
 ) -> Result<GeneratedLesson> {
     let store = ctx.findings_store.unwrap();
-    let source = store.lesson_captured_source(
-        origin,
-        input["maxSourceBytes"]
-            .as_u64()
-            .context("maxSourceBytes is required")? as usize,
-    )?;
+    let (sources, source_reference) = super::sources::load(input, origin, ctx)?;
     let finding = store.lesson_observation(origin)?;
-    let prompt = serde_json::to_string(
-        &json!({"schemaVersion":1,"origin":origin,"observation":finding,"capturedSource":source,"guidance":input["guidance"],"otherSourceRevisions":"Not inspected. No finding verdict transfers to them."}),
-    )?;
+    let prompt = evidence_prompt(input, origin, &finding, &sources)?;
     anyhow::ensure!(
         prompt.len() <= 128 * 1024,
         "Lesson evidence exceeds the 128 KiB request limit"
     );
     let request = query_request(input, ctx, prompt)?;
-    let receipt = generation_receipt(&request, &source, ctx)?;
+    let mut receipt = generation_receipt(&request, &sources.primary, ctx)?;
+    receipt.source_evidence_ref = source_reference;
     let response = runtime.query_blocking_controlled(
         request,
         AgentQueryControl::new(ctx.cancellation.cloned(), None),
@@ -37,6 +31,19 @@ pub(super) fn request(
         content: parse_response(response)?,
         receipt,
     })
+}
+
+fn evidence_prompt(
+    input: &Value,
+    origin: &LessonOrigin,
+    finding: &crate::findings::Finding,
+    sources: &super::sources::LessonSources,
+) -> Result<String> {
+    let mut payload = json!({"schemaVersion":1,"origin":origin,"observation":finding,"capturedSource":sources.primary,"guidance":input["guidance"],"otherSourceRevisions":"Not inspected. No finding verdict transfers to them."});
+    if !sources.supporting.is_empty() {
+        payload["supportingSources"] = json!(sources.supporting);
+    }
+    Ok(serde_json::to_string(&payload)?)
 }
 
 fn generation_receipt(
@@ -54,6 +61,7 @@ fn generation_receipt(
             .into(),
         input_bytes: request.prompt.len(),
         synthesis_requests: 1,
+        source_evidence_ref: None,
     })
 }
 

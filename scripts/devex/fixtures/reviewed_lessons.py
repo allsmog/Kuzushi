@@ -15,6 +15,10 @@ def prepare(root, evidence):
         "app::lessons::tests::fixture::prepare_native_reviewed_lesson_fixture", "--nocapture"],
         env=env, capture_output=True, text=True, timeout=30, check=True)
     (evidence / "preparation.log").write_text(result.stdout + result.stderr)
+    record_prepared(root, evidence)
+
+
+def record_prepared(root, evidence):
     receipt = json.loads((root / ".kuzushi/lesson-fixture.json").read_text())
     assert receipt["findingsAreSynthetic"] and receipt["providerRequests"] == 0
     (evidence / "source-before.sha256").write_text(hashlib.sha256((root / "hello.txt").read_bytes()).hexdigest())

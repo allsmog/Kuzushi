@@ -641,6 +641,7 @@ impl ShellApp {
             campaign.batch_scan_config = None;
             campaign.dfd_study_return = None;
             campaign.clear_active_batch();
+            campaign.clear_campaign_history();
         }
         self.session.set_target(target.clone());
         if changed {

@@ -325,7 +325,7 @@ fn picker_prompt_keybindings() -> Vec<FooterKeybinding> {
 }
 
 fn file_picker_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
-    if app.router.file_picker().purpose() == crate::app::FilePickerPurpose::ReviewEvidence {
+    if app.router.file_picker().purpose().is_source_evidence() {
         return vec![
             bind("Space", "toggle"),
             bind("Tab", "basket"),

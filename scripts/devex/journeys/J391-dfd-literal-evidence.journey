@@ -1,0 +1,55 @@
+name: Diagram context keeps literal paths visible and planning separate
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dfd_literal_evidence.py @TMP_TARGET @ART seed
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: run threat-model:import {"path":"ctx.json","activate":true}
+require-live-snap: 30 threat-model:import saved | imported
+submit: map
+require-live-snap: 25 SYSTEM SUMMARY | map
+nav-mode:
+keys: u
+require-live-snap: 25 Map ✓ | accepted
+keys: Tab z Down Enter
+require-live-snap: 20 LINK DETAIL | focused-120x36
+expect: " a\nb "
+resize: 160x48
+live-snap: focused-160x48
+expect: " a\nb "
+resize: 96x89
+live-snap: focused-96x89
+expect: " a\nb "
+resize: 80x24
+live-snap: focused-80x24
+expect: " a\nb "
+resize: 60x20
+live-snap: focused-60x20
+expect: " a\nb "
+resize: 40x12
+live-snap: focused-40x12
+expect: " a\nb "
+ask: Do all six sizes show the quoted literal path, including its edge spaces and escaped line break, while keeping the selected annotation and Back understandable?
+keys: j
+require-live-snap: 20 "a b" | next-source-40x12
+keys: k
+require-live-snap: 20 " a\nb " | original-source-40x12
+resize: 120x36
+keys: Enter s
+require-live-snap: 20 PLAN A STUDY | separate-scan-draft
+expect: 2 exact source paths
+expect: " a\nb "
+expect: No jobs started
+keys: Escape
+require-live-snap: 20 s plan scan | original-topology
+keys: Enter
+require-live-snap: 20 " a\nb " | original-context
+ask: Does returning from the unsaved scan proposal restore the exact selected annotation without starting work or changing source membership?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dfd_literal_evidence.py @TMP_TARGET @ART inspect
+keys: C-c
+require-exit: 10

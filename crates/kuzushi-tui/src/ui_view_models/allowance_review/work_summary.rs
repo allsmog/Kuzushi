@@ -178,6 +178,23 @@ fn generation_context_lines(receipt: &ContextStudyReceipt) -> Vec<String> {
     if receipt.generation_tool == "findings:lesson-generate" {
         return vec![
             "Evidence: exact confirmed observation; current source is not substituted".into(),
+            format!(
+                "Finding generation: {} · source confirmation: {}",
+                receipt.input["findingId"],
+                receipt
+                    .input
+                    .pointer("/originRef/decision/id")
+                    .map_or("unrecorded".into(), serde_json::Value::to_string)
+            ),
+            format!(
+                "Source cap: {} · {} supporting paths",
+                receipt.input["maxSourceBytes"]
+                    .as_u64()
+                    .map_or("unrecorded".into(), |bytes| format!("{bytes} B shared")),
+                receipt.input["sourceEvidenceFiles"]
+                    .as_array()
+                    .map_or(0, Vec::len)
+            ),
             "Threat context: not used for lesson drafts".into(),
         ];
     }

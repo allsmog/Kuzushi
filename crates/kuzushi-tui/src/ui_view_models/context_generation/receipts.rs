@@ -54,7 +54,8 @@ fn lesson_receipt_lines(
         format!("Plan: {}", receipt.campaign_id),
         format!("Plan digest: {}", receipt.plan_sha256),
         format!("Requested output: {} tokens. Output enforcement depends on the adapter; the allowance bounds provider requests.", receipt.input["maxOutputTokens"]),
-        format!("Recorded source excerpt: at most {} bytes. Missing captures are disclosed; current files are not substituted.", receipt.input["maxSourceBytes"]),
+        format!("Recorded source: at most {} bytes total, including selected supporting files. Missing captures are disclosed; current files are not substituted.", receipt.input["maxSourceBytes"]),
+        format!("Supporting paths: {}. {}", receipt.input["sourceEvidenceFiles"].as_array().map_or(0, Vec::len), if receipt.input["sourceEvidenceRef"].is_string() { "v reads the frozen bundle and omissions." } else { "No supporting-source bundle was selected." }),
         "Tab shows every exact generation option.".into(),
     ]
 }

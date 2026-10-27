@@ -201,6 +201,9 @@ require-live-snap: 25 Approval saved | approved-discovery
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART scan-approved
 keys: L
 require-live-snap: 25 L starts its fixed jobs | discovery-jobs
+expect: Study jobs
+expect: Target
+expect-not: Commands · view:campaign
 keys: L
 require-live-snap: 25 dispatcher pid | discovery-running
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART admitted
@@ -218,11 +221,15 @@ nav-mode:
 keys: c
 require-live-snap: 20 Esc Scan | admitted-study-link
 expect: Jobs: 3
+expect: Study jobs
+expect-not: Commands · view:campaign
 expect-not: q list
 expect-not: Esc returns to prompt
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_footer.py @TMP_TARGET @ART study
 keys: Enter
 require-live-snap: 20 Esc jobs | admitted-study-job
+expect: Study job
+expect-not: Commands · view:campaign
 expect-not: Esc returns to prompt
 keys: Escape
 require-live-snap: 20 Esc Scan | admitted-study-jobs
@@ -250,7 +257,8 @@ ask: While the request waits, are one completed, one running and one queued job 
 resize: 120x36
 keys: C-u
 submit: quit-confirm
-require-live-snap: 20 CONFIRM SESSION EXIT | owned-study-exit-disclosure
+require-live-snap: 20 n/Esc stays in this session | owned-study-exit-disclosure
+expect: CONFIRM SESSION EXIT
 expect: may continue
 expect: unknown (owned study)
 expect-not: no active work
@@ -272,6 +280,8 @@ require-live-snap: 20 Stop requested || Stopped by operator | cancellation-reque
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART canceled
 keys: r
 require-live-snap: 25 Stopped by operator | canceled-partial-work
+expect: Study jobs
+expect-not: Commands · view:campaign
 require-live-snap: 20 repo index ready | canceled-partial-work-index-ready
 expect-not: repo index not built
 expect: session:$0.00
@@ -612,6 +622,8 @@ require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellatio
 paste-file: @ART/context-command.txt
 keys: Enter
 require-live-snap: 25 Jobs: 3 | recorded-context-jobs-after-loss
+expect: Study jobs
+expect-not: Commands · view:campaign
 nav-mode:
 keys: a
 require-live-snap: 25 Enter outcome | missing-context-result

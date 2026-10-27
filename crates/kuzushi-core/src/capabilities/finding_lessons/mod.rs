@@ -4,7 +4,9 @@ use crate::{modules::ToolExecutionContext, runtime::AgentRuntime};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+mod sources;
 mod synthesis;
+pub(crate) use sources::inspect as read_source_evidence;
 #[cfg(test)]
 mod tests;
 
@@ -17,7 +19,8 @@ pub(crate) fn prepare_generation_input(
     prepared
         .as_object_mut()
         .context("Lesson input must be an object")?
-        .insert("originRef".into(), serde_json::to_value(origin)?);
+        .insert("originRef".into(), serde_json::to_value(&origin)?);
+    sources::prepare(&mut prepared, &origin, ctx)?;
     Ok(prepared)
 }
 
@@ -25,7 +28,8 @@ pub(crate) fn validate_generation_input(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<()> {
-    selected_origin(input, ctx).map(|_| ())
+    let origin = selected_origin(input, ctx)?;
+    sources::load(input, &origin, ctx).map(|_| ())
 }
 
 fn selected_origin(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<LessonOrigin> {

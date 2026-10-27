@@ -4,14 +4,16 @@
 //! lifecycle truth when present; any job the queue has not touched is
 //! `planned`. Everything here is read-only over `plan.json` + `queue.json`.
 
-use super::{campaign_plan_path, campaign_queue_path, campaigns_dir, read_json_file};
+use super::{campaign_plan_path, campaign_queue_path, campaigns_dir};
 use anyhow::{Context, Result};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use std::path::Path;
 mod labels;
 mod progress;
+mod reader;
 pub use progress::load_approved_scan_snapshot;
+pub(super) use reader::SnapshotReader;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CampaignSnapshot {
@@ -102,10 +104,7 @@ pub fn campaign_ids(root: &Path) -> Result<Vec<String>> {
 }
 
 pub fn load_campaign_snapshot(root: &Path, campaign_id: &str) -> Result<CampaignSnapshot> {
-    let plan = read_json_file(&campaign_plan_path(root, campaign_id))
-        .with_context(|| format!("campaign {campaign_id:?} has no readable plan"))?;
-    let queue_doc = load_queue_doc(root, campaign_id)?;
-    snapshot_from_documents(root, campaign_id, &plan, &queue_doc)
+    SnapshotReader::new(root, &|| false).load(campaign_id, true)
 }
 
 fn snapshot_from_documents(
@@ -114,14 +113,29 @@ fn snapshot_from_documents(
     plan: &Value,
     queue_doc: &Value,
 ) -> Result<CampaignSnapshot> {
+    let mut reader = SnapshotReader::new(root, &|| false);
+    fold_documents(
+        campaign_id,
+        plan,
+        queue_doc,
+        &mut |id| reader.run(id),
+        &|| false,
+    )
+}
+
+pub(super) fn fold_documents(
+    campaign_id: &str,
+    plan: &Value,
+    queue_doc: &Value,
+    read_run: &mut dyn FnMut(&str) -> Option<Value>,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<CampaignSnapshot> {
     let queue = queue_doc
         .get("jobs")
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
-    let jobs = plan_job_rows(plan)
-        .map(|row| job_snapshot(root, plan, row, &queue))
-        .collect::<Vec<_>>();
+    let jobs = fold_jobs(plan, &queue, read_run, cancelled)?;
     let total_cost_usd = jobs.iter().filter_map(|job| job.cost_usd).sum::<f64>() + 0.0;
     let provider_spend_unresolved = jobs.iter().any(|job| job.provider_spend_unresolved);
     Ok(CampaignSnapshot {
@@ -148,6 +162,24 @@ fn snapshot_from_documents(
     })
 }
 
+fn fold_jobs(
+    plan: &Value,
+    queue: &Map<String, Value>,
+    read_run: &mut dyn FnMut(&str) -> Option<Value>,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Vec<CampaignJobSnapshot>> {
+    plan_job_rows(plan)
+        .map(|row| {
+            anyhow::ensure!(!cancelled(), "Investigation history loading was canceled");
+            let entry = queue.get(row["jobId"].as_str().unwrap_or_default());
+            let run = entry
+                .and_then(|row| row["runId"].as_str())
+                .and_then(&mut *read_run);
+            Ok(job_snapshot_with_run(plan, row, queue, run.as_ref()))
+        })
+        .collect()
+}
+
 fn usize_field(value: &Value, key: &str) -> Option<usize> {
     usize::try_from(value.get(key)?.as_u64()?).ok()
 }
@@ -160,18 +192,33 @@ fn plan_job_rows(plan: &Value) -> impl Iterator<Item = &Value> {
         .flatten()
 }
 
+#[cfg(test)]
 fn job_snapshot(
     root: &Path,
     plan: &Value,
     row: &Value,
     queue: &Map<String, Value>,
 ) -> CampaignJobSnapshot {
+    let mut reader = SnapshotReader::new(root, &|| false);
+    let entry = queue.get(row["jobId"].as_str().unwrap_or_default());
+    let run = entry
+        .and_then(|row| row["runId"].as_str())
+        .and_then(|id| reader.run(id));
+    job_snapshot_with_run(plan, row, queue, run.as_ref())
+}
+
+fn job_snapshot_with_run(
+    plan: &Value,
+    row: &Value,
+    queue: &Map<String, Value>,
+    run: Option<&Value>,
+) -> CampaignJobSnapshot {
     let job_id = string_field(row, "jobId").unwrap_or_default();
     let entry = queue.get(&job_id).cloned().unwrap_or(Value::Null);
     let run_id = string_field(&entry, "runId");
     CampaignJobSnapshot {
         display_label: labels::job_label(plan, row),
-        findings: run_finding_count(root, run_id.as_deref()),
+        findings: run.and_then(|run| run["findings"].as_u64()),
         tool: string_field(row, "tool"),
         shard: string_field(row, "shard"),
         threat_id: string_field(row, "threatId"),
@@ -190,7 +237,7 @@ fn job_snapshot(
             .and_then(Value::as_bool)
             .unwrap_or(false),
         run_id,
-        reason: job_reason(root, row, &entry),
+        reason: job_reason(row, &entry, run),
         job_id,
     }
 }
@@ -212,41 +259,26 @@ fn recorded_dispatches(entry: &Value) -> Option<u64> {
     (total >= current.max(history)).then_some(total)
 }
 
-fn job_reason(root: &Path, row: &Value, entry: &Value) -> Option<String> {
+fn job_reason(row: &Value, entry: &Value, run: Option<&Value>) -> Option<String> {
     string_field(entry, "reason")
-        .or_else(|| recorded_job_failure(root, row, entry))
+        .or_else(|| recorded_job_failure(row, entry, run?))
         .map(|reason| crate::run_artifacts::bounded_run_diagnostic_line(&reason))
 }
 
-fn recorded_job_failure(root: &Path, row: &Value, entry: &Value) -> Option<String> {
+fn recorded_job_failure(row: &Value, entry: &Value, run: &Value) -> Option<String> {
     let state = entry["state"].as_str()?;
     if !["failed", "partial", "interrupted", "parked"].contains(&state) {
         return None;
     }
-    let run = crate::run_artifacts::load_run_summary_without_repair(root, entry["runId"].as_str()?)
-        .ok()?;
     let tool = row["tool"].as_str()?;
-    if run.tool.as_deref() != Some(tool)
-        || !["failed", "partial", "canceled"].contains(&run.status.as_str())
+    if run["tool"].as_str() != Some(tool)
+        || !["failed", "partial", "canceled"].contains(&run["status"].as_str()?)
     {
         return None;
     }
-    run.error
+    string_field(run, "error")
         .map(|error| crate::run_artifacts::bounded_run_diagnostic_line(&error))
         .filter(|error| !error.is_empty())
-}
-
-/// Finding count from the child run's finalized metadata. Absent while the
-/// run is still live (run.json carries no `findings` until completion) or
-/// when the run directory was pruned.
-fn run_finding_count(root: &Path, run_id: Option<&str>) -> Option<u64> {
-    let (_, body) = crate::run_artifacts::read_run_artifact_text(root, run_id?, "run.json")
-        .require("Run finding count")
-        .ok()?;
-    serde_json::from_str::<Value>(&body)
-        .ok()?
-        .get("findings")?
-        .as_u64()
 }
 
 fn string_field(value: &Value, key: &str) -> Option<String> {
@@ -255,14 +287,6 @@ fn string_field(value: &Value, key: &str) -> Option<String> {
         .and_then(Value::as_str)
         .filter(|text| !text.is_empty())
         .map(str::to_string)
-}
-
-fn load_queue_doc(root: &Path, campaign_id: &str) -> Result<Value> {
-    let path = campaign_queue_path(root, campaign_id);
-    if !path.exists() {
-        return Ok(Value::Null);
-    }
-    read_json_file(&path).with_context(|| format!("campaign {campaign_id:?} has no readable queue"))
 }
 
 #[cfg(test)]

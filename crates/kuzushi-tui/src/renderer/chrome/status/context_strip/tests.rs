@@ -47,6 +47,37 @@ fn indexed_model() -> ContextStripModel {
     model
 }
 
+#[test]
+fn study_headers_keep_the_reader_and_target_ahead_of_diagnostics_in_all_six_sizes() {
+    let mut model = indexed_model();
+    model.study_title = Some("Study jobs");
+    model.view = "campaign".into();
+    for (width, height) in [(160, 48), (120, 36), (96, 89), (80, 24), (60, 20), (40, 12)] {
+        let spans = context_strip_spans(&model);
+        let rows = if spans_overflow(&spans, width) {
+            compact_context_strip_lines(&model, Rect::new(0, 0, width, height))
+        } else {
+            vec![Line::from(spans)]
+        };
+        let text = row_text(&rows).join("\n");
+        assert!(text.contains("Study jobs"), "{width}x{height}: {text}");
+        assert!(
+            !text.contains("Commands") && !text.contains("view:campaign"),
+            "{text}"
+        );
+        assert!(
+            text.find("Study jobs").unwrap() < text.find("Target").unwrap(),
+            "{text}"
+        );
+        assert!(rows
+            .iter()
+            .all(|row| display_width(&row.to_string()) <= usize::from(width)));
+        if width >= 80 {
+            assert!(text.contains("configured model:unconfigured"), "{text}");
+        }
+    }
+}
+
 fn row_text(lines: &[Line<'_>]) -> Vec<String> {
     lines
         .iter()

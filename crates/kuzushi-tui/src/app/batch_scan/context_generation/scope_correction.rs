@@ -136,7 +136,9 @@ impl ShellApp {
     }
 
     pub(crate) fn capture_study_text_paste(&mut self, text: &str) -> bool {
-        self.capture_scope_correction_paste(text) || self.capture_regeneration_guidance_paste(text)
+        self.lesson_source_reader_is_open()
+            || self.capture_scope_correction_paste(text)
+            || self.capture_regeneration_guidance_paste(text)
     }
 
     fn capture_scope_correction_paste(&mut self, text: &str) -> bool {

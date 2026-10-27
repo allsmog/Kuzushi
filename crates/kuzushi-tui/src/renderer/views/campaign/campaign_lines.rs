@@ -8,6 +8,9 @@ use kuzushi_core::capabilities::campaign::snapshot::{CampaignJobSnapshot, Campai
 const CAMPAIGN_LIST_WIDTHS: [usize; 4] = [18, 14, 6, 30];
 const JOB_LIST_WIDTHS: [usize; 7] = [4, 22, 10, 4, 5, 12, 5];
 
+#[cfg(test)]
+mod history_tests;
+
 /// The Campaign deck: list mode is one row per planned campaign; detail mode
 /// is the selected campaign's ranked job matrix with include/exclude marks.
 /// All lifecycle truth comes from the snapshot fold (plan + dispatcher queue).
@@ -18,6 +21,7 @@ pub(crate) fn campaign_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     if append_study_surfaces(&mut lines, app, area) {
         return lines;
     }
+    append_history_coverage(&mut lines, deck, area.width);
     if deck.has_dispatcher_failure_notice() {
         let context = lines;
         lines = Vec::new();
@@ -84,7 +88,7 @@ fn append_campaign_list(lines: &mut Vec<Line<'static>>, deck: &CampaignRouteStat
     lines.push(divider("CAMPAIGNS", area.width));
     append_campaign_trend(lines, deck, area.width as usize);
     if deck.campaigns.is_empty() {
-        append_empty_deck(lines);
+        append_history_empty_state(lines, deck);
         return;
     }
     let widths = campaign_list_widths(area);
@@ -99,6 +103,34 @@ fn append_campaign_list(lines: &mut Vec<Line<'static>>, deck: &CampaignRouteStat
             &widths,
         ));
     }
+}
+
+fn append_history_coverage(lines: &mut Vec<Line<'static>>, deck: &CampaignRouteState, width: u16) {
+    let warning = deck
+        .history_coverage
+        .as_ref()
+        .and_then(|coverage| coverage.limitation_label());
+    if let Some(warning) = warning {
+        lines.extend(
+            wrap_text(&warning, usize::from(width).max(1))
+                .into_iter()
+                .map(|text| Line::styled(text, theme::warn())),
+        );
+    }
+}
+
+fn append_history_empty_state(lines: &mut Vec<Line<'static>>, deck: &CampaignRouteState) {
+    if deck
+        .history_coverage
+        .as_ref()
+        .is_some_and(|coverage| !coverage.complete())
+    {
+        lines.push(Line::from(
+            "No readable investigations in this view. r refresh or open an exact campaign ID.",
+        ));
+        return;
+    }
+    append_empty_deck(lines);
 }
 
 fn append_campaign_trend(lines: &mut Vec<Line<'static>>, deck: &CampaignRouteState, width: usize) {

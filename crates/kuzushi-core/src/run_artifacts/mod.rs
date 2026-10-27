@@ -101,7 +101,9 @@ pub use run_result_summary::{
     RunResultDocument, RunResultSummary,
 };
 pub use run_retention::{prune_run_artifacts, RunPruneDisposition};
-pub(crate) use run_summary_store::{list_current_run_summary_prefix, CurrentRunSummaryPrefix};
+pub(crate) use run_summary_store::{
+    decode_run_summary_value, list_current_run_summary_prefix, CurrentRunSummaryPrefix,
+};
 pub use run_summary_store::{
     list_recent_run_summary_entries, list_recent_run_summary_entries_with_recoveries,
     list_run_summaries, list_run_summary_entries, list_run_summary_entries_cursor_page,

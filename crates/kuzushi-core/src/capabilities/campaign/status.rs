@@ -1,6 +1,7 @@
 //! `campaign:status` — the snapshot fold rendered as a tool result.
 
-use super::snapshot::{campaign_ids, load_campaign_snapshot, CampaignSnapshot};
+use super::history::{load_campaign_history, CampaignHistory};
+use super::snapshot::CampaignSnapshot;
 use super::string_input;
 use crate::findings::FindingStore;
 use crate::modules::ToolExecutionContext;
@@ -14,10 +15,22 @@ pub fn execute_campaign_status(input: &Value, ctx: &ToolExecutionContext<'_>) ->
         .workspace
         .context("campaign:status requires an active workspace target")?;
     let root = workspace.root();
-    let (trend, trend_history) = workspace_trend_json(root, ctx);
-    match string_input(input, &["campaignId", "campaign_id", "id"]) {
-        Some(campaign_id) => single_campaign_status(root, &campaign_id, trend, trend_history),
-        None => all_campaigns_status(root, trend, trend_history),
+    let requested = string_input(input, &["campaignId", "campaign_id", "id"]);
+    let history = load_campaign_history(root, requested.as_deref(), &|| ctx.is_cancelled())?
+        .context("Investigation history loading was canceled")?;
+    if let Some(error) = &history.requested_error {
+        anyhow::bail!("{error}");
+    }
+    anyhow::ensure!(
+        !ctx.is_cancelled(),
+        "Investigation history loading was canceled"
+    );
+    let (trend, trend_history) = workspace_trend_json(root, ctx, history.spend());
+    match requested {
+        Some(campaign_id) => {
+            single_campaign_status(root, &campaign_id, &history, trend, trend_history)
+        }
+        None => all_campaigns_status(&history, trend, trend_history),
     }
 }
 
@@ -30,8 +43,11 @@ pub fn execute_campaign_status(input: &Value, ctx: &ToolExecutionContext<'_>) ->
 /// tool policy is workspace-write) and carries the bounded history back as
 /// `trendHistory`; a history write failure degrades to history-less status
 /// rather than failing the read.
-fn workspace_trend_json(root: &Path, ctx: &ToolExecutionContext<'_>) -> (Value, Value) {
-    let spend = super::trend::workspace_campaign_spend_report(root);
+fn workspace_trend_json(
+    root: &Path,
+    ctx: &ToolExecutionContext<'_>,
+    spend: super::trend::WorkspaceCampaignSpend,
+) -> (Value, Value) {
     let metrics = workspace_review_metrics(ctx.findings_store, spend);
     let _ = super::trend_history::record_trend_snapshot(root, &metrics);
     let history =
@@ -49,17 +65,26 @@ fn workspace_review_metrics(
     let Some(store) = store else {
         return super::trend::trend_metrics_with_spend(&[], spend);
     };
-    store.with_projection_snapshot(|store| {
-        let subjects = store.list_review_decision_subjects()?;
-        let records = store.list_review_decisions_for_subjects(&subjects)?;
-        Ok(super::trend::trend_metrics_for_subjects(&subjects, &records, spend))
-    }).unwrap_or_else(|_| super::trend::trend_metrics_from_ledger(super::trend::DecisionLedger::Unreadable, spend))
+    store
+        .with_projection_snapshot(|store| {
+            let subjects = store.list_review_decision_subjects()?;
+            let records = store.list_review_decisions_for_subjects(&subjects)?;
+            Ok(super::trend::trend_metrics_for_subjects(
+                &subjects, &records, spend,
+            ))
+        })
+        .unwrap_or_else(|_| {
+            super::trend::trend_metrics_from_ledger(super::trend::DecisionLedger::Unreadable, spend)
+        })
 }
 
-fn all_campaigns_status(root: &Path, trend: Value, trend_history: Value) -> Result<Value> {
+fn all_campaigns_status(
+    history: &CampaignHistory,
+    trend: Value,
+    trend_history: Value,
+) -> Result<Value> {
     let mut rows = Vec::new();
-    for campaign_id in campaign_ids(root)? {
-        let snapshot = load_campaign_snapshot(root, &campaign_id)?;
+    for snapshot in &history.campaigns {
         rows.push(json!({
             "campaignId": snapshot.campaign_id,
             "tool": snapshot.tool,
@@ -71,10 +96,11 @@ fn all_campaigns_status(root: &Path, trend: Value, trend_history: Value) -> Resu
         }));
     }
     let output = format!("campaign:status found {} campaign(s)", rows.len());
-    Ok(crate::module_result::completed_output_result(
-        output.clone(),
+    Ok(history_result(
+        history,
         output,
         json!({ "campaigns": rows, "trend": trend, "trendHistory": trend_history,
+            "historyCoverage": history.coverage.json(),
             "historyWindow": super::trend_history::history_window_json() }),
     ))
 }
@@ -82,42 +108,65 @@ fn all_campaigns_status(root: &Path, trend: Value, trend_history: Value) -> Resu
 fn single_campaign_status(
     root: &Path,
     campaign_id: &str,
+    history: &CampaignHistory,
     trend: Value,
     trend_history: Value,
 ) -> Result<Value> {
-    let snapshot = load_campaign_snapshot(root, campaign_id)?;
+    let snapshot = history
+        .campaigns
+        .iter()
+        .find(|row| row.campaign_id == campaign_id)
+        .context("Requested campaign is unavailable")?;
     let counts = snapshot.state_counts();
-    let plan_digest = super::campaign_plan_digest(root, campaign_id)?;
+    let plan_digest = history
+        .plan_digests
+        .get(campaign_id)
+        .context("Requested campaign has no snapshot plan digest")?;
     let output = format!(
-        "campaign {} — {} job(s): {}\nPlan digest: {}",
+        "campaign {}: {} job(s): {}\nPlan digest: {}",
         campaign_id,
         snapshot.jobs.len(),
         counts_line(&counts),
         plan_digest,
     );
-    Ok(crate::module_result::completed_output_result(
-        output.clone(),
-        output,
-        json!({
-            "campaignId": snapshot.campaign_id,
-            "planPath": super::campaign_plan_path(root, campaign_id).display().to_string(),
-            "planSha256": plan_digest,
-            "tool": snapshot.tool,
-            "createdAtMs": snapshot.created_at_ms,
-            "pausedUntilMs": snapshot.paused_until_ms,
-            "states": counts,
-            "budgetUsd": snapshot.budget_usd,
-            "jobBudgetUsd": snapshot.job_budget_usd,
-            "fillGaps": snapshot.fill_gaps,
-            "skippedCoveredCells": snapshot.skipped_covered_cells,
-            "totalCostUsd": snapshot.total_cost_usd,
-            "providerSpendUnresolved": snapshot.provider_spend_unresolved,
-            "trend": trend,
-            "trendHistory": trend_history,
-            "historyWindow": super::trend_history::history_window_json(),
-            "jobs": job_rows(root, &snapshot),
-        }),
-    ))
+    let mut data = single_campaign_data(root, snapshot, plan_digest);
+    data["historyCoverage"] = history.coverage.json();
+    data["trend"] = trend;
+    data["trendHistory"] = trend_history;
+    data["historyWindow"] = super::trend_history::history_window_json();
+    Ok(history_result(history, output, data))
+}
+
+fn single_campaign_data(root: &Path, snapshot: &CampaignSnapshot, plan_digest: &str) -> Value {
+    json!({
+        "campaignId": snapshot.campaign_id,
+        "planPath": super::campaign_plan_path(root, &snapshot.campaign_id).display().to_string(),
+        "planSha256": plan_digest,
+        "tool": snapshot.tool,
+        "createdAtMs": snapshot.created_at_ms,
+        "pausedUntilMs": snapshot.paused_until_ms,
+        "states": snapshot.state_counts(),
+        "budgetUsd": snapshot.budget_usd,
+        "jobBudgetUsd": snapshot.job_budget_usd,
+        "fillGaps": snapshot.fill_gaps,
+        "skippedCoveredCells": snapshot.skipped_covered_cells,
+        "totalCostUsd": snapshot.total_cost_usd,
+        "providerSpendUnresolved": snapshot.provider_spend_unresolved,
+        "jobs": job_rows(root, snapshot),
+    })
+}
+
+fn history_result(history: &CampaignHistory, output: String, data: Value) -> Value {
+    let Some(warning) = history.coverage.limitation_label() else {
+        return crate::module_result::completed_output_result(output.clone(), output, data);
+    };
+    let summary = format!("{output}\n{warning}");
+    crate::module_result::partial_output_result(
+        summary.clone(),
+        summary,
+        vec![json!(warning)],
+        data,
+    )
 }
 
 fn job_rows(root: &Path, snapshot: &CampaignSnapshot) -> Vec<Value> {
@@ -147,6 +196,9 @@ fn job_rows(root: &Path, snapshot: &CampaignSnapshot) -> Vec<Value> {
 }
 
 fn done_sentinel_present(root: &Path, run_id: &str) -> bool {
+    if crate::RunId::parse(run_id).is_err() {
+        return false;
+    }
     crate::workspace::workspace_state_dir(root)
         .join("runs")
         .join(run_id)

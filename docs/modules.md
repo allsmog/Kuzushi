@@ -412,6 +412,26 @@ pass. Recurrence changes do not change finding verdicts or clear severity gates.
 The campaign's `o observations` action explicitly selects its batch Review scope;
 `batch clear` returns Review to workspace history.
 
+Campaign status, spending and the shell history browser share one bounded
+catalogue. It examines at most 1,000 directory entries plus one lookahead and
+loads at most 100 investigations with 32 MiB of accounted metadata. Plans and
+queues have a 4 MiB per-file limit, optional child-run metadata 256 KiB, and each
+snapshot at most 1,000 jobs. Browse results do not read child-run details; an
+exact campaign ID is loaded first with its detail under the same allowance.
+Returned `historyCoverage` version 1 reports limits, omissions, confirmed bytes
+and accounted bytes. Uncertain failed reads retain their metadata reservation.
+
+Malformed plans and queues preserve other readable history and mark it partial.
+Unreadable directories are distinguished from empty history. An absent history
+directory is empty history.
+`historyCoverage.complete: false` yields the existing partial result and CLI
+exit 4; aggregate spending remains incomplete. Inspect a known ID outside the
+browse subset with
+`kuzushi run campaign:status --target <repository> --option campaignId=<id>`
+or the shell's `campaign <id>`. The saved plan, queue, original source and approval remain
+unchanged. See [bounded history evidence](assessments/bounded-history-2026-10-27.md)
+and the [reader migration](../RELEASING.md#bounded-campaign-history-readers).
+
 
 `codeql:create-db` and `codeql:scan` keep exact dispatch as Labs, auxiliary Map
 and Scan actions. Database creation retains explicit repository-execution
@@ -4226,6 +4246,15 @@ observation and bounded captured source under the shared investigation allowance
 It makes one logical synthesis request; transport retries consume that same
 allowance. Missing source captures are disclosed rather than replaced with
 current source. Human acceptance and context copying remain separate actions.
+Optional `sourceEvidenceFiles` selects at most 16 exact relative supporting
+paths. The cited file and those files share `maxSourceBytes`, in the selected
+order. Preparation freezes their original snapshot bytes and omissions in
+`sourceEvidenceRef`. Changed or deleted checkout files are never substituted.
+An observation without a retained repository source tree cannot supply
+supporting membership. The TUI's `f` basket uses current paths only for browsing;
+an absent historical path can be entered exactly. After preparation, `v` reads
+the frozen bundle without execution controls. A different selection requires a
+new plan. Receipts retain the optional bundle reference with the lesson draft.
 Report preserves linked lesson records in JSON, JSONL, SARIF and Markdown bundle;
 CSV and the external scanner format disclose their omission. Cross-workspace
 lesson transfer remains unqualified. The manual flow makes no model requests.

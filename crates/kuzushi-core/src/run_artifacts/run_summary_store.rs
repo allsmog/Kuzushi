@@ -200,13 +200,6 @@ fn load_run_summary_raw(target: &Path, run_id: &str) -> Result<(PathBuf, RunSumm
         "Run metadata",
     )?;
     let summary = parse_run_summary_body(target, run_id, &body, &path)?;
-    if summary.run_id != run_id {
-        anyhow::bail!(
-            "Run metadata runId {:?} does not match requested run id {run_id:?}: {}",
-            summary.run_id,
-            path.display()
-        );
-    }
     Ok((path, summary))
 }
 
@@ -772,12 +765,21 @@ fn parse_run_summary_body(
     if !value.is_object() {
         anyhow::bail!("Run metadata is not a JSON object: {}", path.display());
     }
-    let summary = serde_json::from_value(value).map_err(|error| {
-        anyhow::anyhow!("Run metadata is not canonical: {error}: {}", path.display())
-    })?;
+    let summary = decode_run_summary_value(value, run_id)
+        .map_err(|error| anyhow::anyhow!("{error:#}: {}", path.display()))?;
     let summary = summary_with_normalized_artifacts(target, run_id, summary);
-    validate_run_summary_costs(&summary)
-        .with_context(|| format!("Run metadata cost is invalid: {}", path.display()))?;
+    Ok(summary)
+}
+
+pub(crate) fn decode_run_summary_value(value: Value, run_id: &str) -> Result<RunSummary> {
+    let summary: RunSummary =
+        serde_json::from_value(value).context("Run metadata is not canonical")?;
+    validate_run_summary_costs(&summary).context("Run metadata cost is invalid")?;
+    anyhow::ensure!(
+        summary.run_id == run_id,
+        "Run metadata runId {:?} does not match requested run id {run_id:?}",
+        summary.run_id,
+    );
     Ok(summary)
 }
 

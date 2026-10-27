@@ -1396,6 +1396,13 @@ pub(crate) enum FilePickerPurpose {
     KnowledgeBase,
     MapDocument,
     ReviewEvidence,
+    LessonEvidence,
+}
+
+impl FilePickerPurpose {
+    pub(crate) fn is_source_evidence(self) -> bool {
+        matches!(self, Self::ReviewEvidence | Self::LessonEvidence)
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -1483,7 +1490,7 @@ impl FilePickerRouteState {
     }
 
     pub(crate) fn filtered_paths(&self) -> Vec<String> {
-        let files = if self.purpose == FilePickerPurpose::ReviewEvidence {
+        let files = if self.purpose.is_source_evidence() {
             self.review_selection.candidates(&self.files)
         } else {
             self.files.clone()

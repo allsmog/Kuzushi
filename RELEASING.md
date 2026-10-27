@@ -1,5 +1,53 @@
 # Releasing Kuzushi
 
+## Bounded campaign history readers
+
+`campaign:status` adds `data.historyCoverage` version 1. Omitting `campaignId`
+now browses a bounded subset instead of promising every saved campaign. Its
+limits are 1,000 examined directory entries plus one lookahead, 100 loaded
+campaigns and 32 MiB of accounted metadata. Plans and queues are limited to
+4 MiB each, optional run metadata to 256 KiB and snapshots to 1,000 jobs.
+Existing artifact bytes and job identities are not rewritten.
+
+Consumers must check `historyCoverage.complete`. Omissions, unreadable documents
+or limits produce the existing `partial` result and CLI exit 4. Workspace
+spending is then a lower bound with `trend.providerSpendUnresolved: true`.
+A named plan retains its own charge fields. An unreadable
+requested campaign remains an error. Use its exact `campaignId` to inspect an
+investigation outside the browse subset. The requested plan digest comes from
+that same bounded snapshot.
+
+The TUI shares these limits, keeps partial-history disclosure while inspecting
+jobs, and distinguishes an unreadable history directory from an empty workspace.
+Unsupported large or malformed documents stay unavailable rather than supplying
+truncated job counts. Archived JSON remains intact for external inspection.
+No stored-format conversion, plan reapproval or model request is required.
+
+## Historical supporting source for lesson drafts
+
+`findings:lesson-generate` adds optional `sourceEvidenceFiles`, with at most 16
+exact relative paths, and `sourceEvidenceRef`, supplied by study preparation.
+The cited file and supporting files share `maxSourceBytes`. All text comes from
+the exact confirmed observation's retained snapshot. A changed checkout never
+fills missing historical source. Legacy observations that retained only their
+cited file disclose unavailable supporting membership.
+
+Prepared studies bind the selection, source omissions and bytes to an
+authenticated `lesson-source:` bundle. Changing files, order, origin or the
+byte limit requires another plan. Existing studies without supporting files
+retain their prior input and approval behavior. Generation receipts add an
+optional `sourceEvidenceRef`; old receipts deserialize without it and are not
+rewritten. Downstream Rust struct literals must initialize the new optional
+field. Lesson state, finding verdicts and explicit context reuse are unchanged.
+Reading new supporting-source generation receipts requires this release;
+earlier strict readers reject the added field. Existing receipts remain readable
+without migration.
+
+The TUI offers `f` for the supporting-file basket before preparation and `v`
+for a read-only frozen-source view afterward. The basket identifies the current
+path list as a browsing aid. Missing historical paths can be entered exactly.
+
+
 ## Frozen filename selection for scope proposals
 
 `pack:suggest-scopes` adds optional `fileSelection` with `prefix-v1` and

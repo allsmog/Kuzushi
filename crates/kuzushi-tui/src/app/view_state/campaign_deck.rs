@@ -9,12 +9,16 @@ use kuzushi_core::capabilities::campaign::trend::TrendMetrics;
 use kuzushi_core::capabilities::campaign::trend_history::TrendSnapshot;
 use std::collections::BTreeSet;
 
+mod selection;
+
 pub(crate) const CAMPAIGN_DEFAULT_WORKERS: usize = 2;
 pub(crate) const CAMPAIGN_MAX_WORKERS: usize = 8;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CampaignRouteState {
     pub(crate) campaigns: Vec<CampaignSnapshot>,
+    pub(crate) history_coverage:
+        Option<kuzushi_core::capabilities::campaign::history::CampaignHistoryCoverage>,
     pub(crate) selected_campaign: usize,
     /// List mode shows every campaign; detail mode shows the selected
     /// campaign's job matrix.
@@ -60,6 +64,7 @@ impl Default for CampaignRouteState {
     fn default() -> Self {
         Self {
             campaigns: Vec::new(),
+            history_coverage: None,
             selected_campaign: 0,
             detail: false,
             job_detail: false,

@@ -143,11 +143,12 @@ fn campaign_status_tool() -> ToolDescriptor {
     tool_with_options(
         "campaign:status",
         "Fold a campaign plan with the dispatcher queue and run done.json \
-         sentinels into one status view; without campaignId, list all campaigns.",
+         sentinels into one status view; without campaignId, browse bounded \
+         history with explicit omissions and spending limits.",
         vec![opt(
             "campaignId",
             OptionType::String,
-            "Campaign to inspect. Omit to list every campaign.",
+            "Campaign to inspect by exact ID, including one outside the bounded history view. Omit to browse history.",
         )
         .aliases(&["campaign_id", "id"])],
     )

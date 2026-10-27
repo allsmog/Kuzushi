@@ -24,7 +24,7 @@ impl ShellApp {
 }
 
 impl StudyContextGeneration {
-    fn clear_model_plan(&mut self) {
+    pub(crate) fn clear_model_plan(&mut self) {
         self.receipt = None;
         self.campaign_id = None;
         self.generated = None;
@@ -39,6 +39,7 @@ impl StudyContextGeneration {
         self.show_options = false;
         self.show_rejected = false;
         self.options = Default::default();
+        self.lesson_sources = None;
     }
 }
 

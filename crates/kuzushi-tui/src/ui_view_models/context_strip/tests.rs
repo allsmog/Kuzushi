@@ -3,6 +3,8 @@ use crate::ScanPanelState;
 use kuzushi_core::V2Config;
 use std::path::PathBuf;
 
+mod study;
+
 #[test]
 fn context_strip_model_reports_idle_shell_state() {
     let app = ShellApp::new(V2Config::default(), None);

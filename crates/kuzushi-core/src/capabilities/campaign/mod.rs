@@ -85,6 +85,7 @@ pub use scope_allowance::load_scope_proposal_allowance;
 pub use study_receipt::{
     load_study_allowance, load_study_plan_receipt, load_study_resource_baseline, StudyPlanReceipt,
 };
+pub mod history;
 #[cfg(test)]
 mod tests;
 mod threats;

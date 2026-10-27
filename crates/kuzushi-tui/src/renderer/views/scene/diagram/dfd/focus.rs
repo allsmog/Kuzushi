@@ -25,6 +25,10 @@ pub(super) fn render(
     }
     let items = dfd_security_items_for_selection(model, selection);
     let selected = clamped_selection(context_selection, items.len());
+    if area.height < 9 {
+        render_short_context(buf, area, model, selection, &items, selected);
+        return;
+    }
     let regions = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -40,6 +44,38 @@ pub(super) fn render(
         render_compact_context(buf, regions[1], &items, selected);
     }
     render_annotation_detail(buf, regions[2], items.get(selected).copied());
+}
+
+fn render_short_context(
+    buf: &mut Buffer,
+    area: Rect,
+    model: &DfdModel,
+    selection: usize,
+    items: &[&DfdSecurityItem],
+    selected: usize,
+) {
+    let heading = Rect::new(area.x, area.y, area.width, 1);
+    render_element_header(buf, heading, model, selection, items.len());
+    let body = Rect::new(area.x, area.y + 1, area.width, area.height - 1);
+    let Some(item) = items.get(selected) else {
+        Paragraph::new("No linked annotations")
+            .style(theme::muted())
+            .render(body, buf);
+        return;
+    };
+    let lines = [
+        format!(
+            "{} · {}/{} · {}",
+            kind_label(item.kind),
+            selected + 1,
+            items.len(),
+            item.label
+        ),
+        format!("Evidence: {}", item.evidence_label()),
+        item.detail.clone(),
+    ]
+    .map(|line| Line::styled(fit(&line, area.width as usize), theme::primary()));
+    Paragraph::new(Vec::from(lines)).render(body, buf);
 }
 
 fn render_element_header(
@@ -266,7 +302,7 @@ fn detail_lines(item: &DfdSecurityItem, width: usize) -> Vec<Line<'static>> {
     [
         format!("{} · {} · {}", kind_label(item.kind), item.key, item.label),
         item.detail.clone(),
-        item.evidence.clone(),
+        item.evidence_label(),
     ]
     .into_iter()
     .filter(|line| !line.is_empty())
@@ -289,3 +325,6 @@ fn kind_label(kind: DfdSecurityKind) -> &'static str {
         DfdSecurityKind::Threat => "THREAT",
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -3,7 +3,10 @@ use super::*;
 fn linked_reader(width: u16, height: u16) -> (tempfile::TempDir, ShellApp) {
     let root = tempfile::tempdir().unwrap();
     let mut app = large_job_reader(width, height);
+    let history = app.router.campaign().clone();
     app.set_target(Some(root.path().into()));
+    // Install this fixture's synthetic history after selecting its target.
+    *app.router.campaign_mut() = history;
     app.set_shell_view(ShellView::Workbench);
     app.router
         .workbench_mut()

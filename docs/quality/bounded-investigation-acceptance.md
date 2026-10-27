@@ -1219,3 +1219,33 @@ accepting Map/Scan or starting follow-up work. Raw failures and review status
 remain retained. No model request is added. Source-identity IO is separate from
 discovery limits; large-monorepo performance, all other adapters and the full
 investigation goal remain open.
+## Historical supporting-source lesson increment, 2026-10-26
+
+Lesson generation now accepts an explicit bounded supporting-file selection
+from its exact recorded observation snapshot. The TUI provides a file basket,
+read-only source/omission view, explicit source limits on approval and a compact
+generation receipt. Current checkout changes do not replace historical bytes.
+Shared prepared dispatch, snapshot authentication and investigation accounting
+remain authoritative; generation, human acceptance and context reuse stay
+separate. Final J390 has 51 machine passes, zero failures and seven answered
+agent screen judgments with polish findings. This qualifies source plumbing,
+keyboard interaction and restart on a labeled synthetic fixture, with no live
+provider calls. Model usefulness, broader repository quality and operator UX
+acceptance remain scoped. See
+[the evidence and limits](../assessments/historical-lesson-sources-2026-10-26.md).
+
+## Bounded history and end-to-end repeat, 2026-10-27
+
+The [bounded history increment](../assessments/bounded-history-2026-10-27.md)
+shares one cancellable catalogue between status, workspace spending and shell
+history. Limits, unreadable records, symlink exclusions and unknown spending
+remain visible; an explicit ID is loaded before the bounded browse subset.
+There are 475 distinct focused Rust passes, workspace build and Core/TUI Clippy.
+J393 has 24 machine passes, zero failures and six answered agent screen
+questions. The final rebuilt J121 adds 343 machine passes, zero failures and
+21 answered agent questions through Context, three fixed Scan jobs, cancellation,
+specific allowance revisions, triage, reports and restart. Its five intercepted
+requests add no live-model spend. Raw review-required status and craft findings
+remain retained. Synchronous local history reads, remote latency, large decision
+ledgers, broader module usefulness, live-model quality and operator UX acceptance
+remain open. These fixtures do not establish the full reference-product UX bar.

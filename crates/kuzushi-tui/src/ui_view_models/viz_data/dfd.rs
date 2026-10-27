@@ -4,6 +4,7 @@ use super::super::threat_dfd_diagram::{
 use crate::{DfdModelCacheKey, ShellApp};
 
 mod evidence;
+mod evidence_display;
 mod overview;
 pub(crate) use overview::{
     dfd_overview, dfd_overview_component_at, dfd_overview_component_count, display_target,

@@ -4,8 +4,11 @@ use super::{
     scoped_target_path_label, view_status_segment, ShellApp,
 };
 
+mod study;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ContextStripModel {
+    pub(crate) study_title: Option<&'static str>,
     pub(crate) mode: String,
     pub(crate) target: String,
     pub(crate) context_present: bool,
@@ -31,6 +34,7 @@ pub(crate) struct ContextStripSegment {
 
 pub(crate) fn context_strip_model(app: &ShellApp) -> ContextStripModel {
     ContextStripModel {
+        study_title: study::reader_title(app),
         mode: routing_mode_segment(app),
         target: target_segment_value(app),
         context_present: app.domain().context_view().exists,
@@ -54,7 +58,7 @@ impl ContextStripModel {
     pub(crate) fn compact_segments(&self) -> Vec<String> {
         let mut segments = self.orientation_segments();
         segments.extend([
-            format!("model:{}", self.model),
+            format!("{}:{}", self.model_field_label(), self.model),
             self.context_state_segment(),
         ]);
         segments.extend(self.activity_segments());
@@ -63,6 +67,11 @@ impl ContextStripModel {
     }
 
     pub(crate) fn orientation_segments(&self) -> Vec<String> {
+        if let Some(title) = self.study_title {
+            let mut segments = vec![title.into(), format!("Target {}", self.target)];
+            segments.extend(self.phase.iter().map(|phase| format!("Progress {phase}")));
+            return segments;
+        }
         let mut segments = vec![self.mode.clone(), format!("view:{}", self.view)];
         segments.extend(self.phase.iter().map(|phase| format!("phase:{phase}")));
         segments.push(format!("target:{}", self.target));
@@ -76,9 +85,17 @@ impl ContextStripModel {
             .map(|cost| format!("session:{cost}"))
             .collect();
         segments.push(self.context_state_segment());
-        segments.push(format!("model:{}", self.model));
+        segments.push(format!("{}:{}", self.model_field_label(), self.model));
         segments.extend(self.activity_segments());
         segments
+    }
+
+    pub(crate) fn model_field_label(&self) -> &'static str {
+        if self.study_title.is_some() {
+            "configured model"
+        } else {
+            "model"
+        }
     }
 
     fn activity_segments(&self) -> Vec<String> {
