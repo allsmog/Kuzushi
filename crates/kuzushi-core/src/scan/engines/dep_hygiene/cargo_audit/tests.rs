@@ -25,6 +25,75 @@ fn source(folder: &Path) -> PathBuf {
     source
 }
 
+#[cfg(unix)]
+fn package_location_scan(lockfile: &str) -> Vec<Finding> {
+    let root = tempfile::tempdir().unwrap();
+    let source = source(root.path());
+    fs::write(source.join("Cargo.lock"), lockfile).unwrap();
+    let output = r#"{"vulnerabilities":{"found":true,"list":[{"advisory":{"id":"RUSTSEC-OWNED","title":"Owned metadata signal"},"package":{"name":"owned","version":"1.0.0"}}]}}"#;
+    let binary = executable(
+        root.path(),
+        &format!("cat >/dev/null; printf '%s' '{output}'"),
+    );
+    ConfiguredCargoAuditScanner::from_tool_input(&json!({"binary":binary,"offline":true}))
+        .unwrap()
+        .scan(&source, &ScanCancellation::default())
+        .unwrap()
+}
+
+#[cfg(unix)]
+#[test]
+fn cargo_audit_package_location_uses_the_captured_package_declaration() {
+    let source = "# Owned café metadata\nversion=3\n[[package]]\nname='other'\nversion='1.0.0'\n\n[[package]]\nname='owned'\nversion='1.0.0'\n";
+    let findings = package_location_scan(source);
+    assert_eq!(findings[0].start_line, 8);
+    assert_eq!(
+        findings[0].symbol_locator.as_deref(),
+        Some("Cargo.lock#owned@1.0.0")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn cargo_audit_package_location_is_unavailable_for_missing_or_ambiguous_packages() {
+    for source in [
+        "version=3\n",
+        "version=3\n[[package]]\nname='owned'\nversion='1.0.0'\nsource='one'\n[[package]]\nname='owned'\nversion='1.0.0'\nsource='two'\n",
+    ] {
+        let findings = package_location_scan(source);
+        assert_eq!(findings[0].start_line, 0);
+        assert!(findings[0].message.contains("location is unavailable"));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn cargo_audit_package_location_uses_stdin_even_when_the_live_lockfile_changes() {
+    let root = tempfile::tempdir().unwrap();
+    let source = source(root.path());
+    let original =
+        "# Owned captured input\nversion=3\n[[package]]\nname='owned'\nversion='1.0.0'\n";
+    fs::write(source.join("Cargo.lock"), original).unwrap();
+    let report = r#"{"vulnerabilities":{"found":true,"list":[{"advisory":{"id":"RUSTSEC-OWNED","title":"Owned metadata"},"package":{"name":"owned","version":"1.0.0"}}]}}"#;
+    let binary = executable(root.path(), &format!(
+        "fixture_root=${{0%/*}}\ncat > \"$fixture_root/captured\"\nprintf 'version=3\\n' > \"$fixture_root/source/Cargo.lock\"\nprintf '%s' '{report}'"
+    ));
+    let findings =
+        ConfiguredCargoAuditScanner::from_tool_input(&json!({"binary":binary,"offline":true}))
+            .unwrap()
+            .scan(&source, &ScanCancellation::default())
+            .unwrap();
+    assert_eq!(findings[0].start_line, 4);
+    assert_eq!(
+        fs::read(root.path().join("captured")).unwrap(),
+        original.as_bytes()
+    );
+    assert_eq!(
+        fs::read_to_string(source.join("Cargo.lock")).unwrap(),
+        "version=3\n"
+    );
+}
+
 #[test]
 fn cargo_audit_config_refuses_invalid_limits_and_explicit_empty_values() {
     for value in [

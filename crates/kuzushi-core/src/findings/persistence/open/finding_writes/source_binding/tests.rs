@@ -252,6 +252,12 @@ fn canceled_capture_and_invalid_primary_lines_leave_no_observations() {
 fn captured_binding_cannot_be_reused_for_lines_outside_the_supplied_prefix() {
     let mut f = Fixture::new("owned.c");
     let source = f.capture(1024).unwrap();
+    f.finding.start_line = 0;
+    let error = f
+        .store
+        .insert_finding_with_sources("owned", &f.finding, &source)
+        .unwrap_err();
+    assert!(error.to_string().contains("no recorded line"), "{error:#}");
     f.finding.start_line = 2;
     f.finding.evidence.clear();
     assert!(f

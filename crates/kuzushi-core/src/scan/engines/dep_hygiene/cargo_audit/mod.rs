@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 pub(crate) mod config;
 use config::AuditConfig;
+mod source_locations;
 #[cfg(test)]
 mod tests;
 
@@ -93,6 +94,7 @@ impl ScanEngine for ConfiguredCargoAuditScanner {
         anyhow::ensure!(!cancellation.is_cancelled(), "cargo-audit scan cancelled");
         self.remaining_timeout()?;
         let lockfile = self.capture_lockfile(target)?;
+        let locations = source_locations::PackageLocations::from_bytes(&lockfile);
         self.preflight()?;
         let directory = tempfile::Builder::new()
             .prefix("kuzushi-cargo-audit-")
@@ -104,7 +106,9 @@ impl ScanEngine for ConfiguredCargoAuditScanner {
             Some(cancellation),
             self.remaining_timeout()?,
         )?;
-        super::id::cargo_audit_findings_from_output(output)
+        let mut findings = super::id::cargo_audit_findings_from_output(output)?;
+        locations.bind(&mut findings);
+        Ok(findings)
     }
 
     fn inspection_receipts(&self) -> Vec<Value> {

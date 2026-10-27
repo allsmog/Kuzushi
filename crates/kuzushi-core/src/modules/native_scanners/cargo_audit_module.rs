@@ -70,11 +70,12 @@ pub(in crate::modules) fn run_cargo_audit_scan(
 ) -> Result<Value> {
     let target = resolve_tool_target(&input, ctx)?;
     let scanner = ConfiguredCargoAuditScanner::from_tool_input(&input)?;
-    let source = SourceSnapshot::capture(ctx, "cargo-audit:scan", &target)?;
+    let source_workspace = crate::workspace::source_snapshot::workspace_source_owner(ctx, &target)?;
+    let source = SourceSnapshot::capture(ctx, "cargo-audit:scan", source_workspace.root())?;
     let receipt = DirectScanReceipt::capture(ctx, &target, DirectScanPolicy::CargoAudit)?;
     let (output, findings) = source.bind_result(analyze(&target, &scanner, ctx))?;
     let settlement_source = source.clone();
-    let output = source.finish(ctx, "cargo-audit:scan", &target, output);
+    let output = source.finish(ctx, "cargo-audit:scan", source_workspace.root(), output);
     let result = settlement_source.bind_result(receipt.finish(ctx, &findings, output))?;
     Ok(with_inspection_receipts(
         result,
@@ -113,10 +114,10 @@ fn rebase_findings(
         .strip_prefix(workspace.root())
         .context("Cargo discovery target must stay inside its workspace")?;
     for finding in findings {
-        let file = prefix
-            .join(&finding.file_path)
-            .to_string_lossy()
-            .replace('\\', "/");
+        let file = crate::workspace::inventory::repo_relative(
+            Path::new(""),
+            &prefix.join(&finding.file_path),
+        );
         scanner.rebind_scoped_finding(finding, file);
     }
     Ok(())

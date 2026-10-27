@@ -1,0 +1,59 @@
+name: Real scope variant stays unaccepted with uncovered root and exhausted allowance
+size: 120x36
+cwd: @REPO/scripts/devex/artifacts/monorepo-scope-live-20261025/attempt-2/target
+env-unset: NODE_OPTIONS KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE KUZUSHI_AGENT_MCPS ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@REPO/scripts/devex/artifacts/monorepo-scope-live-20261025/attempt-2/operator-home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NODE_OPTIONS=--import=@REPO/scripts/devex/fixtures/deny_provider_transport.mjs KUZUSHI_TEST_DENIED_FETCH_LOG=@ART/denied-fetch.jsonl
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_scope_variant.py @ART inspect
+require-wrapper-flow:
+launch: --target @REPO/scripts/devex/artifacts/monorepo-scope-live-20261025/attempt-2/target
+require-live-snap: 30 KUZUSHI | ready
+submit: scopes
+require-live-snap: 25 DRAFT SCOPES · r2 | real-proposal
+expect: 496/602 files
+expect: Proposal context: saved revision tmr_b8b5f79cd3ab42f3a5184a8d96084030
+expect-not: ACCEPTED SCOPES
+ask: Does the real proposal show its model, exact saved architecture revision, bounded input, component groups and unaccepted state without implying complete source understanding or approved scan jobs?
+keys: Down Down Down Down Down Down Down
+require-live-snap: 20 Shared: | shared-context
+keys: Down
+require-live-snap: 20 Uncovered 1 · excluded 0 · overlap 0 | uncovered-category
+keys: Right Down
+require-live-snap: 20 File: workspace.json | uncovered-root-file
+resize: 160x48
+live-snap: root-160x48
+resize: 96x89
+live-snap: root-96x89
+resize: 80x24
+live-snap: root-80x24
+resize: 60x20
+live-snap: root-60x20
+resize: 40x12
+live-snap: root-40x12
+keys: NPage NPage
+live-snap: root-details-40x12
+ask: Across six sizes, is workspace.json visibly uncovered with readable controls, while shared context stays separate from discovery and no scope is accepted?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_scope_variant.py @ART inspected
+resize: 120x36
+keys: Escape
+submit: logs
+paste-file: @ART/read-allowance.txt
+keys: Enter
+require-live-snap: 30 Calls committed: 2/2 · remaining: 0 | spent-allowance
+expect: Unresolved calls: 0
+expect: dollar ceiling: not enforced
+ask: Does allowance inspection preserve the earlier paid failure and the successful variant as two spent requests, with no remaining calls or enforced dollar ceiling?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_scope_variant.py @ART accounting
+keys: C-c
+require-exit: 10
+env: HOME=@REPO/scripts/devex/artifacts/monorepo-scope-live-20261025/attempt-2/operator-home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1 NODE_OPTIONS=--import=@REPO/scripts/devex/fixtures/deny_provider_transport.mjs KUZUSHI_TEST_DENIED_FETCH_LOG=@ART/denied-fetch.jsonl
+launch: --target @REPO/scripts/devex/artifacts/monorepo-scope-live-20261025/attempt-2/target
+require-live-snap: 30 KUZUSHI | restarted
+submit: scopes
+require-live-snap: 25 DRAFT SCOPES · r2 | recovered-proposal
+expect: Proposal context: saved revision tmr_b8b5f79cd3ab42f3a5184a8d96084030
+keys: Down Down Down Down Down Down Down Down Right Down
+require-live-snap: 20 File: workspace.json | recovered-uncovered-root
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_scope_variant.py @ART restarted
+ask: Does no-color restart retain the same unaccepted real proposal, uncovered root, inactive architecture and exhausted allowance with no new work or provider request?
+keys: C-c
+require-exit: 10

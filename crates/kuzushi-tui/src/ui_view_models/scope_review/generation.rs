@@ -9,6 +9,7 @@ pub(super) fn generation_summary(generation: Option<&ScanScopeGeneration>) -> Ve
             "Proposal model: {}",
             crate::app::display_model_selector(&generation.model)
         ),
+        proposal_context_summary(generation),
         format!(
             "Model input: {} bytes; {}/{} files.",
             generation.input_bytes, generation.supplied_files, generation.inventoried_files
@@ -38,7 +39,27 @@ pub(super) fn generation_detail(review: &ScanScopeReview) -> Vec<String> {
             generation.run_id
         ),
     ];
+    lines.extend(proposal_context_detail(generation));
     lines.extend(generation.limitations.clone());
+    lines
+}
+
+fn proposal_context_summary(generation: &ScanScopeGeneration) -> String {
+    generation.context_ref.as_ref().map_or_else(
+        || "Proposal context reference: not recorded.".into(),
+        |context| format!("Proposal context: saved revision {}", context.revision_id),
+    )
+}
+
+fn proposal_context_detail(generation: &ScanScopeGeneration) -> Vec<String> {
+    let mut lines = vec![proposal_context_summary(generation)];
+    if let Some(context) = &generation.context_ref {
+        lines.extend([
+            format!("Proposal context model: {}", context.model_id),
+            format!("Proposal context SHA-256: {}", context.sha256),
+            "Map acceptance and scan context are reviewed separately.".into(),
+        ]);
+    }
     lines
 }
 
