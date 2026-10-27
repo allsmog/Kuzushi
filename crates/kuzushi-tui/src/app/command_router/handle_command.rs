@@ -1,6 +1,6 @@
 use super::*;
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod dispatcher_tests;
 
 impl ShellApp {

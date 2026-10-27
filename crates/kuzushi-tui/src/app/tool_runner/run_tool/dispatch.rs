@@ -619,5 +619,5 @@ mod remembered_confirmation_tests {
 #[cfg(test)]
 mod preparation_failure_tests;
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod dispatcher_tests;

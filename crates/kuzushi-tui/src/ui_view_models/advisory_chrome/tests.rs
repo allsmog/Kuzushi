@@ -32,6 +32,7 @@ fn cost_cap_halt_model_formats_spend_against_limit() {
     assert!(model.compact.contains("Esc inspect"));
 }
 
+#[cfg(unix)]
 #[test]
 fn held_dispatcher_budget_actions_keep_session_and_study_stop_distinct() {
     use crate::app::owned_dispatcher_test_support::HeldDispatcher;
@@ -40,10 +41,11 @@ fn held_dispatcher_budget_actions_keep_session_and_study_stop_distinct() {
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
     app.session_mut().set_session_budget_usd(Some(1.0));
     app.record_cost(2.0);
-    let mut held = HeldDispatcher::hold(&mut app);
+    let mut held = HeldDispatcher::hold_with_campaign_budget(&mut app, Some(5.0));
     let model = cost_cap_halt_model(&held).unwrap();
     assert!(model.header.contains("SESSION COST CAP HALT"));
     assert!(model.actions.contains("Study allowance is separate"));
+    assert!(!model.actions.contains("no allowance"));
     assert!(model.compact.contains("a local"));
     assert!(footer_keybindings(&held)
         .iter()
@@ -65,6 +67,52 @@ fn held_dispatcher_budget_actions_keep_session_and_study_stop_distinct() {
     assert!(held.request_active_abort());
     assert!(held.directory().join("dispatcher-stop.json").exists());
     assert!(held.is_budget_halted());
+}
+
+#[cfg(unix)]
+fn held_study_halt_actions(budget_usd: Option<f64>) -> (String, String) {
+    use crate::app::owned_dispatcher_test_support::HeldDispatcher;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    app.session_mut().set_session_budget_usd(Some(1.0));
+    app.record_cost(2.0);
+    let mut held = HeldDispatcher::hold_with_campaign_budget(&mut app, budget_usd);
+    let halted = cost_cap_halt_model(&held).unwrap().actions.to_string();
+    held.reduce_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    let acknowledged = cost_cap_halt_model(&held).unwrap().actions.to_string();
+    (halted, acknowledged)
+}
+
+#[cfg(unix)]
+#[test]
+fn held_study_without_allowance_is_disclosed_as_unbounded_by_the_session_cap() {
+    let (halted, acknowledged) = held_study_halt_actions(None);
+    assert!(halted.starts_with("Study has no allowance set and is not bounded by the session cap."));
+    assert!(acknowledged
+        .contains("the study has no allowance set and is not bounded by the session cap"));
+    assert!(
+        !halted.contains("allowance is separate") && !acknowledged.contains("its own allowance")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn held_study_with_allowance_keeps_the_separate_allowance_wording() {
+    let (halted, acknowledged) = held_study_halt_actions(Some(5.0));
+    assert!(halted.starts_with("Study allowance is separate."));
+    assert!(acknowledged.contains("the study uses its own allowance"));
+}
+
+#[cfg(unix)]
+#[test]
+fn held_study_with_unreadable_campaign_state_reports_an_unknown_allowance() {
+    use crate::app::owned_dispatcher_test_support::HeldDispatcher;
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    app.session_mut().set_session_budget_usd(Some(1.0));
+    app.record_cost(2.0);
+    let held = HeldDispatcher::hold(&mut app);
+    let actions = cost_cap_halt_model(&held).unwrap().actions;
+    assert!(actions.starts_with("Study allowance could not be determined."));
 }
 
 #[test]

@@ -26,7 +26,27 @@ impl<'a> HeldDispatcher<'a> {
             owner.to_string(),
         )
         .unwrap();
+        held.app.runtime_state.refresh_owned_study_allowance();
         held
+    }
+
+    /// Holds a study whose recorded campaign queue carries `budget_usd`.
+    pub(crate) fn hold_with_campaign_budget(
+        app: &'a mut ShellApp,
+        budget_usd: Option<f64>,
+    ) -> Self {
+        let mut held = Self::hold(app);
+        held.record_campaign(serde_json::json!({ "budgetUsd": budget_usd }));
+        held
+    }
+
+    fn record_campaign(&mut self, queue: serde_json::Value) {
+        use kuzushi_core::capabilities::campaign::{campaign_plan_path, campaign_queue_path};
+        let (root, id) = (self.root.path(), "held-dispatcher");
+        let plan = serde_json::json!({ "jobs": [] });
+        std::fs::write(campaign_plan_path(root, id), plan.to_string()).unwrap();
+        std::fs::write(campaign_queue_path(root, id), queue.to_string()).unwrap();
+        self.app.runtime_state.refresh_owned_study_allowance();
     }
 
     pub(crate) fn directory(&self) -> PathBuf {

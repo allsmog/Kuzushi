@@ -70,6 +70,7 @@ fn empty_completion_restores_navigation_without_a_new_command() {
     assert!(app.input().is_empty());
 }
 
+#[cfg(unix)]
 #[test]
 fn held_dispatcher_does_not_delay_foreground_origin_and_draft_return() {
     let mut app = returning_to(ShellView::Logs);

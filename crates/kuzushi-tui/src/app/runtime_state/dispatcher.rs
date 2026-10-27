@@ -1,5 +1,6 @@
 //! Ownership of the detached child, independent of the selected target or row.
-use super::RuntimeState;
+use super::study_allowance::resolve_study_allowance;
+use super::{RuntimeState, StudyAllowance};
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::process::Child;
@@ -33,6 +34,21 @@ impl RuntimeState {
         self.dispatcher_child = Some(child);
         self.dispatcher_origin = Some((target, campaign));
         self.dispatcher_stop_requested = false;
+        self.dispatcher_allowance = StudyAllowance::Unknown;
+    }
+
+    /// The owned study's spending bound; `None` when no study is owned.
+    pub(crate) fn owned_study_allowance(&self) -> Option<StudyAllowance> {
+        self.dispatcher_child.as_ref()?;
+        Some(self.dispatcher_allowance)
+    }
+
+    /// Re-read the owned study's campaign state for its spending bound.
+    pub(crate) fn refresh_owned_study_allowance(&mut self) {
+        let Some((target, campaign)) = self.owned_dispatcher_origin() else {
+            return;
+        };
+        self.dispatcher_allowance = resolve_study_allowance(target, campaign);
     }
 
     pub(crate) fn request_dispatcher_stop(&mut self) -> Result<u32> {

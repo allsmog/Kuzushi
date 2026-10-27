@@ -231,6 +231,7 @@ mod tests {
         assert!(!app.refresh_findings_after_external_store_write(next));
     }
 
+    #[cfg(unix)]
     #[test]
     fn held_dispatcher_keeps_external_findings_refresh_live() {
         let (_temp, workspace) = store_with_one_finding();

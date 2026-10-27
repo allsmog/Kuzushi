@@ -608,6 +608,7 @@ mod tests {
         ));
     }
 
+    #[cfg(unix)]
     #[test]
     fn held_dispatcher_keeps_state_artifact_refresh_live() {
         let temp = tempfile::tempdir().unwrap();

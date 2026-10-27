@@ -171,7 +171,7 @@ mod workspace_context;
 
 mod devex_phase_fixture;
 mod domain_cache;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) mod owned_dispatcher_test_support;
 mod shell_lifecycle;
 mod shellapp;

@@ -248,6 +248,7 @@ impl ShellApp {
                 let pid = child.id();
                 self.runtime_state
                     .hold_dispatcher(child, target, campaign_id.clone());
+                self.runtime_state.refresh_owned_study_allowance();
                 let deck = self.router.campaign_mut();
                 deck.dispatcher_pid = Some(pid);
                 deck.dispatcher_stop_requested = false;
