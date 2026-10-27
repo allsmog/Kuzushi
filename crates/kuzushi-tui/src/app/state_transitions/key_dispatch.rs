@@ -881,7 +881,10 @@ impl ShellApp {
         InputUpdate::handled_if(self.handle_unhandled_navigation_key(key, modifiers))
     }
 
-    /// An unclaimed plain printable key in Navigate starts typing a prompt.
+    /// An unclaimed plain printable key in Navigate starts typing a prompt,
+    /// except a digit that names a Workbench page the keymap leaves unbound.
+    /// Answering a page press with silent draft text hides both the press and
+    /// the reason it did nothing.
     fn type_printable_navigate_key(
         &mut self,
         key: KeyEvent,
@@ -893,9 +896,30 @@ impl ShellApp {
         if !modifiers.plain {
             return None;
         }
+        if self.unbound_phase_page_digit(key, ch).is_some() {
+            return None;
+        }
         self.enter_prompt_mode();
         self.insert_printable_key(ch);
         Some(InputUpdate::handled())
+    }
+
+    /// The durable phase page a Workbench digit names while the current keymap
+    /// binds no such key — `4` and `5` wherever only the investigation pages
+    /// carry page keys. An empty composer makes the press navigation intent, so
+    /// the reducer names the page's verb instead of typing the digit; a
+    /// preserved draft keeps extending, exactly as any other printable does.
+    fn unbound_phase_page_digit(&self, key: KeyEvent, ch: char) -> Option<WorkbenchPage> {
+        if self.shell_view() != ShellView::Workbench || !self.input().is_empty() {
+            return None;
+        }
+        let page = WorkbenchPage::ALL
+            .into_iter()
+            .find(|page| page.page_key() == ch)?;
+        self.view_keybindings()
+            .iter()
+            .all(|binding| !binding.matches(key))
+            .then_some(page)
     }
 
     fn record_operator_interaction(&mut self) {
@@ -2031,16 +2055,32 @@ impl ShellApp {
             return false;
         }
         match key.code {
-            KeyCode::Char(ch) => self.log(
-                "input",
-                format!("no navigation action for `{ch}` here — Esc returns to prompt"),
-            ),
+            KeyCode::Char(ch) => {
+                let message = self.unhandled_navigation_character_message(key, ch);
+                self.log("input", message)
+            }
             KeyCode::Enter | KeyCode::Tab | KeyCode::BackTab => {
                 self.log("input", "no navigation action here — Esc returns to prompt")
             }
             _ => return false,
         }
         true
+    }
+
+    /// A page digit names the page it aimed at and the verb that opens it;
+    /// every other character reports only that nothing here claims it.
+    fn unhandled_navigation_character_message(&self, key: KeyEvent, ch: char) -> String {
+        match self.unbound_phase_page_digit(key, ch) {
+            Some(page) => {
+                let phase = page.phase();
+                format!(
+                    "`{ch}` does not open {} here — type `{}`",
+                    phase.title(),
+                    phase.word()
+                )
+            }
+            None => format!("no navigation action for `{ch}` here — Esc returns to prompt"),
+        }
     }
 }
 

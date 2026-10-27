@@ -45,7 +45,10 @@ export function createSourceArchive({ repo, commitSha, output }) {
 
 export function verifySourceArchive(repo, commitSha, archivePath) {
   const tarBytes = gunzipSync(readFileSync(archivePath));
-  const embeddedSha = runGit(repo, ["get-tar-commit-id"], tarBytes).toString("utf8").trim();
+  // Git stores the commit in the first two tar blocks and stops reading there.
+  const embeddedSha = runGit(repo, ["get-tar-commit-id"], tarBytes.subarray(0, 1024))
+    .toString("utf8")
+    .trim();
   if (embeddedSha !== commitSha)
     throw new Error(`source archive embeds ${embeddedSha}, not ${commitSha}`);
   const actual = tarPaths(tarBytes);
