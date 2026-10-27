@@ -64,7 +64,23 @@ pub(super) fn retain_draft(state: &mut ScopeReviewState, form: ScopeEditForm) {
 }
 
 impl ScopeReviewState {
-    pub(super) fn selection_for_saved_review(&mut self) -> Option<String> {
+    pub(super) fn selection_for_saved_review(
+        &mut self,
+        review: &ScanScopeReview,
+    ) -> Option<String> {
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|request| request.focus_first_scope)
+        {
+            self.scroll = 0;
+            return review
+                .record
+                .draft
+                .scopes
+                .first()
+                .map(|scope| scope.id.clone());
+        }
         if let Some(form) = self
             .form
             .as_ref()

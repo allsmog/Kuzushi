@@ -26,11 +26,11 @@ pub(super) fn render_scope_review(frame: &mut Frame<'_>, app: &ShellApp) -> bool
             .title(scope_title_line(app, state, area.width)),
         area,
     );
-    render_scope_source(frame, app, state, area);
     if state.form.is_some() {
         render_scope_target(frame, state, area, None);
         render_scope_form(frame, state, area);
     } else {
+        render_scope_source(frame, app, state, area);
         render_scope_panels(frame, app, state, area);
     }
     let controls = scope_controls(state).map(|text| Line::styled(text, theme::accent()));
@@ -125,7 +125,7 @@ fn render_scope_panels(
         })
         .collect::<Vec<_>>();
     frame.render_widget(Paragraph::new(lines), layout.list);
-    let detail = scope_detail_lines(
+    let detail = scope_display_lines(
         app,
         state,
         &scope_source_view(app, state),
@@ -213,7 +213,7 @@ pub(super) fn scope_review_plain_lines(app: &ShellApp, width: usize) -> Option<V
     text.extend(scope_controls(state).map(str::to_string));
     Some(
         text.into_iter()
-            .flat_map(|line| wrap_text(&line, width))
+            .flat_map(|line| crate::renderer::shared::text::wrap_document_text(&line, width, width))
             .collect(),
     )
 }

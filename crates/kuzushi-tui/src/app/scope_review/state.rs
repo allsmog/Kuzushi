@@ -63,7 +63,7 @@ impl ScopeReviewState {
                 .is_some_and(|members| members.total > 0)
         });
         let selected = self
-            .selection_for_saved_review()
+            .selection_for_saved_review(&review)
             .map(|id| super::ScopeTreeRow::Branch(super::ScopeBranch::Scope(id)))
             .or_else(|| self.selected_row());
         self.reconcile_tree(&review);
@@ -145,6 +145,7 @@ pub(crate) struct ScopeRequest {
     pub filter: Option<ScopeFileFilter>,
     pub offset: usize,
     pub tree_branch: Option<super::ScopeBranch>,
+    pub focus_first_scope: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

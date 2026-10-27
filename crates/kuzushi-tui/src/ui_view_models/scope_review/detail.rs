@@ -158,7 +158,7 @@ fn coverage_detail(review: &kuzushi_core::workspace::ScanScopeReview) -> Vec<Str
     lines
 }
 
-fn enumeration_summary(coverage: &kuzushi_core::workspace::ScanScopeCoverage) -> String {
+pub(super) fn enumeration_summary(coverage: &kuzushi_core::workspace::ScanScopeCoverage) -> String {
     let state = if coverage.enumeration_complete {
         "complete under inventory policy"
     } else {
@@ -239,8 +239,7 @@ fn menu_detail(state: &ScopeReviewState) -> Vec<String> {
 
 fn boundary_action_unavailable(state: &ScopeReviewState) -> bool {
     match state.menu {
-        Some(4) => selected_scope(state).is_none() && state.selected_file().is_none(),
-        Some(0..=5) => selected_scope(state).is_none(),
+        Some(0..=3) | Some(5) => selected_scope(state).is_none(),
         _ => false,
     }
 }

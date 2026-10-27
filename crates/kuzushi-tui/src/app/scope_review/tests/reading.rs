@@ -1,6 +1,6 @@
 use super::*;
 
-fn screen(app: &ShellApp, width: u16, height: u16) -> String {
+pub(super) fn screen(app: &ShellApp, width: u16, height: u16) -> String {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     terminal
         .draw(|frame| crate::render_app(frame, app))

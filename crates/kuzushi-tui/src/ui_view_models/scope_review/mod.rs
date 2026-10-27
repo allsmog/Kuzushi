@@ -2,8 +2,10 @@
 mod action_search;
 mod detail;
 mod generation;
+mod overview;
 mod paths;
 pub(crate) use action_search::scope_search_label;
+pub(crate) use overview::scope_display_lines;
 mod context;
 mod reader_header;
 mod recorded_context;
@@ -11,7 +13,7 @@ mod source;
 mod tree;
 mod workload;
 use crate::app::{merge_destinations, ScopeReviewState, SCOPE_ACTIONS};
-use crate::renderer::shared::text::wrap_text;
+use crate::renderer::shared::text::wrap_document_text;
 pub(crate) use detail::scope_detail;
 pub(crate) use reader_header::scope_reader_heading;
 pub(crate) use source::{scope_source_view, ScopeSourceView};
@@ -261,7 +263,7 @@ pub(crate) fn scope_detail_lines(
     }
     text.extend(source.details());
     text.into_iter()
-        .flat_map(|line| wrap_text(&line, width.max(1)))
+        .flat_map(|line| wrap_document_text(&line, width.max(1), width.max(1)))
         .collect()
 }
 

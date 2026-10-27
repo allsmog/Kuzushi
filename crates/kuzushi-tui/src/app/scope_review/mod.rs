@@ -76,6 +76,7 @@ impl ShellApp {
             filter: serde_json::from_value(input["fileFilter"].clone()).ok(),
             offset: input["offset"].as_u64().unwrap_or(0) as usize,
             tree_branch: None,
+            focus_first_scope: false,
         });
         state.notice = Some(
             "Reading source and scope evidence. No model calls. Ctrl+C cancels active work.".into(),

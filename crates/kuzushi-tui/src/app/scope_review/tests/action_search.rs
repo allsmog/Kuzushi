@@ -10,6 +10,116 @@ fn search(app: &mut ShellApp, query: &str) {
 }
 
 #[test]
+fn coverage_path_action_opens_from_every_coverage_category_without_starting_work() {
+    for branch in [
+        ScopeBranch::Uncovered,
+        ScopeBranch::Excluded,
+        ScopeBranch::Overlap,
+    ] {
+        let (root, mut app) = fixture();
+        let state = app.router.scope_review_mut().as_mut().unwrap();
+        state.cursor = state
+            .tree_rows()
+            .iter()
+            .position(|row| row == &ScopeTreeRow::Branch(branch.clone()))
+            .unwrap();
+        let before = state.review.clone();
+        search(&mut app, "Exclude a file or directory");
+        let detail = crate::renderer::render_plain_app(&app, 200);
+        assert!(!detail.contains("Select a scope before using this action."));
+        assert!(press(&mut app, KeyCode::Enter).effects.is_empty());
+        let state = app.scope_review().unwrap();
+        assert_eq!(
+            state.form.as_ref().map(|form| form.kind),
+            Some(ScopeEditKind::ExcludePath)
+        );
+        assert!(state.menu.is_none() && state.menu_search.is_none());
+        assert_eq!(state.review, before);
+        assert!(!root.path().join(".kuzushi/v3/campaigns").exists());
+    }
+}
+
+#[test]
+fn coverage_path_action_retains_invalid_literal_and_saved_scope_after_dispatch_failure() {
+    let (root, mut app) = fixture();
+    app.set_input("kept exclusion draft");
+    app.set_cursor(5);
+    let state = app.router.scope_review_mut().as_mut().unwrap();
+    state.cursor = state
+        .tree_rows()
+        .iter()
+        .position(|row| row == &ScopeTreeRow::Branch(ScopeBranch::Excluded))
+        .unwrap();
+    let before = state.review.clone();
+    search(&mut app, "Exclude a file or directory");
+    press(&mut app, KeyCode::Enter);
+    assert!(app.scope_review().unwrap().form.is_some());
+    fill_form(
+        &mut app,
+        &[" . ", "Invalid literal must remain distinct from root"],
+    );
+    let update = press(&mut app, KeyCode::F(2));
+    let error = finish(&mut app, root.path(), update).unwrap_err();
+    app.scope_review_failed("pack:scopes", &error.to_string());
+    let state = app.scope_review().unwrap();
+    assert_eq!(state.review, before);
+    assert_eq!(state.form.as_ref().unwrap().fields[0].1.text(), " . ");
+    assert!(state.notice.as_ref().unwrap().contains("Action stopped"));
+    assert_eq!((app.input(), app.cursor()), ("kept exclusion draft", 5));
+    assert!(!root.path().join(".kuzushi/v3/campaigns").exists());
+}
+
+#[test]
+fn whole_repository_result_focuses_its_new_boundary_after_a_coverage_action() {
+    let (root, mut app) = fixture();
+    split(&mut app, root.path());
+    app.set_input("kept whole-repository draft");
+    app.set_cursor(8);
+    let state = app.router.scope_review_mut().as_mut().unwrap();
+    state.cursor = state
+        .tree_rows()
+        .iter()
+        .position(|row| row == &ScopeTreeRow::Branch(ScopeBranch::Excluded))
+        .unwrap();
+    state.scroll = 12;
+    let update = app.apply_scope_menu(7);
+    finish(&mut app, root.path(), update).unwrap();
+    let state = app.scope_review().unwrap();
+    assert_eq!(selected_scope(state).unwrap().paths, ["."]);
+    assert_eq!(state.scroll, 0);
+    assert!(state.review.as_ref().unwrap().record.acceptance.is_none());
+    assert_eq!(
+        (app.input(), app.cursor()),
+        ("kept whole-repository draft", 8)
+    );
+    assert!(!root.path().join(".kuzushi/v3/campaigns").exists());
+}
+
+#[test]
+fn whole_repository_failure_keeps_the_coverage_origin_and_saved_boundaries() {
+    let (root, mut app) = fixture();
+    let state = app.router.scope_review_mut().as_mut().unwrap();
+    state.cursor = state
+        .tree_rows()
+        .iter()
+        .position(|row| row == &ScopeTreeRow::Branch(ScopeBranch::Excluded))
+        .unwrap();
+    let before = (state.review.clone(), state.selected_row());
+    std::fs::write(
+        root.path().join("README.md"),
+        "Changed source after inventory.\n",
+    )
+    .unwrap();
+    let update = app.apply_scope_menu(7);
+    let error = finish(&mut app, root.path(), update).unwrap_err();
+    app.scope_review_failed("pack:scopes", &error.to_string());
+    let state = app.scope_review().unwrap();
+    assert_eq!((state.review.clone(), state.selected_row()), before);
+    assert!(state.pending.is_none());
+    assert!(!root.path().join(".kuzushi/v3/campaigns").exists());
+}
+
+#[test]
 fn filtered_selection_dispatches_the_original_action_and_preserves_the_composer() {
     let (root, mut app) = fixture();
     app.set_input("retained scope draft");

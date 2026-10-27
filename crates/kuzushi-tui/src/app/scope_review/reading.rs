@@ -2,7 +2,7 @@
 use super::*;
 use crate::ui_view_models::{
     scope_review::{
-        scope_detail_lines, scope_detail_scroll, scope_review_layout, scope_source_view,
+        scope_detail_scroll, scope_display_lines, scope_review_layout, scope_source_view,
     },
     study_config::study_config_area,
 };
@@ -32,7 +32,7 @@ impl ShellApp {
         let state = self.scope_review().unwrap();
         let area =
             scope_review_layout(study_config_area(viewport.columns, viewport.rows), state).detail;
-        let maximum = scope_detail_lines(
+        let maximum = scope_display_lines(
             self,
             state,
             &scope_source_view(self, state),
