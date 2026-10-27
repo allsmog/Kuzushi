@@ -2242,3 +2242,17 @@ Verify unchanged source, plan and queue bytes, zero observations and decisions,
 and no provider requests or started study jobs. Six screen questions remain
 separate from machine checks and operator acceptance. This flow qualifies local
 bounded reading and recovery, not remote filesystem latency or model quality.
+
+### J394: background history and preserved input
+
+Read 21 labeled synthetic unapproved plans containing 20,002 unstarted jobs,
+with metadata beyond the 32 MiB catalogue allowance. Verify the actual headless
+partial receipt, then request an exact investigation while typing a Unicode
+draft. Inspect its second job, refresh, resize through six terminal sizes and
+page at 40 columns with the selected identity and parent workload pinned.
+Open the palette during refresh and restart without color. Source and plan
+hashes, zero queues and empty observation/decision/accounting ledgers remain
+unchanged. No source program, scan job or provider request runs. Four screen
+questions are separate from machine checks and operator acceptance; controlled
+Rust readers separately hold requests in flight and test coalescing and stale
+result rejection.

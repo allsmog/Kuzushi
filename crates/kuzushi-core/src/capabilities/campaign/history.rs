@@ -100,7 +100,7 @@ impl CampaignHistoryCoverage {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct CampaignHistory {
     pub campaigns: Vec<CampaignSnapshot>,
     pub coverage: CampaignHistoryCoverage,

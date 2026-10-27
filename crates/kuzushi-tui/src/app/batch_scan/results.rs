@@ -9,11 +9,20 @@ type BatchReviewScope = (
 impl ShellApp {
     pub(crate) fn open_batch_results(&mut self, batch_id: &str) {
         self.open_campaign_view(Some(batch_id.to_string()));
+        if self.defer_batch_results_until_history_ready(batch_id) {
+            return;
+        }
+        self.finish_open_batch_results(batch_id);
+    }
+
+    pub(crate) fn finish_open_batch_results(&mut self, batch_id: &str) {
         let is_batch = self
             .router
             .campaign()
             .selected_campaign()
-            .is_some_and(super::is_scan_batch_snapshot);
+            .is_some_and(|snapshot| {
+                snapshot.campaign_id == batch_id && super::is_scan_batch_snapshot(snapshot)
+            });
         if !is_batch {
             self.router.campaign_mut().notice =
                 Some(format!("campaign {batch_id:?} is not a scan batch"));
@@ -24,8 +33,16 @@ impl ShellApp {
         deck.active_batch_id = Some(batch_id.to_string());
         deck.active_batch_report = None;
         deck.active_batch_observation_fingerprints.clear();
-        self.refresh_active_batch_report();
+        self.refresh_open_batch_scope();
+    }
+
+    fn refresh_open_batch_scope(&mut self) {
         self.reset_findings_page_request();
+        if self.runtime_state.has_terminal_loop() {
+            self.defer_campaign_findings_read();
+            return;
+        }
+        self.refresh_active_batch_report();
         self.refresh_findings_preserving_active_filter(false);
     }
 

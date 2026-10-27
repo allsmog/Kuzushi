@@ -485,7 +485,8 @@
       "discoveryMaturityOverride": null,
       "finiteJobReaderEvidence": "Shared snapshot labels preserve raw job identity and use recorded case/pass metadata. Prepared native campaign:study and campaign:status consumption is tested. TUI inspection reads recorded inputs, outcome and unknown charges; return/adjacent selection preserve the composer. Missing metadata stays unavailable, with no current-setting substitution. See docs/assessments/finite-job-reader-2026-10-14.md for native scope and full-workflow evidence and remaining limits.",
       "phaseResultDeclared": true,
-      "descriptorSha256": "sha256:c9ccaa5509456618c3cf8b7ed65c451820a006365d331018fd8035865626240a"
+      "descriptorSha256": "sha256:c9ccaa5509456618c3cf8b7ed65c451820a006365d331018fd8035865626240a",
+      "backgroundHistoryEvidence": "Terminal catalogue, trend and phase reads use the existing two-slot view-reader pool. Twelve held-reader checks cover identity, cancellation, coalescing, admitted decision totals, failure recovery and phase protection. Serial selections have 581 distinct passes, a locked workspace build, all-target TUI Clippy, risk and ten draft gates. Final J394 has 22 machine passes and final J121 has 343, both with zero failures on the same binary and 25 answered agent questions with findings. Paged view, study, job, workload and unknown-cost labels remain fixed. J394 starts no work; J121 uses five intercepted requests and zero live requests, retaining four observations, two identities, three decisions, four Scan attempts and unused protected Review. See background-history-2026-10-27.md for retained failures, source qualification and remaining limits. No maturity promotion follows."
     },
     {
       "tool": "campaign:study",

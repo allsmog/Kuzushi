@@ -6,13 +6,18 @@ pub(crate) struct CampaignReaderScroll {
 }
 
 pub(crate) fn campaign_reader_scroll(app: &ShellApp) -> Option<CampaignReaderScroll> {
+    if app.pending_campaign_selection().is_some() {
+        return None;
+    }
     if app.shell_view() != ShellView::Campaign || study_editor_is_open(app) {
         return None;
     }
     let viewport = app.viewport();
     let area = campaign_reader_area(app, Rect::new(0, 0, viewport.columns, viewport.rows));
-    let total = campaign_lines(app, area).len();
-    let pinned = if campaign_is_paged(app, area, total) {
+    let full = campaign_lines(app, area);
+    let paged = campaign_is_paged(app, area, full.len());
+    let total = reader_document(app, area, full, paged).len();
+    let pinned = if paged {
         reader_chrome(app, area).reserved_rows()
     } else {
         0
@@ -24,7 +29,9 @@ pub(crate) fn campaign_selection_scroll(app: &ShellApp) -> Option<usize> {
     app.router.campaign().selected_campaign()?;
     let viewport = app.viewport();
     let area = campaign_reader_area(app, Rect::new(0, 0, viewport.columns, viewport.rows));
-    let lines = campaign_lines(app, area);
+    let full = campaign_lines(app, area);
+    let paged = campaign_is_paged(app, area, full.len());
+    let lines = reader_document(app, area, full, paged);
     let selected = lines.iter().position(|line| {
         let text = line.to_string();
         text.starts_with("▸ ") && !text.starts_with("▸ try:")
@@ -34,9 +41,13 @@ pub(crate) fn campaign_selection_scroll(app: &ShellApp) -> Option<usize> {
 
 pub(crate) fn campaign_view_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let lines = campaign_lines(app, area);
+    if app.pending_campaign_selection().is_some() {
+        return lines;
+    }
     if study_editor_is_open(app) || !campaign_is_paged(app, area, lines.len()) {
         return lines;
     }
+    let lines = reader_document(app, area, lines, true);
     let chrome = reader_chrome(app, area);
     let reader = reader_scroll(lines.len(), area.height, chrome.reserved_rows());
     let mut visible = chrome.notice;
@@ -52,6 +63,19 @@ pub(crate) fn campaign_view_lines(app: &ShellApp, area: Rect) -> Vec<Line<'stati
     visible.extend(lines.into_iter().skip(start).take(reader.page_rows));
     visible.extend(chrome.controls);
     visible.into_iter().take(usize::from(area.height)).collect()
+}
+
+fn reader_document(
+    app: &ShellApp,
+    area: Rect,
+    full: Vec<Line<'static>>,
+    paged: bool,
+) -> Vec<Line<'static>> {
+    if paged {
+        super::campaign_lines::campaign_body_lines(app, area)
+    } else {
+        full
+    }
 }
 
 struct ReaderChrome {
@@ -70,13 +94,51 @@ fn reader_chrome(app: &ShellApp, area: Rect) -> ReaderChrome {
         controls.extend(compact_navigation_controls(app, area.width));
     }
     controls.truncate(usize::from(area.height).saturating_sub(2));
+    let identity = pinned_reader_identity(app, area.width);
+    let mut header = context_strip(app, area);
     let mut notice = pinned_action_result(app, area.width);
-    let available = usize::from(area.height).saturating_sub(controls.len() + 2);
+    let available =
+        usize::from(area.height).saturating_sub(controls.len() + identity.len() + header.len() + 2);
     if available < notice.len() && !notice.is_empty() {
         notice.remove(0);
     }
     notice.truncate(available);
-    ReaderChrome { notice, controls }
+    header.extend(notice);
+    header.extend(identity);
+    ReaderChrome {
+        notice: header,
+        controls,
+    }
+}
+
+fn pinned_reader_identity(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
+    let deck = app.router.campaign();
+    let Some(campaign) = deck.selected_campaign().filter(|_| deck.detail) else {
+        return Vec::new();
+    };
+    let mut identity = vec![Line::styled(
+        fit(
+            &format!("Study: {}", campaign.campaign_id),
+            usize::from(width),
+        ),
+        theme::accent(),
+    )];
+    identity.push(Line::styled(
+        fit(
+            &format!("Study {}", super::summary::campaign_spend_label(campaign)),
+            usize::from(width),
+        ),
+        theme::primary(),
+    ));
+    if deck.job_detail {
+        identity.extend(deck.selected_job().map(|job| {
+            Line::styled(
+                super::fixed_jobs::selected_job_heading(job, usize::from(width)),
+                theme::accent(),
+            )
+        }));
+    }
+    identity
 }
 
 fn compact_navigation_controls(app: &ShellApp, width: u16) -> Vec<Line<'static>> {

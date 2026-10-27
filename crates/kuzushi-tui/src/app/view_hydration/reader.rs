@@ -2,6 +2,7 @@ use super::*;
 use kuzushi_core::{CodeqlScanner, ScanEngine, SemgrepScanner};
 use kuzushi_core::{LatestRunPointerIssue, LatestRunPointerState};
 
+mod campaign_history;
 mod completion_io;
 mod groups;
 #[cfg(test)]
@@ -28,6 +29,9 @@ impl ViewArtifactReader for FsViewArtifactReader {
     ) -> Option<ViewHydrationValue> {
         if cancellation.is_canceled() {
             return None;
+        }
+        if let Some(value) = campaign_history::read(target, key, cancellation) {
+            return value;
         }
         if let Some(value) = study_usage::read_study_usage(target, key, cancellation) {
             return value;
@@ -66,6 +70,10 @@ fn read_regular_cancellable(
 }
 
 fn read_artifact_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydrationValue> {
+    if let Some(value) = campaign_history::read(target, key, &ViewHydrationCancellation::default())
+    {
+        return value;
+    }
     if let Some(value) = read_lesson_value(target, key)
         .or_else(|| groups::read_groups(target, key, &ViewHydrationCancellation::default()))
     {

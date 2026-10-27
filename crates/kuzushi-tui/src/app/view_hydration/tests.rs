@@ -102,6 +102,13 @@ impl ViewArtifactReader for CountingReader {
 
 pub(super) fn missing_value(key: &ViewHydrationKey) -> ViewHydrationValue {
     match key {
+        ViewHydrationKey::CampaignHistory(_) => ViewHydrationValue::CampaignHistory(Arc::new(
+            super::super::campaign::history_refresh::CampaignHistoryReadSnapshot {
+                history: Default::default(),
+                phase: None,
+                trend_history: Vec::new(),
+            },
+        )),
         ViewHydrationKey::ScanStudyProgress { .. } => {
             ViewHydrationValue::ScanStudyProgress(Err("missing fixture study".into()))
         }

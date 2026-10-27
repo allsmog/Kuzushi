@@ -15,10 +15,26 @@ mod history_tests;
 /// is the selected campaign's ranked job matrix with include/exclude marks.
 /// All lifecycle truth comes from the snapshot fold (plan + dispatcher queue).
 pub(crate) fn campaign_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
-    let deck = app.router.campaign();
     let mut lines = context_strip(app, area);
     lines.push(blank());
+    build_campaign_lines(app, area, lines)
+}
+
+pub(super) fn campaign_body_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    build_campaign_lines(app, area, Vec::new())
+}
+
+fn build_campaign_lines(
+    app: &ShellApp,
+    area: Rect,
+    mut lines: Vec<Line<'static>>,
+) -> Vec<Line<'static>> {
+    let deck = app.router.campaign();
     if append_study_surfaces(&mut lines, app, area) {
+        return lines;
+    }
+    append_history_feedback(&mut lines, app, area.width);
+    if append_requested_history(&mut lines, app, area.width) {
         return lines;
     }
     append_history_coverage(&mut lines, deck, area.width);
@@ -30,10 +46,25 @@ pub(crate) fn campaign_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     }
     match deck.selected_campaign().filter(|_| deck.detail) {
         Some(campaign) => append_campaign_detail(&mut lines, deck, campaign, area),
-        None => append_campaign_list(&mut lines, deck, area),
+        None => append_campaign_list(&mut lines, app, area),
     }
     append_deck_footer(&mut lines, deck, area, app.study_navigation_return_active());
     lines
+}
+
+fn append_requested_history(lines: &mut Vec<Line<'static>>, app: &ShellApp, width: u16) -> bool {
+    let Some(requested) = app.pending_campaign_selection() else {
+        return false;
+    };
+    lines.push(divider("LOADING INVESTIGATION", width));
+    push_deck_text(
+        lines,
+        &format!("Requested: {requested:?}"),
+        usize::from(width),
+        theme::primary(),
+    );
+    push_deck_text(lines, "Wait for this plan's recorded jobs before launching or changing work. Reading starts no jobs.", usize::from(width), theme::muted());
+    true
 }
 
 fn append_study_surfaces(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: Rect) -> bool {
@@ -84,11 +115,12 @@ fn append_study_picker(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: Rec
     super::batch_scan_config_lines::append_scope_context(lines, app, area)
 }
 
-fn append_campaign_list(lines: &mut Vec<Line<'static>>, deck: &CampaignRouteState, area: Rect) {
+fn append_campaign_list(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: Rect) {
+    let deck = app.router.campaign();
     lines.push(divider("CAMPAIGNS", area.width));
     append_campaign_trend(lines, deck, area.width as usize);
     if deck.campaigns.is_empty() {
-        append_history_empty_state(lines, deck);
+        append_history_empty_state(lines, deck, app.campaign_history_feedback().is_some());
         return;
     }
     let widths = campaign_list_widths(area);
@@ -119,7 +151,27 @@ fn append_history_coverage(lines: &mut Vec<Line<'static>>, deck: &CampaignRouteS
     }
 }
 
-fn append_history_empty_state(lines: &mut Vec<Line<'static>>, deck: &CampaignRouteState) {
+fn append_history_feedback(lines: &mut Vec<Line<'static>>, app: &ShellApp, width: u16) {
+    if let Some(feedback) = app.campaign_history_feedback() {
+        lines.extend(
+            wrap_text(feedback, usize::from(width).max(1))
+                .into_iter()
+                .map(|text| Line::styled(text, theme::warn())),
+        );
+    }
+}
+
+fn append_history_empty_state(
+    lines: &mut Vec<Line<'static>>,
+    deck: &CampaignRouteState,
+    pending: bool,
+) {
+    if pending {
+        lines.push(Line::from(
+            "History has no loaded records yet. r refresh retries the read.",
+        ));
+        return;
+    }
     if deck
         .history_coverage
         .as_ref()

@@ -1249,3 +1249,19 @@ requests add no live-model spend. Raw review-required status and craft findings
 remain retained. Synchronous local history reads, remote latency, large decision
 ledgers, broader module usefulness, live-model quality and operator UX acceptance
 remain open. These fixtures do not establish the full reference-product UX bar.
+
+The [background history follow-up](../assessments/background-history-2026-10-27.md)
+moves catalogue, trend and phase reads off the input thread through the existing
+bounded pool. Twelve held-reader checks protect input, selection, coalescing,
+cancellation and phase state. The paged reader fixes view, study, job, workload
+and study-cost disclosures above the body without resetting reading position.
+Serial selections have 581 distinct Rust passes, a locked workspace build,
+all-target TUI Clippy, passing risk and all ten draft repository gates. Final
+J394 has 22 machine passes over 20,002 unstarted jobs; final J121 has 343 through
+cancellation, allowance limits, triage, export recovery and restart. Both have
+zero machine failures on one binary, with 25 answered agent screen questions
+and remaining craft findings. Four observations, two identities, three decision
+records, four retained Scan attempts, one unresolved reservation and two unused
+Review calls remain. Source is unchanged and never executes; five intercepted
+requests add zero live requests. Raw review status, earlier failed candidates,
+formal operator acceptance and broader reference quality remain distinct.

@@ -14,16 +14,20 @@ use kuzushi_core::capabilities::campaign::snapshot::{load_campaign_snapshot, Cam
 use std::path::Path;
 mod dispatcher_control;
 mod dispatcher_results;
+pub(super) mod history_refresh;
 mod observations;
 mod scan_progress;
 
 impl ShellApp {
     pub(crate) fn open_campaign_view(&mut self, requested: Option<String>) {
-        self.refresh_campaign_deck_for(requested.as_deref());
-        if let Some(campaign_id) = requested {
-            self.select_campaign(&campaign_id);
+        if requested.is_none() {
+            self.cancel_campaign_history_selection();
         }
         self.set_shell_view(ShellView::Campaign);
+        self.refresh_campaign_deck_for(requested.as_deref());
+        if let Some(campaign_id) = requested.filter(|_| !self.campaign_history_loading()) {
+            self.select_campaign(&campaign_id);
+        }
         self.log("campaign", "campaign deck");
     }
 
@@ -60,6 +64,10 @@ impl ShellApp {
                 Some("select a target to load campaigns".to_string());
             return;
         };
+        if self.runtime_state.has_terminal_loop() {
+            self.begin_campaign_history_refresh(target, requested);
+            return;
+        }
         self.refresh_findings_preserving_active_filter(false);
         self.refresh_phase_attempt_projection();
         let preferred = preferred_campaign(self.router.campaign(), requested);
@@ -105,6 +113,9 @@ impl ShellApp {
     pub(crate) fn apply_campaign_hotkey(&mut self, action: ViewHotkeyAction) -> InputUpdate {
         if self.router.campaign().batch_scan_config.is_some() {
             return self.apply_batch_scan_hotkey(action);
+        }
+        if self.refuse_unread_campaign_action(action) {
+            return InputUpdate::handled();
         }
         if action == ViewHotkeyAction::CampaignReviewStudy {
             self.review_selected_study();
@@ -163,6 +174,7 @@ impl ShellApp {
     }
 
     fn back_from_campaign_detail(&mut self) -> InputUpdate {
+        self.cancel_campaign_history_selection();
         if self.restore_campaign_reader_origin() {
             return InputUpdate::handled();
         }
@@ -181,6 +193,7 @@ impl ShellApp {
     }
 
     fn move_visible_campaign_cursor(&mut self, delta: i64) -> InputUpdate {
+        self.cancel_campaign_history_selection();
         let update = self.campaign_deck_edit(|deck| {
             deck.move_cursor(delta);
             if deck.job_detail {
@@ -416,7 +429,7 @@ fn campaign_process_args(
 /// Record a deduped trend snapshot (best effort — a history write failure
 /// must not break the deck) and reload the bounded history window that
 /// backs the sparkline strip.
-fn refresh_trend_history(
+pub(super) fn refresh_trend_history(
     target: &Path,
     trend: &kuzushi_core::capabilities::campaign::trend::TrendMetrics,
 ) -> Vec<kuzushi_core::capabilities::campaign::trend_history::TrendSnapshot> {
@@ -426,11 +439,9 @@ fn refresh_trend_history(
 }
 
 fn preferred_campaign(deck: &CampaignRouteState, requested: Option<&str>) -> Option<String> {
-    requested.map(str::to_owned).or_else(|| {
-        deck.selected_campaign()
-            .filter(|_| deck.detail)
-            .map(|row| row.campaign_id.clone())
-    })
+    requested
+        .map(str::to_owned)
+        .or_else(|| deck.selected_campaign().map(|row| row.campaign_id.clone()))
 }
 
 fn load_campaign_snapshots(target: &Path, preferred: Option<&str>) -> CampaignHistory {
@@ -557,6 +568,7 @@ fn unsupported_platform_kill_dispatcher_process_tree(
 
 #[cfg(test)]
 mod tests {
+    mod background_history;
     mod history;
     use super::*;
     use kuzushi_core::{FindingStore, Severity, V2Config};

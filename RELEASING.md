@@ -23,6 +23,14 @@ Unsupported large or malformed documents stay unavailable rather than supplying
 truncated job counts. Archived JSON remains intact for external inspection.
 No stored-format conversion, plan reapproval or model request is required.
 
+Terminal history and phase projections load through the existing bounded reader
+pool. Newer refreshes cancel earlier reads; completion preserves input, selected
+job identity and current navigation. Work controls wait for current metadata.
+Failed reads retain prior records and qualify spending. CLI and nonterminal
+reads retain synchronous behavior. This scheduling change adds no scan worker,
+provider request, configuration field or artifact migration. See the
+[background history evidence](docs/assessments/background-history-2026-10-27.md).
+
 ## Historical supporting source for lesson drafts
 
 `findings:lesson-generate` adds optional `sourceEvidenceFiles`, with at most 16

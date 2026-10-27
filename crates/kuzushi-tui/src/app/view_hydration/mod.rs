@@ -196,6 +196,7 @@ impl ViewHydrationCancellation {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum ViewHydrationKey {
+    CampaignHistory(super::campaign::history_refresh::CampaignHistoryReadRequest),
     FindingGroups(kuzushi_core::findings::FindingGroupsRequest),
     FindingRelationships {
         finding_id: Option<i64>,
@@ -326,6 +327,7 @@ pub(crate) enum ViewHydrationKey {
 
 #[derive(Debug, Clone)]
 pub(crate) enum ViewHydrationValue {
+    CampaignHistory(Arc<super::campaign::history_refresh::CampaignHistoryReadSnapshot>),
     ExecutableOptions(Vec<String>),
     FindingGroups(Result<kuzushi_core::findings::FindingGroupsPage, String>),
     FindingRelationships(Result<kuzushi_core::findings::FindingRelationshipPage, String>),
@@ -451,6 +453,14 @@ pub(crate) trait ViewArtifactReader: std::fmt::Debug + Send + Sync {
     }
 }
 
+#[cfg(test)]
+pub(crate) fn read_view_artifact_for_test(
+    target: &Path,
+    key: &ViewHydrationKey,
+) -> ViewHydrationValue {
+    reader::FsViewArtifactReader.read(target, key)
+}
+
 fn recovered_runs_from_hydration(
     results: &[ViewHydrationResult],
 ) -> Vec<kuzushi_core::RecoveredRun> {
@@ -486,7 +496,8 @@ impl ShellApp {
     }
 
     pub(crate) fn apply_view_hydration_results(&mut self) -> bool {
-        let scheduled = self.schedule_pending_findings_refresh();
+        let scheduled =
+            self.schedule_pending_findings_refresh() | self.schedule_pending_campaign_history();
         let drain = self.runtime_state.drain_view_hydration();
         if drain.results.is_empty() && drain.failures.is_empty() {
             return scheduled;
@@ -544,6 +555,7 @@ impl ShellApp {
     }
 
     fn apply_view_hydration_drain(&mut self, drain: ViewHydrationDrain) {
+        let drain = self.apply_campaign_history_drain(drain);
         let drain = self.apply_findings_projection_drain(drain);
         let refresh_repository_index = repository_index::drain_updates_index(&drain);
         let refresh_file_picker = drain

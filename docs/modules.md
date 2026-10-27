@@ -432,6 +432,15 @@ or the shell's `campaign <id>`. The saved plan, queue, original source and appro
 unchanged. See [bounded history evidence](assessments/bounded-history-2026-10-27.md)
 and the [reader migration](../RELEASING.md#bounded-campaign-history-readers).
 
+Terminal history loads through the existing two-slot background reader pool.
+Newer requests cancel earlier reads, and an unscheduled refresh keeps only the
+latest request. Input and navigation remain available; launch and plan edits
+wait for the refreshed records. Completion preserves the selected identity and
+does not overwrite a newer phase projection or take focus from another surface.
+The job reader pins the selected label and parent workload through compact
+paging. CLI and nonterminal reads stay synchronous. See
+[background history qualification](assessments/background-history-2026-10-27.md).
+
 
 `codeql:create-db` and `codeql:scan` keep exact dispatch as Labs, auxiliary Map
 and Scan actions. Database creation retains explicit repository-execution

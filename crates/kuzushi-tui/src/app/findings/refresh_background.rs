@@ -56,6 +56,15 @@ impl FindingsRefreshState {
 }
 
 impl ShellApp {
+    pub(crate) fn findings_read_precedes_history(&self) -> bool {
+        self.runtime_state
+            .findings_refresh
+            .pending
+            .as_ref()
+            .is_some_and(|pending| self.target() == Some(pending.target.as_path()))
+            && !self.waiting_for_findings_receipt()
+    }
+
     pub(crate) fn can_defer_findings_refresh(&self, remaining: &VecDeque<ShellEffect>) -> bool {
         self.runtime_state.has_terminal_loop()
             && self.target().is_some()

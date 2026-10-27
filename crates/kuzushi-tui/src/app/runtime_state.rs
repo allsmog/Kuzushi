@@ -55,6 +55,8 @@ pub(crate) struct RuntimeState {
     /// Idle-tick stat probe that notices findings written by other processes.
     findings_store_probe: FindingsStoreProbe,
     pub(crate) findings_refresh: super::FindingsRefreshState,
+    pub(crate) campaign_history_refresh:
+        super::campaign::history_refresh::CampaignHistoryRefreshState,
     pub(crate) requested_findings_page: Option<kuzushi_core::findings::FindingPageRequest>,
     pub(crate) review_write: super::ReviewWriteState,
     pub(crate) context_edit_drafts:
@@ -151,6 +153,11 @@ impl RuntimeState {
     pub(crate) fn invalidate_view_hydration(&mut self) {
         self.view_hydration.invalidate();
         self.findings_refresh.invalidate_scheduling();
+        self.campaign_history_refresh.invalidate_scheduling();
+    }
+
+    pub(crate) fn cancel_single_view_read(&mut self, key: &ViewHydrationKey) {
+        self.view_hydration.cancel_single_read(key);
     }
 
     #[cfg(test)]

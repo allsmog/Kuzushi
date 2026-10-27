@@ -76,6 +76,7 @@ pub struct EngagementState {
     phase_attempt_ledger: kuzushi_core::workflow_attempts::PhaseAttemptLedger,
     phase_target_snapshot: Option<kuzushi_core::workflow_attempts::PhaseTargetSnapshot>,
     phase_attempt_projection_degraded: bool,
+    phase_projection_generation: u64,
     pending_attempt_lineage: Option<(
         WorkflowPhase,
         String,
@@ -132,6 +133,7 @@ impl EngagementState {
         ledger: kuzushi_core::workflow_attempts::PhaseAttemptLedger,
         degraded: bool,
     ) {
+        self.phase_projection_generation = self.phase_projection_generation.wrapping_add(1);
         self.durable_skipped_phases = snapshot
             .as_ref()
             .map(|snapshot| ledger.skipped_phases_for(snapshot))
@@ -143,6 +145,10 @@ impl EngagementState {
         self.phase_target_snapshot = snapshot;
         self.phase_attempt_ledger = ledger;
         self.phase_attempt_projection_degraded = degraded;
+    }
+
+    pub(crate) fn phase_projection_generation(&self) -> u64 {
+        self.phase_projection_generation
     }
 
     pub(crate) fn phase_attempt_projection_is_degraded(&self) -> bool {

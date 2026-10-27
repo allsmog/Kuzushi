@@ -662,6 +662,23 @@ impl ShellApp {
     pub(crate) fn refresh_phase_attempt_projection(&mut self) {
         let previous = self.pending_prove_result_id().map(str::to_string);
         self.read_phase_attempt_projection();
+        self.reset_changed_pending_result_scroll(previous);
+    }
+
+    pub(crate) fn apply_loaded_phase_attempt_projection(
+        &mut self,
+        snapshot: kuzushi_core::workflow_attempts::PhaseTargetSnapshot,
+        recovered: Result<kuzushi_core::workflow_attempts::RecoveredPhaseAttemptLedger, String>,
+    ) {
+        let previous = self.pending_prove_result_id().map(str::to_string);
+        match recovered {
+            Ok(recovered) => self.apply_recovered_phase_attempts(snapshot, recovered),
+            Err(error) => self.apply_unreadable_phase_attempts(snapshot, error),
+        }
+        self.reset_changed_pending_result_scroll(previous);
+    }
+
+    fn reset_changed_pending_result_scroll(&mut self, previous: Option<String>) {
         if self.pending_prove_result_id() != previous.as_deref() {
             self.router
                 .workbench_mut()
