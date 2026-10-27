@@ -29,4 +29,4 @@ Feature: Setup remains explicitly reachable
     When I press "Esc"
     And I type command "setup"
     Then I see "SETUP · READY THE MAP RUN"
-    And the status segment shows "setup"
+    And the status segment shows "Setup"
