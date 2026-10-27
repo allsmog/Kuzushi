@@ -587,7 +587,29 @@ fn status_footer_line(snapshot: &str) -> Option<&str> {
 
 fn is_status_footer_line(line: &str) -> bool {
     let line = line.trim_start();
-    has_named_footer_route(footer_route_segment(line)) || has_legacy_footer_route(line)
+    has_named_footer_route(footer_route_segment(line))
+        || has_setup_footer(line)
+        || has_legacy_footer_route(line)
+}
+
+fn has_setup_footer(line: &str) -> bool {
+    line.trim_end()
+        .rsplit_once("  ")
+        .is_some_and(|(route, counts)| {
+            is_setup_orientation(route.trim_end()) && has_findings_count(counts)
+        })
+}
+
+fn is_setup_orientation(route: &str) -> bool {
+    route == "Setup" || route.starts_with("Setup · ")
+}
+
+fn has_findings_count(counts: &str) -> bool {
+    let mut words = counts.split_whitespace();
+    matches!(
+        (words.next(), words.next()),
+        (Some(count), Some("findings")) if count.parse::<usize>().is_ok()
+    )
 }
 
 fn footer_route_segment(line: &str) -> &str {
@@ -778,6 +800,35 @@ mod tests {
         }
         assert_eq!(status_footer_line("Commands help · use Plan later"), None);
         assert_eq!(status_footer_line("help: Commands · setup"), None);
+    }
+
+    #[test]
+    fn finds_setup_orientation_without_legacy_internal_routes() {
+        for label in ["Setup", "Setup · 1 credential needed · /setup"] {
+            let footer = format!("{label}                       0 findings");
+            let snapshot = format!("SETUP · READY THE MAP RUN\n{footer}\nEnter open/start\n");
+            assert_eq!(status_footer_line(&snapshot), Some(footer.as_str()));
+            assert!(interactive_frame_ready(&snapshot));
+        }
+    }
+
+    #[test]
+    fn setup_footer_accepts_padded_counts_and_findings_details() {
+        let footer = "Setup             4 findings · 2 reviewed   ";
+        assert_eq!(status_footer_line(footer), Some(footer));
+    }
+
+    #[test]
+    fn setup_footer_does_not_match_body_guidance_or_invalid_counts() {
+        for body in [
+            "Setup guide has 0 findings",
+            "Setup notes                 0 findings",
+            "help: Setup                 0 findings",
+            "Setup                       unknown findings",
+            "Setup                       2 warnings",
+        ] {
+            assert_eq!(status_footer_line(body), None, "{body}");
+        }
     }
 
     #[test]

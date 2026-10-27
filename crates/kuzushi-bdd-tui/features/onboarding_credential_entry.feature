@@ -13,7 +13,7 @@ Feature: Session credential entry returns a readiness receipt
     And I press "Enter"
     Then I see "SETUP · READY THE MAP RUN"
     And I see "Credentials"
-    And the status segment shows "setup"
+    And the status segment shows "Setup"
     And I do not see "bdd-anthropic-key"
 
   Scenario: The credential surface keeps a keyless escape hatch visible

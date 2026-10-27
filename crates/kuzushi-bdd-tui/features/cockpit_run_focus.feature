@@ -27,7 +27,7 @@ Feature: Foreground Map work owns Run Focus and restores its origin
     And I see "NOTHING TO RUN"
     And I see "run receipt · completed"
     And I do not see "RESULT READY"
-    And the status segment shows "setup"
+    And the status segment shows "Setup"
 
   Scenario: Background restores captured Setup without canceling the plan
     Given a fresh kuzushi workspace
@@ -37,5 +37,5 @@ Feature: Foreground Map work owns Run Focus and restores its origin
     When I move the cursor to "Start Map"
     And I press "Enter" then immediately "b"
     Then I see "SETUP · READY THE MAP RUN"
-    And the status segment shows "setup"
+    And the status segment shows "Setup"
     And the file ".kuzushi/context-snapshot.json" eventually exists

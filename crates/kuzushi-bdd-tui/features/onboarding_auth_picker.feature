@@ -14,7 +14,7 @@ Feature: Credential readiness is an editor inside aggregate Setup
     And I see "API key (ANTHROPIC_API_KEY)"
     And I see "Claude.ai OAuth login"
     And I see "Offline demo"
-    And the status segment shows "setup:credentials:anthropic"
+    And the status segment shows "Setup"
 
   Scenario: Esc returns from credentials to the same Setup screen
     Given a fresh kuzushi workspace
@@ -26,4 +26,4 @@ Feature: Credential readiness is an editor inside aggregate Setup
     And I press "Esc"
     Then I see "SETUP · READY THE MAP RUN"
     And I see "Map plan"
-    And the status segment shows "setup"
+    And the status segment shows "Setup"
