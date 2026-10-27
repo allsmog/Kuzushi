@@ -480,7 +480,8 @@ fn review_queue_conflict_segment(row: &ReviewQueueRow) -> String {
         .as_ref()
         .map(|conflict| {
             format!(
-                " conflict:{}",
+                " {}:{}",
+                crate::ui_view_models::review_conflicts::review_conflict_status_label(conflict),
                 crate::ui_view_models::review_conflicts::review_conflict_compact_label(conflict)
             )
         })
@@ -495,18 +496,27 @@ fn review_queue_decision_label(row: &ReviewQueueRow) -> &str {
 }
 
 fn review_queue_compact_decision(row: &ReviewQueueRow) -> &'static str {
-    if row.decision_conflict.is_some() {
-        return "conflict";
+    if let Some(conflict) = row.decision_conflict.as_deref() {
+        return crate::ui_view_models::review_conflicts::review_conflict_status_label(conflict);
     }
-    match row.decision.as_str() {
-        value if value.ends_with(" · reassess") => "reassess",
-        "confirmed" => "confirmed",
-        "rejected_false_positive" | "false_positive" => "false-pos",
-        "suppressed" => "suppressed",
-        "deferred" => "deferred",
-        "accepted_risk" => "risk",
-        _ => "open",
+    compact_review_verdict(&row.decision)
+}
+
+fn compact_review_verdict(decision: &str) -> &'static str {
+    if decision.ends_with(" · reassess") {
+        return "reassess";
     }
+    [
+        ("confirmed", "confirmed"),
+        ("rejected_false_positive", "false-pos"),
+        ("false_positive", "false-pos"),
+        ("suppressed", "suppressed"),
+        ("deferred", "deferred"),
+        ("accepted_risk", "risk"),
+    ]
+    .into_iter()
+    .find_map(|(verdict, label)| (verdict == decision).then_some(label))
+    .unwrap_or("open")
 }
 
 fn review_queue_decision_style(row: &ReviewQueueRow) -> ratatui::style::Style {
@@ -758,13 +768,35 @@ mod tests {
     #[test]
     fn row_names_a_decision_from_another_observation() {
         let mut row = review_row();
+        row.proof_confidence = ProofConfidence::Unverified;
+        row.proof_confidence_label = "UNVERIFIED".into();
         row.decision = "rejected_false_positive".to_string();
         row.decision_conflict = Some("reappeared_after_rejection".to_string());
 
         let text = line_text(review_queue_row_line(&row, 160));
 
         assert!(text.contains("decision:rejected_fp"), "{text}");
-        assert!(text.contains("conflict:other-observation"), "{text}");
+        assert!(text.contains("check source:other-observation"), "{text}");
+        assert!(!text.contains("conflict:"), "{text}");
+        assert_eq!(review_queue_compact_decision(&row), "check source");
+    }
+
+    #[test]
+    fn genuine_proof_conflicts_keep_their_distinct_warning() {
+        let mut row = review_row();
+        for (conflict, decision) in [
+            (
+                "runtime_verified_after_rejection",
+                "rejected_false_positive",
+            ),
+            ("not_reproduced_after_confirmation", "confirmed"),
+        ] {
+            row.decision = decision.into();
+            row.decision_conflict = Some(conflict.into());
+            assert_eq!(review_queue_compact_decision(&row), "conflict");
+            let text = line_text(review_queue_row_line(&row, 160));
+            assert!(text.contains("conflict:"), "{text}");
+        }
     }
 
     #[test]

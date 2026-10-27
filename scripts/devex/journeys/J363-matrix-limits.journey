@@ -159,8 +159,9 @@ expect: 1 pending · TP: 0 · FP: 0
 keys: Escape Escape Escape Escape
 submit: open F-0001
 require-live-snap: 25 Labeled synthetic bounded matrix signal | reappeared-finding
-require-live-snap: 25 Conflicting decisions: | prior-fp-retained
-expect: scanner reported
+require-live-snap: 25 Decision source check: | prior-fp-retained
+expect: Later source identity is unverified.
+expect: check source
 expect: J363 operator decision
 ask: Does the new observation retain the earlier operator FP and clearly request reassessment, without silently deleting that decision or starting paid Review work?
 submit: dismiss false_positive J363 explicit reaffirmation: latest owned greeting is intentional

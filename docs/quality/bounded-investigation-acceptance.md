@@ -1,5 +1,15 @@
 # Bounded investigation acceptance ledger
 
+The [current context experiment recovery](../assessments/context-matrix-review-current-2026-10-26.md)
+verifies six fixed jobs through a retained failure, allowance halt, explicit
+revision, retry, separate case recurrence, source reassessment, export and
+no-color restart. Final J363 has 79 machine passes, zero failures, 72 capture
+pairs and eight answered agent screen questions with craft findings. A real
+Review label inconsistency is corrected: a different observation asks to
+`check source`, while proof contradictions remain conflicts. All 45 focused
+checks, build, Clippy and risk pass. Two failed attempts remain recorded.
+Transport is fully intercepted; no live request or broader quality claim follows.
+
 The [scope filename selection follow-up](../assessments/scope-filename-selection-2026-10-26.md)
 repairs an input visibility gap confirmed in the saved 602-file inventory. New
 plans freeze root-first balanced filename samples; omitted policy in older jobs
