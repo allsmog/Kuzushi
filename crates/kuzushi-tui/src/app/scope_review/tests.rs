@@ -9,6 +9,7 @@ mod enumeration;
 mod file_boundaries;
 mod findings;
 mod literal_paths;
+mod reader_position;
 mod reading;
 mod source;
 mod suggestion;

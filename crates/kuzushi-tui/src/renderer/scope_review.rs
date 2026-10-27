@@ -26,9 +26,9 @@ pub(super) fn render_scope_review(frame: &mut Frame<'_>, app: &ShellApp) -> bool
             .title(scope_title_line(app, state, area.width)),
         area,
     );
-    render_scope_target(frame, state, area);
     render_scope_source(frame, app, state, area);
     if state.form.is_some() {
+        render_scope_target(frame, state, area, None);
         render_scope_form(frame, state, area);
     } else {
         render_scope_panels(frame, app, state, area);
@@ -41,7 +41,12 @@ pub(super) fn render_scope_review(frame: &mut Frame<'_>, app: &ShellApp) -> bool
     true
 }
 
-fn render_scope_target(frame: &mut Frame<'_>, state: &ScopeReviewState, area: Rect) {
+fn render_scope_target(
+    frame: &mut Frame<'_>,
+    state: &ScopeReviewState,
+    area: Rect,
+    reader_heading: Option<String>,
+) {
     let target = state
         .target
         .file_name()
@@ -50,7 +55,7 @@ fn render_scope_target(frame: &mut Frame<'_>, state: &ScopeReviewState, area: Re
     frame.render_widget(
         Paragraph::new(Line::styled(
             fit(
-                &format!("Repository: {target}"),
+                &reader_heading.unwrap_or_else(|| format!("Repository: {target}")),
                 area.width.saturating_sub(4) as usize,
             ),
             theme::muted(),
@@ -126,6 +131,8 @@ fn render_scope_panels(
         &scope_source_view(app, state),
         layout.detail.width as usize,
     );
+    let heading = scope_reader_heading(state, detail.len(), layout.detail);
+    render_scope_target(frame, state, area, heading);
     render_scope_document(frame, detail, scope_detail_scroll(state), layout.detail);
 }
 

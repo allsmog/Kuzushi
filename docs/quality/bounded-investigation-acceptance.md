@@ -1182,6 +1182,17 @@ model request or target source execution is added. These are source-retention
 and export checks, with no automatic fix verdict, full guided acceptance,
 general detector quality or reference-product UX claim.
 
+The [scope reader position follow-up](../assessments/scope-reader-position-2026-10-26.md)
+pins the selected boundary, file or coverage category beside its visible
+wrapped-line range without reducing the six content rows at 40x12. There are
+92 distinct focused Rust passes, workspace build, Clippy and risk checks.
+Portable J389 has 26 machine passes, zero failures, 19 capture pairs and four
+answered agent screen reviews with craft findings across six sizes and
+no-color restart. Three inert files, one unaccepted scope revision and empty
+work/accounting ledgers remain unchanged with no provider requests. The raw
+review-required result remains retained. Repeated prose, broader operator
+acceptance, model usefulness and full reference-product UX remain open.
+
 The [workspace source and guidance follow-up](../assessments/workspace-source-guidance-2026-10-26.md)
 corrects another reproduced defect: standalone tool receipts could imply Map
 completion, and child-owned snapshot claims could not be authenticated by the

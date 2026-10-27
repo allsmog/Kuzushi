@@ -5,6 +5,7 @@ mod generation;
 mod paths;
 pub(crate) use action_search::scope_search_label;
 mod context;
+mod reader_header;
 mod recorded_context;
 mod source;
 mod tree;
@@ -12,6 +13,7 @@ mod workload;
 use crate::app::{merge_destinations, ScopeReviewState, SCOPE_ACTIONS};
 use crate::renderer::shared::text::wrap_text;
 pub(crate) use detail::scope_detail;
+pub(crate) use reader_header::scope_reader_heading;
 pub(crate) use source::{scope_source_view, ScopeSourceView};
 
 pub(crate) fn scope_title(state: &ScopeReviewState, source: &ScopeSourceView) -> String {
