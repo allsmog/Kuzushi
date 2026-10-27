@@ -18,6 +18,7 @@ pub(crate) use render_app::{
 pub(in crate::renderer) use section_slot::*;
 pub(in crate::renderer) use shared::*;
 pub(crate) use views::context_page_rows;
+pub(crate) use views::dfd_detail_scroll;
 pub(crate) use views::entry_point_page_scroll;
 pub(crate) use views::finding_group_page_rows;
 pub(crate) use views::keymap_reader_scroll;

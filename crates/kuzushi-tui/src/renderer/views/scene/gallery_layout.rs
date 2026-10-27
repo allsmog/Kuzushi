@@ -65,6 +65,18 @@ pub(crate) fn summary_page_rows(app: &ShellApp) -> Option<usize> {
     ))
 }
 
+pub(crate) fn dfd_detail_scroll(app: &ShellApp) -> Option<super::diagram::DfdDetailScroll> {
+    let area = gallery_body_area(app)?;
+    super::diagram::DfdDiagram {
+        model: crate::ui_view_models::dfd_model(app),
+        selection: Some(app.router.scene().dfd_selection()),
+        detail_scroll: app.router.scene().dfd_detail_scroll(),
+        focused: app.router.scene().dfd_focused(),
+        context_selection: app.router.scene().dfd_context_selection(),
+    }
+    .detail_scroll_bounds(area)
+}
+
 /// Display lines to the adjacent full-frame window, including wrapped-row
 /// continuations on the actual body canvas.
 pub(crate) fn scene_page_rows(app: &ShellApp, direction: PageDirection) -> Option<usize> {
@@ -97,6 +109,9 @@ pub(crate) fn map_gallery_page_rows(app: &ShellApp, direction: PageDirection) ->
 pub(super) fn line_page_position_sections(area: Rect) -> [Rect; 2] {
     split_rows(area, [Constraint::Min(0), Constraint::Length(1)])
 }
+
+#[cfg(test)]
+mod dfd_tests;
 
 #[cfg(test)]
 mod tests {

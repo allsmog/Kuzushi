@@ -580,9 +580,14 @@ impl ShellApp {
     }
 
     fn scroll_dfd_detail(&mut self, direction: i32) {
-        self.router
-            .scene_mut()
-            .scroll_dfd_detail(direction, VIEWPORT_PAGE_LINES);
+        let Some(reader) = crate::renderer::dfd_detail_scroll(self) else {
+            return;
+        };
+        self.router.scene_mut().scroll_dfd_detail(
+            direction,
+            reader.page_rows.min(VIEWPORT_PAGE_LINES),
+            reader.max_offset,
+        );
     }
 
     fn scroll_summary(&mut self, direction: i32) {

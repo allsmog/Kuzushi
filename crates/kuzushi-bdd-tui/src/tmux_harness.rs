@@ -587,18 +587,36 @@ fn status_footer_line(snapshot: &str) -> Option<&str> {
 
 fn is_status_footer_line(line: &str) -> bool {
     let line = line.trim_start();
-    let route_line = if line.starts_with("⛭ ") {
-        line.split_once(" · ").map_or(line, |(_, route)| route)
-    } else {
-        line
-    };
-    let english_route = ["shell", "module", "agent", "plan", "run"]
-        .iter()
-        .any(|mode| route_line.starts_with(&format!("{mode} route ·")));
-    english_route
-        || line.starts_with("route:")
-        || line.starts_with("mode:")
-        || (line.starts_with("KUZUSHI") && (line.contains("route:") || line.contains("mode:")))
+    has_named_footer_route(footer_route_segment(line)) || has_legacy_footer_route(line)
+}
+
+fn footer_route_segment(line: &str) -> &str {
+    if !line.starts_with("⛭ ") {
+        return line;
+    }
+    line.split_once(" · ").map_or(line, |(_, route)| route)
+}
+
+fn has_named_footer_route(line: &str) -> bool {
+    [
+        "Commands",
+        "Module selected",
+        "Agent active",
+        "Plan",
+        "Run active",
+    ]
+    .iter()
+    .any(|label| line.starts_with(&format!("{label} ·")))
+        || ["shell", "module", "agent", "plan", "run"]
+            .iter()
+            .any(|mode| line.starts_with(&format!("{mode} route ·")))
+}
+
+fn has_legacy_footer_route(line: &str) -> bool {
+    if line.starts_with("KUZUSHI") {
+        return line.contains("route:") || line.contains("mode:");
+    }
+    line.starts_with("route:") || line.starts_with("mode:")
 }
 
 fn parse_pane_size(value: &str) -> Result<(u16, u16)> {
@@ -740,6 +758,26 @@ mod tests {
         assert_eq!(status_footer_line(&snapshot), Some(footer));
         assert!(interactive_frame_ready(&snapshot));
         assert_eq!(status_footer_line("⛭ help · use shell route · later"), None);
+    }
+
+    #[test]
+    fn finds_current_operator_labels_with_and_without_posture() {
+        for label in [
+            "Commands",
+            "Module selected",
+            "Agent active",
+            "Plan",
+            "Run active",
+        ] {
+            for prefix in ["", "⛭ autonomy:fix · "] {
+                let footer = format!("{prefix}{label} · Desktop alerts unavailable · setup:model");
+                let snapshot = format!("body\n{footer}\ncomposer\n");
+                assert_eq!(status_footer_line(&snapshot), Some(footer.as_str()));
+                assert!(interactive_frame_ready(&snapshot));
+            }
+        }
+        assert_eq!(status_footer_line("Commands help · use Plan later"), None);
+        assert_eq!(status_footer_line("help: Commands · setup"), None);
     }
 
     #[test]

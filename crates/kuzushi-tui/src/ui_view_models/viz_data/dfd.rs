@@ -6,6 +6,7 @@ use crate::{DfdModelCacheKey, ShellApp};
 mod evidence;
 mod evidence_display;
 mod overview;
+mod topology;
 pub(crate) use overview::{
     dfd_overview, dfd_overview_component_at, dfd_overview_component_count, display_target,
     DfdContextCounts, DfdOverview, DfdOverviewComponent, DfdOverviewFlow, DfdOverviewZone,
@@ -205,11 +206,6 @@ impl DfdModel {
             .unwrap_or_default()
     }
 
-    pub(crate) fn topology_notice(&self) -> Option<&'static str> {
-        (!self.nodes.is_empty() && self.flows.is_empty()).then_some(
-            "Component map only. No data flows are recorded; relationships remain unknown.",
-        )
-    }
     pub(crate) fn evidence_notice(&self) -> Option<&'static str> {
         self.review_only.then_some(
             "Partial deterministic Map. Artifact review only; no model or empirical verification.",

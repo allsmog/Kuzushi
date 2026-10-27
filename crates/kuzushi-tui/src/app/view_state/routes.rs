@@ -1161,9 +1161,10 @@ impl SceneRouteState {
         self.dfd_detail_scroll = 0;
     }
 
-    pub(crate) fn scroll_dfd_detail(&mut self, direction: i32, amount: usize) {
+    pub(crate) fn scroll_dfd_detail(&mut self, direction: i32, amount: usize, maximum: usize) {
+        self.dfd_detail_scroll = self.dfd_detail_scroll.min(maximum);
         if direction >= 0 {
-            self.dfd_detail_scroll = self.dfd_detail_scroll.saturating_add(amount);
+            self.dfd_detail_scroll = self.dfd_detail_scroll.saturating_add(amount).min(maximum);
         } else {
             self.dfd_detail_scroll = self.dfd_detail_scroll.saturating_sub(amount);
         }

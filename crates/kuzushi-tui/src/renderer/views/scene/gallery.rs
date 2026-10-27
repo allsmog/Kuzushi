@@ -442,12 +442,15 @@ fn summary_plain_lines(width: usize, model: &DfdModel) -> Vec<Line<'static>> {
 
 fn append_dfd_notice(lines: &mut Vec<Line<'static>>, width: usize, model: &DfdModel) {
     lines.extend(
-        [model.evidence_notice(), model.topology_notice()]
-            .into_iter()
-            .flatten()
-            .flat_map(|notice| crate::renderer::shared::text::wrap_text(notice, width))
-            .into_iter()
-            .map(|line| Line::styled(line, theme::label())),
+        [
+            model.evidence_notice().map(str::to_owned),
+            model.topology_notice(),
+        ]
+        .into_iter()
+        .flatten()
+        .flat_map(|notice| crate::renderer::shared::text::wrap_text(&notice, width))
+        .into_iter()
+        .map(|line| Line::styled(line, theme::label())),
     );
 }
 
@@ -584,6 +587,11 @@ fn dfd_component_children(component: &DfdOverviewComponent) -> Vec<String> {
             .as_deref()
             .unwrap_or("not recorded; rebuild the threat model")
     ));
+    children.extend(
+        component
+            .topology_notice()
+            .map(|notice| format!("flows · {notice}")),
+    );
     for flow in &component.outgoing {
         let crossing = if flow.crosses { " · boundary" } else { "" };
         children.push(format!(
@@ -1089,3 +1097,6 @@ mod tests {
             .collect::<String>()
     }
 }
+
+#[cfg(test)]
+mod topology_tests;
