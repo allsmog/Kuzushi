@@ -1,5 +1,6 @@
 import { AIMessage } from "@langchain/core/messages";
 import { toJsonSchema } from "@langchain/core/utils/json_schema";
+import { anthropicMaxTokens, temperatureLockedModelName } from "./anthropic-model-policy.mjs";
 import { invalidProviderResponseError, providerResponseError } from "./errors.mjs";
 import { appendStructuredOutputContract, cacheableTextBlock, messageText } from "./model.mjs";
 import { openAiResponseEvents } from "./oauth-response-stream.mjs";
@@ -44,13 +45,13 @@ class AnthropicOAuthChatModel {
     const system = appendStructuredOutputContract(systemText(messages), structuredOutput(this.request));
     const body = {
       model: this.modelName,
-      max_tokens: maxTokens(this.request),
+      max_tokens: anthropicMaxTokens(this.modelName, maxTokens(this.request)),
       system: claudeCodeIdentitySystemBlocks(system),
       messages: anthropicMessages(messages),
     };
     if (this.tools.length) body.tools = anthropicToolDefinitions(this.tools);
     const temperature = numericTemperature(this.request);
-    if (temperature !== undefined) body.temperature = temperature;
+    if (temperature !== undefined && !temperatureLockedModelName(this.modelName)) body.temperature = temperature;
     return body;
   }
 }
@@ -385,7 +386,7 @@ function structuredOutput(request) {
 }
 
 function maxTokens(request) {
-  return request.maxOutputTokens ?? request.max_output_tokens ?? request.maxTokens ?? request.max_tokens ?? 4096;
+  return request.maxOutputTokens ?? request.max_output_tokens ?? request.maxTokens ?? request.max_tokens;
 }
 
 function numericTemperature(request) {
