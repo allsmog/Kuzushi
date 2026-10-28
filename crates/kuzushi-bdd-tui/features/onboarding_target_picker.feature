@@ -22,7 +22,7 @@ Feature: Explicit target consent enters aggregate Setup
     And I see "Credentials"
     And I see "Budget"
     And I see "Start Map"
-    And the status segment shows "setup"
+    And the status segment shows "Setup"
 
   Scenario: Esc browses without a target
     Given a fresh kuzushi workspace

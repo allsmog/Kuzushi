@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 164
 ---
- KUZUSHI › workbench · shell route · target:none · ctx:not built · model:unconfigured · cost:$0.00
+ KUZUSHI › workbench · Commands · target:none · repo index not built · model:unconfigured · session:$0.00
 
 Kuzushi · VIEW REVIEW · target:no target · o idle · modules:all modules
  type Esc then B review decision backlog · type Enter finding details · type findings full queue · press z open heatmap
@@ -38,15 +38,15 @@ author-reported confidence: 91%
 -- EVIDENCE --
   no evidence rows recorded
 
+-- SCANNER MESSAGE --
+  sql injection via order_id concatenation
+
 -- REVIEW ACTIONS --
   Record a verdict with a reason; earlier decisions remain in history.
   triage: `decision <confirmed|deferred|needs_review> <reason>`
   false positive: `dismiss false_positive <note>`
   suppression rule: `suppress <id> --reason <text> --days 90`
   report · export findings and decisions
-
--- SCANNER MESSAGE --
-  sql injection via order_id concatenation
 
 -- PROVENANCE --
 rule: demo.sqli

@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 33
 ---
- KUZUSHI › workbench · shell route · target:none · ctx:not built · model:unconfigured · cost:$0.00
+ KUZUSHI › workbench · Commands · target:none · repo index not built · model:unconfigured · session:$0.00
 
 Kuzushi · VIEW REVIEW · target:no target · o idle · modules:all modules
  type Esc then B review decision backlog · type Enter finding details · type findings full queue

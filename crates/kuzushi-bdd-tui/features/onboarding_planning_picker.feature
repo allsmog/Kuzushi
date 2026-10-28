@@ -12,7 +12,7 @@ Feature: Map-plan editing returns to aggregate Setup
     When I press "Down"
     And I press "Enter"
     Then I see "SETUP · MAP PLAN"
-    And the status segment shows "setup:map-plan"
+    And the status segment shows "Setup"
     And "Gather repo context" is checked
     And "Map entry points" is checked
     And "Attach reference files" is unchecked
@@ -35,5 +35,5 @@ Feature: Map-plan editing returns to aggregate Setup
     And I press "Enter"
     And I press "Enter"
     Then I see "SETUP · READY THE MAP RUN"
-    And the status segment shows "setup"
+    And the status segment shows "Setup"
     And I do not see "TASKS"
