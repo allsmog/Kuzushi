@@ -9,6 +9,7 @@ mod context_guidance;
 mod matrix;
 mod reassessment;
 mod review_counts;
+mod scan_selection;
 mod scope;
 
 pub(in crate::workspace::application) fn planned_report(root: &Path) -> InvestigationReportReceipt {

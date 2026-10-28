@@ -149,6 +149,9 @@ paste-file: @ART/open-shared.txt
 keys: Enter
 require-live-snap: 25 message_07.json | shared-finding
 submit: decision deferred Benign replay marker owner review
+submit: use sast
+submit: options sast:scan
+submit: set semgrepConfig p/unrelated-current
 submit: report
 require-live-snap: 25 Scope study: | report
 expect: 7 boundaries
@@ -166,7 +169,98 @@ live-snap: report-60x20
 resize: 40x12
 live-snap: report-40x12
 ask: Across all six sizes, are the finite plan, Review state, spending and report controls usable through keyboard navigation?
+resize: 160x48
+keys: p Home
+wait-for: 20 semgrepConfig
+wait: 0.25
+require-live-snap: 20 semgrepConfig | settings-details-160x48
+keys: PgDn
+wait: 0.25
+live-snap: settings-details-paged-160x48
+resize: 96x89
+keys: Home
+wait-for: 20 semgrepConfig
+wait: 0.25
+require-live-snap: 20 semgrepConfig | settings-details-96x89
+resize: 80x24
+keys: Home
+wait-for: 20 REPORT · fixture-target
+wait: 0.25
+require-live-snap: 20 REPORT · fixture-target | settings-details-80x24
+keys: PgDn
+wait-for: 20 semgrepConfig
+wait: 0.25
+require-live-snap: 20 semgrepConfig | settings-details-paged-80x24
+keys: PgDn
+wait: 0.25
+live-snap: settings-details-more-80x24
+resize: 60x20
+keys: Home
+wait-for: 20 REPORT · fixture-target
+wait: 0.25
+require-live-snap: 20 REPORT · fixture-target | settings-details-60x20
+keys: PgDn
+wait: 0.25
+live-snap: settings-details-paged-60x20
+keys: PgDn
+wait-for: 20 semgrepConfig
+wait: 0.25
+require-live-snap: 20 semgrepConfig | settings-details-more-60x20
+keys: PgDn
+wait: 0.25
+live-snap: settings-details-last-60x20
+resize: 40x12
+keys: Home
+wait-for: 20 REPORT · fixture-target
+wait: 0.25
+require-live-snap: 20 REPORT · fixture-target | settings-details-40x12
+keys: PgDn
+wait: 0.25
+live-snap: settings-details-paged-40x12
+keys: PgDn
+wait: 0.25
+live-snap: settings-details-page-2-40x12
+keys: PgDn
+wait: 0.25
+live-snap: settings-details-page-3-40x12
+keys: PgDn
+wait: 0.25
+live-snap: settings-details-page-4-40x12
+keys: PgDn
+wait: 0.25
+live-snap: settings-details-page-5-40x12
+keys: PgDn
+wait: 0.25
+live-snap: settings-details-page-6-40x12
+keys: PgDn
+wait: 0.25
+live-snap: settings-details-page-7-40x12
+keys: PgDn
+wait: 0.25
+live-snap: settings-details-page-8-40x12
+keys: PgDn
+wait: 0.25
+live-snap: settings-details-page-9-40x12
+keys: PgDn
+wait: 0.25
+live-snap: settings-details-page-10-40x12
+keys: PgDn
+wait: 0.25
+live-snap: settings-details-page-11-40x12
+keys: PgDn
+wait: 0.25
+live-snap: settings-details-page-12-40x12
+ask: Can the operator inspect the frozen per-case requested tasks and rule sources after current settings change, with actual outcomes, coverage limits and shared spending kept distinct across six sizes?
 resize: 120x36
+keys: Home
+wait-for: 20 semgrepConfig
+wait: 0.25
+require-live-snap: 20 semgrepConfig | settings-details-120x36
+keys: PgDn
+wait: 0.25
+live-snap: settings-details-paged-120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_replay_native.py @TMP_TARGET @ART settings-read
+keys: Home p
 keys: j j j
 require-live-snap: 20 format json (4/6) | json-format
 keys: Enter

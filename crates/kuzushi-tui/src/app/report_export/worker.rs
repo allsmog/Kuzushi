@@ -109,10 +109,8 @@ impl ReportExportState {
         let handle = std::thread::Builder::new()
             .name("report-export".into())
             .spawn(move || {
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    exporter.export(&request)
-                }))
-                .unwrap_or_else(|_| stopped_receipt(&request.export));
+                let result = kuzushi_core::recovered_panic::catch(|| exporter.export(&request))
+                    .unwrap_or_else(|_| stopped_receipt(&request.export));
                 if let Some(wake) = wake {
                     wake.notify();
                 }

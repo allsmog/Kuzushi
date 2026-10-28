@@ -131,3 +131,34 @@ fn an_unknown_status_or_canceled_looking_name_never_invents_cancellation() {
     attempt.run_status = Some("unrecognized\u{1b}[31mstatus".into());
     assert_eq!(outcome_label(&attempt), "outcome unavailable");
 }
+
+#[test]
+fn completed_attempt_ids_do_not_bury_spending_coverage_or_settings() {
+    let attempts: Vec<_> = (0..21)
+        .map(|index| {
+            receipt(
+                &format!("owned-{index}"),
+                Some(PhaseStageOutcome::Completed),
+            )
+        })
+        .collect();
+    let mut content = vec![
+        "Scope study: 7 boundaries".into(),
+        "Shared allowance: 1 / 3 calls".into(),
+        "Coverage: selected boundaries only".into(),
+        "Planned scan settings: frozen".into(),
+    ];
+    insert_after_scope(&mut content, &attempts, true);
+    assert_eq!(content[1], "Recorded attempts: 21 · 21 completed");
+    assert_eq!(content[2], "Shared allowance: 1 / 3 calls");
+    assert_eq!(content[3], "Coverage: selected boundaries only");
+    assert_eq!(content[4], "Planned scan settings: frozen");
+    assert_eq!(
+        content
+            .iter()
+            .filter(|line| line.starts_with("Attempt:"))
+            .count(),
+        21
+    );
+    assert_eq!(content.last().unwrap(), "Attempt: owned-20 · completed");
+}

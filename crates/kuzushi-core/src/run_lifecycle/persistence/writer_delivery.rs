@@ -325,16 +325,14 @@ fn notify_item_subscriber(
         return Ok(items.last().map_or(applied_seq, |item| item.seq));
     };
     for item in items {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| subscriber(item))).map_err(
-            |_| {
-                RunItemDeliveryFault::new(
-                    RunItemDeliveryFailureStage::ItemSubscriber,
-                    applied_seq,
-                    durable_seq,
-                    "committed-item subscriber panicked",
-                )
-            },
-        )?;
+        crate::recovered_panic::catch(|| subscriber(item)).map_err(|_| {
+            RunItemDeliveryFault::new(
+                RunItemDeliveryFailureStage::ItemSubscriber,
+                applied_seq,
+                durable_seq,
+                "committed-item subscriber panicked",
+            )
+        })?;
         applied_seq = item.seq;
     }
     Ok(applied_seq)
@@ -378,7 +376,7 @@ pub(super) fn report_delivery_fault(
     let Some(subscriber) = subscriber else {
         return;
     };
-    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| subscriber(fault)));
+    let _ = crate::recovered_panic::catch(|| subscriber(fault));
 }
 
 #[cfg(test)]

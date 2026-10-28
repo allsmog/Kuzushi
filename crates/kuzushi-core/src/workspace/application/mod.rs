@@ -42,7 +42,8 @@ pub use investigation_report::{
     load_investigation_report_document_for_runs, load_investigation_report_for_runs,
     ContextMatrixInvestigationReceipt, InvestigationAttemptReceipt, InvestigationContextCase,
     InvestigationReportDocument, InvestigationReportEvidence, InvestigationReportReceipt,
-    InvestigationReportSummary, InvestigationWorkCounts, ScopeStudyInvestigationReceipt,
+    InvestigationReportSummary, InvestigationScanSelection, InvestigationWorkCounts,
+    ScopeStudyInvestigationReceipt,
 };
 pub use report_review_summary::{load_workspace_review_summary, WorkspaceReviewSummary};
 mod load_program_scope;

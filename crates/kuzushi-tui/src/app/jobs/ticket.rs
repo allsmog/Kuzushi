@@ -238,9 +238,9 @@ where
     std::thread::spawn(move || {
         let sink = ticket.sink();
         let cancel = ticket.cancel.clone();
-        if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if let Err(payload) = kuzushi_core::recovered_panic::catch(|| {
             body(sink, cancel);
-        })) {
+        }) {
             if !ticket.terminal_sent() {
                 ticket.fail(worker_panic_message(worker_label, payload));
             }

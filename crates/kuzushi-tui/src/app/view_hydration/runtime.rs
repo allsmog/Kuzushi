@@ -287,10 +287,8 @@ fn caught_read(
     key: &ViewHydrationKey,
     cancellation: &ViewHydrationCancellation,
 ) -> Result<Option<ViewHydrationValue>, ()> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        reader.read_cancellable(target, key, cancellation)
-    }))
-    .map_err(|_| ())
+    kuzushi_core::recovered_panic::catch(|| reader.read_cancellable(target, key, cancellation))
+        .map_err(|_| ())
 }
 
 fn collect_panicked_batch_failures(
