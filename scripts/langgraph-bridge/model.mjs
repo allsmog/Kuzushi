@@ -6,6 +6,7 @@ import { AnthropicVertex } from "@anthropic-ai/vertex-sdk";
 import { ChatAnthropic } from "@langchain/anthropic";
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
 import { ChatOpenAI } from "@langchain/openai";
+import { anthropicMaxTokens, temperatureLockedModelName } from "./anthropic-model-policy.mjs";
 import { BridgePublicError } from "./errors.mjs";
 import { oauthModelForRequest } from "./oauth-models.mjs";
 import { providerAdmissionEnabled } from "./provider-admission.mjs";
@@ -48,20 +49,20 @@ function apiModelForProvider(request, provider, modelName) {
 }
 
 function anthropicModelForProvider(request, provider, modelName, options) {
+  const anthropicOptions = { ...options, maxTokens: anthropicMaxTokens(modelName, options.maxTokens) };
+  Object.assign(anthropicOptions, anthropicStreamingOptions(anthropicOptions));
   if (provider === "anthropic") {
     return new ChatAnthropic({
       model: modelName,
       apiKey: credentialForRequest(request, provider, "ANTHROPIC_API_KEY"),
-      ...anthropicStreamingOptions(options),
-      ...options,
+      ...anthropicOptions,
     });
   }
   if (provider === "vertex-anthropic") {
     return new ChatAnthropic({
       model: modelName,
       createClient: (clientOptions) => vertexAnthropicClient(request, clientOptions),
-      ...anthropicStreamingOptions(options),
-      ...options,
+      ...anthropicOptions,
     });
   }
   return undefined;
@@ -331,21 +332,9 @@ function nonEmpty(value) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-// Adaptive-thinking-only Anthropic models reject sampling knobs client-side
-// (@langchain/anthropic `validateInvocationParamCompatibility` throws before
-// any HTTP call when temperature is set to a non-default value). Mirror its
-// prefix list so a caller-pinned deterministic temperature (e.g. triage's
-// 0.0) degrades to the provider default for these models instead of failing
-// every bridge call.
-const TEMPERATURE_LOCKED_MODEL_PREFIXES = [
-  "claude-opus-4-7",
-  "claude-opus-4-8",
-  "claude-fable-5",
-];
-
 function temperatureLockedModel(request) {
   const [, model] = parseModelSpec(request?.model ?? "");
-  return TEMPERATURE_LOCKED_MODEL_PREFIXES.some((prefix) => model.startsWith(prefix));
+  return temperatureLockedModelName(model);
 }
 
 // Agentic tool loops issue many back-to-back calls, so a burst-quota 429 in
