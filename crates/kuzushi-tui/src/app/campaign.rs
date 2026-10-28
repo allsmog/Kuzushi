@@ -7,23 +7,28 @@ use super::state_transitions::{InputUpdate, ViewHotkeyAction};
 use super::*;
 use anyhow::Context;
 use kuzushi_core::capabilities::campaign::campaign_dir;
-use kuzushi_core::capabilities::campaign::snapshot::{
-    campaign_ids, load_campaign_snapshot, CampaignSnapshot,
+use kuzushi_core::capabilities::campaign::history::{
+    load_campaign_history, CampaignHistory, CampaignHistoryCoverage,
 };
+use kuzushi_core::capabilities::campaign::snapshot::{load_campaign_snapshot, CampaignSnapshot};
 use std::path::Path;
 mod dispatcher_control;
 mod dispatcher_results;
+pub(super) mod history_refresh;
 mod live_progress;
 mod observations;
 mod scan_progress;
 
 impl ShellApp {
     pub(crate) fn open_campaign_view(&mut self, requested: Option<String>) {
-        self.refresh_campaign_deck();
-        if let Some(campaign_id) = requested {
-            self.select_campaign(&campaign_id);
+        if requested.is_none() {
+            self.cancel_campaign_history_selection();
         }
         self.set_shell_view(ShellView::Campaign);
+        self.refresh_campaign_deck_for(requested.as_deref());
+        if let Some(campaign_id) = requested.filter(|_| !self.campaign_history_loading()) {
+            self.select_campaign(&campaign_id);
+        }
         self.log("campaign", "campaign deck");
     }
 
@@ -50,40 +55,47 @@ impl ShellApp {
     }
 
     pub(crate) fn refresh_campaign_deck(&mut self) {
+        self.refresh_campaign_deck_for(None);
+    }
+
+    fn refresh_campaign_deck_for(&mut self, requested: Option<&str>) {
         self.collect_dispatcher_exit();
         let Some(target) = self.target_path_buf().cloned() else {
             self.router.campaign_mut().notice =
                 Some("select a target to load campaigns".to_string());
             return;
         };
+        if self.runtime_state.has_terminal_loop() {
+            self.begin_campaign_history_refresh(target, requested);
+            return;
+        }
         self.refresh_findings_preserving_active_filter(false);
         self.refresh_phase_attempt_projection();
-        let (campaigns, unreadable) = load_campaign_snapshots(&target);
-        self.refresh_campaign_trend(&target, &campaigns, unreadable);
-        self.replace_campaign_snapshots(campaigns, unreadable);
+        let preferred = preferred_campaign(self.router.campaign(), requested);
+        let history = load_campaign_snapshots(&target, preferred.as_deref());
+        self.refresh_campaign_trend(&target, history.spend());
+        self.replace_campaign_snapshots(history);
         self.refresh_active_batch_report();
         self.restore_dispatcher_failure_notice();
     }
 
-    fn replace_campaign_snapshots(&mut self, campaigns: Vec<CampaignSnapshot>, unreadable: usize) {
+    fn replace_campaign_snapshots(&mut self, history: CampaignHistory) {
         let deck = self.router.campaign_mut();
-        deck.campaigns = campaigns;
-        deck.selected_campaign = deck
-            .selected_campaign
-            .min(deck.campaigns.len().saturating_sub(1));
-        deck.selected_job = deck.selected_job.min(deck.detail_job_ceiling());
-        deck.sync_selected_batch_workers();
-        deck.notice =
-            (unreadable > 0).then(|| format!("{unreadable} campaign dir(s) had no readable plan"));
+        let selection_notice = deck.replace_campaigns(history.campaigns);
+        deck.plan_digests = history.plan_digests;
+        deck.history_coverage = Some(history.coverage);
+        let notices = selection_notice
+            .into_iter()
+            .chain(history.requested_error)
+            .collect::<Vec<_>>();
+        deck.notice = (!notices.is_empty()).then(|| notices.join(" "));
     }
 
     fn refresh_campaign_trend(
         &mut self,
         target: &Path,
-        campaigns: &[CampaignSnapshot],
-        unreadable: usize,
+        spend: kuzushi_core::capabilities::campaign::trend::WorkspaceCampaignSpend,
     ) {
-        let spend = campaign_snapshot_spend(campaigns, unreadable);
         let trend = self
             .domain()
             .review_trend()
@@ -103,6 +115,9 @@ impl ShellApp {
     pub(crate) fn apply_campaign_hotkey(&mut self, action: ViewHotkeyAction) -> InputUpdate {
         if self.router.campaign().batch_scan_config.is_some() {
             return self.apply_batch_scan_hotkey(action);
+        }
+        if self.refuse_unread_campaign_action(action) {
+            return InputUpdate::handled();
         }
         if action == ViewHotkeyAction::CampaignReviewStudy {
             self.review_selected_study();
@@ -146,15 +161,22 @@ impl ShellApp {
     }
 
     fn inspect_campaign_selection(&mut self) -> InputUpdate {
-        self.campaign_deck_edit(|deck| {
+        let hydrate =
+            self.router.campaign().history_coverage.is_some() && !self.router.campaign().detail;
+        let update = self.campaign_deck_edit(|deck| {
             deck.job_detail = deck.detail && deck.selected_job().is_some();
             deck.detail = deck.selected_campaign().is_some();
             deck.read_scroll = 0;
             deck.sync_selected_batch_workers();
-        })
+        });
+        if hydrate {
+            self.refresh_campaign_deck();
+        }
+        update
     }
 
     fn back_from_campaign_detail(&mut self) -> InputUpdate {
+        self.cancel_campaign_history_selection();
         if self.restore_campaign_reader_origin() {
             return InputUpdate::handled();
         }
@@ -173,6 +195,7 @@ impl ShellApp {
     }
 
     fn move_visible_campaign_cursor(&mut self, delta: i64) -> InputUpdate {
+        self.cancel_campaign_history_selection();
         let update = self.campaign_deck_edit(|deck| {
             deck.move_cursor(delta);
             if deck.job_detail {
@@ -312,7 +335,7 @@ impl ShellApp {
         Some(target)
     }
 
-    pub(super) fn selected_fixed_study_has_ended(&self) -> bool {
+    pub(crate) fn selected_fixed_study_has_ended(&self) -> bool {
         self.router
             .campaign()
             .selected_campaign()
@@ -408,7 +431,7 @@ fn campaign_process_args(
 /// Record a deduped trend snapshot (best effort — a history write failure
 /// must not break the deck) and reload the bounded history window that
 /// backs the sparkline strip.
-fn refresh_trend_history(
+pub(super) fn refresh_trend_history(
     target: &Path,
     trend: &kuzushi_core::capabilities::campaign::trend::TrendMetrics,
 ) -> Vec<kuzushi_core::capabilities::campaign::trend_history::TrendSnapshot> {
@@ -417,32 +440,29 @@ fn refresh_trend_history(
     trend_history::load_trend_history(target, trend_history::TREND_HISTORY_LIMIT)
 }
 
-pub(super) fn load_campaign_snapshots(target: &Path) -> (Vec<CampaignSnapshot>, usize) {
-    let ids = campaign_ids(target).unwrap_or_default();
-    let mut snapshots = Vec::new();
-    let mut unreadable = 0usize;
-    for campaign_id in ids {
-        match load_campaign_snapshot(target, &campaign_id) {
-            Ok(snapshot) => snapshots.push(snapshot),
-            Err(_) => unreadable += 1,
-        }
-    }
-    (snapshots, unreadable)
+fn preferred_campaign(deck: &CampaignRouteState, requested: Option<&str>) -> Option<String> {
+    requested
+        .map(str::to_owned)
+        .or_else(|| deck.selected_campaign().map(|row| row.campaign_id.clone()))
 }
 
-fn campaign_snapshot_spend(
-    campaigns: &[CampaignSnapshot],
-    unreadable: usize,
-) -> kuzushi_core::capabilities::campaign::trend::WorkspaceCampaignSpend {
-    kuzushi_core::capabilities::campaign::trend::WorkspaceCampaignSpend {
-        observed_usd: campaigns
-            .iter()
-            .map(|campaign| campaign.total_cost_usd)
-            .sum(),
-        provider_spend_unresolved: unreadable > 0
-            || campaigns
-                .iter()
-                .any(|campaign| campaign.provider_spend_unresolved),
+fn load_campaign_snapshots(target: &Path, preferred: Option<&str>) -> CampaignHistory {
+    match load_campaign_history(target, preferred, &|| false) {
+        Ok(Some(history)) => history,
+        result => CampaignHistory {
+            coverage: CampaignHistoryCoverage {
+                directory_unreadable: true,
+                ..Default::default()
+            },
+            requested_error: Some(format!(
+                "Investigation history unavailable: {}",
+                result
+                    .err()
+                    .map(|error| error.to_string())
+                    .unwrap_or_else(|| "loading canceled".into())
+            )),
+            ..Default::default()
+        },
     }
 }
 
@@ -550,8 +570,12 @@ fn unsupported_platform_kill_dispatcher_process_tree(
 
 #[cfg(test)]
 mod tests {
+    mod background_history;
+    mod history;
     use super::*;
     use kuzushi_core::{FindingStore, Severity, V2Config};
+
+    mod selection;
 
     fn write_fixture_campaign(root: &Path) {
         let plan = serde_json::json!({

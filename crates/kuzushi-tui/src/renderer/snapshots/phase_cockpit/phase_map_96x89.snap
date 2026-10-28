@@ -12,11 +12,12 @@ KUZUSHI · Viewing Map · next required Review · target ./phase-target · ● L
 views  [summary] · dfd  ·  Tab cycles · z zoom
 ┌EXECUTIVE SUMMARY ────────────────────────┐ ┌OVERALL DATA FLOW ───────────────────────────────┐
 │phase-target: purpose not recorded in this  │ │external → application · 1 flow · boundary       │
-│threat model. The primary process         │ │application → data · 1 flow · boundary           │
-│component is API. 3 components exchange   │ │                                                 │
-│data over 2 flows across 3 trust zones; 2 │ │                                                 │
-│flows cross a declared boundary. Rebuild  │ │                                                 │
-│to add a source-grounded product summary. │ │                                                 │
+│threat model. The recorded process        │ │application → data · 1 flow · boundary           │
+│component is API. The stored diagram      │ │                                                 │
+│records 3 components, 2 flows and 3 trust │ │                                                 │
+│zones; 2 flows cross a declared boundary. │ │                                                 │
+│Rebuild to add a source-grounded product  │ │                                                 │
+│summary.                                  │ │                                                 │
 │                                          │ │                                                 │
 │shape · 1 entities · 1 processes · 1      │ │                                                 │
 │stores                                    │ │                                                 │
@@ -39,7 +40,6 @@ views  [summary] · dfd  ·  Tab cycles · z zoom
 │   └─   ◇ Orders DB · store · in 1 · out 0                                                    │
 │      ├─ does · not recorded in the threat model                                              │
 │      └─ purpose · not recorded; rebuild the threat model                                     │
-│                                                                                              │
 │                                                                                              │
 │                                                                                              │
 │                                                                                              │

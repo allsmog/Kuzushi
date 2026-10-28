@@ -24,6 +24,12 @@ impl LinkedFindingsOrigin {
     pub(crate) fn belongs_to_target(&self, target: Option<&std::path::Path>) -> bool {
         target == Some(self.target.as_path())
     }
+
+    pub(crate) fn context_matrix_receipt(
+        &self,
+    ) -> Option<&kuzushi_core::capabilities::campaign::ContextMatrixReceipt> {
+        self.batch_config.as_ref()?.study.matrix.receipt.as_ref()
+    }
 }
 
 impl ShellApp {

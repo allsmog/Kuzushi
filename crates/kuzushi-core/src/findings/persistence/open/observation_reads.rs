@@ -51,6 +51,15 @@ select created_seq, run_id, snapshot_hash
 "#;
 
 impl FindingStore {
+    pub(crate) fn lesson_source_tree_hash(&self, origin: &LessonOrigin) -> Result<Option<String>> {
+        self.lesson_observation(origin)?;
+        self.conn.query_row(
+            "select s.tree_hash from finding_observations o join target_snapshots s on s.snapshot_hash=o.snapshot_hash where o.stable_fp=?1 and o.created_seq=?2 and o.snapshot_hash=?3",
+            params![origin.finding.stable_key, i64::try_from(origin.observation_seq)?, origin.snapshot_hash],
+            |row| row.get(0),
+        ).optional().context("Could not read the lesson's recorded source tree")
+    }
+
     pub(crate) fn lesson_captured_source(
         &self,
         origin: &LessonOrigin,
@@ -66,8 +75,13 @@ impl FindingStore {
         let objects = self
             .v3_objects_dir()
             .context("Captured source store is unavailable")?;
-        let content = ContentStore::open(objects)?
-            .get_blob_bounded(&Blake3Hash::new(hash.clone())?, limit)?;
+        let store = ContentStore::open(objects)?;
+        let object = Blake3Hash::new(hash.clone())?;
+        let content = if store.object_path(&object).try_exists()? {
+            store.get_blob_bounded(&object, limit)?
+        } else {
+            None
+        };
         let text = content
             .map(String::from_utf8)
             .transpose()

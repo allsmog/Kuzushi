@@ -10,20 +10,23 @@ pub(in crate::ui_view_models::phase_cockpit) fn apply_header(
     let super::super::PhaseCockpitBody::Scan(scan) = body else {
         return;
     };
-    if scan.study.is_none()
-        || header
-            .result_card
-            .as_ref()
-            .is_some_and(|card| card.has_result_actions())
+    let Some(study) = &scan.study else {
+        return;
+    };
+    if header
+        .result_card
+        .as_ref()
+        .is_some_and(|card| card.has_result_actions())
     {
         return;
     }
-    header.next_tools = "c study jobs · jobs inspect run receipts".into();
+    header.next_tools = format!("{} study jobs · jobs inspect run receipts", study.jobs_key);
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ScanStudyModel {
     pub(crate) campaign_id: String,
+    pub(crate) jobs_key: char,
     pub(crate) target: String,
     pub(crate) queue: Option<ScanStudyQueue>,
     pub(crate) issue: Option<String>,
@@ -62,6 +65,7 @@ pub(super) fn scan_study_model(app: &ShellApp) -> Option<ScanStudyModel> {
     };
     Some(ScanStudyModel {
         campaign_id: campaign_id.clone(),
+        jobs_key: app.scan_study_jobs_key(),
         target: safe(&crate::ui_view_models::scoped_target_path_label(app)),
         queue,
         issue,
@@ -101,7 +105,7 @@ fn job_model(
             "planned" | "pending" => "queued",
             state => state,
         }),
-        run_ref: job.run_id.clone(),
+        run_ref: job.run_id.as_deref().map(safe),
         detail: job.reason.as_deref().map(safe),
     }
 }

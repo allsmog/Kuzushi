@@ -60,7 +60,7 @@ pub fn execute_context_study(input: &Value, ctx: &ToolExecutionContext<'_>) -> R
     let registry = ModuleRegistry::with_v2_builtins();
     let tool = generation::selected(input["generationTool"].as_str())?;
     let guided = super::brief::prepare_guided_input(root, input, tool)?;
-    let prepared = generation::prepare(tool, &guided, ctx, &registry)?;
+    let prepared = generation::prepare_new(tool, &guided, ctx, &registry)?;
     let preparation = preparation::prepare_jobs(input.get("preparationJobs"), ctx, &registry)?;
     generation::validate_preparation(tool, &prepared, &preparation)?;
     let id =

@@ -43,3 +43,7 @@ pub fn execute_lesson_action(
         .authorize_interactive_with_delegated_tools(&[]);
     registry.dispatch_prepared_input_with_runtime(prepared, &ctx, None)
 }
+/// Read the exact historical source bundle retained for a lesson draft.
+pub fn read_lesson_source_evidence(root: &Path, reference: &str) -> Result<serde_json::Value> {
+    crate::capabilities::finding_lessons::read_source_evidence(root, reference)
+}

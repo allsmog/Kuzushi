@@ -25,18 +25,33 @@ fn context_strip_spans(model: &ContextStripModel) -> Vec<Span<'static>> {
         Span::styled("KUZUSHI", theme::heading()),
         Span::raw(" "),
     ];
-    push_breadcrumb_segment(&mut spans, model.view.clone());
-    push_prefixed_segment(&mut spans, model.mode.clone(), theme::accent());
-    push_segment(&mut spans, "target", model.target.clone(), theme::primary());
-    if let Some(phase) = &model.phase {
-        push_segment(&mut spans, "phase", phase.clone(), theme::accent());
-    }
+    push_orientation(&mut spans, model);
     push_context_segment(&mut spans, model);
-    push_segment(&mut spans, "model", model.model.clone(), theme::primary());
+    push_segment(
+        &mut spans,
+        model.model_field_label(),
+        model.model.clone(),
+        theme::primary(),
+    );
     push_activity_or_run_segment(&mut spans, model);
     push_stage_segment(&mut spans, model.stage.as_ref());
     push_cost_or_trim(&mut spans, model.cost.clone());
     spans
+}
+
+fn push_orientation(spans: &mut Vec<Span<'static>>, model: &ContextStripModel) {
+    if model.study_title.is_some() {
+        for text in model.orientation_segments() {
+            push_prefixed_segment(spans, text, theme::primary());
+        }
+        return;
+    }
+    push_breadcrumb_segment(spans, model.view.clone());
+    push_prefixed_segment(spans, model.mode.clone(), theme::accent());
+    push_segment(spans, "target", model.target.clone(), theme::primary());
+    if let Some(phase) = &model.phase {
+        push_segment(spans, "phase", phase.clone(), theme::accent());
+    }
 }
 
 fn spans_overflow(spans: &[Span<'static>], width: u16) -> bool {

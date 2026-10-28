@@ -1161,9 +1161,10 @@ impl SceneRouteState {
         self.dfd_detail_scroll = 0;
     }
 
-    pub(crate) fn scroll_dfd_detail(&mut self, direction: i32, amount: usize) {
+    pub(crate) fn scroll_dfd_detail(&mut self, direction: i32, amount: usize, maximum: usize) {
+        self.dfd_detail_scroll = self.dfd_detail_scroll.min(maximum);
         if direction >= 0 {
-            self.dfd_detail_scroll = self.dfd_detail_scroll.saturating_add(amount);
+            self.dfd_detail_scroll = self.dfd_detail_scroll.saturating_add(amount).min(maximum);
         } else {
             self.dfd_detail_scroll = self.dfd_detail_scroll.saturating_sub(amount);
         }
@@ -1396,6 +1397,13 @@ pub(crate) enum FilePickerPurpose {
     KnowledgeBase,
     MapDocument,
     ReviewEvidence,
+    LessonEvidence,
+}
+
+impl FilePickerPurpose {
+    pub(crate) fn is_source_evidence(self) -> bool {
+        matches!(self, Self::ReviewEvidence | Self::LessonEvidence)
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -1483,7 +1491,7 @@ impl FilePickerRouteState {
     }
 
     pub(crate) fn filtered_paths(&self) -> Vec<String> {
-        let files = if self.purpose == FilePickerPurpose::ReviewEvidence {
+        let files = if self.purpose.is_source_evidence() {
             self.review_selection.candidates(&self.files)
         } else {
             self.files.clone()

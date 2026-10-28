@@ -124,6 +124,14 @@ impl ViewHydrationRuntime {
         self.retryable_failures.clear();
     }
 
+    pub(crate) fn cancel_single_read(&mut self, key: &ViewHydrationKey) {
+        for batch in &self.handles {
+            if batch.keys.as_slice() == std::slice::from_ref(key) {
+                batch.cancellation.cancel();
+            }
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn set_reader(&mut self, reader: Arc<dyn ViewArtifactReader>) {
         self.invalidate();
@@ -212,10 +220,17 @@ impl ViewHydrationRuntime {
                     generation: batch_generation,
                     target,
                     keys,
-                    cancellation: _,
+                    cancellation,
                     handle,
                 } = batch;
                 let panicked = handle.join().is_err();
+                release_canceled_batch_claims(
+                    batch_generation,
+                    &keys,
+                    &cancellation,
+                    self.generation,
+                    &mut self.in_flight,
+                );
                 collect_panicked_batch_failures(
                     batch_generation,
                     target,
@@ -231,6 +246,38 @@ impl ViewHydrationRuntime {
             }
         }
         self.handles = active;
+    }
+}
+
+fn release_canceled_batch_claims(
+    generation: u64,
+    keys: &[ViewHydrationKey],
+    cancellation: &ViewHydrationCancellation,
+    current_generation: u64,
+    in_flight: &mut BTreeSet<ViewHydrationKey>,
+) {
+    if generation != current_generation || !cancellation.is_canceled() {
+        return;
+    }
+    for key in keys {
+        in_flight.remove(key);
+    }
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+
+    #[test]
+    fn canceled_claims_are_released_without_erasing_a_newer_generation() {
+        let key = ViewHydrationKey::TargetBase;
+        let cancellation = ViewHydrationCancellation::default();
+        cancellation.cancel();
+        let mut claims = BTreeSet::from([key.clone()]);
+        release_canceled_batch_claims(1, std::slice::from_ref(&key), &cancellation, 2, &mut claims);
+        assert!(claims.contains(&key));
+        release_canceled_batch_claims(2, std::slice::from_ref(&key), &cancellation, 2, &mut claims);
+        assert!(claims.is_empty());
     }
 }
 

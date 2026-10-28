@@ -226,58 +226,41 @@ impl<'p> InventoryBudget<'p> {
         }
     }
 
-    /// Enumerates one directory deterministically: every entry is drained
-    /// and sorted by path before the entry cap applies, so a capped walk
-    /// covers a lexicographic prefix regardless of filesystem order. A
-    /// directory whose drain is canceled admits nothing, because its sorted
-    /// prefix is unknown.
+    /// Buffers at most the remaining entry allowance, then sorts that subset.
+    /// A partial filesystem walk follows enumeration order and cannot promise
+    /// a globally lexicographic prefix. One extra entry detects truncation.
     fn collect_dir(
         &mut self,
-        read_dir: InventoryDirectory,
-        dir: &Path,
-    ) -> Result<Vec<InventoryEntry>> {
-        let mut entries = self.drain_directory(read_dir, dir)?;
-        if self.canceled {
-            return Ok(Vec::new());
-        }
-        entries.sort_by(|left, right| left.path.cmp(&right.path));
-        Ok(self.admit_sorted_prefix(entries, dir))
-    }
-
-    fn drain_directory(
-        &mut self,
-        read_dir: InventoryDirectory,
+        mut read_dir: InventoryDirectory,
         dir: &Path,
     ) -> Result<Vec<InventoryEntry>> {
         let mut entries = Vec::new();
-        for entry in read_dir {
-            if self.cancel_requested(dir) {
-                break;
-            }
-            entries.push(entry.with_context(|| format!("Could not enumerate {}", dir.display()))?);
+        while let Some(entry) = self.next_directory_entry(&mut read_dir, dir)? {
+            entries.push(entry);
+            self.count_entry();
         }
+        entries.sort_by(|left, right| left.path.cmp(&right.path));
         Ok(entries)
     }
 
-    /// Counts the sorted entries that fit under the entry cap and discloses
-    /// the truncation when any entry is left out.
-    fn admit_sorted_prefix(
+    fn next_directory_entry(
         &mut self,
-        mut entries: Vec<InventoryEntry>,
+        read_dir: &mut InventoryDirectory,
         dir: &Path,
-    ) -> Vec<InventoryEntry> {
-        let room = self.max_entries.saturating_sub(self.entries);
-        if entries.len() > room {
-            entries.truncate(room);
-            self.enumeration_incomplete = true;
-            self.mark_truncated(format!(
-                "entry cap of {} reached at {}; inventory covers the enumerated prefix only",
-                self.max_entries,
-                dir.display()
-            ));
+    ) -> Result<Option<InventoryEntry>> {
+        if self.cancel_requested(dir) {
+            return Ok(None);
         }
-        entries.iter().for_each(|_| self.count_entry());
-        entries
+        let Some(entry) = read_dir.next() else {
+            return Ok(None);
+        };
+        if self.entries_exhausted() {
+            mark_enumeration_cap(self, &dir.display().to_string());
+            return Ok(None);
+        }
+        entry
+            .map(Some)
+            .with_context(|| format!("Could not enumerate {}", dir.display()))
     }
 
     /// Returns whether the file's content may still be inspected. Once the
@@ -746,7 +729,7 @@ mod coverage_limit_tests {
     }
 
     #[test]
-    fn entry_cap_admits_the_sorted_prefix_regardless_of_directory_order() {
+    fn entry_cap_sorts_only_the_admitted_filesystem_prefix() {
         let mut progress = |_| {};
         let mut budget = InventoryBudget::new(2, 1024, &mut progress);
         let entries = budget
@@ -755,13 +738,34 @@ mod coverage_limit_tests {
                 Path::new("/repo"),
             )
             .unwrap();
-        assert_eq!(enumerated_names(&entries), vec!["a.rs", "b.rs"]);
+        assert_eq!(enumerated_names(&entries), vec!["a.rs", "c.rs"]);
         assert_eq!(budget.entries, 2);
         assert!(budget.enumeration_incomplete);
         assert!(budget
             .truncation
             .unwrap()
             .contains("inventory covers the enumerated prefix only"));
+    }
+
+    #[test]
+    fn directory_entry_cap_stops_a_lazy_unbounded_reader() {
+        let probes = std::rc::Rc::new(std::cell::Cell::new(0));
+        let observed = probes.clone();
+        let directory = Box::new((0..).map(move |index| {
+            observed.set(observed.get() + 1);
+            assert!(observed.get() <= 3, "entry cap must stop enumeration");
+            Ok(InventoryEntry {
+                path: std::path::PathBuf::from(format!("/repo/source-{index}.rs")),
+                kind: InventoryEntryKind::File,
+            })
+        }));
+        let mut progress = |_| {};
+        let mut budget = InventoryBudget::new(2, 1024, &mut progress);
+        let entries = budget.collect_dir(directory, Path::new("/repo")).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(budget.entries, 2);
+        assert_eq!(probes.get(), 3, "one lookahead detects truncation");
+        assert!(budget.enumeration_incomplete);
     }
 
     #[test]
@@ -1052,8 +1056,8 @@ mod coverage_limit_tests {
             .collect_dir(reader.read_directory(temp.path()).unwrap(), temp.path())
             .unwrap();
         assert_eq!(probes.get(), 6, "cancellation lands within one entry");
-        assert!(entries.is_empty(), "an undrained directory has no sorted prefix");
-        assert_eq!(budget.entries, 0);
+        assert_eq!(entries.len(), 5, "retain the bounded observed prefix");
+        assert_eq!(budget.entries, 5);
         assert!(budget.canceled);
         assert!(budget
             .truncation

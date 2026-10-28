@@ -50,6 +50,8 @@ fn is_movement_hotkey(action: ViewHotkeyAction) -> bool {
             | ViewPageDown
             | RecommendCursorPrevious
             | RecommendCursorNext
+            | CampaignCursorPrevious
+            | CampaignCursorNext
             | TuneCursorPrevious
             | TuneCursorNext
             | PromptsCursorPrevious
@@ -91,10 +93,7 @@ impl ShellApp {
         }
         self.set_info_notice(
             "navigate",
-            format!(
-                "Navigate · {} → {} · Esc to type",
-                binding.hint, binding.label
-            ),
+            format!("Navigate · {} → {}", binding.hint, binding.label),
         );
     }
 

@@ -8,6 +8,7 @@ mod history_result;
 mod keys;
 use history_result::install_latest_review;
 mod new_scope;
+mod reading;
 mod state;
 mod study;
 mod suggestion;
@@ -75,6 +76,7 @@ impl ShellApp {
             filter: serde_json::from_value(input["fileFilter"].clone()).ok(),
             offset: input["offset"].as_u64().unwrap_or(0) as usize,
             tree_branch: None,
+            focus_first_scope: false,
         });
         state.notice = Some(
             "Reading source and scope evidence. No model calls. Ctrl+C cancels active work.".into(),
@@ -167,6 +169,7 @@ fn install_file_page(state: &mut ScopeReviewState, request: &ScopeRequest, data:
             });
             state.pending = None;
             state.scroll = 0;
+            state.detail_reader.scroll = 0;
             state.notice = None;
         }
         Ok(_) => {}
@@ -186,5 +189,6 @@ fn install_tree_page(state: &mut ScopeReviewState, branch: ScopeBranch, page: Sc
     state.restore_tree_selection(selected);
     state.pending = None;
     state.scroll = 0;
+    state.detail_reader.scroll = 0;
     state.notice = None;
 }

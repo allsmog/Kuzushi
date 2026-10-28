@@ -12,6 +12,7 @@ use std::path::Path;
 
 mod fold;
 mod gate_binding;
+mod gate_freshness;
 mod load;
 mod pending_receipt;
 mod phase_runs;
@@ -93,6 +94,9 @@ pub struct BatchOccurrenceRow {
     pub titles: Vec<String>,
     pub fingerprints: Vec<String>,
     pub run_ids: Vec<String>,
+    /// Exact recorded generation in this workspace, never the latest fingerprint match.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub representative_observation_ref: Option<String>,
     pub representative_fingerprint: String,
     pub representative_title: String,
     pub representative_severity: String,
@@ -213,13 +217,17 @@ impl BatchOccurrenceRow {
             self.seen, self.completed, self.planned, self.failed
         );
         format!(
-            "{occurrence:<39} {:<9} {}  {}{}{}",
+            "{occurrence:<39} {:<9} {}  {}{}{}{}",
             self.representative_severity,
             self.representative_location,
             self.representative_title,
             variance_suffix(self),
             self.completed_pass_hint()
                 .map(|hint| format!(" [{hint}]"))
+                .unwrap_or_default(),
+            self.representative_observation_ref
+                .as_ref()
+                .map(|reference| format!(" [observation {reference}]"))
                 .unwrap_or_default()
         )
     }
@@ -328,16 +336,13 @@ fn load_batch_gate(
         outcome.equivalence_key == report.equivalence_key,
         "batch gate equivalence key disagrees with its occurrence report"
     );
-    let (binding, blocking_count) = derive_batch_gate_binding(
+    let current = derive_batch_gate_binding(
         store,
         report,
         outcome.policy.fail_on,
         outcome.binding.sarif_path.as_deref(),
     )?;
-    anyhow::ensure!(
-        outcome.binding == binding && outcome.blocking_safe_fold_count == blocking_count,
-        "batch gate is stale for the current trial/finding/SARIF state"
-    );
+    gate_freshness::validate(root, plan, report, &outcome, current)?;
     Ok(Some(outcome))
 }
 

@@ -30,7 +30,6 @@ pub(super) fn lines(
     ];
     lines.extend(source_currency_lines(current));
     lines.extend(source_lines(receipt));
-    lines.extend(shared_allowance_lines(receipt.allowance.as_ref()));
     lines.extend(case_lines(&receipt.occurrence));
     lines.extend(scope::lines(&receipt.scope, details));
     if details {

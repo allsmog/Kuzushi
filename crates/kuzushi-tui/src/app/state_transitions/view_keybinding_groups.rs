@@ -257,8 +257,15 @@ pub(super) fn workbench_keybindings_for_plan(
 }
 
 fn scan_study_keybindings(app: &ShellApp) -> Option<ViewKeybinding> {
-    app.scan_study_progress_key()
-        .map(|_| bind_char('c', "c", "study jobs", ViewHotkeyAction::WorkbenchStudyJobs))
+    app.scan_study_progress_key()?;
+    let key = app.scan_study_jobs_key();
+    let hint = if key == 'C' { "C" } else { "c" };
+    Some(bind_char(
+        key,
+        hint,
+        "study jobs",
+        ViewHotkeyAction::WorkbenchStudyJobs,
+    ))
 }
 
 /// Review's ledger owns `G` (finding groups) and is searched first, so a
@@ -524,12 +531,20 @@ fn workbench_return_keybindings(
         plan.effective_focus == crate::ui_view_models::PhaseSurfaceId::ReviewDetail
     });
     if !is_review_detail {
-        return diagram_return_keybindings(app);
+        return linked_reader_return_keybindings(app);
     }
     vec![bind_char('q', "q", "review list", ViewHotkeyAction::Back)]
 }
 
-fn diagram_return_keybindings(app: &ShellApp) -> Vec<ViewKeybinding> {
+fn linked_reader_return_keybindings(app: &ShellApp) -> Vec<ViewKeybinding> {
+    if app.matrix_observation_return_is_available() {
+        return vec![bind_char(
+            'q',
+            "q",
+            "context results",
+            ViewHotkeyAction::Back,
+        )];
+    }
     if app.scope_findings_return_is_available() {
         return vec![bind_char('q', "q", "scopes", ViewHotkeyAction::Back)];
     }

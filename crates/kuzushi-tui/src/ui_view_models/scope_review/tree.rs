@@ -94,17 +94,17 @@ pub(super) fn selected_file_detail(state: &ScopeReviewState) -> Option<Vec<Strin
             format!("File: {}", paths::display_path(&path)),
             format!("Membership: {}", branch_label(state, state.review.as_ref()?, &branch)),
             file_action_hint(&branch).into(),
-            "Space marks only boundary rows. Left returns to the parent. f reads this branch's full file list.".into(),
+            "In the tree, Space marks only boundary rows. Left returns to the parent. f reads this branch's full file list.".into(),
         ]),
         ScopeTreeRow::Page { branch, offset } => Some(vec![page_label(state, &branch, offset),
-            "Enter loads one recorded membership page. No model requests or scan jobs start.".into()]),
+            "In the tree, Enter loads one recorded membership page. No model requests or scan jobs start.".into()]),
         _ => None,
     }
 }
 
 fn file_action_hint(branch: &ScopeBranch) -> &'static str {
     if branch == &ScopeBranch::Excluded {
-        return "Enter reviews the exclusion rule covering this file. Restoring a directory rule can include other files; save recomputes coverage and clears acceptance.";
+        return "In the tree, Enter reviews the exclusion rule covering this file. Restoring a directory rule can include other files; save recomputes coverage and clears acceptance.";
     }
-    "Enter opens file actions. Exclude pre-fills this exact path; save recomputes coverage and clears acceptance."
+    "In the tree, Enter opens file actions. Exclude pre-fills this exact path; save recomputes coverage and clears acceptance."
 }

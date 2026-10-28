@@ -25,9 +25,11 @@ pub(super) fn scan_phase_model(app: &ShellApp) -> ScanPhaseModel {
     let summary_index = scan_summary_entries(app);
     let entries = &summary_index.entries;
     let study = study::scan_study_model(app);
-    let projection = durable_attempt(app)
-        .map(|(record, disposition)| durable_projection(app, record, disposition, entries))
-        .or_else(|| legacy_projection(app, entries, study.is_none()));
+    let recorded_attempt = durable_attempt(app);
+    let projection = match recorded_attempt {
+        Some((record, disposition)) => durable_projection(app, record, disposition, entries),
+        None => legacy_projection(app, entries, study.is_none()),
+    };
     let has_projection = projection.is_some();
     ScanPhaseModel {
         study,
@@ -45,7 +47,7 @@ pub(super) fn scan_phase_model(app: &ShellApp) -> ScanPhaseModel {
         engine_outcomes: projection
             .map(|projection| projection.engine_outcomes)
             .unwrap_or_default(),
-        empty_hint: scan_page_hint(&summary_index, has_projection),
+        empty_hint: scan_page_hint(&summary_index, has_projection, recorded_attempt.is_some()),
         live: live_scan_model(app),
     }
 }
@@ -65,13 +67,21 @@ fn live_scan_model(app: &ShellApp) -> Option<LiveScanModel> {
 /// a durable projection is already on screen, a transient "receipts are
 /// loading" note would flap in and out beneath it, so pending-index hints
 /// only show when the page has nothing else to stand on.
-fn scan_page_hint(index: &ScanSummaryIndex, has_projection: bool) -> Option<String> {
+fn scan_page_hint(
+    index: &ScanSummaryIndex,
+    has_projection: bool,
+    has_recorded_attempt: bool,
+) -> Option<String> {
     if index.index_pending && has_projection {
         return None;
     }
     index.load_hint.clone().or_else(|| {
         (!has_projection).then(|| {
-            "no terminal Scan run is recorded — describe a target in the Scan composer".to_string()
+            if has_recorded_attempt {
+                "Recorded Scan summaries are incomplete; aggregate results are unavailable".into()
+            } else {
+                "no terminal Scan run is recorded; describe a target in the Scan composer".into()
+            }
         })
     })
 }
@@ -118,19 +128,22 @@ fn durable_projection(
     record: &PhaseAttemptRecord,
     disposition: &'static str,
     entries: &[RunSummaryEntry],
-) -> ScanProjection {
+) -> Option<ScanProjection> {
     if let Some(receipt) = typed_scan_receipt(app, record) {
         if let Some(projection) = typed_scan_projection(app, record, disposition, &receipt) {
-            return projection;
+            return Some(projection);
         }
     }
     let summaries = summaries_for_refs(entries, &record.completed.run_refs);
-    ScanProjection {
+    if summaries::has_incomplete_run_summaries(&summaries, &record.completed.run_refs) {
+        return None;
+    }
+    Some(ScanProjection {
         scope: "not recorded".into(),
         plan: scanner_plan(&summaries),
         engine_outcomes: scanner_outcomes(&summaries, record.completed.outcome),
         attempt: scan_attempt_from_record(app, record, disposition, &summaries),
-    }
+    })
 }
 
 fn legacy_projection(
@@ -285,7 +298,7 @@ fn scan_receipt_load_hint(app: &ShellApp) -> Option<String> {
             }
         }
     }
-    missing.then(|| "typed Scan receipt missing · showing legacy run summary".to_string())
+    missing.then(|| "Typed Scan receipt missing; terminal run summaries are required".to_string())
 }
 
 #[cfg(test)]

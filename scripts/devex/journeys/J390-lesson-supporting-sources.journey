@@ -1,0 +1,143 @@
+name: Historical supporting sources, reader ownership, lesson draft and restart
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR NODE_OPTIONS KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/lesson_support.py seed @TMP_TARGET @ART @TMP_HOME
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/open.txt
+keys: Enter
+require-live-snap: 25 F-0001 · FINDING | source-finding
+submit: lessons
+require-live-snap: 25 REUSABLE LESSONS | lessons
+keys: g
+require-live-snap: 20 GENERATE LESSON DRAFT | generation-plan
+expect: One lesson job
+ask: Does planning keep generation separate from human acceptance and context reuse, with one job, recorded source and no model request before approval?
+keys: f
+require-live-snap: 20 LESSON SUPPORTING FILES | supporting-picker
+expect: Current paths
+type: service.txt
+keys: Space Tab
+require-live-snap: 20 service.txt | cancelled-basket
+keys: Escape
+require-live-snap: 20 GENERATE LESSON DRAFT | basket-cancelled-to-plan
+keys: f
+require-live-snap: 20 0/16 chosen | reopened-empty-basket
+type: service.txt
+keys: Space C-u
+type: policy.txt
+keys: Space C-u
+type: missing.txt
+keys: Space Tab
+require-live-snap: 20 3/16 chosen | selected-historical-paths
+expect: policy.txt
+expect: missing.txt
+ask: Does the basket distinguish the current browsing list from historical source, allow an absent exact path, and retain explicit selection order without spending?
+keys: Enter
+require-live-snap: 20 Supporting files: 3 selected | planned-paths
+keys: t
+type: 2
+keys: Enter r
+type: 1
+keys: Enter Enter
+require-live-snap: 30 Draft ready | frozen-draft
+require-shell: python3 -B @REPO/scripts/devex/fixtures/lesson_support.py draft @TMP_TARGET @ART
+keys: v
+require-live-snap: 20 HISTORICAL LESSON SOURCE | source-reader
+expect: Shared source limit:
+keys: Enter t n f G
+paste-file: @ART/retained.txt
+require-live-snap: 20 HISTORICAL LESSON SOURCE | reader-owns-keys
+expect-not: REVIEW PLAN & ALLOWANCE
+expect-not: Keep this unsubmitted note
+keys: End
+require-live-snap: 20 no retained source membership | missing-source
+expect-not: CURRENT_ONLY
+keys: Home
+resize: 160x48
+live-snap: plan-160x48
+resize: 96x89
+live-snap: plan-96x89
+resize: 80x24
+live-snap: plan-80x24
+resize: 60x20
+live-snap: plan-60x20
+resize: 40x12
+live-snap: plan-40x12
+keys: NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage
+live-snap: plan-40x12-last
+ask: Across six sizes, can the operator read every historical source and omission, including deleted policy text, with scroll position and a visible return control?
+resize: 120x36
+keys: Escape
+require-live-snap: 20 Draft ready | source-reader-return
+keys: Enter
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | approval
+expect: Evidence: exact confirmed observation
+keys: End
+require-live-snap: 20 y approve | approval-last
+expect: 1 fixed jobs
+expect: Total provider calls: 2
+expect: Threat context: not used for lesson drafts
+expect-not: legacy selection
+ask: Does approval bind exactly one job and one attempt to the original confirmation, selected model and two total calls, with one protected Review call and uncertain dollar consumption?
+keys: y
+require-live-snap: 30 Open approved lesson job | approved
+keys: Enter
+require-live-snap: 25 L starts the approved jobs | before-launch
+keys: L
+require-live-snap: 25 dispatcher pid | launched
+require-shell: python3 -B @REPO/scripts/devex/fixtures/lesson_support.py finished @TMP_TARGET @ART
+keys: r
+require-live-snap: 25 Jobs: 1 · 1 completed | completed
+keys: a
+require-live-snap: 25 GENERATED LESSON DRAFT | generation-result
+expect: Inspect model-proposed lesson
+keys: Enter
+require-live-snap: 25 Labeled model lesson | saved-draft
+expect: Proposed by:
+expect: Captured historical source supplied.
+ask: Does the actual executor expose only a model draft, with model and source omissions disclosed, unchanged finding decisions and explicit later human acceptance?
+resize: 160x48
+live-snap: source-160x48
+resize: 96x89
+live-snap: source-96x89
+resize: 80x24
+live-snap: source-80x24
+resize: 60x20
+live-snap: source-60x20
+resize: 40x12
+keys: PageDown
+require-live-snap: 20 Captured historical source | source-40x12
+expect: Supporting source: saved bundle
+expect: Evidence text:
+keys: PageDown
+require-live-snap: 20 Provider retries | source-retry-40x12
+ask: Is historical source distinct from the evidence text size, provider retry accounting and finding verdict, including at 40 columns by paging?
+resize: 120x36
+keys: Home
+keys: a
+paste-file: @ART/reason.txt
+keys: Enter
+require-live-snap: 20 CONFIRM ACCEPTED LESSON | acceptance-confirmation
+keys: Enter
+require-live-snap: 25 Accepted · Labeled model | accepted
+require-shell: python3 -B @REPO/scripts/devex/fixtures/lesson_support.py accepted @TMP_TARGET @ART
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 Jobs: 1 · 1 completed | recovered-job
+nav-mode:
+keys: a
+require-live-snap: 25 GENERATED LESSON DRAFT | recovered-result
+keys: Enter
+require-live-snap: 25 Accepted · Labeled model | recovered-lesson
+require-shell: python3 -B @REPO/scripts/devex/fixtures/lesson_support.py restart @TMP_TARGET @ART
+ask: Does restart authenticate the original generated revision and preserve acceptance and consumed allowance without another model request or job?
+keys: C-c
+require-exit: 10

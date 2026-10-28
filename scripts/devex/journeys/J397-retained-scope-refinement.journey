@@ -1,0 +1,59 @@
+name: Read the real revision-three scope refinement without accepting or extending it
+size: 120x36
+cwd: @REPO/scripts/devex/artifacts/monorepo-scope-live-20261025/attempt-2/target
+env-unset: NODE_OPTIONS KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE KUZUSHI_AGENT_MCPS ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NODE_OPTIONS=--import=@REPO/scripts/devex/fixtures/deny_provider_transport.mjs KUZUSHI_TEST_DENIED_FETCH_LOG=@ART/denied-fetch.jsonl
+require-shell: python3 -B @REPO/scripts/devex/fixtures/retained_scope_reader.py @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @REPO/scripts/devex/artifacts/monorepo-scope-live-20261025/attempt-2/target
+require-live-snap: 30 KUZUSHI | ready
+submit: scopes
+require-live-snap: 25 DRAFT SCOPES · r3 | retained-proposal
+expect: 504/602 filenames
+expect: Proposal context: saved revision tmr_b8b5f79cd3ab42f3a5184a8d96084030
+expect-not: ACCEPTED SCOPES
+ask: Does the real refinement disclose its unaccepted state, bounded filename input, exact saved architecture and separate shared context without implying completed security coverage or approved scan jobs?
+keys: Down Down Down Down Down Down
+keys: Tab
+require-live-snap: 20 SCOPE DETAIL | integration-detail
+expect: workspace.json
+resize: 160x48
+live-snap: integration-detail-160x48
+expect: 504/602 filenames
+resize: 96x89
+live-snap: integration-detail-96x89
+expect: 504/602 filenames
+resize: 80x24
+live-snap: integration-detail-80x24
+resize: 60x20
+live-snap: integration-detail-60x20
+resize: 40x12
+live-snap: integration-detail-40x12
+keys: NPage
+live-snap: integration-detail-40x12-page-1
+keys: NPage
+live-snap: integration-detail-40x12-page-2
+keys: NPage
+live-snap: integration-detail-40x12-page-3
+keys: NPage
+live-snap: integration-detail-40x12-page-4
+require-shell: python3 -B @REPO/scripts/devex/fixtures/retained_scope_reader.py @ART compact
+ask: Can the operator inspect the residual integration boundary and its loose root files, including workspace.json, without accepting the scope or generating another proposal?
+resize: 120x36
+keys: Home Escape Down
+require-live-snap: 20 Shared: | shared-context
+keys: Space
+require-live-snap: 20 Selection unavailable: Accept exact boundaries | context-not-discovery
+expect: shared context only; no discovery jobs.
+require-shell: python3 -B @REPO/scripts/devex/fixtures/retained_scope_reader.py @ART inspected
+keys: Escape
+submit: logs
+paste-file: @ART/read-allowance.txt
+keys: Enter
+require-live-snap: 30 Calls committed: 3/3 · remaining: 0 | spent-allowance
+expect: Unresolved calls: 0
+expect: dollar ceiling: not enforced
+ask: Does allowance reading retain the original paid failure and two later proposals as three spent requests, with no remaining requests or claim of zero dollar consumption?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/retained_scope_reader.py @ART accounting
+keys: C-c
+require-exit: 10

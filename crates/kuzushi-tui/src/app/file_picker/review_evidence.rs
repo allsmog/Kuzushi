@@ -80,7 +80,7 @@ impl ShellApp {
     }
 
     pub(super) fn handle_review_file_picker_key(&mut self, key: KeyEvent) -> bool {
-        if self.router.file_picker().purpose() != FilePickerPurpose::ReviewEvidence {
+        if !self.router.file_picker().purpose().is_source_evidence() {
             return false;
         }
         match key.code {

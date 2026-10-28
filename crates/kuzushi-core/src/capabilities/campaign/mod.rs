@@ -49,7 +49,9 @@ pub use context_matrix::{
     ContextMatrixDraft, ContextMatrixMetadataV1, ContextMatrixReceipt, FrozenContextCase,
     CONTEXT_MATRIX_KIND, MAX_CONTEXT_CASES,
 };
+mod study_allowance;
 mod study_receipt;
+pub use study_allowance::{is_fixed_study_kind, load_fixed_study_allowance};
 mod study_resources;
 pub use map_allowance::{
     load_accepted_map_allowance, load_map_run_allowance, load_selected_map_history_allowance,
@@ -85,6 +87,7 @@ pub use scope_allowance::load_scope_proposal_allowance;
 pub use study_receipt::{
     load_study_allowance, load_study_plan_receipt, load_study_resource_baseline, StudyPlanReceipt,
 };
+pub mod history;
 #[cfg(test)]
 mod tests;
 mod threats;
@@ -107,6 +110,7 @@ pub use batch::{
     SCAN_BATCH_EQUIVALENCE_RECEIPT_FILE, SCAN_BATCH_KIND, SCAN_BATCH_SCHEMA_VERSION,
 };
 pub use coverage::execute_campaign_coverage;
+pub(crate) use dispatcher_lease::batch_controller_owns_publication;
 pub use dispatcher_lease::{
     acquire_batch_controller_lease, acquire_dispatcher_lease, BatchControllerLease,
     CampaignDispatcherLease,

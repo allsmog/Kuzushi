@@ -1,5 +1,97 @@
 # Releasing Kuzushi
 
+## Exact observation links in study results
+
+Occurrence rows add optional `representativeObservationRef`, an opaque
+`generation:<id>` string scoped to the original workspace. It identifies the
+same recorded observation used for the row's representative evidence, even
+when another pass or case later reports the same fingerprint. It does not
+change recurrence, severity, evidence confidence or a human decision.
+
+Old artifacts are not rewritten. Readers should tolerate the additive field;
+when absent, refresh the recorded study results before opening an exact
+observation. Do not substitute the latest fingerprint match. Rust consumers
+constructing `BatchOccurrenceRow` literals must initialize
+`representative_observation_ref`, using `None` when no exact observation is
+known. No request option, database migration, plan approval or provider call
+is added. Context results offer an explicit findings picker and return from
+Review with the selected case and reading position intact.
+
+## Bounded campaign history readers
+
+`campaign:status` adds `data.historyCoverage` version 1. Omitting `campaignId`
+now browses a bounded subset instead of promising every saved campaign. Its
+limits are 1,000 examined directory entries plus one lookahead, 100 loaded
+campaigns and 32 MiB of accounted metadata. Plans and queues are limited to
+4 MiB each, optional run metadata to 256 KiB and snapshots to 1,000 jobs.
+Existing artifact bytes and job identities are not rewritten.
+
+Consumers must check `historyCoverage.complete`. Omissions, unreadable documents
+or limits produce the existing `partial` result and CLI exit 4. Workspace
+spending is then a lower bound with `trend.providerSpendUnresolved: true`.
+A named plan retains its own charge fields. An unreadable
+requested campaign remains an error. Use its exact `campaignId` to inspect an
+investigation outside the browse subset. The requested plan digest comes from
+that same bounded snapshot.
+
+The TUI shares these limits, keeps partial-history disclosure while inspecting
+jobs, and distinguishes an unreadable history directory from an empty workspace.
+Unsupported large or malformed documents stay unavailable rather than supplying
+truncated job counts. Archived JSON remains intact for external inspection.
+No stored-format conversion, plan reapproval or model request is required.
+
+Terminal history and phase projections load through the existing bounded reader
+pool. Newer refreshes cancel earlier reads; completion preserves input, selected
+job identity and current navigation. Work controls wait for current metadata.
+Failed reads retain prior records and qualify spending. CLI and nonterminal
+reads retain synchronous behavior. This scheduling change adds no scan worker,
+provider request, configuration field or artifact migration. See the
+[background history evidence](docs/assessments/background-history-2026-10-27.md).
+
+## Historical supporting source for lesson drafts
+
+`findings:lesson-generate` adds optional `sourceEvidenceFiles`, with at most 16
+exact relative paths, and `sourceEvidenceRef`, supplied by study preparation.
+The cited file and supporting files share `maxSourceBytes`. All text comes from
+the exact confirmed observation's retained snapshot. A changed checkout never
+fills missing historical source. Legacy observations that retained only their
+cited file disclose unavailable supporting membership.
+
+Prepared studies bind the selection, source omissions and bytes to an
+authenticated `lesson-source:` bundle. Changing files, order, origin or the
+byte limit requires another plan. Existing studies without supporting files
+retain their prior input and approval behavior. Generation receipts add an
+optional `sourceEvidenceRef`; old receipts deserialize without it and are not
+rewritten. Downstream Rust struct literals must initialize the new optional
+field. Lesson state, finding verdicts and explicit context reuse are unchanged.
+Reading new supporting-source generation receipts requires this release;
+earlier strict readers reject the added field. Existing receipts remain readable
+without migration.
+
+The TUI offers `f` for the supporting-file basket before preparation and `v`
+for a read-only frozen-source view afterward. The basket identifies the current
+path list as a browsing aid. Missing historical paths can be entered exactly.
+
+
+## Frozen filename selection for scope proposals
+
+`pack:suggest-scopes` adds optional `fileSelection` with `prefix-v1` and
+`root-balanced-v1` choices. Omission preserves the earlier prefix sample and
+its serialized filename sample. New scope context-study plans explicitly freeze
+`root-balanced-v1`; an explicit legacy choice remains available. Existing plans
+and approvals are not rewritten.
+
+The new policy selects loose root files first, then balances filename examples
+across structural directory groups. It retains the 512-name, 16 KiB filename
+and 64 KiB total-input limits. Counts disclose root names and directory groups
+that did not fit. Selection reuses the saved inventory and adds no model call,
+source read, scan boundary or job. Coverage review still includes omitted names.
+
+The TUI shows the frozen policy and exact option before work approval, and names
+the earlier policy when reading old plans. Tool names, stored artifact versions,
+module maturity and one-request proposal limits remain unchanged. See
+[qualification and limits](docs/assessments/scope-filename-selection-2026-10-26.md).
+
 ## Recorded context in scope review
 
 Generated scope drafts now show their recorded proposal-context revision
@@ -4954,3 +5046,14 @@ references but omit text. Missing entries are null; malformed or unsupported
 receipts are unavailable. Existing fields and public tool inputs are unchanged.
 Readers may ignore the additive field and must not infer complete coverage from
 it. See the [workflow evidence](docs/assessments/generated-scope-investigation-2026-10-24.md).
+
+
+### Fixed-study accounting in jobs
+
+Fixed-study jobs retain the exact plan identity from bounded history and display
+shared investigation calls, protected Review capacity and cost availability.
+Jobs cost labels identify the plan subtotal. Loading, unavailable and unapproved
+accounting remain explicit. The additive read-only Rust
+`campaign::load_fixed_study_allowance` API requires the saved plan digest;
+existing tool inputs and persisted ledger formats are unchanged. Approval-plan
+reads now reject symlinked paths using the existing bounded containment reader.

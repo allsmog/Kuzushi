@@ -16,5 +16,6 @@ pub(in crate::renderer::views) use phase_pages::{
 };
 pub(in crate::renderer) use render_workbench_view::*;
 pub(crate) use render_workbench_view::{
-    render_workbench_view, workbench_lines, workbench_phase_plan_for_app,
+    render_workbench_view, workbench_lines, workbench_phase_plan_for_app, workbench_scroll_metrics,
+    WorkbenchScrollMetrics,
 };

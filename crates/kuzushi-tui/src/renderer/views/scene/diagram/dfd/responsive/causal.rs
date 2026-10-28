@@ -73,7 +73,7 @@ fn render_single_node(diagram: &DfdDiagram, buf: &mut Buffer, area: Rect) {
         return;
     };
     draw_node_box(diagram, buf, area, &node.key, 1);
-    text(buf, area, 2, 4, "no connected flows", diagram_muted());
+    text(buf, area, 2, 4, "no recorded flows", diagram_muted());
     diagram.draw_legend(buf, area, 5);
 }
 

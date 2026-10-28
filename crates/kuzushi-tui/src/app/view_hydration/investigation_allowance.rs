@@ -1,7 +1,113 @@
 use super::*;
 
+pub(crate) struct StudyAllowanceSelection<'a> {
+    pub(crate) campaign_id: &'a str,
+    pub(crate) plan_sha256: Option<&'a str>,
+}
+
+impl StudyAllowanceSelection<'_> {
+    fn key(&self) -> Option<ViewHydrationKey> {
+        Some(ViewHydrationKey::StudyAllowance {
+            campaign_id: self.campaign_id.into(),
+            plan_sha256: self.plan_sha256?.into(),
+        })
+    }
+}
+
 impl ShellApp {
     pub(crate) fn investigation_allowance_key(&self) -> Option<ViewHydrationKey> {
+        if self.scope_review_is_visible() {
+            return self.scope_generation_run_id().map(|run| {
+                ViewHydrationKey::InvestigationAllowance {
+                    run_refs: vec![run.into()],
+                }
+            });
+        }
+        if let Some(study) = self.study_allowance_selection() {
+            return study.key();
+        }
+        self.phase_allowance_key()
+    }
+
+    pub(crate) fn study_allowance_selection(&self) -> Option<StudyAllowanceSelection<'_>> {
+        if self.scope_review_is_visible() {
+            return None;
+        }
+        self.target()?;
+        if let Some(id) = self
+            .pending_campaign_selection()
+            .filter(|_| self.shell_view() == ShellView::Campaign)
+        {
+            return Some(StudyAllowanceSelection {
+                campaign_id: id,
+                plan_sha256: None,
+            });
+        }
+        self.matrix_allowance_selection()
+            .or_else(|| self.jobs_allowance_selection())
+    }
+
+    pub(crate) fn scope_generation_run_id(&self) -> Option<&str> {
+        if !self.scope_review_is_visible() {
+            return None;
+        }
+        let review = self.scope_review()?.review.as_ref()?;
+        Some(review.record.generation.as_ref()?.run_id.as_str())
+    }
+
+    fn matrix_allowance_selection(&self) -> Option<StudyAllowanceSelection<'_>> {
+        let receipt = match self.shell_view() {
+            ShellView::Campaign => self.open_matrix_allowance_receipt(),
+            ShellView::Workbench => self.reviewed_context_matrix_receipt(),
+            _ => None,
+        }?;
+        Some(StudyAllowanceSelection {
+            campaign_id: &receipt.campaign_id,
+            plan_sha256: Some(&receipt.plan_sha256),
+        })
+    }
+
+    fn jobs_allowance_selection(&self) -> Option<StudyAllowanceSelection<'_>> {
+        if !self.fixed_jobs_surface() {
+            return None;
+        }
+        let deck = self.router.campaign();
+        let selected = deck
+            .selected_campaign()
+            .filter(|row| crate::app::is_fixed_study_snapshot(row))?;
+        Some(StudyAllowanceSelection {
+            campaign_id: &selected.campaign_id,
+            plan_sha256: deck
+                .plan_digests
+                .get(&selected.campaign_id)
+                .map(String::as_str),
+        })
+    }
+
+    fn fixed_jobs_surface(&self) -> bool {
+        self.shell_view() == ShellView::Campaign
+            && self.router.campaign().detail
+            && self.router.campaign().batch_scan_config.is_none()
+            && self.context_generation().is_none()
+    }
+
+    fn open_matrix_allowance_receipt(
+        &self,
+    ) -> Option<&kuzushi_core::capabilities::campaign::ContextMatrixReceipt> {
+        let matrix = &self
+            .router
+            .campaign()
+            .batch_scan_config
+            .as_ref()?
+            .study
+            .matrix;
+        if !matrix.open {
+            return None;
+        }
+        matrix.receipt.as_ref()
+    }
+
+    fn phase_allowance_key(&self) -> Option<ViewHydrationKey> {
         if self.target().is_none() || self.shell_view() != ShellView::Workbench {
             return None;
         }

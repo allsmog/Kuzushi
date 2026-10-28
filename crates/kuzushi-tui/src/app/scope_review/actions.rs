@@ -123,9 +123,21 @@ impl ShellApp {
         else {
             return InputUpdate::handled();
         };
-        self.dispatch_scope_request(
+        let focus_first_scope = matches!(edit, ScanScopeEdit::WholeRepository);
+        let update = self.dispatch_scope_request(
             json!({"operation":"edit", "proposalRef":reference, "edit":edit}),
-        )
+        );
+        if !update.effects.is_empty() {
+            self.router
+                .scope_review_mut()
+                .as_mut()
+                .unwrap()
+                .pending
+                .as_mut()
+                .expect("dispatched scope edit has a pending request")
+                .focus_first_scope = focus_first_scope;
+        }
+        update
     }
 
     fn open_scope_form(&mut self, kind: ScopeEditKind) {
@@ -291,8 +303,10 @@ fn scope_form_template(
     kind: ScopeEditKind,
 ) -> Option<kuzushi_core::workspace::ProposedScanScope> {
     let state = state?;
-    if kind == ScopeEditKind::ExcludePath && state.selected_file().is_some() {
-        return state.review.as_ref()?.record.draft.scopes.first().cloned();
+    if kind == ScopeEditKind::ExcludePath {
+        return selected_scope(state)
+            .or_else(|| state.review.as_ref()?.record.draft.scopes.first())
+            .cloned();
     }
     selected_scope(state).cloned()
 }

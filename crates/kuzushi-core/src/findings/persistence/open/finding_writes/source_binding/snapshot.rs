@@ -8,6 +8,12 @@ pub(crate) struct FindingSourceSnapshot {
     pub(super) tree: ReviewSourceTree,
 }
 
+impl FindingSourceSnapshot {
+    pub(crate) fn file_hash(&self, path: &str) -> Option<Blake3Hash> {
+        self.tree.file_hash(path)
+    }
+}
+
 impl FindingStore {
     pub(crate) fn require_workspace_target(&self, target: &Path) -> Result<PathBuf> {
         let root = self

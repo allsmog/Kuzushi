@@ -1,0 +1,67 @@
+name: Background history retains typing, selected jobs and origin under bounded metadata pressure
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/campaign_history_loading.py @TMP_TARGET @ART seed
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI || READY THE MAP RUN | ready
+submit: campaign held
+type: held history draft λ
+require-live-snap: 25 held history draft λ | input-after-history-request
+require-shell: python3 -B @REPO/scripts/devex/fixtures/campaign_history_loading.py @TMP_TARGET @ART title
+ask: Does requesting the saved investigation preserve the typed draft and disclose whether history is loading or available without presenting an empty workspace as a successful read?
+require-live-snap: 30 held-1 | exact-history-ready
+expect: held-2
+expect: History partial
+expect: held history draft λ
+nav-mode:
+keys: Down Enter
+require-live-snap: 20 held-2 | selected-recorded-job
+expect: 0 total attempts
+keys: r
+require-live-snap: 25 held-2 | refreshing-selected-job
+expect: 0 total attempts
+resize: 160x48
+keys: Home
+live-snap: history-job-160x48
+resize: 96x89
+keys: Home
+live-snap: history-job-96x89
+resize: 80x24
+keys: Home
+live-snap: history-job-80x24
+resize: 60x20
+keys: Home
+live-snap: history-job-60x20
+resize: 40x12
+keys: Home
+live-snap: history-job-40x12
+keys: NPage NPage NPage
+live-snap: history-job-paged-40x12
+expect: Job: held-2
+expect: Jobs: 2
+ask: Can the operator read the selected recorded job and unknown cost at six sizes while refresh retains identity, scroll and visible return controls?
+resize: 120x36
+submit: campaign held
+keys: C-g
+require-live-snap: 20 COMMAND PALETTE | palette-during-history-refresh
+ask: Does history completion leave the command palette in control rather than taking focus or starting work?
+keys: Escape
+require-live-snap: 30 held-2 | returned-to-recorded-job
+expect: History partial
+require-shell: python3 -B @REPO/scripts/devex/fixtures/campaign_history_loading.py @TMP_TARGET @ART verify
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI || READY THE MAP RUN | restarted
+submit: campaign held
+require-live-snap: 30 held-1 | recovered-history
+expect: held-2
+expect: History partial
+require-shell: python3 -B @REPO/scripts/devex/fixtures/campaign_history_loading.py @TMP_TARGET @ART verify
+ask: Does no-color restart recover the same unstarted investigation with truthful omissions and unknown spending, unchanged plans and zero requests or follow-up jobs?
+keys: C-c
+require-exit: 10

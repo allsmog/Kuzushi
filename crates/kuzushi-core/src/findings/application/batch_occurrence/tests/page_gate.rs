@@ -43,6 +43,54 @@ fn an_authenticated_severity_receipt_survives_a_finding_membership_read() {
 }
 
 #[test]
+fn a_queue_update_between_membership_and_assessment_requests_one_fresh_read() {
+    let (target, store) = fixture();
+    let mut earlier =
+        derive_batch_occurrence_report_for_controller(target.path(), "batch-test", &store).unwrap();
+    let path =
+        crate::capabilities::campaign::campaign_dir(target.path(), "batch-test").join("queue.json");
+    let mut queue: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    queue["jobs"]["trial-003"]["state"] = json!("completed");
+    std::fs::write(path, serde_json::to_vec(&queue).unwrap()).unwrap();
+    let policy = gate_policy(target.path().join("owned.sarif"));
+    persist_current_gate(target.path(), &store, &policy);
+
+    let error = hydrate_report_gate(target.path(), &store, &mut earlier).unwrap_err();
+    assert!(error.is::<BatchReceiptPending>(), "{error:#}");
+    assert!(earlier.gate.is_none());
+    let fresh = snapshot(target.path(), &store, None);
+    assert!(fresh.study_gate_error.is_none());
+    let report = fresh.study.unwrap();
+    assert_eq!(report.completed, 3);
+    assert!(report.gate.is_some());
+}
+
+#[test]
+fn a_completed_queue_waits_for_its_owned_assessment_publication() {
+    let (target, store) = fixture();
+    let _lease =
+        crate::capabilities::campaign::acquire_batch_controller_lease(target.path(), "batch-test")
+            .unwrap();
+    let path =
+        crate::capabilities::campaign::campaign_dir(target.path(), "batch-test").join("queue.json");
+    let mut queue: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    queue["jobs"]["trial-003"]["state"] = json!("completed");
+    std::fs::write(path, serde_json::to_vec(&queue).unwrap()).unwrap();
+    let mut current =
+        derive_batch_occurrence_report_for_controller(target.path(), "batch-test", &store).unwrap();
+    let error = hydrate_report_gate(target.path(), &store, &mut current).unwrap_err();
+    assert!(error.is::<BatchReceiptPending>(), "{error:#}");
+    assert!(current.gate.is_none());
+    let policy = gate_policy(target.path().join("owned.sarif"));
+    persist_current_gate(target.path(), &store, &policy);
+    let fresh = snapshot(target.path(), &store, None);
+    assert!(fresh.study_gate_error.is_none());
+    assert_eq!(fresh.study.unwrap().completed, 3);
+}
+
+#[test]
 fn stale_assessment_is_explicit_without_blocking_authenticated_finding_triage() {
     let (target, store) = fixture();
     let finding = Finding::new_tool(
@@ -68,6 +116,9 @@ fn stale_assessment_is_explicit_without_blocking_authenticated_finding_triage() 
 #[test]
 fn malformed_and_absent_receipts_remain_distinct_and_never_reuse_an_old_assessment() {
     let (target, store) = fixture();
+    let _lease =
+        crate::capabilities::campaign::acquire_batch_controller_lease(target.path(), "batch-test")
+            .unwrap();
     let path =
         crate::capabilities::campaign::campaign_dir(target.path(), "batch-test").join("gate.json");
     std::fs::write(&path, b"not json").unwrap();

@@ -1,5 +1,29 @@
 # Bounded investigation acceptance ledger
 
+The [current context experiment recovery](../assessments/context-matrix-review-current-2026-10-26.md)
+verifies six fixed jobs through a retained failure, allowance halt, explicit
+revision, retry, separate case recurrence, source reassessment, export and
+no-color restart. Final J363 has 79 machine passes, zero failures, 72 capture
+pairs and eight answered agent screen questions with craft findings. A real
+Review label inconsistency is corrected: a different observation asks to
+`check source`, while proof contradictions remain conflicts. All 45 focused
+checks, build, Clippy and risk pass. Two failed attempts remain recorded.
+Transport is fully intercepted; no live request or broader quality claim follows.
+
+The [scope filename selection follow-up](../assessments/scope-filename-selection-2026-10-26.md)
+repairs an input visibility gap confirmed in the saved 602-file inventory. New
+plans freeze root-first balanced filename samples; omitted policy in older jobs
+retains the earlier prefix sample. The 512-name, 16 KiB and total 64 KiB limits
+remain. All 65 distinct focused Rust checks, build, Clippy and risk pass,
+including actual 100,000-entry sampling and current descriptor consistency.
+Final read-only J386 has sixteen machine passes, zero failures, fifteen capture
+pairs and three answered agent reviews with findings across six sizes and
+no-color restart. Two unapproved plans and all 602 inert fixture files remain
+unchanged, with no grant, model request, finding or accepted scope. Earlier
+duplicate-copy polish is retained in its own run. Cumulative live use stays
+nineteen. New-policy model usefulness, dense reading and the broad goal remain
+open; the paid scope result and its uncovered root file are not rewritten.
+
 The [dependency child-source follow-up](../assessments/cargo-child-source-2026-10-26.md)
 repairs parent snapshot ownership, literal paths and the package source anchor
 that an installed-scanner visual audit found missing. All 51 distinct focused
@@ -1168,6 +1192,17 @@ model request or target source execution is added. These are source-retention
 and export checks, with no automatic fix verdict, full guided acceptance,
 general detector quality or reference-product UX claim.
 
+The [scope reader position follow-up](../assessments/scope-reader-position-2026-10-26.md)
+pins the selected boundary, file or coverage category beside its visible
+wrapped-line range without reducing the six content rows at 40x12. There are
+92 distinct focused Rust passes, workspace build, Clippy and risk checks.
+Portable J389 has 26 machine passes, zero failures, 19 capture pairs and four
+answered agent screen reviews with craft findings across six sizes and
+no-color restart. Three inert files, one unaccepted scope revision and empty
+work/accounting ledgers remain unchanged with no provider requests. The raw
+review-required result remains retained. Repeated prose, broader operator
+acceptance, model usefulness and full reference-product UX remain open.
+
 The [workspace source and guidance follow-up](../assessments/workspace-source-guidance-2026-10-26.md)
 corrects another reproduced defect: standalone tool receipts could imply Map
 completion, and child-owned snapshot claims could not be authenticated by the
@@ -1184,3 +1219,49 @@ accepting Map/Scan or starting follow-up work. Raw failures and review status
 remain retained. No model request is added. Source-identity IO is separate from
 discovery limits; large-monorepo performance, all other adapters and the full
 investigation goal remain open.
+## Historical supporting-source lesson increment, 2026-10-26
+
+Lesson generation now accepts an explicit bounded supporting-file selection
+from its exact recorded observation snapshot. The TUI provides a file basket,
+read-only source/omission view, explicit source limits on approval and a compact
+generation receipt. Current checkout changes do not replace historical bytes.
+Shared prepared dispatch, snapshot authentication and investigation accounting
+remain authoritative; generation, human acceptance and context reuse stay
+separate. Final J390 has 51 machine passes, zero failures and seven answered
+agent screen judgments with polish findings. This qualifies source plumbing,
+keyboard interaction and restart on a labeled synthetic fixture, with no live
+provider calls. Model usefulness, broader repository quality and operator UX
+acceptance remain scoped. See
+[the evidence and limits](../assessments/historical-lesson-sources-2026-10-26.md).
+
+## Bounded history and end-to-end repeat, 2026-10-27
+
+The [bounded history increment](../assessments/bounded-history-2026-10-27.md)
+shares one cancellable catalogue between status, workspace spending and shell
+history. Limits, unreadable records, symlink exclusions and unknown spending
+remain visible; an explicit ID is loaded before the bounded browse subset.
+There are 475 distinct focused Rust passes, workspace build and Core/TUI Clippy.
+J393 has 24 machine passes, zero failures and six answered agent screen
+questions. The final rebuilt J121 adds 343 machine passes, zero failures and
+21 answered agent questions through Context, three fixed Scan jobs, cancellation,
+specific allowance revisions, triage, reports and restart. Its five intercepted
+requests add no live-model spend. Raw review-required status and craft findings
+remain retained. Synchronous local history reads, remote latency, large decision
+ledgers, broader module usefulness, live-model quality and operator UX acceptance
+remain open. These fixtures do not establish the full reference-product UX bar.
+
+The [background history follow-up](../assessments/background-history-2026-10-27.md)
+moves catalogue, trend and phase reads off the input thread through the existing
+bounded pool. Twelve held-reader checks protect input, selection, coalescing,
+cancellation and phase state. The paged reader fixes view, study, job, workload
+and study-cost disclosures above the body without resetting reading position.
+Serial selections have 581 distinct Rust passes, a locked workspace build,
+all-target TUI Clippy, passing risk and all ten draft repository gates. Final
+J394 has 22 machine passes over 20,002 unstarted jobs; final J121 has 343 through
+cancellation, allowance limits, triage, export recovery and restart. Both have
+zero machine failures on one binary, with 25 answered agent screen questions
+and remaining craft findings. Four observations, two identities, three decision
+records, four retained Scan attempts, one unresolved reservation and two unused
+Review calls remain. Source is unchanged and never executes; five intercepted
+requests add zero live requests. Raw review status, earlier failed candidates,
+formal operator acceptance and broader reference quality remain distinct.

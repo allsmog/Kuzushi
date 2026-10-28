@@ -73,3 +73,40 @@ fn absent_scope_form_has_no_work_or_planning_copy() {
     let config = BatchScanConfig::load(root.path(), None);
     assert!(summary(&config, 80).is_empty());
 }
+
+#[test]
+fn filename_selection_distinguishes_new_defaults_from_unchanged_legacy_receipts() {
+    let absent = serde_json::json!({});
+    assert!(file_selection_line(&absent, false).contains("root files first"));
+    assert!(file_selection_line(&absent, true).contains("recorded filename prefix"));
+    let balanced = serde_json::json!({"fileSelection":"root-balanced-v1"});
+    assert!(file_selection_line(&balanced, true).contains("root files first"));
+    let explicit = serde_json::json!({"fileSelection":"prefix-v1"});
+    assert!(file_selection_line(&explicit, false).contains("recorded filename prefix"));
+    for invalid in [serde_json::Value::Null, serde_json::json!("unknown")] {
+        let input = serde_json::json!({"fileSelection":invalid});
+        assert!(file_selection_line(&input, true).contains("unsupported saved option"));
+    }
+}
+
+#[test]
+fn the_frozen_scope_policy_is_shown_once_in_each_viewport() {
+    let root = tempfile::tempdir().unwrap();
+    let mut config = BatchScanConfig::load(root.path(), None);
+    let receipt = serde_json::from_value(serde_json::json!({
+        "generationTool":"pack:suggest-scopes", "campaignId":"owned",
+        "investigationId":"owned", "planSha256":"sha256:owned", "sourceIdentity":"tree:owned",
+        "configSha256":"sha256:owned", "model":"openai-codex:gpt-6-luna",
+        "input":{"fileSelection":"root-balanced-v1","maxOutputTokens":4096}}))
+    .unwrap();
+    config.context_generation = Some(StudyContextGeneration {
+        generation_tool: Some("pack:suggest-scopes".into()),
+        receipt: Some(receipt),
+        ..Default::default()
+    });
+    for width in [40, 60, 80, 96, 120, 160] {
+        let text = summary(&config, width).join(" ");
+        assert_eq!(text.matches("Filename sample:").count(), 1, "{text}");
+        assert!(text.contains("root files first"));
+    }
+}

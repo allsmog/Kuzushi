@@ -1,0 +1,60 @@
+name: Investigation refresh preserves saved selection and explains unavailable history
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/campaign_selection.py @TMP_TARGET @ART seed
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: campaign held
+require-live-snap: 25 held-1 | held-investigation
+nav-mode:
+keys: Down Enter
+require-live-snap: 20 held-2 | selected-job
+keys: End
+require-live-snap: 20 held-2 | original-reading-position
+require-shell: python3 -B @REPO/scripts/devex/fixtures/campaign_selection.py @TMP_TARGET @ART insert
+keys: r
+require-live-snap: 20 held-2 | inserted-history-keeps-selection
+require-shell: python3 -B @REPO/scripts/devex/fixtures/campaign_selection.py @TMP_TARGET @ART reorder
+keys: r
+require-live-snap: 20 held-2 | reordered-jobs-keep-selection
+ask: Does refresh preserve the same investigation, selected job and reading position after earlier history appears and unapproved job rows are reordered, without launching work?
+resize: 160x48
+keys: End
+live-snap: selected-job-160x48
+expect: held-2
+resize: 96x89
+keys: End
+live-snap: selected-job-96x89
+expect: held-2
+resize: 80x24
+keys: End
+live-snap: selected-job-80x24
+expect: held-2
+resize: 60x20
+keys: End
+live-snap: selected-job-60x20
+expect: held-2
+resize: 40x12
+keys: End
+live-snap: selected-job-40x12
+expect: held-2
+ask: Can the selected recorded job and return controls remain readable across all six sizes while resize preserves its identity?
+resize: 60x20
+keys: NPage
+live-snap: paged-before-refresh
+keys: r
+live-snap: paged-after-refresh
+require-shell: python3 -B @REPO/scripts/devex/fixtures/campaign_selection.py @TMP_TARGET @ART paging
+ask: Does refresh retain the same positive reading offset after ordinary PageDown, while keeping return controls visible?
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/campaign_selection.py @TMP_TARGET @ART remove
+keys: r
+require-live-snap: 20 Previously selected campaign | unavailable-selection
+expect: Choose a campaign to inspect
+ask: When the selected history is unavailable, does the browser explain the loss and return to selection instead of displaying another job through the old reader?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/campaign_selection.py @TMP_TARGET @ART verify
+keys: C-c
+require-exit: 10

@@ -179,15 +179,21 @@ fn reading_keybind_rows(app: &ShellApp, height: u16, width: u16) -> u16 {
     if compact_map_reading(app, height) || compact_gallery_reading(app, height) {
         return 1;
     }
-    let wrap_width = if super::review_queue_navigation_footer(app) {
-        100
-    } else {
-        70
-    };
+    let wrap_width = reading_footer_wrap_width(app);
     if width < wrap_width && height >= 9 {
         return 3;
     }
     2
+}
+
+fn reading_footer_wrap_width(app: &ShellApp) -> u16 {
+    if super::campaign_reader_navigation_owns_input(app) {
+        return 120;
+    }
+    if super::review_queue_navigation_footer(app) {
+        return 100;
+    }
+    70
 }
 
 pub(crate) fn status_footer_chrome_height(app: &ShellApp, terminal_height: u16) -> u16 {
@@ -428,6 +434,22 @@ mod tests {
 
         assert_eq!(keybind_footer_chrome_height(&app, 24, 69), 3);
         assert_eq!(keybind_footer_chrome_height(&app, 24, 70), 2);
+    }
+
+    #[test]
+    fn study_navigation_uses_two_key_rows_below_120_columns() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_shell_view(ShellView::Campaign);
+        app.set_input_mode(crate::InputMode::Navigate);
+        for width in [60, 80, 96, 119] {
+            assert_eq!(keybind_footer_chrome_height(&app, 24, width), 3);
+        }
+        assert_eq!(keybind_footer_chrome_height(&app, 24, 120), 2);
+        app.set_input_mode(crate::InputMode::Prompt);
+        assert_eq!(keybind_footer_chrome_height(&app, 24, 80), 2);
+        app.set_shell_view(ShellView::History);
+        app.set_input_mode(crate::InputMode::Navigate);
+        assert_eq!(keybind_footer_chrome_height(&app, 24, 80), 2);
     }
 
     #[test]

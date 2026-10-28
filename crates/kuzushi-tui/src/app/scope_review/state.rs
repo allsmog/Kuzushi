@@ -14,6 +14,7 @@ pub(crate) struct ScopeReviewState {
     pub tree: super::ScopeTreeState,
     pub study_scope_ids: std::collections::BTreeSet<String>,
     pub scroll: usize,
+    pub detail_reader: ScopeDetailReader,
     pub menu: Option<usize>,
     pub menu_search: Option<FieldEditor>,
     pub merge_target: Option<usize>,
@@ -38,6 +39,7 @@ impl ScopeReviewState {
             tree: Default::default(),
             study_scope_ids: Default::default(),
             scroll: 0,
+            detail_reader: Default::default(),
             menu: None,
             menu_search: None,
             merge_target: None,
@@ -61,7 +63,7 @@ impl ScopeReviewState {
                 .is_some_and(|members| members.total > 0)
         });
         let selected = self
-            .selection_for_saved_review()
+            .selection_for_saved_review(&review)
             .map(|id| super::ScopeTreeRow::Branch(super::ScopeBranch::Scope(id)))
             .or_else(|| self.selected_row());
         self.reconcile_tree(&review);
@@ -91,6 +93,13 @@ impl ScopeReviewState {
     }
 
     fn reconcile_tree(&mut self, review: &ScanScopeReview) {
+        if self
+            .review
+            .as_ref()
+            .is_some_and(|old| old.reference != review.reference)
+        {
+            self.detail_reader.scroll = 0;
+        }
         let same_proposal = self
             .review
             .as_ref()
@@ -98,6 +107,7 @@ impl ScopeReviewState {
         if !same_proposal {
             self.tree = Default::default();
             self.scroll = 0;
+            self.detail_reader = Default::default();
             return;
         }
         if self.review.as_ref().is_some_and(|old| {
@@ -110,6 +120,12 @@ impl ScopeReviewState {
             _ => true,
         });
     }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct ScopeDetailReader {
+    pub open: bool,
+    pub scroll: usize,
 }
 
 pub(super) fn scope_ids(review: &ScanScopeReview) -> impl Iterator<Item = &str> {
@@ -129,6 +145,7 @@ pub(crate) struct ScopeRequest {
     pub filter: Option<ScopeFileFilter>,
     pub offset: usize,
     pub tree_branch: Option<super::ScopeBranch>,
+    pub focus_first_scope: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

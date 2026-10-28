@@ -259,7 +259,11 @@ fn repository_failure_is_partial_in_both_report_and_finding_history() {
             json!({"file":"owned.c","line":1,"column":1}),
             "navigation",
         ),
-        call("grep".into(), json!({"pattern":"["}), "invalid-search"),
+        call(
+            "read_file".into(),
+            json!({"file":"missing-owned.c"}),
+            "missing-source",
+        ),
         clean_final(),
     ]);
     let workspace = crate::WorkspaceTarget::new(root.path()).unwrap();
@@ -279,15 +283,9 @@ fn repository_failure_is_partial_in_both_report_and_finding_history() {
     };
     let report = run_uaf_hunt_report(&json!({}), &ctx, Some(&runtime)).unwrap();
     assert_eq!(report.repo_tool_calls, 1);
-    // The invalid pattern fails inside `rg` where ripgrep is installed
-    // ("repository search failed: ..."); on hosts without `rg` the spawn
-    // fails instead ("Could not start uaf-hunt repository search"). Either
-    // way the grep tool must record a repository-search failure.
-    let first_repo_error = report.first_repo_error.as_deref().unwrap();
-    assert!(
-        first_repo_error.contains("grep: ") && first_repo_error.contains("repository search"),
-        "unexpected repository tool error: {first_repo_error}"
-    );
+    let error = report.first_repo_error.as_deref().unwrap();
+    assert!(error.contains("read_file:"), "{error}");
+    assert!(error.contains("missing-owned.c"), "{error}");
     assert!(report.is_partial());
     assert_eq!(
         store.run_status("owned-uaf-partial").unwrap().as_deref(),

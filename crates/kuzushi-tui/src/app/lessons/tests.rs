@@ -5,6 +5,7 @@ mod followup;
 mod pagination;
 mod reader;
 mod replacement;
+mod supporting_sources;
 
 #[test]
 fn lesson_preparation_failure_is_visible_without_losing_draft_or_focus() {

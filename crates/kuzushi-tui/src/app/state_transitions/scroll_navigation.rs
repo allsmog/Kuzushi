@@ -128,10 +128,17 @@ impl ShellApp {
     }
 
     pub(super) fn page_down_current_view(&mut self) {
-        let step = self.current_page_step(PageDirection::Down);
+        if self.page_workbench_surface(PageDirection::Down) {
+            return;
+        }
         if self.page_findings_down() {
             return;
         }
+        self.page_down_document();
+    }
+
+    fn page_down_document(&mut self) {
+        let step = self.current_page_step(PageDirection::Down);
         if let Some(kind) =
             page_scroll_kind(&self.shell_view(), self.router.catalog().is_expanded())
         {
@@ -144,10 +151,17 @@ impl ShellApp {
     }
 
     pub(super) fn page_up_current_view(&mut self) {
-        let step = self.current_page_step(PageDirection::Up);
+        if self.page_workbench_surface(PageDirection::Up) {
+            return;
+        }
         if self.page_findings_up() {
             return;
         }
+        self.page_up_document();
+    }
+
+    fn page_up_document(&mut self) {
+        let step = self.current_page_step(PageDirection::Up);
         if let Some(kind) =
             page_scroll_kind(&self.shell_view(), self.router.catalog().is_expanded())
         {
@@ -157,6 +171,19 @@ impl ShellApp {
         if self.is_scrollable_view() {
             self.scroll_up(step as u16);
         }
+    }
+
+    pub(super) fn page_workbench_surface(&mut self, direction: PageDirection) -> bool {
+        let Some(metrics) = crate::renderer::workbench_scroll_metrics(self) else {
+            return false;
+        };
+        let page = metrics.page_rows.min(i32::MAX as usize) as i32;
+        let amount = match direction {
+            PageDirection::Up => -page,
+            PageDirection::Down => page,
+        };
+        self.shift_workbench_scroll(metrics, amount);
+        true
     }
 
     fn current_page_step(&self, direction: PageDirection) -> usize {

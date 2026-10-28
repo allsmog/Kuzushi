@@ -2218,3 +2218,41 @@ study versus workspace-history counts, visible `r` refresh, original severity
 in export and restart. J199 now reads Report before and after source-qualified
 human review and after restart. These cases use no model transport. See
 [Report decision evidence](../assessments/report-decision-summary-2026-10-17.md).
+
+### J390: historical supporting source for lesson drafts
+
+Select and cancel supporting paths, including a deleted historical file and an
+unavailable path. Freeze the exact source bundle, inspect each file and omission
+at six terminal sizes, and verify that the source reader owns Enter and planner
+shortcuts. Return to the same plan, approve one bounded intercepted job, inspect
+its draft, explicitly review it and restart without another request. The fixture
+uses fake credentials and never executes target source. Its observation and
+human confirmation are labeled synthetic. Screen judgments remain separate from
+machine checks and operator acceptance.
+
+### J393: bounded investigation history and exact lookup
+
+Browse 111 labeled synthetic unstarted investigations through the real bounded
+headless status result, then open an ID omitted from the initial 100 rows.
+Inspect its exact job, refresh without changing identity and read it at six
+terminal sizes, including three ordinary PageDown actions at 40 columns.
+Introduce a malformed plan, a symlink and an unavailable history directory.
+Keep omissions and unknown spending visible, then repair and refresh explicitly.
+Verify unchanged source, plan and queue bytes, zero observations and decisions,
+and no provider requests or started study jobs. Six screen questions remain
+separate from machine checks and operator acceptance. This flow qualifies local
+bounded reading and recovery, not remote filesystem latency or model quality.
+
+### J394: background history and preserved input
+
+Read 21 labeled synthetic unapproved plans containing 20,002 unstarted jobs,
+with metadata beyond the 32 MiB catalogue allowance. Verify the actual headless
+partial receipt, then request an exact investigation while typing a Unicode
+draft. Inspect its second job, refresh, resize through six terminal sizes and
+page at 40 columns with the selected identity and parent workload pinned.
+Open the palette during refresh and restart without color. Source and plan
+hashes, zero queues and empty observation/decision/accounting ledgers remain
+unchanged. No source program, scan job or provider request runs. Four screen
+questions are separate from machine checks and operator acceptance; controlled
+Rust readers separately hold requests in flight and test coalescing and stale
+result rejection.

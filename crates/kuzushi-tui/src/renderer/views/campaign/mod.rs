@@ -13,7 +13,8 @@ mod summary;
 pub(crate) use campaign_lines::campaign_lines;
 pub(crate) use coverage_lines::{coverage_lines, coverage_page_rows};
 pub(crate) use reader::{
-    campaign_reader_scroll, campaign_selection_scroll, campaign_view_lines, compact_campaign_reader,
+    campaign_plain_document_lines, campaign_reader_scroll, campaign_selection_scroll,
+    campaign_view_lines, compact_campaign_reader,
 };
 
 fn push_deck_text(

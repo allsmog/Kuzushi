@@ -1,6 +1,9 @@
 use kuzushi_core::capabilities::campaign::snapshot::CampaignJobSnapshot;
 use serde_json::Value;
 
+mod reference_labels;
+use reference_labels::{binding_lines, ReferenceKind};
+
 pub(crate) fn campaign_job_scope_label(job: &CampaignJobSnapshot) -> String {
     let scope = discovery_scope_label(&job.input, job.shard.as_deref());
     match job.threat_title.as_deref().or(job.threat_id.as_deref()) {
@@ -112,27 +115,21 @@ fn recorded_selection_lines(job: &CampaignJobSnapshot) -> Vec<String> {
 
 fn recorded_context_lines(job: &CampaignJobSnapshot) -> Vec<String> {
     [
-        ("Discovery scope", "scanScopeRef"),
-        ("Architecture context", "threatModelRef"),
-        ("Supplemental context", "scanContextRef"),
+        ("Discovery scope", "scanScopeRef", ReferenceKind::Scope),
+        (
+            "Architecture context",
+            "threatModelRef",
+            ReferenceKind::Architecture,
+        ),
+        (
+            "Supplemental context",
+            "scanContextRef",
+            ReferenceKind::Supplemental,
+        ),
     ]
     .into_iter()
-    .flat_map(|(label, key)| binding_lines(label, job.input.get(key)))
+    .flat_map(|(label, key, kind)| binding_lines(label, kind, job.input.get(key)))
     .collect()
-}
-
-fn binding_lines(label: &str, value: Option<&Value>) -> Vec<String> {
-    match value {
-        None => vec![format!("{label}: not recorded")],
-        Some(Value::Null) => vec![format!("{label}: explicitly omitted")],
-        Some(value) => {
-            let text = serde_json::to_string_pretty(value)
-                .unwrap_or_else(|_| "unreadable reference".into());
-            let mut lines = vec![format!("{label}: recorded reference")];
-            lines.extend(text.lines().map(|line| format!("  {line}")));
-            lines
-        }
-    }
 }
 
 fn discovery_scope_label<'a>(input: &'a Value, legacy_shard: Option<&'a str>) -> &'a str {

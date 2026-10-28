@@ -141,3 +141,17 @@ fn plain_render_mode_selects_specialized_plain_views() {
         PlainRenderMode::InteractiveOnly(model) if model.title == "FILE PICKER"
     ));
 }
+
+#[test]
+fn campaign_documents_are_selected_by_the_routing_projection() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    for view in [
+        ShellView::Campaign,
+        ShellView::Workbench,
+        ShellView::Help,
+        ShellView::Cost,
+    ] {
+        app.set_shell_view(view);
+        assert_eq!(uses_campaign_document(&app), view == ShellView::Campaign);
+    }
+}

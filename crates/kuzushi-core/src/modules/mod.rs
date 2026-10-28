@@ -88,6 +88,7 @@ mod native_scanners;
 mod offense_module;
 mod offense_review_module;
 mod options;
+pub(crate) use options::selected_source_paths;
 mod pack_module;
 mod patch_module;
 mod phase_results;

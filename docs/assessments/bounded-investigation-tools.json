@@ -457,7 +457,7 @@
       "module": "campaign",
       "declaredMaturity": "core",
       "declaredPhase": "operate",
-      "purpose": "Fold a campaign plan with the dispatcher queue and run done.json sentinels into one status view; without campaignId, list all campaigns.",
+      "purpose": "Fold a campaign plan with the dispatcher queue and run done.json sentinels into one status view; without campaignId, browse bounded history with explicit omissions and spending limits.",
       "scope": "audit-pending",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -467,8 +467,8 @@
       "declaredOptions": [
         "campaignId"
       ],
-      "executionEvidence": "J86 uses the actual shared campaign projection for a failed context job. Its matching recorded run error is surfaced, provider-call consumption remains zero, and one consumed work attempt plus protected review survive restart. Five focused tests cover correlation, bounded/redacted diagnostics, explicit-reason precedence, read-only metadata and escaped references. This does not certify all campaign kinds or live provider quality.",
-      "readinessVerdict": "verified operational tracker on the owned investigation; large history and full interface parity pending",
+      "executionEvidence": "J86 uses the actual shared campaign projection for a failed context job. Its matching recorded run error is surfaced, provider-call consumption remains zero, and one consumed work attempt plus protected review survive restart. Five focused tests cover correlation, bounded/redacted diagnostics, explicit-reason precedence, read-only metadata and escaped references. This does not certify all campaign kinds or live provider quality. Bounded history checks now exercise shared prepared dispatch, readable-plan retention after corruption, direct lookup outside the browse result, cancellation without writes, symlink exclusion, metadata and job bounds. Final verification has 312 Core campaign checks, 19 canonical run-summary checks, 123 TUI campaign checks, 18 header checks and three registry contracts, all passing. J393 has 24 machine passes, zero failures and six answered agent questions on bounded local browsing and exact-ID recovery. Final rebuilt J121 has 343 machine passes, zero failures and 21 answered agent questions through context, three fixed Scan jobs, cancellation, allowance revisions, triage, export and restart. These fixtures add zero live provider requests. See bounded-history-2026-10-27.md for binary identities, retained failed runs, screen findings and qualification limits.",
+      "readinessVerdict": "bounded local operational history and exact-ID recovery verified; remote latency, large decision-ledger, full interface and operator UX qualification pending",
       "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
       "auditDimensions": {
         "purposeAndValue": "Native exact run reports three completed jobs without new scan work.",
@@ -476,16 +476,17 @@
         "requiredInputs": "Workspace and findings store required; campaign id optional.",
         "sharedDispatchExecution": "Native prepared dispatch and artifact persistence succeed with unresolved historical spending.",
         "artifactConsumption": "Report preserves the original SAST analysis after status and coverage runs.",
-        "failureAndRecovery": "Unresolved historical cost persists correctly. Malformed queues and torn history rows are tested. Missing decision counts produce an unavailable FP plot. Large campaign-directory and history-write failure acceptance remain pending.",
-        "approvedResources": "Native reads add zero model requests. Trend history reads at most 1 MiB and retains at most 90 valid snapshots; campaign-directory enumeration and cancellation across histories remain pending.",
+        "failureAndRecovery": "Unresolved historical cost remains unknown. Malformed queues, plans, canonical run metadata and torn history rows are tested. Missing decision counts produce an unavailable FP plot. J393 retains readable investigations through a malformed plan, symlink exclusion and unavailable-directory repair. Shared prepared cancellation writes no trend or work. Legacy count-only summaries remain compatible; mismatched run IDs cannot supply canonical diagnostics. History-write failures, remote filesystem latency and large decision-ledger acceptance remain pending.",
+        "approvedResources": "History metadata uses one cancellable catalogue for status and spend: 1000 directory entries plus one lookahead, 100 loaded investigations, 32 MiB accounted metadata, 4 MiB per plan/queue, 256 KiB per optional run and 1000 jobs per snapshot. List browsing skips child-run metadata; exact detail has the same allowance. Trend history retains its existing 1 MiB/90-row bound. Findings-decision ledger scaling is separate. No provider calls are added.",
         "scopeEnforcement": "Reads the named campaign and does not establish repository coverage.",
-        "interfaceParity": "Shared native CLI and shell history readers verified on the owned fixture. J124 covers six terminal sizes, including paged 40x12 reading; remaining scan consumers and full option paths are pending."
+        "interfaceParity": "Shared native CLI status and shell history readers are verified on the owned J393 fixture at six terminal sizes, including paged 40x12 exact-job reading. Final rebuilt J121 verifies continued phase artifact consumption and restart. Remaining scan consumers and all option paths are pending."
       },
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
       "finiteJobReaderEvidence": "Shared snapshot labels preserve raw job identity and use recorded case/pass metadata. Prepared native campaign:study and campaign:status consumption is tested. TUI inspection reads recorded inputs, outcome and unknown charges; return/adjacent selection preserve the composer. Missing metadata stays unavailable, with no current-setting substitution. See docs/assessments/finite-job-reader-2026-10-14.md for native scope and full-workflow evidence and remaining limits.",
       "phaseResultDeclared": true,
-      "descriptorSha256": "sha256:31caa2e7d6b0513452f99b16248b8e723d9b8dcfe379544e3d0199ff301b3d33"
+      "descriptorSha256": "sha256:c9ccaa5509456618c3cf8b7ed65c451820a006365d331018fd8035865626240a",
+      "backgroundHistoryEvidence": "Terminal catalogue, trend and phase reads use the existing two-slot view-reader pool. Twelve held-reader checks cover identity, cancellation, coalescing, admitted decision totals, failure recovery and phase protection. Serial selections have 581 distinct passes, a locked workspace build, all-target TUI Clippy, risk and ten draft gates. Final J394 has 22 machine passes and final J121 has 343, both with zero failures on the same binary and 25 answered agent questions with findings. Paged view, study, job, workload and unknown-cost labels remain fixed. J394 starts no work; J121 uses five intercepted requests and zero live requests, retaining four observations, two identities, three decisions, four Scan attempts and unused protected Review. See background-history-2026-10-27.md for retained failures, source qualification and remaining limits. No maturity promotion follows."
     },
     {
       "tool": "campaign:study",
@@ -1221,6 +1222,8 @@
       "declaredOptions": [
         "findingId",
         "originRef",
+        "sourceEvidenceFiles",
+        "sourceEvidenceRef",
         "guidance",
         "maxSourceBytes",
         "maxOutputTokens",
@@ -1239,33 +1242,36 @@
         "docs/assessments/lesson-generation-2026-10-08.md",
         "docs/assessments/live-lesson-retry-2026-10-10.md",
         "docs/assessments/live-lesson-generation-2026-10-26.md",
-        "scripts/devex/journeys/J376-live-lesson-draft.journey"
+        "scripts/devex/journeys/J376-live-lesson-draft.journey",
+        "docs/assessments/historical-lesson-sources-2026-10-26.md",
+        "scripts/devex/journeys/J390-lesson-supporting-sources.journey",
+        "crates/kuzushi-core/src/capabilities/finding_lessons/tests/supporting_sources.rs"
       ],
       "outcomeEvidence": {
-        "requiredInputs": "Exact finding generation with current human confirmation, frozen origin, selected model/runtime, captured source when available and approved allowanceRef. Fixed study preparation validates and freezes these through the shared boundary.",
+        "requiredInputs": "Exact finding generation with current human confirmation, frozen origin, selected model/runtime, captured source when available and approved allowanceRef. Fixed study preparation validates and freezes these through the shared boundary. Optional sourceEvidenceFiles selects up to 16 exact relative supporting paths from the observation snapshot; sourceEvidenceRef binds the prepared immutable bundle.",
         "sharedDispatchExecution": "Real core executor through prepared dispatch, Learning accounting and the existing fixed campaign runner. TUI does not make direct model requests.",
-        "artifactConsumption": "Returns an immutable model-authored Draft with model/run/prompt/source receipt. Human lesson review and report exports consume it separately. It cannot publish Map or enter automatic context.",
-        "failureAndRecovery": "Invalid/truncated output, cancellation and changed confirmation refuse draft saving without repair. Historical authentication failure and later success remain documented. Fresh October 26 evidence records one completed request and one settled reservation, no automatic acceptance, a corrected misleading approval caption, completed-plan refusal and preserved Draft state after restart. Earlier observer and setup failures remain retained.",
-        "approvedResources": "One fixed job, worker and attempt; one tool-free synthesis request. Internal transport requests require shared reservation. Learning cannot spend protected Review allocation. Output-token/dollar ceilings are not claimed as enforced.",
-        "scopeEnforcement": "The model receives the confirmed historical observation and authenticated bounded captured source. No tools, current-source substitution, finding creation, source execution or follow-up work.",
-        "interfaceParity": "Shared prepared dispatch and general campaign runner execute the actual one-job synthesis. Current J119 covers intercepted TUI planning/approval, separate scripted acceptance and restart; J376 reads the completed real draft across six sizes and no-color restart with no new requests. Full module/platform and broad UX acceptance remain open.",
+        "artifactConsumption": "Returns an immutable model-authored Draft with model/run/prompt/source receipt. Human lesson review and report exports consume it separately. It cannot publish Map or enter automatic context. Historical cited and selected supporting source share one bundle and byte allowance, consumed by the fixed job; the draft receipt retains its exact reference.",
+        "failureAndRecovery": "Invalid/truncated output, cancellation and changed confirmation refuse draft saving without repair. Historical authentication failure and later success remain documented. Fresh October 26 evidence records one completed request and one settled reservation, no automatic acceptance, a corrected misleading approval caption, completed-plan refusal and preserved Draft state after restart. Earlier observer and setup failures remain retained. Missing retained membership is an explicit omission; corrupt objects and a changed bundle, origin, selection or byte cap fail before inference. J390 retains the bundle through acceptance and restart.",
+        "approvedResources": "One fixed job, worker and attempt; one tool-free synthesis request. Internal transport requests require shared reservation. Learning cannot spend protected Review allocation. Output-token/dollar ceilings are not claimed as enforced. Supporting files share maxSourceBytes with cited source, without additional model calls or automatic dependency expansion.",
+        "scopeEnforcement": "The model receives the confirmed historical observation and authenticated bounded captured source. No tools, current-source substitution, finding creation, source execution or follow-up work. The picker may browse current names, but selected bytes come only from the recorded observation snapshot. Deleted paths can be selected explicitly; current checkout bytes never substitute.",
+        "interfaceParity": "Shared prepared dispatch and general campaign runner execute the actual one-job synthesis. Current J119 covers intercepted TUI planning/approval, separate scripted acceptance and restart; J376 reads the completed real draft across six sizes and no-color restart with no new requests. Full module/platform and broad UX acceptance remain open. New options are declared and enforced through shared prepared dispatch. J390 covers TUI selection and the read-only frozen bundle at six sizes; full platform parity and live lesson quality remain open.",
         "purposeAndValue": "Draft reusable defensive guidance from an exact human-confirmed historical observation. The current real output preserves synthetic and historical limits and distinguishes a human label from technical proof. This is one benign owned case, not general lesson-quality or vulnerability-precision evidence."
       },
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
       "auditDimensions": {
-        "requiredInputs": "Exact finding generation with current human confirmation, frozen origin, selected model/runtime, captured source when available and approved allowanceRef. Fixed study preparation validates and freezes these through the shared boundary.",
+        "requiredInputs": "Exact finding generation with current human confirmation, frozen origin, selected model/runtime, captured source when available and approved allowanceRef. Fixed study preparation validates and freezes these through the shared boundary. Optional sourceEvidenceFiles selects up to 16 exact relative supporting paths from the observation snapshot; sourceEvidenceRef binds the prepared immutable bundle.",
         "sharedDispatchExecution": "Real core executor through prepared dispatch, Learning accounting and the existing fixed campaign runner. TUI does not make direct model requests.",
-        "artifactConsumption": "Returns an immutable model-authored Draft with model/run/prompt/source receipt. Human lesson review and report exports consume it separately. It cannot publish Map or enter automatic context.",
-        "failureAndRecovery": "Invalid/truncated output, cancellation and changed confirmation refuse draft saving without repair. Historical authentication failure and later success remain documented. Fresh October 26 evidence records one completed request and one settled reservation, no automatic acceptance, a corrected misleading approval caption, completed-plan refusal and preserved Draft state after restart. Earlier observer and setup failures remain retained.",
-        "approvedResources": "One fixed job, worker and attempt; one tool-free synthesis request. Internal transport requests require shared reservation. Learning cannot spend protected Review allocation. Output-token/dollar ceilings are not claimed as enforced.",
-        "scopeEnforcement": "The model receives the confirmed historical observation and authenticated bounded captured source. No tools, current-source substitution, finding creation, source execution or follow-up work.",
-        "interfaceParity": "Shared prepared dispatch and general campaign runner execute the actual one-job synthesis. Current J119 covers intercepted TUI planning/approval, separate scripted acceptance and restart; J376 reads the completed real draft across six sizes and no-color restart with no new requests. Full module/platform and broad UX acceptance remain open.",
+        "artifactConsumption": "Returns an immutable model-authored Draft with model/run/prompt/source receipt. Human lesson review and report exports consume it separately. It cannot publish Map or enter automatic context. Historical cited and selected supporting source share one bundle and byte allowance, consumed by the fixed job; the draft receipt retains its exact reference.",
+        "failureAndRecovery": "Invalid/truncated output, cancellation and changed confirmation refuse draft saving without repair. Historical authentication failure and later success remain documented. Fresh October 26 evidence records one completed request and one settled reservation, no automatic acceptance, a corrected misleading approval caption, completed-plan refusal and preserved Draft state after restart. Earlier observer and setup failures remain retained. Missing retained membership is an explicit omission; corrupt objects and a changed bundle, origin, selection or byte cap fail before inference. J390 retains the bundle through acceptance and restart.",
+        "approvedResources": "One fixed job, worker and attempt; one tool-free synthesis request. Internal transport requests require shared reservation. Learning cannot spend protected Review allocation. Output-token/dollar ceilings are not claimed as enforced. Supporting files share maxSourceBytes with cited source, without additional model calls or automatic dependency expansion.",
+        "scopeEnforcement": "The model receives the confirmed historical observation and authenticated bounded captured source. No tools, current-source substitution, finding creation, source execution or follow-up work. The picker may browse current names, but selected bytes come only from the recorded observation snapshot. Deleted paths can be selected explicitly; current checkout bytes never substitute.",
+        "interfaceParity": "Shared prepared dispatch and general campaign runner execute the actual one-job synthesis. Current J119 covers intercepted TUI planning/approval, separate scripted acceptance and restart; J376 reads the completed real draft across six sizes and no-color restart with no new requests. Full module/platform and broad UX acceptance remain open. New options are declared and enforced through shared prepared dispatch. J390 covers TUI selection and the read-only frozen bundle at six sizes; full platform parity and live lesson quality remain open.",
         "purposeAndValue": "Draft reusable defensive guidance from an exact human-confirmed historical observation. The current real output preserves synthetic and historical limits and distinguishes a human label from technical proof. This is one benign owned case, not general lesson-quality or vulnerability-precision evidence.",
         "phaseAgreement": "Auxiliary Review with explicit Learning accounting. Generation cannot accept a lesson, change a finding verdict, publish Map or start discovery; later human review and context selection are separate."
       },
       "phaseResultDeclared": false,
-      "descriptorSha256": "sha256:eb05719b0dbfd2fe325532491af3a8e3dfd29123eb327ce7e828131851d9b768"
+      "descriptorSha256": "sha256:6e7a058c565a1314e64ae772bb74ea569f9e4b5a15ce893c7a80b714eb5023eb"
     },
     {
       "tool": "findings:lesson-review",
@@ -1862,7 +1868,7 @@
       "module": "fuzz",
       "declaredMaturity": "labs",
       "declaredPhase": "scan",
-      "purpose": "Replay one engine target's corpus through N implementations (fork vs upstream, or one command as a metamorphic self-check) and rank the divergences: crash-split first, then validity- and output-splits \u2014 the silent-wrong-data oracle the crash lane never fires on.",
+      "purpose": "Replay one engine target's corpus through N implementations (fork vs upstream, or one command as a metamorphic self-check) and rank the divergences: crash-split first, then validity- and output-splits — the silent-wrong-data oracle the crash lane never fires on.",
       "scope": "excluded-work",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -2580,6 +2586,7 @@
     },
     {
       "tool": "pack:suggest-scopes",
+      "filenameSelectionEvidence": "docs/assessments/scope-filename-selection-2026-10-26.md: one declared filename-selection option preserves old prefix inputs and freezes root-first balanced samples only in new plans. Bounds remain 512 names, 16 KiB and 64 KiB overall. Omitted root/directory counts are explicit; no source traversal, model call, accepted scope or additional job is created by sampling. Controlled dispatch and legacy preparation evidence are separate from real-model grouping usefulness.",
       "contextVariantEvidence": "docs/assessments/live-scope-context-variant-2026-10-26.md: one approved changed-priority request on the same owned 602-file fixture produces seven primary scopes covering 601 files and a context-only shared scope. workspace.json remains uncovered and revision 2 stays unaccepted. Exact inactive manually declared architecture is preserved. The durable investigation retains the paid failure and uses two of two calls after an explicit allowance revision. Nineteen cumulative experiment requests, zero remaining allowance, unknown dollars. This context variant does not establish causation, complete coverage or useful grouping on unfamiliar repositories. Final read-only J385 has 18 machine passes, zero failures and four answered agent screen reviews with findings across six sizes and no-color restart. The exact proposal context is displayed separately from future Scan context; no model is called during inspection.",
       "scope": "one budgeted architecture proposal over an authenticated existing inventory; no discovery",
       "executionEvidence": "Two explicitly approved normal OAuth jobs on the same owned nine-file monorepo, GPT-6 Luna low: first rejected an undeclared dependency; corrected instructions then produced a valid unaccepted revision with three primary boundaries, shared context and two uncovered discovery members. Each job used one request and one attempt. Controlled tests cover scope-id dependencies and context-only membership. October 24: canonical systemContext is supplied from the exact immutable selected revision under the existing 8 KiB projection. Final J88 has 49 machine passes, zero failures and eight pending operator judgments; one intercepted actual adapter request preserves overview quotes/newlines, one settled reservation, unchanged active context and a separately unstarted three-job scan. The 40-column input receipt takes two PageDown presses instead of 35. See docs/assessments/scope-context-overview-2026-10-24.md. This is handoff and workflow evidence, not live inference or useful large-monorepo grouping evidence. October 26: one separately approved normal OAuth request on the owned 602-file, six-component fixture was rejected for an undeclared contracts dependency. One settled reservation and consumed attempt remain; no result revision, acceptance or scan was published. See docs/assessments/live-monorepo-scope-failure-2026-10-26.md. This is a failed larger-fixture result, not grouping usefulness evidence.",
@@ -2611,6 +2618,7 @@
         "proposalRef",
         "threatModelRef",
         "priorities",
+        "fileSelection",
         "model",
         "thinkingLevel",
         "maxOutputTokens",
@@ -2624,7 +2632,7 @@
       "evidenceSourceCommit": "f8649511f74695f3f4dbd75197a2148f538047e7",
       "evidenceSourceState": "Uncommitted main. Existing maturity unchanged. Live producing native fingerprint retained separately.",
       "phaseResultDeclared": false,
-      "descriptorSha256": "sha256:049c9b144ebe29a6a606f71d890c92cc648f32bef292d7009893c9112f0b84d3",
+      "descriptorSha256": "sha256:f6f7d03c93c59ddf4e5822944c7fc5cc3ca6c4428acea7b5e71e16aed162086b",
       "scopeCorrectionEvidence": "docs/assessments/rejected-scope-correction-2026-10-26.md: bounded local retention, exact failed-run recovery and a separate unaccepted manual revision. Final J382 has 41 machine passes, zero failures and seven answered agent reviews with findings; 248 distinct focused Rust checks, workspace build, Clippy and risk pass. Explicit later boundary acceptance and scan planning retain the original spent investigation without new work. Missing or foreign accounting refuses. One intercepted response, no new live request. Larger model usefulness and full UX remain open."
     },
     {
@@ -11143,5 +11151,17 @@
     "acceptedScopeRevisions": 1,
     "boundaryAcceptance": "Separate explicit operator action after the unaccepted manual correction. No scan approval or new work.",
     "accounting": "Original failed run, investigation, committed call and protected Review balance survive acceptance and later edits. Missing or foreign accounting refuses."
+  },
+  "historicalLessonSourcesCheckpoint": {
+    "assessment": "docs/assessments/historical-lesson-sources-2026-10-26.md",
+    "catalogSource": "scripts/devex/artifacts/end-to-end-current-20261026/control/catalog/catalog-all.json",
+    "catalogSha256": "2c1845a1dc56db270e93ba69e28c53c63d9343ce8e48c909b711f920be5ddfe7",
+    "changedVisibleTool": "findings:lesson-generate",
+    "changedMetadataFields": [
+      "declaredOptions",
+      "descriptorSha256"
+    ],
+    "unchangedOtherVisibleDescriptors": 117,
+    "meaning": "Metadata and named bounded source-bundle execution evidence only. No maturity promotion, retirement or broad usefulness qualification."
   }
 }

@@ -30,3 +30,38 @@ fn shared_usage_discloses_protected_capacity_unsettled_calls_and_unknown_dollars
         .any(|row| row.contains("cost not recorded")));
     assert!(!model.rows.iter().any(|row| row.contains("$0")));
 }
+
+#[test]
+fn maximum_review_reserve_keeps_a_complete_cost_state_in_a_40_column_summary() {
+    use kuzushi_core::runtime::RuntimeCost;
+    let cost = RuntimeCost::from_usd(100_000_000.25, "owned test cost").unwrap();
+    for report in [
+        RuntimeCostReport::UNAVAILABLE,
+        RuntimeCostReport::known(cost),
+        RuntimeCostReport::incomplete(cost),
+        RuntimeCostReport::incomplete(cost).with_unmetered_estimate(Some(cost)),
+    ] {
+        let snapshot = AllowanceSnapshot {
+            schema_version: 1,
+            investigation_id: "owned".into(),
+            revision: 1,
+            model: "operator:model".into(),
+            limits: AllowanceLimits {
+                max_provider_calls: 1_000_000,
+                protected_review_calls: 1_000_000,
+            },
+            committed_calls: 0,
+            review_calls: 0,
+            unresolved_calls: 0,
+            cost: report,
+            work_plan: None,
+        };
+        let model = present(&snapshot);
+        assert!(model.summary.starts_with("1000000 Review protected"));
+        assert!(
+            unicode_width::UnicodeWidthStr::width(model.summary.as_str()) <= 40,
+            "{}",
+            model.summary
+        );
+    }
+}

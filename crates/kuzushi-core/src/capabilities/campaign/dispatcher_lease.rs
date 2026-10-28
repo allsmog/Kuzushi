@@ -1,6 +1,9 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
+mod ownership;
+pub(crate) use ownership::batch_controller_owns_publication;
+
 pub struct CampaignDispatcherLease {
     _lock: crate::file_lock::ExclusiveFileLock,
     control: super::CampaignDispatcherControl,

@@ -32,6 +32,7 @@ impl ShellApp {
             state.cursor = (state.cursor + 1).min(state.row_count().saturating_sub(1));
         }
         state.scroll = 0;
+        state.detail_reader.scroll = 0;
         state.notice = None;
     }
 
@@ -43,6 +44,7 @@ impl ShellApp {
         }
         state.restore_tree_selection(Some(ScopeTreeRow::Branch(branch)));
         state.scroll = 0;
+        state.detail_reader.scroll = 0;
         state.notice = None;
     }
 

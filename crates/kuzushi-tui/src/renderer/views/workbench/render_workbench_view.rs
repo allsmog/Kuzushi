@@ -2,14 +2,54 @@ use super::*;
 use crate::app::WorkbenchPage;
 use crate::ui_view_models::{
     phase_presentation_plan, workbench_presentation_snapshot, AttentionMode, EngagementHeaderModel,
-    JourneyPhaseStatus, PhaseCockpitModel, PhaseSurfaceId, WorkbenchChromeModel, WorkbenchHint,
-    WorkbenchTopBar,
+    JourneyPhaseStatus, PhaseCockpitBody, PhaseCockpitModel, PhaseSurfaceId, SurfaceInteraction,
+    WorkbenchChromeModel, WorkbenchHint, WorkbenchPresentationSnapshot, WorkbenchTopBar,
 };
 use ratatui::layout::Rect;
 use ratatui::prelude::{Frame, Line, Span};
 use ratatui::widgets::Paragraph;
 
 const MIN_COMPACT_ZOOM_BODY_ROWS: u16 = 4;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct WorkbenchScrollMetrics {
+    pub(crate) surface: PhaseSurfaceId,
+    pub(crate) page_rows: usize,
+    pub(crate) max_offset: Option<u16>,
+}
+
+/// Resolve ownership, page size and Scan bounds from one presentation snapshot.
+pub(crate) fn workbench_scroll_metrics(app: &ShellApp) -> Option<WorkbenchScrollMetrics> {
+    if app.shell_view() != crate::ShellView::Workbench {
+        return None;
+    }
+    let snapshot = workbench_presentation_snapshot(app);
+    let viewport = app.viewport();
+    let plan = phase_plan_for_snapshot(
+        app,
+        Rect::new(0, 0, viewport.columns, viewport.rows),
+        &snapshot,
+    )?;
+    let surface = plan.surface(plan.effective_focus)?;
+    if surface.interaction != SurfaceInteraction::Scrollable {
+        return None;
+    }
+    let inner = cockpit_pane_block("", false).inner(surface.rect);
+    Some(WorkbenchScrollMetrics {
+        surface: surface.id,
+        page_rows: usize::from(inner.height).max(1),
+        max_offset: scan_scroll_limit(&snapshot.phase.body, surface.id, surface.rect),
+    })
+}
+
+fn scan_scroll_limit(body: &PhaseCockpitBody, surface: PhaseSurfaceId, area: Rect) -> Option<u16> {
+    match (body, surface) {
+        (PhaseCockpitBody::Scan(model), PhaseSurfaceId::ScanEngines) => {
+            Some(super::phase_pages::scan_engine_max_scroll(model, area))
+        }
+        _ => None,
+    }
+}
 
 /// Render the one canonical phase-native cockpit.
 pub(crate) fn render_workbench_view(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
@@ -24,8 +64,16 @@ pub(crate) fn workbench_phase_plan_for_app(
     if app.shell_view() != crate::ShellView::Workbench {
         return None;
     }
-    let area = crate::renderer::workbench_primary_area(app, terminal_area);
     let snapshot = workbench_presentation_snapshot(app);
+    phase_plan_for_snapshot(app, terminal_area, &snapshot)
+}
+
+fn phase_plan_for_snapshot(
+    app: &ShellApp,
+    terminal_area: Rect,
+    snapshot: &WorkbenchPresentationSnapshot,
+) -> Option<crate::ui_view_models::PhasePresentationPlan> {
+    let area = crate::renderer::workbench_primary_area(app, terminal_area);
     let phase = &snapshot.phase;
     let chrome = &snapshot.chrome;
     let question_visible = app.guided_scan_question_model().is_some();

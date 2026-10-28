@@ -24,6 +24,14 @@ pub(crate) fn review_conflict_compact_label(conflict: &str) -> &'static str {
     }
 }
 
+pub(crate) fn review_conflict_status_label(conflict: &str) -> &'static str {
+    match conflict {
+        "reappeared_after_rejection" => "check source",
+        "runtime_verified_after_rejection" | "not_reproduced_after_confirmation" => "conflict",
+        _ => "review",
+    }
+}
+
 pub(crate) fn review_conflict_detail_label(conflict: &str) -> &'static str {
     match conflict {
         "runtime_verified_after_rejection" => {

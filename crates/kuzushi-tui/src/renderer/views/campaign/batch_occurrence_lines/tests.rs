@@ -144,6 +144,7 @@ fn long_row() -> BatchOccurrenceRow {
         severities: vec!["high".into()], locations: vec![], titles: vec![],
         fingerprints: vec!["finding-exact-identity".into()],
         run_ids: vec!["run-discovery-exact-reference-1".into(), "run-discovery-exact-reference-2".into()],
+        representative_observation_ref: None,
         representative_fingerprint: "finding-exact-identity".into(),
         representative_title: "Untrusted repository paths escape the configured workspace boundary".into(),
         representative_severity: "high".into(),

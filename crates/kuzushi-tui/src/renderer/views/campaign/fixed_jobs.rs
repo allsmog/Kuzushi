@@ -71,6 +71,17 @@ fn fitted_job_label(name: &str, pass: Option<&str>, width: usize) -> String {
     )
 }
 
+pub(super) fn selected_job_heading(job: &CampaignJobSnapshot, width: usize) -> String {
+    let (name, pass) = job_label_parts(job);
+    fit(
+        &format!(
+            "Job: {}",
+            fitted_job_label(name, pass, width.saturating_sub(5))
+        ),
+        width,
+    )
+}
+
 pub(super) fn append_selected_detail(
     lines: &mut Vec<Line<'static>>,
     job: &CampaignJobSnapshot,

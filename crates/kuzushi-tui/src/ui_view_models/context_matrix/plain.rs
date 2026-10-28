@@ -9,6 +9,7 @@ pub(crate) fn matrix_plain_lines(app: &ShellApp, width: usize) -> Option<Vec<Str
         .as_ref()
         .filter(|config| config.study.matrix.open)?;
     let mut lines = vec!["CONTEXT CASES".into()];
+    append_allowance(&mut lines, app, width);
     if !config.study.matrix.results {
         lines.extend(super::context_matrix_lines(config, width, usize::MAX));
         return Some(lines);
@@ -33,4 +34,11 @@ pub(crate) fn matrix_plain_lines(app: &ShellApp, width: usize) -> Option<Vec<Str
         )),
     }
     Some(lines)
+}
+
+fn append_allowance(lines: &mut Vec<String>, app: &ShellApp, width: usize) {
+    lines.extend(super::matrix_allowance_lines(app, width));
+    if let Some(allowance) = super::super::investigation_allowance_model(app) {
+        lines.extend(allowance.rows);
+    }
 }

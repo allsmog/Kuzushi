@@ -12,6 +12,15 @@ pub(super) fn render_context_matrix(
     let inner = block.inner(area).inner(ratatui::layout::Margin::new(1, 0));
     frame.render_widget(block, area);
     let body = crate::ui_view_models::matrix_body(area, config.study.matrix.results);
+    frame.render_widget(
+        Paragraph::new(
+            crate::ui_view_models::matrix_allowance_lines(app, inner.width.into()).join("\n"),
+        ),
+        Rect {
+            height: body.y.saturating_sub(inner.y).min(inner.height),
+            ..inner
+        },
+    );
     let lines = matrix_surface_lines(app, config, body);
     frame.render_widget(ratatui::widgets::Paragraph::new(lines.join("\n")), body);
     if config.study.matrix.results {
@@ -34,9 +43,15 @@ fn matrix_surface_lines(app: &ShellApp, config: &BatchScanConfig, body: Rect) ->
 
 fn render_matrix_result_controls(frame: &mut Frame<'_>, app: &ShellApp, inner: Rect) {
     let hints = crate::ui_view_models::matrix_result_controls(app);
+    let height = (hints.len() as u16).min(inner.height);
     frame.render_widget(
         ratatui::widgets::Paragraph::new(hints.join("\n")),
-        Rect::new(inner.x, inner.bottom().saturating_sub(3), inner.width, 3),
+        Rect::new(
+            inner.x,
+            inner.bottom().saturating_sub(height),
+            inner.width,
+            height,
+        ),
     );
 }
 

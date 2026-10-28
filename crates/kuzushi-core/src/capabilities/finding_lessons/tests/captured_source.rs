@@ -25,6 +25,7 @@ fn generation_supplies_the_captured_observation_instead_of_changed_current_sourc
     assert_eq!(payload["capturedSource"]["status"], "included");
     assert_eq!(payload["capturedSource"]["text"], captured);
     assert_eq!(payload["capturedSource"]["currentSourceRead"], false);
+    assert!(payload.get("supportingSources").is_none());
     assert!(!requests[0].prompt.contains("Current-only source marker"));
     assert_eq!(
         result["data"]["lesson"]["generation"]["sourceCapture"],
