@@ -581,3 +581,27 @@ fn completed_retry_selection_keeps_canceled_history_and_observations_in_reports(
     assert_eq!(result.completed.run_refs.len(), 9);
     assert!(!result.completed.run_refs.iter().any(|id| id == run));
 }
+
+#[test]
+fn every_authenticated_matrix_case_reaches_report_scan_selection() {
+    let fixture = Fixture::new();
+    fixture.plan(true);
+    let report = load_investigation_report_document(&fixture.workspace, "matrix-report").unwrap();
+    let selections = report.summary().scan_selection;
+    assert_eq!(selections.len(), 3);
+    assert_eq!(
+        selections
+            .iter()
+            .map(|row| row.case_id.as_deref().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["alpha", "beta", "gamma"]
+    );
+    for selection in selections {
+        assert_eq!(selection.parameters["tasks"], json!(["secret-scan"]));
+        assert_eq!(selection.parameters["taskMode"], "manual");
+        assert!(!selection.parameters.contains_key("threatModelRef"));
+    }
+    assert!(report.summary().attempts.is_empty());
+    let encoded = serde_json::to_value(&report).unwrap();
+    assert_eq!(encoded["scanSelection"].as_array().unwrap().len(), 3);
+}

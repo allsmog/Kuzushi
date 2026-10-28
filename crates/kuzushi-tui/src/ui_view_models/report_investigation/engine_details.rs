@@ -15,6 +15,10 @@ pub(super) fn append_document_engine_details(
         engine_details.extend(engine_detail_lines(document));
     }
     insert_engine_details(lines, engine_details);
+    scan_selection::insert(
+        lines,
+        scan_selection::lines(document.summary().scan_selection, details),
+    );
     attempt_history::insert_after_scope(lines, attempts, details);
 }
 

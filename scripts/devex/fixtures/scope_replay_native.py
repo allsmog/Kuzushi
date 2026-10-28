@@ -15,7 +15,8 @@ from retained_scope_reader import immutable_files
 from semgrep_invocation_probe import install
 
 REPO = Path(__file__).resolve().parents[3]
-CONTROL = REPO / "scripts/devex/artifacts/scope-balanced-refinement-current-20261026/control"
+RETAINED = REPO / "scripts/devex/artifacts/scope-replay-native-current-20261027/J399-attempt-3/native/20261027-150833/J399"
+SCAN_SELECTION_KEYS = ("taskMode", "tasks", "semgrepConfig", "semgrepBinary", "semgrepJobs", "semgrepTimeoutMs")
 COMPONENTS = ["control-panel", "gateway", "accounts", "invoicing", "worker", "notifications"]
 MARKERS = {"control-panel": "apps/control-panel/unit_095.ts",
            **{name: "services/" + name + "/unit_095.py" for name in COMPONENTS[1:]},
@@ -31,10 +32,23 @@ def digest(path):
 
 
 def retained():
-    prepared, live = read(CONTROL / "prepared.json"), read(CONTROL / "live-result.json")
-    root = Path(prepared["target"])
-    record = read(root / ".kuzushi/v3/scan-scopes/revisions" / (live["scopeReference"]["recordHash"] + ".json"))
-    assert record["revision"] == 3 and record["acceptance"] is None
+    protected = read(RETAINED / "original-immutable-before.json")
+    assert len(protected) == 624
+    for name, expected in protected.items():
+        assert digest(Path(name)) == expected, name
+    revisions = [Path(name) for name in protected if "/scan-scopes/revisions/" in name]
+    matches = [(path, read(path)) for path in revisions if read(path)["revision"] == 3]
+    assert len(matches) == 1
+    path, record = matches[0]
+    assert record["acceptance"] is None
+    assert record["draft"] == read(RETAINED / "saved-scope-draft.json")
+    configs = [Path(name) for name in protected if name.endswith("/.kuzushi/v3/config.toml")]
+    assert len(configs) == 1
+    root = path.parents[4]
+    prepared = {"target": str(root), "operatorHome": str(configs[0].parents[2])}
+    live = {"runId": record["generation"]["runId"], "scopeReference": {
+        "proposalId": record["proposalId"], "revision": record["revision"], "recordHash": path.stem}}
+    assert immutable_files(root, prepared, live) == protected
     return root, prepared, live, record
 
 
@@ -136,7 +150,7 @@ def proposal(root, evidence, stage):
     assert len(calls) == 1 and calls[0]["replySha256"] == digest(evidence / "saved-scope-draft.json")
     review = scope_review(root, evidence)
     assert review["record"]["draft"] == read(evidence / "saved-scope-draft.json")
-    assert review["reference"] != read(CONTROL / "live-result.json")["scopeReference"]
+    assert review["reference"] != retained()[2]["scopeReference"]
     assert review["record"]["generation"]["runId"] == next(iter(rows.values()))["runId"]
     coverage = review["coverage"]
     assert coverage["enumeratedFiles"] == 602 and coverage["enumerationComplete"]
@@ -168,7 +182,13 @@ def scan_plan(root, evidence):
         assert case["passes"] == 3 and case["equivalence"]["components"].get("model") is None
         assert scan["scanScopeRef"]["proposal"] == accepted["reference"] and scan["threatModelRef"] == common
         assert scan["tasks"] == ["semgrep"] and scan["semgrepTimeoutMs"] == 60000
+        assert scan["semgrepConfig"] == [str(evidence / "local-rules.yaml")]
         assert all(not scan[key] for key in ["triage", "verify", "patch", "autoPatch", "pocExecution", "dynamicAnalysis"])
+    frozen = evidence / "frozen-scan-plan.json"
+    if frozen.exists():
+        assert plan == read(frozen), "The approved scan plan changed after preparation"
+    else:
+        save(evidence, "frozen-scan-plan", plan)
     (evidence / "resume-scan.txt").write_text("campaign " + plan["campaignId"])
     return plan, cases
 
@@ -235,9 +255,32 @@ def exported(root, evidence, plan, stage):
     assert receipt["campaignId"] == plan["campaignId"] and receipt["observationCount"] == 24
     assert receipt["reviewedCount"] == 8 and receipt["confirmedCount"] == 0
     assert receipt["unplannedScopeIds"] == [] and len(receipt["scope"]) == 7
+    expected = [{"caseId": case["id"], "parameters": {
+        key: case["baseInput"][key] for key in SCAN_SELECTION_KEYS if key in case["baseInput"]}}
+        for case in plan["scopeStudy"]["cases"]]
+    assert receipt["scanSelection"] == expected, "Report must retain every frozen case selection"
+    assert all("p/unrelated-current" not in json.dumps(row) for row in receipt["scanSelection"])
+    save(evidence, stage + "-scan-selection", {
+        "caseCount": len(expected), "matchesApprovedPlan": True,
+        "recordedRuleSource": str(evidence / "local-rules.yaml"),
+        "ruleSourceBytesPinned": False, "completeEnabledPolicyKnown": False})
     budget = receipt["allowance"]["currentInvestigation"]
     assert budget["committedCalls"] == 1 and budget["unresolvedCalls"] == 0
     assert budget["limits"] == {"maxProviderCalls": 3, "protectedReviewCalls": 2}
+
+
+def settings_read(evidence):
+    rows = []
+    for size in ["40x12", "60x20", "80x24", "96x89", "120x36", "160x48"]:
+        captures = sorted(evidence.glob("*settings-details*" + size + ".txt"))
+        texts = [path.read_text() for path in captures]
+        assert any("semgrepConfig" in text for text in texts), size
+        assert any("local-rules.yaml" in "".join(text.split()) for text in texts), size
+        assert all("p/unrelated-current" not in text for text in texts), size
+        assert any("poverview" in "".join(text.split()) for text in texts), size
+        rows.append({"size": size, "capturedPages": [path.name for path in captures],
+                     "frozenSelectorVisible": True, "mutableSelectorAbsent": True})
+    save(evidence, "settings-reading", rows)
 
 
 def verify(root, evidence, stage):
@@ -252,6 +295,8 @@ def verify(root, evidence, stage):
         plan, cases = scan_plan(root, evidence)
         if stage != "scan-draft":
             completed(root, evidence, plan, cases)
+        if stage == "settings-read":
+            settings_read(evidence)
         if stage in ["exported", "restarted"]:
             exported(root, evidence, plan, stage)
         save(evidence, stage + "-check", {"jobs": 21, "interceptedReplies": 1, "liveProviderRequests": 0, "sourceExecuted": False})

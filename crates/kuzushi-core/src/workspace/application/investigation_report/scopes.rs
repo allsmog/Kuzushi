@@ -64,6 +64,7 @@ fn report_receipt(
         campaign_id: campaign.into(),
         plan_sha256: plan.plan_sha256,
         workers: plan.workers,
+        scan_selection: scan_selection::cases(&plan.scope_study.cases),
         scope_proposal_ref: plan.scope_study.proposal_ref,
         inherited_threat_model_ref: plan.scope_study.inherited_threat_model_ref,
         context_selections: plan.scope_study.selections,

@@ -12,6 +12,7 @@ use serde::Serialize;
 mod document;
 mod evidence;
 mod matrix;
+mod scan_selection;
 mod scope;
 mod scopes;
 pub use document::{
@@ -20,6 +21,7 @@ pub use document::{
     ScopeStudyInvestigationReceipt,
 };
 use evidence::collect_evidence;
+pub use scan_selection::InvestigationScanSelection;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,6 +34,8 @@ pub struct InvestigationReportReceipt {
     pub workers: usize,
     pub equivalence: BatchEquivalenceKey,
     pub scope: serde_json::Value,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub scan_selection: Vec<InvestigationScanSelection>,
     pub occurrence: BatchOccurrenceReport,
     pub observation_run_refs: Vec<String>,
     pub observation_count: usize,
@@ -183,6 +187,7 @@ pub fn load_investigation_report(
         workers: plan.workers,
         equivalence: plan.equivalence,
         scope: scope::report_scope(workspace, &plan.scan_input)?,
+        scan_selection: scan_selection::single(&plan.scan_input),
         occurrence,
         observation_run_refs: evidence.observation_run_refs,
         observation_count: evidence.observation_count,

@@ -1302,6 +1302,16 @@ remains unrecorded. Existing exports retain their original contents; re-export
 to obtain recorded statuses. See [the migration notes](../RELEASING.md#recorded-execution-status-in-investigation-reports)
 for the additive JSON field and public Rust struct construction.
 
+Investigation receipts also expose optional `scanSelection` records from the
+authenticated saved plan. Each record retains its optional `caseId` and the
+recorded subset of `taskMode`, `tasks`, `semgrepConfig`, `semgrepBinary`,
+`semgrepJobs` and `semgrepTimeoutMs`. Every context or scope case is represented;
+reports do not replace differing values with the baseline. Missing parameters
+and explicit nulls stay distinct. Current tool settings are never substituted.
+Requested rule sources establish neither their historical contents nor the
+full enabled-rule policy. Actual engine outcomes remain in attempt receipts.
+See [the additive migration](../RELEASING.md#recorded-scan-settings-in-investigation-reports).
+
 Setup context drafts resolve supplied options through the registry's descriptor
 validation, including canonical aliases, stored precedence and workspace policy checks.
 Global runtime-role settings remain outside tool input. Explicit unknown options
