@@ -99,6 +99,13 @@ fn render_generation_reader_controls(
     area: Rect,
     generation: &crate::app::StudyContextGeneration,
 ) -> bool {
+    if generation.lesson_sources.is_some() {
+        frame.render_widget(
+            Paragraph::new("PgUp/PgDn read · Home/End\nEsc returns to the same plan"),
+            area,
+        );
+        return true;
+    }
     if generation.show_brief_guidance {
         frame.render_widget(Paragraph::new("PgUp/Dn read\nEsc back · frozen goal"), area);
         return true;
@@ -153,7 +160,7 @@ fn render_remaining_generation_editor_controls(
         return true;
     }
     if generation.is_lesson() {
-        render_lesson_controls(frame, area, generation.has_result());
+        render_lesson_controls(frame, area, generation);
         return true;
     }
     false
@@ -281,13 +288,17 @@ fn remaining_generation_title_override(
         .then(|| regeneration_title(generation.has_result()))
 }
 
-fn render_lesson_controls(frame: &mut Frame<'_>, area: Rect, has_result: bool) {
+fn render_lesson_controls(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    generation: &crate::app::StudyContextGeneration,
+) {
     frame.render_widget(
         Paragraph::new(vec![
             Line::styled("t calls · r review · M model", theme::muted()),
-            Line::styled("G guidance · Tab options · PgUp/Dn", theme::muted()),
+            Line::styled(lesson_source_controls(generation), theme::muted()),
             Line::styled(
-                if has_result {
+                if generation.has_result() {
                     "Enter inspect lesson · n new · Esc back"
                 } else {
                     "Enter next · n new · Esc back"
@@ -297,4 +308,15 @@ fn render_lesson_controls(frame: &mut Frame<'_>, area: Rect, has_result: bool) {
         ]),
         area,
     );
+}
+
+fn lesson_source_controls(generation: &crate::app::StudyContextGeneration) -> &'static str {
+    match (
+        generation.receipt.is_some(),
+        generation.has_lesson_source_bundle(),
+    ) {
+        (false, _) => "f files · G guidance · Tab options",
+        (true, true) => "v source · Tab options · PgUp/Dn",
+        (true, false) => "Tab options · PgUp/Dn read",
+    }
 }

@@ -125,6 +125,7 @@ impl ShellApp {
 
     fn campaign_view_keybindings(&self) -> Vec<ViewKeybinding> {
         let mut bindings = campaign_keybindings();
+        self.campaign_job_return_binding(&mut bindings);
         self.linked_scan_study_bindings(&mut bindings);
         if self.selected_fixed_study_has_ended() {
             if let Some(binding) = bindings
@@ -135,6 +136,18 @@ impl ShellApp {
             }
         }
         bindings
+    }
+
+    fn campaign_job_return_binding(&self, bindings: &mut [ViewKeybinding]) {
+        if !self.router.campaign().job_detail {
+            return;
+        }
+        for binding in bindings
+            .iter_mut()
+            .filter(|binding| binding.action == ViewHotkeyAction::CampaignBackToList)
+        {
+            binding.label = "jobs".into();
+        }
     }
 
     fn linked_scan_study_bindings(&self, bindings: &mut Vec<ViewKeybinding>) {

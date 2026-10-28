@@ -22,6 +22,7 @@ fn reading_app() -> (tempfile::TempDir, ShellApp) {
                 source_capture: "included".into(),
                 input_bytes: 2048,
                 synthesis_requests: 1,
+                source_evidence_ref: None,
                 run_id: Some("owned-model-run".into()),
                 prompt_sha256: format!("sha256:{}", "a".repeat(64)),
             }),

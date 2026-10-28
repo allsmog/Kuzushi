@@ -47,6 +47,8 @@ pub(crate) fn generation_tool() -> ToolDescriptor {
     let mut tool=tool_with_options("findings:lesson-generate","Propose one defensive lesson draft from an exact human-confirmed observation. One bounded synthesis request; acceptance and context reuse remain separate.",vec![
         opt("findingId",OptionType::Int,"Exact human-confirmed finding generation.").integer_range(1,i64::MAX).required(),
         opt("originRef",OptionType::Json,"Frozen lesson origin, including exact confirmation and observation. Study preparation supplies it."),
+        opt("sourceEvidenceFiles",OptionType::StringList,"Up to 16 exact relative supporting paths from the recorded observation snapshot. No dependency expansion or current-checkout substitution. All files share maxSourceBytes."),
+        opt("sourceEvidenceRef",OptionType::String,"Frozen historical lesson source bundle. Study preparation supplies this reference for selected supporting files."),
         opt("guidance",OptionType::String,"Operator guidance, at most 2048 bytes.").default(json!("")),
         opt("maxSourceBytes",OptionType::Int,"Captured source bytes allowed in this request. Source outside this limit is explicitly omitted; current source is not substituted.").integer_range(1024,65536).default(json!(16384)),
         opt("maxOutputTokens",OptionType::Int,"Requested output tokens; transport may not enforce this ceiling. The approved provider-call limit remains enforced.").integer_range(256,4096).default(json!(1024)),

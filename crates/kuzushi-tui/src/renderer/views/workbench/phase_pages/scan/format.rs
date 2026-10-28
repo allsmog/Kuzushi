@@ -58,20 +58,25 @@ pub(super) fn receipt_metrics_lines(
     attempt: &ScanAttemptModel,
     width: usize,
 ) -> Vec<Line<'static>> {
-    vec![
-        Line::styled(
-            fit(
-                &format!(
-                    "duration {} · cost {}",
-                    optional_duration(attempt.duration_secs),
-                    optional_cost(attempt.cost_usd, attempt.cost_complete)
-                ),
-                width,
-            ),
-            theme::muted(),
-        ),
-        Line::styled(fit(&scan_rerun_guidance(model), width), theme::primary()),
-    ]
+    let scope = if model.study.is_some() {
+        "jobs"
+    } else {
+        "scan"
+    };
+    let metrics = format!(
+        "duration {} · {scope} cost {}",
+        optional_duration(attempt.duration_secs),
+        optional_cost(attempt.cost_usd, attempt.cost_complete)
+    );
+    let mut lines = crate::renderer::shared::text::wrap_text(&metrics, width)
+        .into_iter()
+        .map(|line| Line::styled(line, theme::muted()))
+        .collect::<Vec<_>>();
+    lines.push(Line::styled(
+        fit(&scan_rerun_guidance(model), width),
+        theme::primary(),
+    ));
+    lines
 }
 
 fn scan_rerun_guidance(model: &ScanPhaseModel) -> String {
@@ -301,6 +306,43 @@ mod tests {
             ">=$0.2500 incomplete"
         );
         assert_eq!(super::optional_cost(Some(0.0), Some(true)), "$0.0000");
+    }
+
+    #[test]
+    fn scan_cost_scope_and_uncertainty_survive_narrow_wrapping() {
+        let mut model = super::ScanPhaseModel {
+            study: None,
+            scope: "owned".into(),
+            plan: "fixed".into(),
+            attempt: Some(attempt(Some(1), None)),
+            engine_outcomes: vec![],
+            empty_hint: None,
+            live: None,
+        };
+        for width in [18, 27, 40, 80] {
+            for (cost, complete, expected) in [
+                (None, None, "not recorded"),
+                (Some(0.0), Some(false), "unavailable (metering incomplete)"),
+                (Some(0.25), Some(false), ">=$0.2500 incomplete"),
+                (Some(0.0), Some(true), "$0.0000"),
+            ] {
+                let attempt = model.attempt.as_mut().unwrap();
+                attempt.cost_usd = cost;
+                attempt.cost_complete = complete;
+                let lines =
+                    super::receipt_metrics_lines(&model, model.attempt.as_ref().unwrap(), width);
+                let text = lines
+                    .iter()
+                    .map(|line| line.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                assert!(
+                    text.contains("scan cost") && text.contains(expected),
+                    "{width}: {text}"
+                );
+                assert!(lines.iter().all(|line| line.width() <= width));
+            }
+        }
     }
 
     fn attempt(findings: Option<u64>, findings_observed: Option<u64>) -> ScanAttemptModel {

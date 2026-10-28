@@ -79,6 +79,7 @@ fn lesson_generation_summary(
         "Learning calls share the investigation allowance; protected Review calls remain reserved. Preparing a plan makes no model request. Execution needs separate approval and start.".into(),
         format!("Total calls: {}",limit(config.study.max_provider_calls)),format!("Protected review: {}",limit(config.study.protected_review_calls)),"Internal transport retries consume the same shared allowance. Dollar consumption is uncertain; no dollar ceiling is enforced.".into()];
     lines.extend(config.notice.iter().cloned());
+    lines.extend(lesson_source_selection_lines(generation));
     if let Some(error) = &generation.result_error {
         lines.push(format!("Lesson result unavailable: {error}. Enter opens its recorded outcome. No automatic retry or repair."));
     }
@@ -117,4 +118,30 @@ fn regeneration_summary(
         .into_iter()
         .flat_map(|line| wrap_text(&line, width.max(1)))
         .collect()
+}
+
+fn lesson_source_selection_lines(generation: &StudyContextGeneration) -> Vec<String> {
+    let input = generation
+        .receipt
+        .as_ref()
+        .map_or(&generation.context_input, |r| &r.input);
+    let paths = input["sourceEvidenceFiles"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    let mut lines = vec![format!(
+        "Supporting files: {} selected. All historical source shares the byte limit.",
+        paths.len()
+    )];
+    lines.extend(paths.iter().map(|path| format!("  {path}")));
+    lines.push(lesson_source_hint(generation).into());
+    lines
+}
+
+fn lesson_source_hint(generation: &StudyContextGeneration) -> &'static str {
+    match (generation.receipt.is_some(), generation.has_lesson_source_bundle()) {
+        (false, _) => "f chooses paths. The current path list is a browsing aid; only recorded snapshot bytes are supplied.",
+        (true, true) => "v reads frozen source and omissions. n starts a separate draft to change files.",
+        (true, false) => "This plan uses its cited capture only. n prepares a separate draft to select supporting files.",
+    }
 }

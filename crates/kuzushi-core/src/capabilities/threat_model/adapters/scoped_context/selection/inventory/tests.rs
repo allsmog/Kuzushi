@@ -13,7 +13,8 @@ fn inventory(limit: usize) -> RepositoryInventory {
 #[test]
 fn partial_inventory_accepts_known_members_and_discloses_its_extent() {
     let inventory = inventory(2);
-    let result = selected_membership(&["a.rs".into()], &inventory).unwrap();
+    let known = inventory.inspection.as_ref().unwrap().files[0].clone();
+    let result = selected_membership(&[known], &inventory).unwrap();
     assert_eq!(result["selectedMembershipKnown"], true);
     assert_eq!(result["enumerationComplete"], false);
     assert_eq!(result["enumeratedFiles"], 2);
@@ -28,11 +29,16 @@ fn partial_inventory_accepts_known_members_and_discloses_its_extent() {
 #[test]
 fn partial_inventory_never_assumes_an_unenumerated_file_is_a_member() {
     let inventory = inventory(2);
-    let error = selected_membership(&["c.rs".into()], &inventory)
+    let files = &inventory.inspection.as_ref().unwrap().files;
+    let omitted = ["a.rs", "b.rs", "c.rs"]
+        .into_iter()
+        .find(|name| !files.iter().any(|path| path == *name))
+        .expect("the two-entry limit must omit one owned fixture file");
+    let error = selected_membership(&[omitted.into()], &inventory)
         .unwrap_err()
         .to_string();
     assert!(error.contains("absent from the bounded inventory"));
-    assert!(error.contains("\"c.rs\""));
+    assert!(error.contains(&format!("{omitted:?}")));
 }
 
 #[test]

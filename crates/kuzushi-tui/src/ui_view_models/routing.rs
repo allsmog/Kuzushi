@@ -68,6 +68,10 @@ pub(crate) fn uses_workbench_frame(app: &ShellApp) -> bool {
     matches!(app.shell_view(), ShellView::Workbench)
 }
 
+pub(crate) fn uses_campaign_document(app: &ShellApp) -> bool {
+    matches!(app.shell_view(), ShellView::Campaign)
+}
+
 /// Frame-level gallery pages (3D terrain, graph/tree diagrams, and interactive
 /// entry-point browser) own the full body region. Attack-path, Components, and
 /// heatmap use the shared line path.

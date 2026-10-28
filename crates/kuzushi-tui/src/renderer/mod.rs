@@ -18,6 +18,7 @@ pub(crate) use render_app::{
 pub(in crate::renderer) use section_slot::*;
 pub(in crate::renderer) use shared::*;
 pub(crate) use views::context_page_rows;
+pub(crate) use views::dfd_detail_scroll;
 pub(crate) use views::entry_point_page_scroll;
 pub(crate) use views::finding_group_page_rows;
 pub(crate) use views::keymap_reader_scroll;
@@ -39,6 +40,7 @@ pub(crate) use views::{option_detail_page_bounds, option_error_page_bounds};
 pub(crate) use views::{recommendation_max_scroll, recommendation_page_rows};
 pub(crate) use views::{run_artifact_max_scroll, run_artifact_page_rows};
 pub(crate) use views::{strategy_queue_max_scroll, strategy_queue_page_rows};
+pub(crate) use views::{workbench_scroll_metrics, WorkbenchScrollMetrics};
 mod allowance_review;
 mod answers;
 mod campaign_reader;

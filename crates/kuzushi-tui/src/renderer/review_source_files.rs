@@ -6,7 +6,7 @@ use ratatui::widgets::{Block, Borders, Clear};
 
 pub(super) fn render(frame: &mut Frame<'_>, app: &ShellApp) -> bool {
     if app.shell_view() != ShellView::FilePicker
-        || app.router.file_picker().purpose() != FilePickerPurpose::ReviewEvidence
+        || !app.router.file_picker().purpose().is_source_evidence()
         || app.advisory().pending_confirm.is_some()
     {
         return false;
@@ -15,7 +15,7 @@ pub(super) fn render(frame: &mut Frame<'_>, app: &ShellApp) -> bool {
     let area = study_config_area(full.width, full.height);
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" REVIEW SUPPORTING FILES ");
+        .title(picker_title(app));
     let inner = block.inner(area);
     frame.render_widget(Clear, full);
     frame.render_widget(block, area);
@@ -25,7 +25,7 @@ pub(super) fn render(frame: &mut Frame<'_>, app: &ShellApp) -> bool {
 
 pub(crate) fn plain_lines(app: &ShellApp, width: usize) -> Option<Vec<String>> {
     if app.shell_view() != ShellView::FilePicker
-        || app.router.file_picker().purpose() != FilePickerPurpose::ReviewEvidence
+        || !app.router.file_picker().purpose().is_source_evidence()
         || app.advisory().pending_confirm.is_some()
     {
         return None;
@@ -37,7 +37,7 @@ pub(crate) fn plain_lines(app: &ShellApp, width: usize) -> Option<Vec<String>> {
         .len()
         .min(u16::MAX as usize - 5);
     let area = Rect::new(0, 0, width as u16, (count + 5).max(10) as u16);
-    let mut output = vec!["REVIEW SUPPORTING FILES".into()];
+    let mut output = vec![picker_title(app).trim().into()];
     output.extend(lines(app, area).into_iter().map(|line| {
         line.spans
             .into_iter()
@@ -78,6 +78,8 @@ fn header(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
     let selection = route.review_selection();
     let mode = if selection.basket() {
         "Basket"
+    } else if route.purpose() == FilePickerPurpose::LessonEvidence {
+        "Current paths"
     } else {
         "Repository"
     };
@@ -86,13 +88,37 @@ fn header(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
         selection.paths().len()
     ))];
     lines.push(query_line(app, width));
-    let hint = selection.notice().unwrap_or(if route.truncated() {
-        "Partial index. Paste an exact path."
-    } else {
-        "No dependency expansion or model call."
+    let hint = selection.notice().unwrap_or_else(|| {
+        picker_hint(
+            route.purpose() == FilePickerPurpose::LessonEvidence,
+            route.truncated(),
+        )
     });
     lines.push(Line::styled(fit(hint, width as usize), theme::muted()));
     lines
+}
+
+fn picker_title(app: &ShellApp) -> &'static str {
+    if app.router.file_picker().purpose() == FilePickerPurpose::LessonEvidence {
+        " LESSON SUPPORTING FILES "
+    } else {
+        " REVIEW SUPPORTING FILES "
+    }
+}
+
+fn picker_hint(lesson: bool, truncated: bool) -> &'static str {
+    if truncated {
+        return if lesson {
+            "Partial list · historical source"
+        } else {
+            "Partial index. Paste an exact path."
+        };
+    }
+    if lesson {
+        "Reads historical bytes only."
+    } else {
+        "No dependency expansion or model call."
+    }
 }
 
 fn query_line(app: &ShellApp, width: u16) -> Line<'static> {

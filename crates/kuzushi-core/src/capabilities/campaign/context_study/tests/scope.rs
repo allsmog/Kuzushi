@@ -45,6 +45,7 @@ fn scope_study_freezes_one_job_and_approval_binds_exact_inputs_without_spending(
     assert!(receipt.input.get("allowanceRef").is_none());
     assert!(receipt.input["threatModelRef"].is_null());
     assert_eq!(receipt.input["maxOutputTokens"], 4096);
+    assert_eq!(receipt.input["fileSelection"], "root-balanced-v1");
     let document = read_bounded_plan(root.path(), "scope-draft").unwrap();
     assert_eq!(document["jobs"][0]["tool"], "pack:suggest-scopes");
     let approved = approve(&registry, &ctx, approval(&receipt)).unwrap();
@@ -128,4 +129,49 @@ fn scope_retention_alias_false_is_preserved_before_the_new_plan_is_frozen() {
     let receipt = load_context_study(root.path(), "scope-draft").unwrap();
     assert_eq!(receipt.input["saveRejectedOutput"], false);
     assert!(receipt.input.get("save_rejected_output").is_none());
+}
+
+#[test]
+fn historical_scope_input_repreparation_does_not_gain_a_sampling_policy() {
+    let (_root, workspace, config, reference) = scope_target();
+    let registry = ModuleRegistry::with_v2_builtins();
+    let ctx = context(&workspace, &config);
+    let legacy = generation::prepare(
+        generation::SCOPE_TOOL,
+        &json!({"proposalRef":reference}),
+        &ctx,
+        &registry,
+    )
+    .unwrap();
+    assert!(legacy.get("fileSelection").is_none());
+    assert_eq!(
+        generation::prepare(generation::SCOPE_TOOL, &legacy, &ctx, &registry).unwrap(),
+        legacy
+    );
+}
+
+#[test]
+fn new_scope_plan_preserves_explicit_legacy_selection_and_refuses_unknown_values() {
+    for selection in ["prefix-v1", "unknown"] {
+        let (root, workspace, config, reference) = scope_target();
+        let mut input = scope_plan(&reference);
+        input["contextInput"]["fileSelection"] = json!(selection);
+        let result = ModuleRegistry::with_v2_builtins().execute_tool(
+            "campaign:context-study",
+            input,
+            &context(&workspace, &config),
+        );
+        if selection == "unknown" {
+            assert!(result.is_err());
+            assert!(!campaign_plan_path(root.path(), "scope-draft").exists());
+        } else {
+            result.unwrap();
+            assert_eq!(
+                load_context_study(root.path(), "scope-draft")
+                    .unwrap()
+                    .input["fileSelection"],
+                selection
+            );
+        }
+    }
 }

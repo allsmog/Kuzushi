@@ -22,7 +22,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Widget};
 use std::collections::HashMap;
 
+mod detail_reading;
 mod focus;
+use detail_reading::detail_scroll_bounds;
+pub(crate) use detail_reading::DfdDetailScroll;
 mod neighborhood;
 mod overview;
 pub(crate) use overview::summary_reading_rows;
@@ -187,6 +190,19 @@ impl DfdDiagram {
                 buf,
                 detail_area,
                 layout == responsive::DfdTopologyLayout::DetailOnly,
+            );
+        } else {
+            text(
+                buf,
+                area,
+                1,
+                0,
+                &format!(
+                    "{:<width$}",
+                    "Resize to read selected details",
+                    width = area.width.saturating_sub(1) as usize
+                ),
+                diagram_muted(),
             );
         }
     }
@@ -542,13 +558,10 @@ impl DfdDiagram {
         if area.height < 3 {
             return self.draw_borderless_detail(buf, area);
         }
-        let width = area.width.saturating_sub(2) as usize;
-        let mut detail = selected_detail_content(&self.model, self.selection, width);
-        prepend_resize_hint(&mut detail.lines, width, show_resize_hint);
-        append_legacy_context_detail(&mut detail.lines, &self.model, width);
+        let detail = self.panel_detail_content(area, show_resize_hint);
         let render_area = compact_detail_area(area, detail.lines.len());
         let viewport = render_area.height.saturating_sub(2) as usize;
-        let max_scroll = detail.lines.len().saturating_sub(viewport);
+        let max_scroll = detail_scroll_bounds(detail.lines.len(), viewport).max_offset;
         let scroll = self.detail_scroll.min(max_scroll);
         let total = dfd_selectable_count(&self.model);
         let selected = selected_position(self.selection, total);
@@ -1130,6 +1143,7 @@ fn node_detail_content(model: &DfdModel, node: &DfdNodeModel, width: usize) -> D
             .unwrap_or("not recorded in the threat model"),
         width,
     );
+    append_component_topology_notice(&mut lines, model, &node.key, width);
     append_detail_lines(
         &mut lines,
         "purpose",
@@ -1137,7 +1151,6 @@ fn node_detail_content(model: &DfdModel, node: &DfdNodeModel, width: usize) -> D
         width,
     );
     append_linked_context_detail(&mut lines, model, &node.key, width);
-    append_component_topology_notice(&mut lines, model, width);
     append_detail_lines(&mut lines, "type", kind_label(node.kind), width);
     append_detail_lines(&mut lines, "zone", &node.zone, width);
     DetailContent {
@@ -1149,9 +1162,10 @@ fn node_detail_content(model: &DfdModel, node: &DfdNodeModel, width: usize) -> D
 fn append_component_topology_notice(
     lines: &mut Vec<Line<'static>>,
     model: &DfdModel,
+    key: &str,
     width: usize,
 ) {
-    if let Some(notice) = model.topology_notice() {
+    if let Some(notice) = model.component_topology_notice(key) {
         append_detail_lines(lines, "flows", notice, width);
     }
 }
@@ -1233,7 +1247,10 @@ fn append_detail_lines(lines: &mut Vec<Line<'static>>, key: &str, value: &str, w
     let key_width = width.min(13);
     let value_width = width.saturating_sub(key_width).max(1);
     let chunks = crate::renderer::shared::text::wrap_document_lines(
-        vec![Line::raw(value.to_owned())],
+        value
+            .split('\n')
+            .map(|line| Line::raw(line.to_owned()))
+            .collect(),
         value_width.min(u16::MAX as usize) as u16,
     );
     for (index, chunk) in chunks.into_iter().enumerate() {

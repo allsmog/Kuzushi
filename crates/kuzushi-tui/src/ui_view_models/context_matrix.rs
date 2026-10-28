@@ -4,7 +4,10 @@ use crate::renderer::shared::text::{fit_path, wrap_text};
 use kuzushi_core::capabilities::campaign::ContextCaseInput;
 use kuzushi_core::capabilities::campaign::ContextMatrixReceipt;
 
+mod allowance;
 mod controls;
+pub(crate) use allowance::lines as matrix_allowance_lines;
+mod observations;
 mod plain;
 pub(crate) use controls::matrix_result_controls;
 mod result_detail;
@@ -43,8 +46,10 @@ pub(crate) struct MatrixResultReadLimits {
 
 pub(crate) fn matrix_body(area: ratatui::layout::Rect, results: bool) -> ratatui::layout::Rect {
     let mut body = area.inner(ratatui::layout::Margin::new(2, 1));
-    let controls = if body.width < 50 && !results { 4 } else { 3 };
-    body.height = body.height.saturating_sub(controls);
+    let controls = if results || body.width < 50 { 4 } else { 3 };
+    let allowance_rows = if body.width < 72 { 3 } else { 2 };
+    body.y = body.y.saturating_add(allowance_rows);
+    body.height = body.height.saturating_sub(controls + allowance_rows);
     body
 }
 
@@ -77,6 +82,9 @@ fn case_read_limits(
     report: &kuzushi_core::findings::ContextMatrixOccurrenceReport,
     body: ratatui::layout::Rect,
 ) -> Option<MatrixResultReadLimits> {
+    if config.study.matrix.observation_key.is_some() {
+        return observations::read_limits(config, report, body);
+    }
     let case = report.cases.get(config.study.matrix.cursor)?;
     let page = results::detail_capacity(config, report, usize::from(body.height)).max(1);
     let count = results::detail_lines(config, report, case, usize::from(body.width)).len();

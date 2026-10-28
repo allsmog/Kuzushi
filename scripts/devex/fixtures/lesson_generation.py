@@ -7,12 +7,15 @@ import sqlite3
 import sys
 import time
 from pathlib import Path
-from reviewed_lessons import prepare
+from reviewed_lessons import prepare, record_prepared
 from rejected_context import execute
 
 
-def seed(root, evidence, home):
-    prepare(root, evidence)
+def seed(root, evidence, home, *, prepared=False):
+    if prepared:
+        record_prepared(root, evidence)
+    else:
+        prepare(root, evidence)
     capture_source_receipt(root, evidence)
     repo = Path(__file__).resolve().parents[3]
     shutil.copyfile(repo / "scripts/devex/fixtures/lesson_provider.mjs", evidence / "provider.mjs")

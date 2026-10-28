@@ -2,7 +2,7 @@ use super::*;
 use crate::ui_view_models::scope_review::{scope_detail, scope_source_view, scope_title};
 
 fn detail(app: &ShellApp) -> String {
-    scope_detail(app.scope_review().unwrap()).join("\n")
+    scope_detail(app.scope_review().unwrap(), Vec::new()).join("\n")
 }
 
 fn title(app: &ShellApp) -> String {

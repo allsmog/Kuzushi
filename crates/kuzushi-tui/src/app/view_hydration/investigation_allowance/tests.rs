@@ -3,6 +3,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+mod jobs;
+
 #[derive(Debug, Default)]
 struct DelayedAllowanceReader {
     entered: AtomicBool,

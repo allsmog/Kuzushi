@@ -162,6 +162,7 @@ impl ShellApp {
     }
 
     pub(crate) fn open_report_from_current_origin(&mut self) {
+        let study = self.report_study_from_origin();
         if let Some(target) = self.target_owned() {
             self.workbench_cache()
                 .borrow_mut()
@@ -179,8 +180,24 @@ impl ShellApp {
         }
         self.set_shell_view(ShellView::Report);
         self.set_input_mode(InputMode::Navigate);
-        self.router.report_mut().set_study(None);
+        self.bind_report_study(study);
         self.clear_report_navigation_notice();
+    }
+
+    fn report_study_from_origin(&self) -> Option<crate::app::view_state::ReportStudyRef> {
+        let receipt = self.reviewed_context_matrix_receipt()?;
+        Some(crate::app::view_state::ReportStudyRef {
+            campaign_id: receipt.campaign_id.clone(),
+            plan_sha256: receipt.plan_sha256.clone(),
+        })
+    }
+
+    fn bind_report_study(&mut self, study: Option<crate::app::view_state::ReportStudyRef>) {
+        let scoped = study.is_some();
+        self.router.report_mut().set_study(study);
+        if scoped {
+            self.scroll_to_top();
+        }
     }
 
     fn clear_report_navigation_notice(&mut self) {
@@ -641,6 +658,7 @@ impl ShellApp {
             campaign.batch_scan_config = None;
             campaign.dfd_study_return = None;
             campaign.clear_active_batch();
+            campaign.clear_campaign_history();
         }
         self.session.set_target(target.clone());
         if changed {
@@ -661,6 +679,23 @@ impl ShellApp {
     pub(crate) fn refresh_phase_attempt_projection(&mut self) {
         let previous = self.pending_prove_result_id().map(str::to_string);
         self.read_phase_attempt_projection();
+        self.reset_changed_pending_result_scroll(previous);
+    }
+
+    pub(crate) fn apply_loaded_phase_attempt_projection(
+        &mut self,
+        snapshot: kuzushi_core::workflow_attempts::PhaseTargetSnapshot,
+        recovered: Result<kuzushi_core::workflow_attempts::RecoveredPhaseAttemptLedger, String>,
+    ) {
+        let previous = self.pending_prove_result_id().map(str::to_string);
+        match recovered {
+            Ok(recovered) => self.apply_recovered_phase_attempts(snapshot, recovered),
+            Err(error) => self.apply_unreadable_phase_attempts(snapshot, error),
+        }
+        self.reset_changed_pending_result_scroll(previous);
+    }
+
+    fn reset_changed_pending_result_scroll(&mut self, previous: Option<String>) {
         if self.pending_prove_result_id() != previous.as_deref() {
             self.router
                 .workbench_mut()

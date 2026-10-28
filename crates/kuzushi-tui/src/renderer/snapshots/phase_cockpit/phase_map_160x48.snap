@@ -12,10 +12,10 @@ KUZUSHI · Viewing Map · next required Review · target ./phase-target · ● L
 views  [summary] · dfd  ·  Tab cycles · z zoom                                                                              │ Review 3/3
 ┌EXECUTIVE SUMMARY ─────────────────────────────────────┐ ┌OVERALL DATA FLOW ──────────────────────────────────────────────┐│ ⛭ autonomy:fix
 │phase-target: purpose not recorded in this threat model. │ │external → application · 1 flow · boundary                      ││
-│The primary process component is API. 3 components     │ │application → data · 1 flow · boundary                          ││ IN FLIGHT
-│exchange data over 2 flows across 3 trust zones; 2     │ │                                                                ││ ⠋ context:build
-│flows cross a declared boundary. Rebuild to add a      │ │                                                                ││
-│source-grounded product summary.                       │ │                                                                ││ FINDINGS
+│The recorded process component is API. The stored      │ │application → data · 1 flow · boundary                          ││ IN FLIGHT
+│diagram records 3 components, 2 flows and 3 trust      │ │                                                                ││ ⠋ context:build
+│zones; 2 flows cross a declared boundary. Rebuild to   │ │                                                                ││
+│add a source-grounded product summary.                 │ │                                                                ││ FINDINGS
 │                                                       │ │                                                                ││ 6 findings · 1 C · 2 H · 2 M
 │shape · 1 entities · 1 processes · 1 stores            │ │                                                                ││ 0/6 reviewed · 0 confirmed
 │context · 0 entries, 0 gates, 0 assets, 0 threats      │ │                                                                ││

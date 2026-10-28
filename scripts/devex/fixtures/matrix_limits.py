@@ -88,6 +88,40 @@ def verify_draft(root, evidence):
                                   "interceptedRequests": 0, "liveProviderRequests": 0})
 
 
+def verify_case_review(root, evidence):
+    current = state(root, evidence)
+    assert current["calls"] == (5, 0, 0) and current["decisions"] == 0
+    assert current["observations"] == 3
+    with ledger(root, evidence) as db:
+        original = json.loads(db.execute(
+            "select finding_json from finding_observations order by created_seq limit 1").fetchone()[0])
+        latest = json.loads(db.execute(
+            "select finding_json from finding_observations order by created_seq desc limit 1").fetchone()[0])
+    reference = "generation:" + str(original["id"])
+    captures = sorted(evidence.glob("*-recorded-case-reference.txt"))
+    assert len(captures) == 1
+    displayed = captures[0].read_text()
+    assert reference in displayed, (reference, displayed)
+    assert "generation:" + str(latest["id"]) not in displayed
+    save(evidence, "case-review-check", {
+        "exactObservation": reference, "renderedObservationRef": reference,
+        "originalRun": original["scan_id"], "interceptedRequests": 5,
+        "decisionRecords": 0, "rawObservations": 3, "liveProviderRequests": 0})
+
+
+def verify_case_report(root, evidence):
+    current = state(root, evidence)
+    assert current["calls"] == (5, 0, 0) and current["decisions"] == 0
+    assert current["observations"] == 3
+    captures = sorted(evidence.glob("*-review-scoped-report.txt"))
+    assert len(captures) == 1
+    displayed = captures[0].read_text()
+    for expected in ["Scope: context matrix " + CAMPAIGN, "5 committed / 7 calls", "3 raw observations"]:
+        assert expected in displayed, (expected, displayed)
+    save(evidence, "case-report-check", {"campaignId": CAMPAIGN, "interceptedRequests": 5,
+        "decisionRecords": 0, "rawObservations": 3, "liveProviderRequests": 0})
+
+
 def wait_terminal(root, evidence, completed):
     directory = root / ".kuzushi/v3/campaigns" / CAMPAIGN
     for _ in range(40):
@@ -164,5 +198,9 @@ if __name__ == "__main__":
         seed(root, evidence, Path(sys.argv[4]).resolve())
     elif stage == "draft":
         verify_draft(root, evidence)
+    elif stage == "case-review":
+        verify_case_review(root, evidence)
+    elif stage == "case-report":
+        verify_case_report(root, evidence)
     else:
         verify(root, evidence, stage)

@@ -29,8 +29,8 @@ pub(in crate::renderer) use runs::*;
 pub(crate) use runs::{run_artifact_max_scroll, run_artifact_page_rows};
 pub(in crate::renderer) use scene::*;
 pub(crate) use scene::{
-    entry_point_page_scroll, map_gallery_page_rows, scene_page_rows, summary_page_rows,
-    PageDirection,
+    dfd_detail_scroll, entry_point_page_scroll, map_gallery_page_rows, scene_page_rows,
+    summary_page_rows, PageDirection,
 };
 pub(in crate::renderer) use shell_view_lines::*;
 pub(crate) use system::keymap_reader_scroll;
@@ -39,8 +39,10 @@ pub(in crate::renderer) use system::*;
 pub(crate) use system::{cost_max_scroll, cost_page_rows};
 pub(in crate::renderer) use threat::*;
 pub(in crate::renderer) use viewport_lines::*;
-pub(crate) use workbench::workbench_phase_plan_for_app;
 pub(in crate::renderer) use workbench::*;
+pub(crate) use workbench::{
+    workbench_phase_plan_for_app, workbench_scroll_metrics, WorkbenchScrollMetrics,
+};
 pub(crate) use workspace::context_page_rows;
 pub(in crate::renderer) use workspace::*;
 pub(crate) use workspace::{strategy_queue_max_scroll, strategy_queue_page_rows};

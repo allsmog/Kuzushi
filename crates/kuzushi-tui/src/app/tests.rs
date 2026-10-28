@@ -24110,6 +24110,7 @@ fn dfd_page_cycles_all_13_nodes_and_11_flows_and_scrolls_details() {
         .set_page(crate::scene3d::VizPage::Dfd);
     app.set_shell_view(ShellView::Scene);
     app.set_input_mode(crate::InputMode::Prompt);
+    app.reduce_resize(40, 12);
 
     let total = 24;
     let mut visited = vec![false; total];

@@ -14,6 +14,7 @@ use kuzushi_core::workflow_attempts::{
 use kuzushi_core::{write_run_summary, RunSummary, V2Config, WorkflowPhase, WorkspaceTarget};
 
 mod partial_membership;
+mod receipt_loading;
 mod repeated;
 mod result_ownership;
 

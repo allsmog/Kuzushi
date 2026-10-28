@@ -62,7 +62,7 @@ fn context_projection_retains_canonical_and_legacy_overviews_and_all_architectur
     let context = json!({"systemContext":SELECTED_OVERVIEW,"contextSummary":"Legacy overview",
         "dfd":{"nodes":[],"flows":[],"trustBoundaries":[]},
         "attackSurface":{"entryPoints":[]},"privateUnrelatedField":"Not architecture input"});
-    let outline = input::build(&inventory, &fixture.original, Some(&context), "").unwrap();
+    let outline = input::build(&inventory, &fixture.original, Some(&context), "", None).unwrap();
     assert_eq!(outline.document["context"]["total"], 6);
     assert_eq!(outline.document["context"]["omitted"], 0);
     assert!(outline.limitations[0].starts_with("Context sections: 6/6; omitted 0."));
@@ -84,7 +84,7 @@ fn oversized_system_overview_is_disclosed_as_omitted_within_existing_input_limit
     let (_, inventory) =
         current_inventory(&fixture.context(), &fixture.original.reference).unwrap();
     let context = json!({"systemContext":"bounded-overview".repeat(1024)});
-    let outline = input::build(&inventory, &fixture.original, Some(&context), "").unwrap();
+    let outline = input::build(&inventory, &fixture.original, Some(&context), "", None).unwrap();
     assert_eq!(
         outline.document["context"],
         json!({"total":1,"omitted":1,"items":[]})
@@ -98,7 +98,38 @@ fn explicitly_omitted_context_is_distinct_from_zero_supplied_sections() {
     let fixture = Fixture::new();
     let (_, inventory) =
         current_inventory(&fixture.context(), &fixture.original.reference).unwrap();
-    let outline = input::build(&inventory, &fixture.original, None, "").unwrap();
+    let outline = input::build(&inventory, &fixture.original, None, "", None).unwrap();
     assert!(outline.document["context"].is_null());
     assert_eq!(outline.limitations[0], "Architecture context: omitted.");
+}
+
+#[test]
+fn prepared_structural_file_selection_supplies_late_root_and_directory_examples() {
+    let mut fixture = Fixture::new();
+    for directory in ["a/component", "z/component"] {
+        let directory = fixture.root.path().join(directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        for index in 0..300 {
+            std::fs::write(
+                directory.join(format!("unit_{index:03}.py")),
+                "# Owned input fixture\n",
+            )
+            .unwrap();
+        }
+    }
+    std::fs::write(fixture.root.path().join("workspace.json"), "{}\n").unwrap();
+    fixture.original = create_scan_scope_proposal(&fixture.context(), None).unwrap();
+    let mut request = fixture.input();
+    request["fileSelection"] = json!("root-balanced-v1");
+    let runtime = OfflineScopeRuntime::new(draft());
+    let output = fixture.dispatch(request, &runtime).unwrap();
+    let requests = runtime.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    let prompt: Value = serde_json::from_str(&requests[0].prompt).unwrap();
+    let names = prompt["files"]["items"].as_array().unwrap();
+    assert!(names.contains(&json!("workspace.json")));
+    assert!(names.contains(&json!("z/component/unit_000.py")));
+    assert!(names.len() <= 512);
+    assert!(serde_json::to_vec(names).unwrap().len() <= 16_384);
+    assert!(output["data"]["record"]["acceptance"].is_null());
 }

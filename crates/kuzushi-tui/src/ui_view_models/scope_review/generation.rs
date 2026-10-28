@@ -11,7 +11,7 @@ pub(super) fn generation_summary(generation: Option<&ScanScopeGeneration>) -> Ve
         ),
         proposal_context_summary(generation),
         format!(
-            "Model input: {} bytes; {}/{} files.",
+            "Model input: {} bytes; {}/{} filenames.",
             generation.input_bytes, generation.supplied_files, generation.inventoried_files
         ),
     ];

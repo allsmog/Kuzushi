@@ -680,6 +680,7 @@ mod tests {
                 titles: vec![first.title.clone(), second.title.clone()],
                 fingerprints: vec![first.fingerprint.clone(), second.fingerprint.clone()],
                 run_ids: vec!["trial-a".to_string(), "trial-b".to_string()],
+                representative_observation_ref: None,
                 representative_fingerprint: second.fingerprint.clone(),
                 representative_title: second.title.clone(),
                 representative_severity: "critical".to_string(),

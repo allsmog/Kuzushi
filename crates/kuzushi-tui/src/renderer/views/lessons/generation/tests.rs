@@ -6,6 +6,7 @@ fn receipt(state: &str) -> LessonGeneration {
         source_capture: state.into(),
         input_bytes: 2048,
         synthesis_requests: 1,
+        source_evidence_ref: None,
         run_id: Some("recorded-lesson-run".into()),
         prompt_sha256: format!("sha256:{}", "a".repeat(64)),
     }

@@ -20,6 +20,16 @@ fn summary_is_terminal(summary: &RunSummary) -> bool {
     )
 }
 
+pub(super) fn has_incomplete_run_summaries(summaries: &[&RunSummary], run_refs: &[String]) -> bool {
+    // With no summaries, preserve the recorded attempt's identity without a
+    // finding or cost total. A partially loaded index must not become a total.
+    !summaries.is_empty()
+        && (summaries.len() != run_refs.len()
+            || summaries
+                .iter()
+                .any(|summary| !summary_is_terminal(summary)))
+}
+
 fn summary_is_scan(summary: &RunSummary) -> bool {
     summary.kind.eq_ignore_ascii_case("scan")
         || summary.tool.as_deref().is_some_and(|tool| {

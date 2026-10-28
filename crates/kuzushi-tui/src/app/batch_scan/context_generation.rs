@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 
 mod brief;
 mod diagnosis;
+mod lesson_sources;
 mod model_selection;
 mod recovery;
 mod scope_correction;
@@ -55,6 +56,7 @@ pub(crate) struct StudyContextGeneration {
     pub(crate) guidance_editing: bool,
     pub(crate) guidance_notice: Option<String>,
     pub(crate) options: std::sync::Arc<Vec<String>>,
+    pub(crate) lesson_sources: Option<(std::sync::Arc<Vec<String>>, usize)>,
 }
 
 impl StudyContextGeneration {
@@ -118,6 +120,12 @@ impl StudyContextGeneration {
     }
     pub(crate) fn is_lesson(&self) -> bool {
         self.generation_tool.as_deref() == Some("findings:lesson-generate")
+    }
+    pub(crate) fn has_lesson_source_bundle(&self) -> bool {
+        self.receipt
+            .as_ref()
+            .map_or(&self.context_input, |r| &r.input)["sourceEvidenceRef"]
+            .is_string()
     }
     pub(crate) fn supports_rejected_retention(&self) -> bool {
         matches!(
@@ -292,6 +300,9 @@ impl ShellApp {
     }
 
     pub(super) fn handle_context_generation_key(&mut self, code: KeyCode) -> InputUpdate {
+        if let Some(update) = self.handle_lesson_source_key(code) {
+            return update;
+        }
         if code == KeyCode::Esc && self.context_generation().is_some_and(|g| g.show_answer) {
             self.router
                 .campaign_mut()

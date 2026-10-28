@@ -1,4 +1,4 @@
-/// A queued current attempt has not published the receipts needed for a study read.
+/// A study update has not published coherent receipts needed for a read.
 /// This does not establish process liveness or authenticate any findings.
 #[derive(Debug)]
 pub struct BatchReceiptPending;

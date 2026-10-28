@@ -130,7 +130,7 @@ impl ShellApp {
         request: &FindingsReadRequest,
         announce: bool,
     ) {
-        self.runtime_state.findings_refresh.accept_projection();
+        self.accept_findings_projection(&snapshot.target);
         self.clear_failed_findings_refresh_notice();
         if let Some(notice) = &snapshot.page_recovery_notice {
             self.set_warn_notice("findings", notice.clone());

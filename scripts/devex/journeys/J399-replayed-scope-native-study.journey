@@ -1,0 +1,189 @@
+name: Saved seven-scope response drives twenty-one fixed native jobs and Report
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR SEMGREP_APP_TOKEN SEMGREP_AGENT_TOKEN
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_replay_native.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+submit: run context:build {"enrichment":false}
+require-live-snap: 40 context:build indexed 602 files | source-context
+submit: use threat-model
+submit: options threat-model:import
+submit: set path .kuzushi/replay-context.json
+submit: set activate false
+submit: set label Owned scope response replay
+submit: run threat-model:import
+require-live-snap: 30 threat-model:import saved | manual-context
+submit: map
+require-live-snap: 25 SYSTEM SUMMARY | map-review
+nav-mode:
+keys: u
+require-live-snap: 25 Map ✓ | accepted-map
+submit: use sast
+submit: options sast:scan
+submit: set taskMode manual
+submit: set tasks semgrep
+paste-file: @ART/rule-setting.txt
+keys: Enter
+paste-file: @ART/scanner-setting.txt
+keys: Enter
+submit: set semgrepTimeoutMs 60000
+submit: scopes
+require-live-snap: 25 Enter / c build inventory | no-scope
+keys: c
+require-live-snap: 35 DRAFT SCOPES | initial-inventory
+expect: all: 3 jobs
+keys: Enter /
+type: Suggest scan scopes with AI
+require-live-snap: 20 ▸ Suggest scan scopes with AI | proposal-action
+keys: Enter
+require-live-snap: 20 AI SCOPE PRIORITIES | proposal-priorities
+paste-file: @ART/priorities.txt
+keys: F2
+require-live-snap: 25 SUGGEST SCAN SCOPES | proposal-plan
+keys: t
+type: 3
+keys: Enter r
+type: 2
+keys: Enter Enter
+require-live-snap: 30 Draft ready | proposal-draft
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_replay_native.py @TMP_TARGET @ART proposal-draft
+keys: Enter End
+require-live-snap: 20 y approve | proposal-approval
+expect: 1 fixed jobs
+expect: Total provider calls: 3
+expect: Protected review calls: 2
+keys: y
+require-live-snap: 30 Open approved scope proposal job | approved-proposal
+keys: Enter
+require-live-snap: 25 L starts the approved jobs | proposal-jobs
+keys: L
+require-live-snap: 25 dispatcher pid | proposal-running
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_replay_native.py @TMP_TARGET @ART proposal-finished
+keys: r
+require-live-snap: 25 1 completed | proposal-completed
+keys: a
+require-live-snap: 25 Review suggested scopes | proposal-result
+keys: Enter
+require-live-snap: 25 Shared allowance: calls 1/3 | replayed-boundaries
+expect: DRAFT SCOPES
+expect: all: 21 jobs
+expect: Shared allowance: calls 1/3
+expect: 2 Review protected
+ask: Does the saved-response replay enter the ordinary unaccepted scope reader with seven primary boundaries, shared context, retained spending and separate future approval?
+keys: a
+require-live-snap: 20 Accept exact boundaries | boundary-approval
+keys: Enter End Enter
+require-live-snap: 30 ACCEPTED SCOPES | accepted-boundaries
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_replay_native.py @TMP_TARGET @ART accepted
+keys: Home Space Down Space Down Space Down Space Down Space Down Space Down Space
+require-live-snap: 20 7 boundaries marked | seven-marked
+keys: p
+require-live-snap: 25 PLAN A STUDY | fixed-study
+expect: 21 fixed discovery jobs
+expect: 1 committed / 3 total
+ask: Does the scan draft preserve the proposal's existing allowance and freeze twenty-one jobs with one worker, without discovering shared files again through each consumer?
+keys: L
+require-live-snap: 35 Scope draft ready | scan-draft
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_replay_native.py @TMP_TARGET @ART scan-draft
+keys: L Home
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | scan-approval
+expect: 21 fixed jobs
+expect: Total provider calls: 3
+expect: Protected review calls: 2
+keys: End
+require-live-snap: 20 y approve | scan-approval-tail
+keys: y
+require-live-snap: 25 Approval saved | approved-scan
+keys: L
+require-live-snap: 25 L starts its fixed jobs | scan-jobs
+keys: L
+require-live-snap: 25 dispatcher pid | scan-running
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_replay_native.py @TMP_TARGET @ART completed
+keys: r
+require-live-snap: 25 21 completed | completed-jobs
+submit: workbench
+require-live-snap: 25 Viewing Scan | scan-result
+expect-not: · failed ·
+expect-not: findings 23
+ask: Does the first Scan frame show complete receipts or an honest pending state, without converting a running indexed summary into a failed engine or presenting incomplete aggregate totals?
+require-live-snap: 25 21/21 complete | settled-scan
+expect: findings 8 distinct
+nav-mode:
+keys: n
+require-live-snap: 25 Viewing Review | accepted-scan
+paste-file: @ART/open-control-panel.txt
+keys: Enter
+require-live-snap: 25 unit_095.ts | panel-finding
+submit: decision deferred Benign replay marker owner review
+paste-file: @ART/open-gateway.txt
+keys: Enter
+require-live-snap: 25 services/gateway | gateway-finding
+submit: decision deferred Benign replay marker owner review
+paste-file: @ART/open-accounts.txt
+keys: Enter
+require-live-snap: 25 services/accounts | accounts-finding
+submit: decision deferred Benign replay marker owner review
+paste-file: @ART/open-invoicing.txt
+keys: Enter
+require-live-snap: 25 services/invoicing | invoicing-finding
+submit: decision deferred Benign replay marker owner review
+paste-file: @ART/open-worker.txt
+keys: Enter
+require-live-snap: 25 services/worker | worker-finding
+submit: decision deferred Benign replay marker owner review
+paste-file: @ART/open-notifications.txt
+keys: Enter
+require-live-snap: 25 services/notifications | notifications-finding
+submit: decision deferred Benign replay marker owner review
+paste-file: @ART/open-loose.txt
+keys: Enter
+require-live-snap: 25 loose.py | root-finding
+submit: decision deferred Benign replay marker owner review
+paste-file: @ART/open-shared.txt
+keys: Enter
+require-live-snap: 25 message_07.json | shared-finding
+submit: decision deferred Benign replay marker owner review
+submit: report
+require-live-snap: 25 Scope study: | report
+expect: 7 boundaries
+expect: 1 committed / 3 calls
+expect: 2 protected review remaining
+ask: Does Report retain seven boundaries, eight benign signals and three-pass recurrence while distinguishing rule-selected coverage and unavailable charges from complete security coverage?
+resize: 160x48
+live-snap: report-160x48
+resize: 96x89
+live-snap: report-96x89
+resize: 80x24
+live-snap: report-80x24
+resize: 60x20
+live-snap: report-60x20
+resize: 40x12
+live-snap: report-40x12
+ask: Across all six sizes, are the finite plan, Review state, spending and report controls usable through keyboard navigation?
+resize: 120x36
+keys: j j j
+require-live-snap: 20 format json (4/6) | json-format
+keys: Enter
+require-live-snap: 25 EXPORTED | exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_replay_native.py @TMP_TARGET @ART exported
+keys: C-c
+require-exit: 10
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR SEMGREP_APP_TOKEN SEMGREP_AGENT_TOKEN
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/resume-scan.txt
+keys: Enter
+require-live-snap: 25 21 completed | recovered-jobs
+submit: report
+require-live-snap: 25 Scope study: | recovered-report
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_replay_native.py @TMP_TARGET @ART restarted
+ask: Does no-color restart retain the same accepted source/context, twenty-one jobs, twenty-four observations, eight human deferrals and one intercepted reply, with no fresh provider request or follow-up job?
+keys: C-c
+require-exit: 10

@@ -915,6 +915,13 @@ fn compact_result_summary_keeps_known_cost_and_marks_unknown_accounting() {
 
     summary.cost = Some("cost not recorded".to_string());
     assert!(compact_result_summary(&summary).contains("⚠ cost not recorded"));
+    summary.phase = WorkflowPhase::Scan;
+    assert!(compact_result_summary(&summary).contains("jobs ⚠ cost not recorded"));
+    for cost in ["$0.0000 exact", ">=$0.2500 incomplete", "cost unavailable"] {
+        summary.cost = Some(cost.into());
+        let text = compact_result_summary(&summary);
+        assert!(text.contains("jobs ") && text.contains(cost), "{text}");
+    }
 }
 
 #[test]

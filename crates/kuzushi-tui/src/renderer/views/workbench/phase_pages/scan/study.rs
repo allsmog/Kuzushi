@@ -2,6 +2,8 @@ use super::*;
 use crate::renderer::shared::text::wrap_text;
 use crate::ui_view_models::ScanPhaseModel;
 
+mod jobs;
+
 pub(super) fn plain_lines(model: &ScanPhaseModel, width: usize) -> Vec<Line<'static>> {
     let mut lines = divider_lines("APPROVED STUDY", summary_lines(model, width), width);
     lines.extend(divider_lines(
@@ -9,7 +11,11 @@ pub(super) fn plain_lines(model: &ScanPhaseModel, width: usize) -> Vec<Line<'sta
         scope_lines(model, width),
         width,
     ));
-    lines.extend(divider_lines("STUDY JOBS", job_lines(model, width), width));
+    lines.extend(divider_lines(
+        "STUDY JOBS",
+        job_lines_with_references(model, width, true),
+        width,
+    ));
     lines.extend(divider_lines(
         "RECORDED RESULT",
         super::content::receipt_lines(model, width),
@@ -27,9 +33,12 @@ pub(super) fn scope_lines(model: &ScanPhaseModel, width: usize) -> Vec<Line<'sta
         .map(|line| Line::styled(line, theme::primary()))
         .collect::<Vec<_>>();
     lines.extend(
-        wrap_text("Per-job scopes: c study jobs", width)
-            .into_iter()
-            .map(|line| Line::styled(line, theme::accent())),
+        wrap_text(
+            &format!("Per-job scopes: {} study jobs", study.jobs_key),
+            width,
+        )
+        .into_iter()
+        .map(|line| Line::styled(line, theme::accent())),
     );
     lines
 }
@@ -52,10 +61,17 @@ pub(super) fn summary_lines(model: &ScanPhaseModel, width: usize) -> Vec<Line<'s
         .into_iter()
         .map(|line| Line::styled(line, theme::warn()))
         .collect::<Vec<_>>();
-    lines.push(Line::styled(
-        fit("c study jobs · queue at last read", width),
-        theme::accent(),
-    ));
+    lines.extend(
+        wrap_text(
+            &format!(
+                "{} study jobs / run refs · queue at last read",
+                study.jobs_key
+            ),
+            width,
+        )
+        .into_iter()
+        .map(|line| Line::styled(line, theme::accent())),
+    );
     if let Some(issue) = &study.issue {
         lines.extend(
             wrap_text(issue, width)
@@ -103,10 +119,18 @@ fn append_count_part(lines: &mut Vec<String>, part: &str, width: usize) {
 }
 
 pub(super) fn job_lines(model: &ScanPhaseModel, width: usize) -> Vec<Line<'static>> {
+    job_lines_with_references(model, width, false)
+}
+
+fn job_lines_with_references(
+    model: &ScanPhaseModel,
+    width: usize,
+    include_references: bool,
+) -> Vec<Line<'static>> {
     let Some(queue) = model.study.as_ref().and_then(|study| study.queue.as_ref()) else {
         return summary_lines(model, width);
     };
-    super::content::engine_outcome_lines(&queue.jobs, width)
+    jobs::lines(&queue.jobs, width, include_references)
 }
 
 pub(super) fn receipt_lines(model: &ScanPhaseModel, width: usize) -> Vec<Line<'static>> {
@@ -122,8 +146,61 @@ pub(super) fn receipt_lines(model: &ScanPhaseModel, width: usize) -> Vec<Line<'s
             .into_iter()
             .map(|line| Line::styled(line, theme::muted())),
     );
-    lines.push(Line::styled(fit("c study jobs", width), theme::accent()));
+    lines.push(Line::styled(
+        fit(&format!("{} study jobs", study.jobs_key), width),
+        theme::accent(),
+    ));
     lines
+}
+
+pub(super) fn result_lines(model: &ScanPhaseModel, width: usize) -> Vec<Line<'static>> {
+    let Some(attempt) = &model.attempt else {
+        return receipt_lines(model, width);
+    };
+    let mut lines = result_status_lines(attempt, width);
+    let jobs_key = model.study.as_ref().map_or('c', |study| study.jobs_key);
+    lines.extend(
+        wrap_text(
+            &format!(
+                "{} run references · {jobs_key} study jobs",
+                attempt.run_refs.len()
+            ),
+            width,
+        )
+        .into_iter()
+        .map(|line| Line::styled(line, theme::accent())),
+    );
+    lines.extend(super::format::receipt_metrics_lines(model, attempt, width));
+    if let Some(error) = &attempt.error {
+        lines.extend(
+            wrap_text(error, width)
+                .into_iter()
+                .map(|line| Line::styled(line, theme::danger())),
+        );
+    }
+    lines
+}
+
+fn result_status_lines(
+    attempt: &crate::ui_view_models::ScanAttemptModel,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let status = format!("outcome {} · {}", attempt.outcome, attempt.freshness);
+    let disposition = format!("result {}", attempt.disposition);
+    [
+        (&status, super::format::outcome_style(&attempt.outcome)),
+        (
+            &disposition,
+            super::format::disposition_style(&attempt.disposition),
+        ),
+    ]
+    .into_iter()
+    .flat_map(|(text, style)| {
+        wrap_text(text, width)
+            .into_iter()
+            .map(move |line| Line::styled(line, style))
+    })
+    .collect()
 }
 
 #[cfg(test)]

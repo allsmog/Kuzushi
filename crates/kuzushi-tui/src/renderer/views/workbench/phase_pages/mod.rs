@@ -16,6 +16,7 @@ mod map;
 mod scan;
 
 pub(in crate::renderer::views) use header::{compact_review_header_lines, phase_header_lines};
+pub(in crate::renderer::views) use scan::engine_max_scroll as scan_engine_max_scroll;
 
 #[derive(Debug, Clone, Copy)]
 pub(in crate::renderer::views) struct PhaseRenderState<'a> {
@@ -134,9 +135,16 @@ fn scan_scroll_title(
     }
     let first = scroll as usize + 1;
     let last = (scroll as usize + inner.height as usize).min(rows);
-    let hint = format!("{first}-{last}/{rows} PgUp/PgDn");
-    let title_width = (inner.width as usize).saturating_sub(hint.len() + 1);
-    format!("{} {hint}", fit(title, title_width))
+    let range = format!("rows {first}-{last}/{rows}");
+    let short = if title == "STUDY JOBS" {
+        "JOBS"
+    } else {
+        "OUTCOMES"
+    };
+    [format!("{title} · {range}"), format!("{short} · {range}")]
+        .into_iter()
+        .find(|label| display_width(label) <= inner.width as usize)
+        .unwrap_or_else(|| fit(short, inner.width as usize))
 }
 
 pub(super) fn render_diagram_pane(
@@ -307,11 +315,29 @@ mod tests {
             6,
             inner,
         );
-        assert!(title.contains("7-9/14 PgUp/PgDn"), "{title}");
+        assert!(title.contains("OUTCOMES · rows 7-9/14"), "{title}");
         assert!(title.chars().count() <= 38, "{title}");
         assert_eq!(
             scan_scroll_title("OUTCOMES", PhaseSurfaceId::ScanEngines, 3, 0, inner),
             "OUTCOMES"
         );
+    }
+
+    #[test]
+    fn study_overflow_labels_rows_and_preserves_the_jobs_identity() {
+        for width in [12, 20, 26, 38, 80] {
+            let title = scan_scroll_title(
+                "STUDY JOBS",
+                PhaseSurfaceId::ScanEngines,
+                75,
+                61,
+                Rect::new(0, 0, width, 14),
+            );
+            assert!(title.contains("JOBS"), "{width}: {title}");
+            assert!(display_width(&title) <= width as usize);
+            if width >= 26 {
+                assert!(title.contains("rows 62-75/75"), "{width}: {title}");
+            }
+        }
     }
 }

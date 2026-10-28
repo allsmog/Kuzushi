@@ -8,16 +8,57 @@ use kuzushi_core::capabilities::campaign::snapshot::{CampaignJobSnapshot, Campai
 const CAMPAIGN_LIST_WIDTHS: [usize; 4] = [18, 14, 6, 30];
 const JOB_LIST_WIDTHS: [usize; 7] = [4, 22, 10, 4, 5, 12, 5];
 
+#[cfg(test)]
+mod history_tests;
+
 /// The Campaign deck: list mode is one row per planned campaign; detail mode
 /// is the selected campaign's ranked job matrix with include/exclude marks.
 /// All lifecycle truth comes from the snapshot fold (plan + dispatcher queue).
 pub(crate) fn campaign_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
-    let deck = app.router.campaign();
     let mut lines = context_strip(app, area);
+    if let Some(allowance) = crate::ui_view_models::investigation_allowance_model(app) {
+        lines.push(Line::styled(allowance.summary, theme::primary()));
+    }
     lines.push(blank());
+    build_campaign_lines(app, area, lines, true)
+}
+
+pub(super) fn campaign_body_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    build_campaign_lines(app, area, Vec::new(), false)
+}
+
+fn build_campaign_lines(
+    app: &ShellApp,
+    area: Rect,
+    mut lines: Vec<Line<'static>>,
+    inline_commands: bool,
+) -> Vec<Line<'static>> {
+    let deck = app.router.campaign();
     if append_study_surfaces(&mut lines, app, area) {
         return lines;
     }
+    append_history_feedback(&mut lines, app, area.width);
+    if append_requested_history(&mut lines, app, area.width) {
+        return lines;
+    }
+    append_history_coverage(&mut lines, deck, area.width);
+    lines = campaign_content_lines(app, area, lines);
+    append_deck_footer(
+        &mut lines,
+        deck,
+        area,
+        app.study_navigation_return_active(),
+        inline_commands,
+    );
+    lines
+}
+
+fn campaign_content_lines(
+    app: &ShellApp,
+    area: Rect,
+    mut lines: Vec<Line<'static>>,
+) -> Vec<Line<'static>> {
+    let deck = app.router.campaign();
     if deck.has_dispatcher_failure_notice() {
         let context = lines;
         lines = Vec::new();
@@ -26,10 +67,24 @@ pub(crate) fn campaign_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     }
     match deck.selected_campaign().filter(|_| deck.detail) {
         Some(campaign) => append_campaign_detail(&mut lines, deck, campaign, area),
-        None => append_campaign_list(&mut lines, deck, area),
+        None => append_campaign_list(&mut lines, app, area),
     }
-    append_deck_footer(&mut lines, deck, area, app.study_navigation_return_active());
     lines
+}
+
+fn append_requested_history(lines: &mut Vec<Line<'static>>, app: &ShellApp, width: u16) -> bool {
+    let Some(requested) = app.pending_campaign_selection() else {
+        return false;
+    };
+    lines.push(divider("LOADING INVESTIGATION", width));
+    push_deck_text(
+        lines,
+        &format!("Requested: {requested:?}"),
+        usize::from(width),
+        theme::primary(),
+    );
+    push_deck_text(lines, "Wait for this plan's recorded jobs before launching or changing work. Reading starts no jobs.", usize::from(width), theme::muted());
+    true
 }
 
 fn append_study_surfaces(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: Rect) -> bool {
@@ -80,11 +135,12 @@ fn append_study_picker(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: Rec
     super::batch_scan_config_lines::append_scope_context(lines, app, area)
 }
 
-fn append_campaign_list(lines: &mut Vec<Line<'static>>, deck: &CampaignRouteState, area: Rect) {
+fn append_campaign_list(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: Rect) {
+    let deck = app.router.campaign();
     lines.push(divider("CAMPAIGNS", area.width));
     append_campaign_trend(lines, deck, area.width as usize);
     if deck.campaigns.is_empty() {
-        append_empty_deck(lines);
+        append_history_empty_state(lines, deck, app.campaign_history_feedback().is_some());
         return;
     }
     let widths = campaign_list_widths(area);
@@ -99,6 +155,54 @@ fn append_campaign_list(lines: &mut Vec<Line<'static>>, deck: &CampaignRouteStat
             &widths,
         ));
     }
+}
+
+fn append_history_coverage(lines: &mut Vec<Line<'static>>, deck: &CampaignRouteState, width: u16) {
+    let warning = deck
+        .history_coverage
+        .as_ref()
+        .and_then(|coverage| coverage.limitation_label());
+    if let Some(warning) = warning {
+        lines.extend(
+            wrap_text(&warning, usize::from(width).max(1))
+                .into_iter()
+                .map(|text| Line::styled(text, theme::warn())),
+        );
+    }
+}
+
+fn append_history_feedback(lines: &mut Vec<Line<'static>>, app: &ShellApp, width: u16) {
+    if let Some(feedback) = app.campaign_history_feedback() {
+        lines.extend(
+            wrap_text(feedback, usize::from(width).max(1))
+                .into_iter()
+                .map(|text| Line::styled(text, theme::warn())),
+        );
+    }
+}
+
+fn append_history_empty_state(
+    lines: &mut Vec<Line<'static>>,
+    deck: &CampaignRouteState,
+    pending: bool,
+) {
+    if pending {
+        lines.push(Line::from(
+            "History has no loaded records yet. r refresh retries the read.",
+        ));
+        return;
+    }
+    if deck
+        .history_coverage
+        .as_ref()
+        .is_some_and(|coverage| !coverage.complete())
+    {
+        lines.push(Line::from(
+            "No readable investigations in this view. r refresh or open an exact campaign ID.",
+        ));
+        return;
+    }
+    append_empty_deck(lines);
 }
 
 fn append_campaign_trend(lines: &mut Vec<Line<'static>>, deck: &CampaignRouteState, width: usize) {
@@ -423,9 +527,13 @@ fn append_deck_footer(
     deck: &CampaignRouteState,
     area: Rect,
     linked_study: bool,
+    inline_commands: bool,
 ) {
     if !deck.has_dispatcher_failure_notice() {
         append_campaign_notice(lines, deck, area);
+    }
+    if !inline_commands {
+        return;
     }
     lines.push(blank());
     let commands = deck_commands(deck)
@@ -916,7 +1024,7 @@ mod tests {
         deck.notice = Some("Context result unavailable. Inspect the completed attempt; a replacement draft requires separate approval.".into());
         for width in [40, 60, 80, 96, 120, 160] {
             let mut lines = Vec::new();
-            append_deck_footer(&mut lines, &deck, Rect::new(0, 0, width, 48), false);
+            append_deck_footer(&mut lines, &deck, Rect::new(0, 0, width, 48), false, true);
             let text = lines
                 .iter()
                 .map(ToString::to_string)
@@ -979,6 +1087,7 @@ mod tests {
                 titles: vec!["unsafe auth flow".to_string()],
                 fingerprints: vec!["finding-1".to_string()],
                 run_ids: vec!["run-1".to_string(), "run-2".to_string()],
+                representative_observation_ref: None,
                 representative_fingerprint: "finding-1".to_string(),
                 representative_title: "unsafe auth flow".to_string(),
                 representative_severity: "high".to_string(),

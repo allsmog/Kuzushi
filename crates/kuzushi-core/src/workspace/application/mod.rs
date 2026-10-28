@@ -27,7 +27,9 @@ mod finding_goals;
 pub use finding_goals::execute_goal_review;
 mod finding_lessons;
 mod finding_relationships;
-pub use finding_lessons::{execute_lesson_action, load_finding_lessons};
+pub use finding_lessons::{
+    execute_lesson_action, load_finding_lessons, read_lesson_source_evidence,
+};
 mod investigation_report;
 mod report_review_summary;
 pub use finding_relationships::{

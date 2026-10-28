@@ -7,33 +7,73 @@ pub(super) fn lines(document: &InvestigationReportDocument, details: bool) -> Ve
         InvestigationReportDocument::Study(receipt) => {
             state_lines(&receipt.scope["contextEvidence"], details)
         }
-        InvestigationReportDocument::ScopeStudy(receipt) => receipt
-            .cases
-            .iter()
-            .flat_map(|case| {
-                named_lines(
-                    &case.label,
+        InvestigationReportDocument::ScopeStudy(receipt) => case_lines(
+            receipt.cases.iter().map(|case| {
+                (
+                    case.label.as_str(),
                     &receipt.scope[&case.id]["contextEvidence"],
-                    details,
                 )
-            })
-            .collect(),
-        InvestigationReportDocument::ContextMatrix(receipt) => receipt
-            .cases
-            .iter()
-            .flat_map(|case| {
-                named_lines(
-                    &case.label,
+            }),
+            details,
+            "boundaries",
+        ),
+        InvestigationReportDocument::ContextMatrix(receipt) => case_lines(
+            receipt.cases.iter().map(|case| {
+                (
+                    case.label.as_str(),
                     &receipt.scope["caseContextEvidence"][&case.id],
-                    details,
                 )
-            })
-            .collect(),
+            }),
+            details,
+            "context cases",
+        ),
     }
 }
 
+fn case_lines<'a>(
+    states: impl Iterator<Item = (&'a str, &'a Value)>,
+    details: bool,
+    noun: &str,
+) -> Vec<String> {
+    if details {
+        return states
+            .flat_map(|(label, state)| named_lines(label, state, true))
+            .collect();
+    }
+    let mut groups = std::collections::BTreeMap::<Vec<String>, Vec<&str>>::new();
+    for (label, state) in states {
+        groups
+            .entry(case_state_lines(state, false))
+            .or_default()
+            .push(label);
+    }
+    groups
+        .into_iter()
+        .flat_map(|(lines, labels)| group_lines(lines, &labels, noun))
+        .collect()
+}
+
+fn group_lines(mut lines: Vec<String>, labels: &[&str], noun: &str) -> Vec<String> {
+    if let Some(first) = lines.first_mut() {
+        *first = if labels.len() == 1 {
+            format!("{}: {first}", labels[0])
+        } else {
+            format!("{first} · {} {noun}", labels.len())
+        };
+    }
+    lines
+}
+
+fn case_state_lines(state: &Value, details: bool) -> Vec<String> {
+    let lines = state_lines(state, details);
+    if lines.is_empty() {
+        return vec!["Context evidence: not recorded.".into()];
+    }
+    lines
+}
+
 fn named_lines(label: &str, state: &Value, details: bool) -> Vec<String> {
-    let mut lines = state_lines(state, details);
+    let mut lines = case_state_lines(state, details);
     if let Some(first) = lines.first_mut() {
         *first = format!("{label}: {first}");
     }
@@ -73,47 +113,4 @@ fn recorded_lines(state: &Value, details: bool) -> Vec<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn partial_context_stays_visible_and_details_keep_the_recorded_reason() {
-        let state = json!({"status":"recorded","verification":{"verdict":"partial","groundingSource":"partial-catalog","groundingDegraded":"Per-file inspection was capped; unseen entry points remain unknown."}});
-        assert_eq!(
-            state_lines(&state, false),
-            vec!["Context grounding: partial."]
-        );
-        let detail = state_lines(&state, true).join("\n");
-        assert!(detail.contains("inspection was capped") && detail.contains("unknown"));
-        assert!(!detail.contains("verified"));
-    }
-
-    #[test]
-    fn missing_legacy_verification_does_not_claim_grounding_or_current_context() {
-        assert!(state_lines(&json!({}), true).is_empty());
-        assert_eq!(
-            state_lines(&json!({"status":"recorded"}), false),
-            vec!["Context grounding: unrecorded."]
-        );
-        let unavailable = state_lines(&json!({"status":"unavailable","message":"Exact historical context is missing. No active revision substituted."}), true).join("\n");
-        assert!(
-            unavailable.contains("unavailable")
-                && unavailable.contains("No active revision substituted")
-        );
-    }
-
-    #[test]
-    fn report_details_show_source_receipt_without_context_reader_shortcuts() {
-        let state = json!({"status":"recorded","sourceContext":{"scopeContext":{"status":"recorded",
-            "receipt":{"schemaVersion":1,"selectedFileCount":3,"sourcePartial":false,"completeRepositoryCoverage":false,
-                "sourceEvidence":{"files":[],"omissions":{}}}}}});
-        let text = state_lines(&state, true).join("\n");
-        assert!(text.contains("FILE-GROUP CONTEXT RECEIPT") && text.contains("Requested files: 3"));
-        assert!(!text.contains("Tab reads"));
-        assert_eq!(
-            state_lines(&json!({"status":"omitted"}), false),
-            vec!["Context: explicitly omitted."]
-        );
-    }
-}
+mod tests;

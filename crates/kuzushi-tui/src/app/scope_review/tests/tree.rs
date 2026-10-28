@@ -272,7 +272,7 @@ fn expanded_tree_keeps_file_identity_and_controls_reachable_at_every_size() {
         assert!(
             text.contains("Enter menu · Esc")
                 && text.contains("p plan")
-                && text.contains("PgUp/Dn")
+                && text.contains("Tab read")
                 && text.contains("f files"),
             "{text}"
         );

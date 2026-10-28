@@ -3,10 +3,9 @@
 //! records and campaign job spend. Pure, so the cockpit deck, the Report
 //! route, and `campaign:status` render the exact same numbers.
 
-use super::snapshot::{campaign_ids, load_campaign_snapshot};
 mod review;
-pub use review::{trend_metrics_for_findings, trend_metrics_for_subjects};
 use crate::findings::{ReviewDecisionRecord, ReviewDecisionVerdict};
+pub use review::{trend_metrics_for_findings, trend_metrics_for_subjects};
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -38,7 +37,11 @@ pub struct WorkspaceCampaignSpend {
 
 impl TrendMetrics {
     pub fn with_spend(mut self, spend: WorkspaceCampaignSpend) -> Self {
-        self.campaign_spend_usd = if spend.observed_usd == 0.0 { 0.0 } else { spend.observed_usd };
+        self.campaign_spend_usd = if spend.observed_usd == 0.0 {
+            0.0
+        } else {
+            spend.observed_usd
+        };
         self.provider_spend_unresolved = spend.provider_spend_unresolved;
         self
     }
@@ -141,7 +144,8 @@ pub fn trend_metrics_from_ledger(
         DecisionLedger::Unreadable => TrendMetrics {
             decisions_unreadable: true,
             ..TrendMetrics::default()
-        }.with_spend(spend),
+        }
+        .with_spend(spend),
     }
 }
 
@@ -218,24 +222,13 @@ pub fn workspace_campaign_spend(root: &Path) -> f64 {
 }
 
 pub fn workspace_campaign_spend_report(root: &Path) -> WorkspaceCampaignSpend {
-    let Ok(ids) = campaign_ids(root) else {
+    let Ok(Some(history)) = super::history::load_campaign_history(root, None, &|| false) else {
         return WorkspaceCampaignSpend {
             provider_spend_unresolved: true,
             ..WorkspaceCampaignSpend::default()
         };
     };
-    let mut spend = WorkspaceCampaignSpend::default();
-    for campaign_id in ids {
-        match load_campaign_snapshot(root, &campaign_id) {
-            Ok(snapshot) => {
-                spend.observed_usd += snapshot.total_cost_usd;
-                spend.provider_spend_unresolved |= snapshot.provider_spend_unresolved;
-            }
-            Err(_) => spend.provider_spend_unresolved = true,
-        }
-    }
-    spend.observed_usd += 0.0;
-    spend
+    history.spend()
 }
 
 pub fn trend_json(metrics: &TrendMetrics) -> serde_json::Value {

@@ -9,17 +9,6 @@ mod tests {
 
     static ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
 
-    /// Writes a source file long enough to contain `anchor_line`, so the
-    /// observation an engine reports there binds to captured source.
-    fn write_bindable_source(root: &Path, relative: &str, anchor_line: usize) {
-        let path = root.join(relative);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let body: String = (1..=anchor_line)
-            .map(|line| format!("// fixture line {line}\n"))
-            .collect();
-        fs::write(path, body).unwrap();
-    }
-
     struct EnvVarGuard {
         key: &'static str,
         previous: Option<std::ffi::OsString>,
@@ -41,6 +30,14 @@ mod tests {
                 env::remove_var(self.key);
             }
         }
+    }
+
+    fn write_source_at_line(root: &Path, path: &str, line: usize, source: &str) {
+        assert!(line > 0);
+        let path = root.join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let prefix = "// Owned scanner fixture.\n".repeat(line - 1);
+        fs::write(path, format!("{prefix}{source}\n")).unwrap();
     }
 
     #[test]
@@ -106,7 +103,7 @@ mod tests {
             r#"{"dependencies":{"lodash":"latest"}}"#,
         )
         .unwrap();
-        write_bindable_source(tmp.path(), "src/app.rs", 12);
+        write_source_at_line(tmp.path(), "src/app.rs", 12, "fn owned_fixture() {}");
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let scanners: Vec<Box<dyn ScanEngine>> =
@@ -148,7 +145,7 @@ mod tests {
         }
 
         let tmp = tempfile::tempdir().unwrap();
-        write_bindable_source(tmp.path(), "src/app.rs", 12);
+        write_source_at_line(tmp.path(), "src/app.rs", 12, "fn owned_fixture() {}");
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let scanners: Vec<Box<dyn ScanEngine>> = vec![Box::new(StaticScanner)];
@@ -312,7 +309,12 @@ mod tests {
         }
 
         let tmp = tempfile::tempdir().unwrap();
-        write_bindable_source(tmp.path(), "web/src/app.ts", 7);
+        write_source_at_line(
+            tmp.path(),
+            "web/src/app.ts",
+            7,
+            "export const ownedFixture = true;",
+        );
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let scanners: Vec<Box<dyn ScanEngine>> = vec![Box::new(ScopedScanner)];
@@ -1387,7 +1389,7 @@ JSON
         permissions.set_mode(0o755);
         fs::set_permissions(&scanner_path, permissions).unwrap();
 
-        write_bindable_source(tmp.path(), "server.js", 9);
+        write_source_at_line(tmp.path(), "server.js", 9, "res.send(req.query.name)");
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let scanner = SemgrepScanner {
@@ -1511,7 +1513,7 @@ exit 2
     fn codeql_scanner_invokes_subprocess_and_normalizes_sarif() {
         let tmp = tempfile::tempdir().unwrap();
         fs::write(tmp.path().join("package.json"), "{}\n").unwrap();
-        fs::write(tmp.path().join("server.js"), "db.query(req.query.q)\n").unwrap();
+        write_source_at_line(tmp.path(), "server.js", 9, "db.query(req.query.q)");
         let binary = fake_codeql_binary(tmp.path());
         let scanner = CodeqlScanner {
             binary: Some(binary.display().to_string()),
@@ -1540,7 +1542,7 @@ exit 2
             r#"{"dependencies":{"lodash":"latest"}}"#,
         )
         .unwrap();
-        write_bindable_source(tmp.path(), "server.js", 9);
+        write_source_at_line(tmp.path(), "server.js", 9, "db.query(req.query.q)");
         let binary = fake_codeql_binary(tmp.path());
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();

@@ -7,7 +7,9 @@ use kuzushi_core::findings::{
     ContextMatrixOccurrenceReport, IdentityFoldPolicy,
 };
 
+mod observations;
 mod reading;
+mod spending;
 
 fn report() -> ContextMatrixOccurrenceReport {
     ContextMatrixOccurrenceReport {
@@ -72,6 +74,7 @@ fn observation(case: usize, row: usize) -> BatchOccurrenceRow {
         titles: vec![],
         fingerprints: vec![],
         run_ids: vec![],
+        representative_observation_ref: None,
         representative_fingerprint: row.to_string(),
         representative_title: format!(
             "Labeled synthetic observation {row} with a long title to check wrapping"

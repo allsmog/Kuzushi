@@ -12,7 +12,7 @@ KUZUSHI · Viewing Scan · next required Review · target ./phase-target · ● 
 │✓ Run SAST scan · complete · r:scan-phase       │outcome completed · revision...     │not recorded                         │ Review 3/3
 │                                                │result legacy inferred              │recorded tool sast:scan              │ ⛭ autonomy:fix
 │                                                │run 1/1 scan-phase-run              │b plan study and allowance           │
-│                                                │duration 12s · cost $0.0420         │                                     │ IN FLIGHT
+│                                                │duration 12s · scan cost $0.0420    │                                     │ IN FLIGHT
 │                                                │r Review saved scan options         │                                     │ ⠋ context:build
 │                                                │                                    │                                     │
 │                                                │                                    │                                     │ FINDINGS

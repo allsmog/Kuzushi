@@ -101,10 +101,13 @@ pub struct LessonGeneration {
     pub source_capture: String,
     pub input_bytes: usize,
     pub synthesis_requests: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_evidence_ref: Option<String>,
 }
 
 impl LessonGeneration {
     fn validate(&self) -> Result<()> {
+        validate_source_evidence_ref(self.source_evidence_ref.as_deref())?;
         anyhow::ensure!(
             !self.model.trim().is_empty() && self.model.len() <= 512,
             "Lesson generation model is missing or invalid"
@@ -260,6 +263,20 @@ fn validate_review_note(note: &str) -> Result<()> {
     anyhow::ensure!(
         !note.trim().is_empty() && note.len() <= 4096,
         "Lesson review reason must contain 1 to 4096 bytes"
+    );
+    Ok(())
+}
+
+fn validate_source_evidence_ref(reference: Option<&str>) -> Result<()> {
+    let Some(reference) = reference else {
+        return Ok(());
+    };
+    let hash = reference
+        .strip_prefix("lesson-source:")
+        .context("Invalid lesson source reference")?;
+    anyhow::ensure!(
+        hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()),
+        "Invalid lesson source reference"
     );
     Ok(())
 }

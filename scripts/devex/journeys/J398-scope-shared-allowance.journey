@@ -1,0 +1,56 @@
+name: Read retained scope spending without approving more work
+size: 120x36
+cwd: @REPO/scripts/devex/artifacts/monorepo-scope-live-20261025/attempt-2/target
+env-unset: NODE_OPTIONS KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE KUZUSHI_AGENT_MCPS ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NODE_OPTIONS=--import=@REPO/scripts/devex/fixtures/deny_provider_transport.mjs KUZUSHI_TEST_DENIED_FETCH_LOG=@ART/denied-fetch.jsonl
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_allowance_reader.py @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @REPO/scripts/devex/artifacts/monorepo-scope-live-20261025/attempt-2/target
+require-live-snap: 30 KUZUSHI | ready
+submit: scopes
+require-live-snap: 30 Shared allowance: calls 3/3 | budget-overview
+expect: 0 calls left
+expect: 0 unsettled
+expect: cost not recorded
+expect-not: ACCEPTED SCOPES
+expect-not: session:$0
+ask: Does scope review show the shared investigation's three spent calls, exhausted allowance and unavailable dollar charges without treating them as this proposal's individual cost or approving future work?
+keys: Tab Home
+require-live-snap: 20 Shared allowance: calls 3/3 | budget-detail-120x36
+resize: 160x48
+live-snap: budget-detail-160x48
+resize: 96x89
+live-snap: budget-detail-96x89
+resize: 80x24
+live-snap: budget-detail-80x24
+resize: 60x20
+live-snap: budget-detail-60x20
+resize: 40x12
+live-snap: budget-detail-40x12
+expect: calls 3/3
+expect: 0 calls left
+expect: 0 unsettled
+expect: cost not
+expect: recorded
+ask: At the compact size, are spending, protected Review capacity, unknown charges and reading controls understandable without covering the selected scope or inventing zero consumption?
+resize: 120x36
+keys: End
+require-live-snap: 20 Shared investigation: monorepo-scope-quality-20261025 r3 | budget-tail
+expect: 0 other calls left
+expect: Dollar ceiling: not enforced
+expect: Totals cover all work sharing this investigation
+keys: Escape Escape C-c
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NODE_OPTIONS=--import=@REPO/scripts/devex/fixtures/deny_provider_transport.mjs KUZUSHI_TEST_DENIED_FETCH_LOG=@ART/denied-fetch.jsonl
+launch: --target @REPO/scripts/devex/artifacts/monorepo-scope-live-20261025/attempt-2/target
+require-live-snap: 30 KUZUSHI | restarted
+submit: scopes
+require-live-snap: 30 Shared allowance: calls 3/3 | budget-restarted
+expect: 0 calls left
+expect: cost not recorded
+expect-not: ACCEPTED SCOPES
+expect-not: session:$0
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_allowance_reader.py @ART inspected
+ask: After no-color restart, does the same draft retain its shared spending and leave acceptance, context activation, jobs and further allowance as separate operator decisions?
+keys: Escape C-c
+require-exit: 10

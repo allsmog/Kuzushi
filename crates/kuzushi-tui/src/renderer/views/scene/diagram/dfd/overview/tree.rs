@@ -149,7 +149,7 @@ fn append_component_detail(
     let children = component_children(component);
     let child_count = children.len();
     for (index, (text, crossing)) in children.into_iter().enumerate() {
-        lines.push(child_line(
+        lines.extend(child_lines(
             &indent,
             &text,
             crossing,
@@ -158,14 +158,34 @@ fn append_component_detail(
     }
 }
 
+fn child_lines(indent: &str, text: &str, crossing: bool, last: bool) -> Vec<Line<'static>> {
+    let continuation = if last { "   " } else { "│  " };
+    text.split('\n')
+        .enumerate()
+        .map(|(index, paragraph)| {
+            if index == 0 {
+                return child_line(indent, paragraph, crossing, last);
+            }
+            Line::styled(
+                format!("{indent}{continuation}{paragraph}"),
+                child_style(crossing),
+            )
+        })
+        .collect()
+}
+
 fn child_line(indent: &str, text: &str, crossing: bool, last: bool) -> Line<'static> {
     let branch = if last { "└─" } else { "├─" };
+    Line::styled(format!("{indent}{branch} {text}"), child_style(crossing))
+}
+
+fn child_style(crossing: bool) -> ratatui::style::Style {
     let color = if crossing {
         theme::SEV_HIGH
     } else {
         diagram_muted()
     };
-    Line::styled(format!("{indent}{branch} {text}"), diagram_style(color))
+    diagram_style(color)
 }
 
 fn component_children(component: &DfdOverviewComponent) -> Vec<(String, bool)> {
@@ -173,6 +193,11 @@ fn component_children(component: &DfdOverviewComponent) -> Vec<(String, bool)> {
         (description_label(component), false),
         (purpose_label(component), false),
     ];
+    children.extend(
+        component
+            .topology_notice()
+            .map(|notice| (format!("flows · {notice}"), false)),
+    );
     children.extend(component.outgoing.iter().map(flow_child));
     if let Some(context) = context_label(component.context) {
         children.push((context, false));
@@ -267,6 +292,27 @@ mod tests {
         );
         assert_eq!(document.selected_zone, "app");
         assert_eq!((document.selection, document.total), (1, 2));
+    }
+
+    #[test]
+    fn component_paragraphs_keep_rows_and_the_selected_tree_anchor() {
+        let mut model = sample_model();
+        model.nodes[1].description = Some("First paragraph.\n\nSecond paragraph.".into());
+        let overview = crate::ui_view_models::dfd_overview(&model);
+        let tree = component_tree_document(&model, &overview, 1);
+        let rows = tree.lines.iter().map(Line::to_string).collect::<Vec<_>>();
+        let first = rows
+            .iter()
+            .position(|row| row.contains("First paragraph."))
+            .unwrap();
+        let second = rows
+            .iter()
+            .position(|row| row.contains("Second paragraph."))
+            .unwrap();
+        assert_eq!(second, first + 2);
+        assert!(tree.selected_start < first && tree.selected_end > second);
+        assert!(!rows[first + 1].chars().any(char::is_alphanumeric));
+        assert!(!rows.iter().any(|row| row.contains('\n')));
     }
 
     fn sample_model() -> DfdModel {

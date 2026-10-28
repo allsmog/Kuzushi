@@ -63,6 +63,94 @@ fn explicit_dispatcher_reason_takes_precedence_over_the_run_error() {
 }
 
 #[test]
+fn foreign_run_metadata_cannot_supply_a_failure_reason_or_findings() {
+    let root = tempfile::tempdir().unwrap();
+    failure(
+        root.path(),
+        "threat-model:build",
+        "failed",
+        "Unrelated recorded failure",
+    );
+    let path =
+        crate::workspace::workspace_state_dir(root.path()).join("runs/failed-child/run.json");
+    let mut value: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    value["runId"] = json!("different-child");
+    value["findings"] = json!(42);
+    std::fs::write(path, serde_json::to_vec(&value).unwrap()).unwrap();
+    let row = snapshot(
+        root.path(),
+        json!({"state":"failed","runId":"failed-child"}),
+    );
+    assert_eq!(row.reason, None);
+    assert_eq!(row.findings, None);
+}
+
+#[test]
+fn incomplete_run_metadata_cannot_invent_a_canonical_failure_reason() {
+    let root = tempfile::tempdir().unwrap();
+    let directory = crate::workspace::workspace_state_dir(root.path()).join("runs/failed-child");
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(
+        directory.join("run.json"),
+        json!({"tool":"threat-model:build","status":"failed","error":"Unverified minimal JSON"})
+            .to_string(),
+    )
+    .unwrap();
+    assert_eq!(
+        snapshot(
+            root.path(),
+            json!({"state":"failed","runId":"failed-child"})
+        )
+        .reason,
+        None
+    );
+}
+
+#[test]
+fn legacy_count_metadata_cannot_supply_another_runs_count() {
+    let root = tempfile::tempdir().unwrap();
+    let directory = crate::workspace::workspace_state_dir(root.path()).join("runs/failed-child");
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(
+        directory.join("run.json"),
+        json!({"runId":"foreign","status":"completed","findings":42}).to_string(),
+    )
+    .unwrap();
+    let row = snapshot(
+        root.path(),
+        json!({"state":"failed","runId":"failed-child"}),
+    );
+    assert_eq!(row.findings, None);
+    assert_eq!(row.reason, None);
+}
+
+#[test]
+fn invalid_costs_and_unknown_fields_cannot_supply_canonical_failure_details() {
+    let root = tempfile::tempdir().unwrap();
+    for (field, value) in [("costUsd", json!(-1.0)), ("unknownField", json!(true))] {
+        failure(
+            root.path(),
+            "threat-model:build",
+            "failed",
+            "Invalid canonical metadata",
+        );
+        let path =
+            crate::workspace::workspace_state_dir(root.path()).join("runs/failed-child/run.json");
+        let mut body: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        body[field] = value;
+        std::fs::write(path, serde_json::to_vec(&body).unwrap()).unwrap();
+        assert_eq!(
+            snapshot(
+                root.path(),
+                json!({"state":"failed","runId":"failed-child"})
+            )
+            .reason,
+            None
+        );
+    }
+}
+
+#[test]
 fn unrelated_live_missing_and_unsafe_run_references_cannot_supply_a_failure_reason() {
     let root = tempfile::tempdir().unwrap();
     let entry = json!({"state":"failed", "runId":"failed-child"});

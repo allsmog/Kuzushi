@@ -122,9 +122,38 @@ fn retry_attempts_do_not_increase_logical_occurrence_counts() {
     assert_eq!(report.rows[0].planned, 3);
     assert_eq!(report.rows[0].failed, 1);
     assert_eq!(report.trials[2].state, "failed");
+    assert_recorded_observation_reference(target.path(), &store, &report.rows[0]);
     assert!(report
         .output()
         .contains("completed 2 / planned 3 · failed 1"));
+}
+
+fn assert_recorded_observation_reference(
+    root: &Path,
+    store: &FindingStore,
+    row: &BatchOccurrenceRow,
+) {
+    let serialized = serde_json::to_value(row).unwrap();
+    let reference = serialized["representativeObservationRef"].as_str().unwrap();
+    let original = store.get_finding_by_reference(reference).unwrap().unwrap();
+    assert_eq!(original.scan_id.as_deref(), Some("run-trial-1-a1"));
+    store
+        .record_run_started("unrelated-later-case", root, "completed")
+        .unwrap();
+    store
+        .insert_finding("unrelated-later-case", &original)
+        .unwrap();
+    let reopened = store.get_finding_by_reference(reference).unwrap().unwrap();
+    assert_eq!(reopened.id, original.id);
+    assert_eq!(reopened.scan_id, original.scan_id);
+    assert_ne!(
+        store
+            .get_finding_by_fingerprint(&original.fingerprint)
+            .unwrap()
+            .unwrap()
+            .id,
+        reopened.id
+    );
 }
 
 #[test]

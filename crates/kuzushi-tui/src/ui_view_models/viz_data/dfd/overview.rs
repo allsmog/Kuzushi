@@ -33,6 +33,13 @@ pub(crate) struct DfdOverviewComponent {
     pub context: DfdContextCounts,
 }
 
+impl DfdOverviewComponent {
+    pub(crate) fn topology_notice(&self) -> Option<&'static str> {
+        (self.inbound_count == 0 && self.outgoing.is_empty())
+            .then_some(super::topology::NO_RECORDED_COMPONENT_FLOWS)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DfdOverviewFlow {
     pub target: String,
@@ -99,14 +106,14 @@ fn executive_summary(model: &DfdModel) -> String {
     let crossings = model.flows.iter().filter(|flow| flow.crosses).count();
     let process_summary = match process_names.as_slice() {
         [] => "No process components are recorded".to_string(),
-        [one] => format!("The primary process component is {one}"),
+        [one] => format!("The recorded process component is {one}"),
         [first, second, ..] => {
-            format!("Primary process components include {first}; {second}")
+            format!("Recorded process components include {first}; {second}")
         }
     };
     let crossing_verb = if crossings == 1 { "crosses" } else { "cross" };
     format!(
-        "{}: purpose not recorded in this threat model. {process_summary}. {} exchange data over {} across {}; {} {crossing_verb} a declared boundary. Rebuild to add a source-grounded product summary.",
+        "{}: purpose not recorded in this threat model. {process_summary}. The stored diagram records {}, {} and {}; {} {crossing_verb} a declared boundary. Rebuild to add a source-grounded product summary.",
         display_target(model),
         count_label(model.nodes.len(), "component"),
         count_label(model.flows.len(), "flow"),
@@ -272,7 +279,7 @@ mod tests {
         assert_eq!(overview.zone_flows[0].crossing_count, 1);
         assert!(overview
             .executive_summary
-            .contains("The primary process component is API"));
+            .contains("The recorded process component is API"));
         assert_eq!(overview.zones[1].components[0].inbound_count, 1);
         assert_eq!(overview.zones[1].components[0].context.entry_points, 1);
         assert_eq!(dfd_overview_component_count(&overview), 2);

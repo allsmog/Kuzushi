@@ -115,14 +115,7 @@ pub(crate) fn split_context_rail(app: &ShellApp, full: Rect) -> (Rect, Option<Re
 
 /// Page by the same focused pane interior used to paint its text.
 pub(crate) fn workbench_scroll_page_rows(app: &ShellApp) -> Option<usize> {
-    let viewport = app.viewport();
-    let plan = workbench_phase_plan_for_app(app, Rect::new(0, 0, viewport.columns, viewport.rows))?;
-    let surface = plan.surface(plan.effective_focus)?;
-    if surface.interaction != crate::ui_view_models::SurfaceInteraction::Scrollable {
-        return None;
-    }
-    let inner = cockpit_pane_block("detail", false).inner(surface.rect);
-    Some(usize::from(inner.height).max(1))
+    workbench_scroll_metrics(app).map(|metrics| metrics.page_rows)
 }
 
 pub(crate) fn workbench_primary_area(app: &ShellApp, full: Rect) -> Rect {

@@ -13,6 +13,8 @@ use serde_json::{Map, Value};
 mod coerce_int_option;
 mod json_summary;
 mod operator_text;
+mod source_paths;
 pub use operator_text::coerce_option_text;
+pub(crate) use source_paths::selected_source_paths;
 #[cfg(test)]
 mod tests;

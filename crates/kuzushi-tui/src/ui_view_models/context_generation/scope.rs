@@ -7,6 +7,14 @@ pub(super) fn summary(config: &BatchScanConfig, width: usize) -> Vec<String> {
     let mut lines = vec![generation.action(config).into()];
     append_outcome(&mut lines, generation);
     lines.push("One scope proposal job · one worker · one attempt".into());
+    lines.push(file_selection_line(
+        generation
+            .receipt
+            .as_ref()
+            .map(|receipt| &receipt.input)
+            .unwrap_or(&generation.context_input),
+        generation.receipt.is_some(),
+    ));
     lines.push(
         super::diagnosis::scope_retention_label(
             generation.receipt.as_ref(),
@@ -57,6 +65,25 @@ fn architecture_line(generation: &StudyContextGeneration) -> String {
         "exact saved revision"
     };
     format!("Architecture context: {context}")
+}
+
+fn file_selection_line(input: &serde_json::Value, frozen: bool) -> String {
+    let selection = input.get("fileSelection");
+    let default = if frozen {
+        "prefix-v1"
+    } else {
+        "root-balanced-v1"
+    };
+    let policy = match selection {
+        None => Some(default),
+        Some(value) => value.as_str(),
+    };
+    let label = match policy {
+        Some("prefix-v1") => "recorded filename prefix",
+        Some("root-balanced-v1") => "root files first, balanced directory groups",
+        _ => return "Filename sample: unsupported saved option; prepare a corrected draft.".into(),
+    };
+    format!("Filename sample: {label}. At most 512 names and 16 KiB.")
 }
 
 pub(super) fn receipt_lines(

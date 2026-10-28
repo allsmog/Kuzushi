@@ -707,11 +707,7 @@ fn compact_result_summary(summary: &crate::PhaseResultCompactSummary) -> String 
         parts.push("⚠ receipt unavailable".to_string());
     }
     if let Some(cost) = summary.cost.as_deref() {
-        parts.push(if cost_needs_warning(cost) {
-            format!("⚠ {cost}")
-        } else {
-            cost.to_string()
-        });
+        parts.push(result_cost_label(summary.phase, cost));
     }
     if !summary.revision_recorded {
         parts.push("⚠ rev unrecorded".to_string());
@@ -722,6 +718,16 @@ fn compact_result_summary(summary: &crate::PhaseResultCompactSummary) -> String 
     ]);
     parts.extend(summary.findings_segment());
     parts.join(" · ")
+}
+
+fn result_cost_label(phase: WorkflowPhase, cost: &str) -> String {
+    let scope = if phase == WorkflowPhase::Scan {
+        "jobs "
+    } else {
+        ""
+    };
+    let warning = if cost_needs_warning(cost) { "⚠ " } else { "" };
+    format!("{scope}{warning}{cost}")
 }
 
 fn cost_needs_warning(cost: &str) -> bool {

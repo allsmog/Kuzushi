@@ -3,6 +3,7 @@ use crate::app::{BatchScanConfig, BatchScanConfigRow};
 use crate::renderer::shared::text::wrap_text;
 use ratatui::layout::Rect;
 pub(crate) mod brief;
+mod context_passes;
 mod context_results;
 mod controls;
 mod engine_inputs;
@@ -275,7 +276,7 @@ fn discovery_pass_lines(config: &BatchScanConfig) -> Vec<String> {
             "Repetition does not prove correctness. Editing prepares a new immutable plan.".into()];
     }
     if !config.study.matrix.cases.is_empty() {
-        return vec![format!("{} passes is the default for newly added context cases. Existing cases keep their own repetitions; p in Context cases edits the selected case. Approval covers the sum of all case jobs.", config.trials)];
+        return context_passes::lines(config);
     }
     vec![format!("{} fresh discovery passes with identical source, context and scan options. Repetition does not prove correctness. Editing prepares a new immutable plan.", config.trials)]
 }

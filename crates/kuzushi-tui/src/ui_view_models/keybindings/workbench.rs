@@ -5,6 +5,7 @@ use crate::ui_view_models::WORKBENCH_REPORT_COMMAND;
 use crate::{ShellApp, ShellView};
 
 mod prove_details;
+mod scan_reading;
 pub(super) use prove_details::prove_detail_bindings;
 
 pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
@@ -12,11 +13,7 @@ pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
 }
 
 fn workbench_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
-    if let Some(mut bindings) = crate::ui_view_models::phase_cockpit::result_keybindings(app) {
-        if let Some(reader) = result_reader_binding(app) {
-            bindings.insert(0, reader);
-        }
-        bindings.push(bind("Ctrl+C", workbench_exit_label(app)));
+    if let Some(bindings) = pending_result_keybindings(app) {
         return bindings;
     }
     let plan = workbench_plan(app);
@@ -26,9 +23,22 @@ fn workbench_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     regular_workbench_keybindings(app, plan.as_ref())
 }
 
+fn pending_result_keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
+    let mut bindings = crate::ui_view_models::phase_cockpit::result_keybindings(app)?;
+    if let Some(reader) = result_reader_binding(app) {
+        bindings.insert(0, reader);
+    }
+    if let Some(jobs) = scan_reading::jobs_binding(app) {
+        bindings.insert(0, jobs);
+    }
+    bindings.push(bind("Ctrl+C", workbench_exit_label(app)));
+    Some(bindings)
+}
+
 fn result_reader_binding(app: &ShellApp) -> Option<FooterKeybinding> {
     if scan_coverage_reader_is_open(app) {
-        return Some(bind("PgUp/PgDn", "coverage"));
+        let label = scan_reading::label(app);
+        return Some(bind("PgUp/PgDn", label));
     }
     crate::renderer::workbench_scroll_page_rows(app).map(|_| bind("PgUp/PgDn", "scroll"))
 }
@@ -61,7 +71,10 @@ fn regular_workbench_keybindings(
 }
 
 fn prioritize_linked_return(bindings: &mut [FooterKeybinding], app: &ShellApp) {
-    if !app.dfd_review_return_is_available() && !app.scope_findings_return_is_available() {
+    if !app.dfd_review_return_is_available()
+        && !app.scope_findings_return_is_available()
+        && !app.matrix_observation_return_is_available()
+    {
         return;
     }
     let Some(key) = app.view_back_key(ShellView::Workbench) else {

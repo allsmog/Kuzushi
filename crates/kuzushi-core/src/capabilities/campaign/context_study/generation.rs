@@ -65,6 +65,23 @@ pub(super) fn prepare(
     Ok(frozen)
 }
 
+pub(super) fn prepare_new(
+    tool: &str,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    registry: &ModuleRegistry,
+) -> Result<Value> {
+    let mut draft = input.clone();
+    if tool == SCOPE_TOOL {
+        draft
+            .as_object_mut()
+            .context("contextInput must be an object")?
+            .entry("fileSelection")
+            .or_insert_with(|| json!("root-balanced-v1"));
+    }
+    prepare(tool, &draft, ctx, registry)
+}
+
 fn default_scope_retention(tool: &str, input: &mut serde_json::Map<String, Value>) {
     if tool != SCOPE_TOOL
         || input.contains_key("saveRejectedOutput")

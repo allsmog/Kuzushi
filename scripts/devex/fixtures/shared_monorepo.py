@@ -120,9 +120,9 @@ def verify_scope(root, evidence, stage):
 
 def selected_plan(root, evidence):
     plans = [json.loads(p.read_text()) for p in (root / ".kuzushi/v3/campaigns").glob("*/plan.json")]
-    plans = [plan for plan in plans if plan["kind"] == "scope-study"]
     assert len(plans) == 1
     plan = plans[0]
+    assert plan["kind"] == "scope-study", "No hidden or follow-up campaign is included"
     accepted = json.loads((evidence / "accepted-scope.json").read_text())
     assert plan["jobCount"] == len(plan["jobs"]) == 9 and plan["workers"] == 1
     cases = {case["id"]:case for case in plan["scopeStudy"]["cases"]}
@@ -191,6 +191,7 @@ def verify_work(root, evidence, stage):
 
 
 def verify(root, evidence, stage):
+    assert not (evidence / "denied-fetch.jsonl").exists(), "No provider transport is permitted"
     assert hashes(root) == json.loads((evidence / "source-before.json").read_text())
     manifest = root / ".kuzushi/threat-models/manifest.json"
     assert json.loads(manifest.read_text()).get("active") is None
@@ -198,6 +199,24 @@ def verify(root, evidence, stage):
         verify_scope(root,evidence,stage)
     else:
         verify_work(root,evidence,stage)
+    if stage == "context-read":
+        verify_context_reading(root,evidence)
+
+
+def verify_context_reading(root, evidence):
+    plan, _ = selected_plan(root,evidence)
+    pages = sorted(evidence.glob("*-report-context-*.txt"))
+    assert len(pages) == 7, "Read the full bounded detail-page sequence"
+    text = "".join("".join(path.read_text().split()) for path in pages)
+    for case in plan["scopeStudy"]["cases"]:
+        label = "".join((case["label"] + " · Context reference:").split())
+        assert label in text, "Missing visible context reference for " + case["label"]
+        assert case["baseInput"]["threatModelRef"]["sha256"] in text
+    summary = next(evidence.glob("*-report.txt")).read_text()
+    assert "Frozen context revision for all 3 boundaries:" in summary
+    assert summary.count("Context: frozen") == 1
+    save(evidence,"report-context-reading",{"detailPages":len(pages),"boundaryReferences":3,
+        "commonSummaryReferences":1,"sourceAndLedgerUnchanged":True,"providerCalls":0})
 
 
 if __name__ == "__main__":

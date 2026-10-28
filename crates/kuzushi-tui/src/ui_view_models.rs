@@ -24,8 +24,8 @@ pub(crate) use context_matrix::{
     case_name_notice, case_name_plain_lines, context_matrix_conditions, context_matrix_lines,
 };
 pub(crate) use context_matrix::{
-    matrix_body, matrix_plain_lines, matrix_result_controls, matrix_result_lines,
-    matrix_result_read_limits, matrix_result_state, MatrixResultReadLimits,
+    matrix_allowance_lines, matrix_body, matrix_plain_lines, matrix_result_controls,
+    matrix_result_lines, matrix_result_read_limits, matrix_result_state, MatrixResultReadLimits,
 };
 pub(crate) mod scope_context;
 pub(crate) mod study_context;
@@ -257,7 +257,10 @@ pub(crate) use journey::{
     CheckpointDrift, JourneyDestination, JourneyModel, JourneyPhaseAccess, JourneyPhaseState,
     JourneyPhaseStatus, JourneyPhaseTone, JourneyRealityProjection, ReportReason,
 };
-pub(crate) use keybindings::{footer_keybindings, review_queue_navigation_footer};
+pub(crate) use keybindings::{
+    campaign_reader_action_hint, campaign_reader_footer, campaign_reader_navigation_owns_input,
+    footer_keybindings, review_queue_navigation_footer,
+};
 pub(crate) use keymap::{keymap_model, KeymapModel};
 pub(crate) use knowledge_base::{
     knowledge_base_model, plain_knowledge_base_model, KnowledgeBaseArtifactRow,
@@ -355,8 +358,8 @@ pub(crate) use review_yield::{
 };
 pub(crate) use routing::{
     has_run_activity, plain_render_mode, routing_mode, routing_mode_segment, uses_activity_frame,
-    uses_scene_frame, uses_workbench_frame, PlainInteractiveOnlyModel, PlainRenderMode,
-    RoutingMode,
+    uses_campaign_document, uses_scene_frame, uses_workbench_frame, PlainInteractiveOnlyModel,
+    PlainRenderMode, RoutingMode,
 };
 pub(crate) use run_diff::{
     run_diff_model, RunDiffChangedRow, RunDiffDecisionSummary, RunDiffFindingRow,

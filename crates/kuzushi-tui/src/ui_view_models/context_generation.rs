@@ -4,6 +4,8 @@ use crate::renderer::shared::text::wrap_text;
 use ratatui::layout::Rect;
 mod diagnosis;
 mod evidence;
+mod lesson_sources;
+pub(crate) use lesson_sources::lesson_source_lines;
 mod planning;
 mod proposal;
 mod question;
@@ -81,6 +83,14 @@ fn generation_subview_lines(
     generation: &crate::app::StudyContextGeneration,
     width: usize,
 ) -> Option<Vec<String>> {
+    if let Some((lines, _)) = &generation.lesson_sources {
+        return Some(
+            lines
+                .iter()
+                .flat_map(|line| wrap_text(line, width.max(1)))
+                .collect(),
+        );
+    }
     if generation.show_brief_guidance {
         return Some(bound_brief_lines(generation, width));
     }

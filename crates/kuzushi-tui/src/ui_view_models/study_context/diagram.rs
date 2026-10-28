@@ -119,11 +119,7 @@ fn linked_evidence_lines(model: &DfdModel, selection: usize) -> Vec<String> {
         format!("LINKED CONTEXT · {} recorded items", items.len()),
     ];
     for item in items {
-        let evidence = if item.evidence_paths.contains(&item.evidence) {
-            serde_json::json!(item.evidence).to_string()
-        } else {
-            item.evidence.clone()
-        };
+        let evidence = item.evidence_label();
         lines.extend([
             String::new(),
             item.label.clone(),

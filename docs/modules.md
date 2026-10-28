@@ -1,5 +1,13 @@
 # Kuzushi modules
 
+Study occurrence rows expose an optional `representativeObservationRef` for
+the exact recorded generation in the original workspace. The context-results
+findings picker opens that observation through the shared Review reader.
+Review retains evidence confidence, decisions and source warnings; recurrence
+remains a separate completed-pass count. A missing reference requires a fresh
+read rather than opening the latest fingerprint match. No model request or
+new scan is started. See the [additive output migration](../RELEASING.md#exact-observation-links-in-study-results).
+
 Normalized native license, dependency-policy and secret findings keep locations
 relative to the explicit workspace, including child-directory scans. Their saved
 source comes from the cited child file. Direct and SAST directory scans retain
@@ -412,6 +420,35 @@ pass. Recurrence changes do not change finding verdicts or clear severity gates.
 The campaign's `o observations` action explicitly selects its batch Review scope;
 `batch clear` returns Review to workspace history.
 
+Campaign status, spending and the shell history browser share one bounded
+catalogue. It examines at most 1,000 directory entries plus one lookahead and
+loads at most 100 investigations with 32 MiB of accounted metadata. Plans and
+queues have a 4 MiB per-file limit, optional child-run metadata 256 KiB, and each
+snapshot at most 1,000 jobs. Browse results do not read child-run details; an
+exact campaign ID is loaded first with its detail under the same allowance.
+Returned `historyCoverage` version 1 reports limits, omissions, confirmed bytes
+and accounted bytes. Uncertain failed reads retain their metadata reservation.
+
+Malformed plans and queues preserve other readable history and mark it partial.
+Unreadable directories are distinguished from empty history. An absent history
+directory is empty history.
+`historyCoverage.complete: false` yields the existing partial result and CLI
+exit 4; aggregate spending remains incomplete. Inspect a known ID outside the
+browse subset with
+`kuzushi run campaign:status --target <repository> --option campaignId=<id>`
+or the shell's `campaign <id>`. The saved plan, queue, original source and approval remain
+unchanged. See [bounded history evidence](assessments/bounded-history-2026-10-27.md)
+and the [reader migration](../RELEASING.md#bounded-campaign-history-readers).
+
+Terminal history loads through the existing two-slot background reader pool.
+Newer requests cancel earlier reads, and an unscheduled refresh keeps only the
+latest request. Input and navigation remain available; launch and plan edits
+wait for the refreshed records. Completion preserves the selected identity and
+does not overwrite a newer phase projection or take focus from another surface.
+The job reader pins the selected label and parent workload through compact
+paging. CLI and nonterminal reads stay synchronous. See
+[background history qualification](assessments/background-history-2026-10-27.md).
+
 
 `codeql:create-db` and `codeql:scan` keep exact dispatch as Labs, auxiliary Map
 and Scan actions. Database creation retains explicit repository-execution
@@ -757,6 +794,10 @@ and `sample_limit` aliases accept integers from 1 through 2000; malformed or
 out-of-range values fail through shared preparation before replacing a snapshot.
 The inventory preserves its 100,000-entry, 512 MiB inspection and 256 KiB per-file
 inspection limits, containment checks, ignored-path rules and cancellation.
+Filesystem collection buffers only the remaining entry allowance and probes
+one extra entry to detect truncation, then sorts the admitted subset. Truncated filesystem coverage
+depends on directory enumeration order; it does not promise a globally lexical
+prefix. See the [bounded directory qualification](assessments/bounded-directory-integration-2026-10-27.md).
 Git path acquisition has a 30-second subprocess deadline, 64 MiB stdout and
 1 MiB stderr capture limits. Cancellation is polled during acquisition, before
 file inspection. The parser retains at most the entry cap plus one overflow
@@ -3567,6 +3608,14 @@ provides the same one-job path for headless use. A later accepted-scope scan stu
 retains the proposal's investigation accounting and requires its own work approval.
 Missing or mismatched generation receipts fail instead of resetting spending.
 
+Opening saved model-generated scopes reads the current shared allowance through
+the recorded generation run. The overview and Tab reader show committed calls,
+remaining calls, protected Review capacity and charge availability. End reaches
+the investigation identity and full receipt; plain output includes the same
+facts. These totals include other work sharing the investigation. Loading,
+missing and failed reads remain explicit, and unavailable charges stay unknown.
+Scope and context acceptance, further work and spending need their own approval.
+
 
 ### Source framework extraction and partial Map evidence
 
@@ -4226,6 +4275,15 @@ observation and bounded captured source under the shared investigation allowance
 It makes one logical synthesis request; transport retries consume that same
 allowance. Missing source captures are disclosed rather than replaced with
 current source. Human acceptance and context copying remain separate actions.
+Optional `sourceEvidenceFiles` selects at most 16 exact relative supporting
+paths. The cited file and those files share `maxSourceBytes`, in the selected
+order. Preparation freezes their original snapshot bytes and omissions in
+`sourceEvidenceRef`. Changed or deleted checkout files are never substituted.
+An observation without a retained repository source tree cannot supply
+supporting membership. The TUI's `f` basket uses current paths only for browsing;
+an absent historical path can be entered exactly. After preparation, `v` reads
+the frozen bundle without execution controls. A different selection requires a
+new plan. Receipts retain the optional bundle reference with the lesson draft.
 Report preserves linked lesson records in JSON, JSONL, SARIF and Markdown bundle;
 CSV and the external scanner format disclose their omission. Cross-workspace
 lesson transfer remains unqualified. The manual flow makes no model requests.
@@ -4499,3 +4557,41 @@ text. Unsupported receipts remain unavailable; missing flags and counts remain
 unrecorded. Report details share the receipt presentation, while reader shortcuts
 stay local to the context reader. See the [generated scope workflow](assessments/generated-scope-investigation-2026-10-24.md)
 for sequential native evidence and qualification limits.
+
+
+### Fixed-study jobs and shared accounting
+
+The Scan study overview gives job labels the main reading width beside a compact
+summary and recorded result. Overflow ranges count wrapped rows; paging names
+the pane that owns it. In Navigate, `c` opens exact study jobs while a completed
+result remains unselected. When Resume owns `c`, the displayed reader shortcut
+is `C`. Prompt typing, drafts, pane selection and result disposition survive the
+round trip. Full run references remain in job detail and plain output. See the
+[study layout qualification](assessments/study-reading-layout-2026-10-27.md).
+
+The pending-result footer includes the actual study-reader binding. Compact
+footers keep Escape, interrupt, paging and Jobs visible before secondary actions.
+Opening Jobs reveals its selected row after immediate or background loading.
+Paging still reaches the full study summary, and background completion yields
+to composer input. Scan result cards name jobs spending, and receipt metrics distinguish `jobs cost`
+from `scan cost`; unavailable and incomplete metering stay qualified. These labels
+describe the recorded Scan work, with shared investigation totals remaining in
+the allowance reader. See the [controls and cost qualification](assessments/study-controls-cost-2026-10-27.md).
+
+The jobs and job-detail readers bind Scan, context, context-matrix, scope and
+Review studies to the exact plan digest retained by bounded campaign history.
+They read the shared investigation ledger in the background. Call limits,
+protected Review capacity and cost availability stay visible while paging.
+Dollar totals for this plan are labeled as Jobs subtotals. Unrecorded cost stays
+unknown, and an unreadable or changed plan cannot borrow another plan's approval.
+
+The shared read-only `campaign::load_fixed_study_allowance` projection checks
+saved plan identity and historical work approval before returning current
+investigation totals. Later approved work may share those totals. An unapproved
+draft may display its explicitly named investigation's spending while its work
+still requires approval. Retained source evidence is unnecessary for reading
+recorded charges. Reading this projection never authorizes or starts work.
+Bounded approval-plan reads enforce repository containment and reject symlinks.
+
+See the [fixed-study accounting evidence](assessments/jobs-allowance-2026-10-27.md)
+for buffer, native and accounting qualification limits.

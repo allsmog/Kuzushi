@@ -50,7 +50,11 @@ impl WorkbenchCache {
     }
 
     pub(super) fn record_failed_allowance_read(&mut self, failure: &ViewHydrationFailure) {
-        if matches!(failure.key, ViewHydrationKey::InvestigationAllowance { .. }) {
+        if matches!(
+            failure.key,
+            ViewHydrationKey::InvestigationAllowance { .. }
+                | ViewHydrationKey::StudyAllowance { .. }
+        ) {
             self.apply_allowance_hydration(
                 failure.target.clone(),
                 failure.key.clone(),

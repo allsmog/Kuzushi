@@ -1558,6 +1558,7 @@ fn scan_batch_results_have_tty_and_plain_content_parity() {
             titles: vec!["auth bypass".to_string()],
             fingerprints: vec!["finding-parity".to_string()],
             run_ids: vec!["run-1".to_string()],
+            representative_observation_ref: None,
             representative_fingerprint: "finding-parity".to_string(),
             representative_title: "auth bypass".to_string(),
             representative_severity: "high".to_string(),

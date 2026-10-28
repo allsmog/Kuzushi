@@ -1,0 +1,81 @@
+name: Recorded flows distinguish connected components and unreviewed roles
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dfd_connectivity.py @TMP_TARGET @ART seed
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: run threat-model:import {"path":"ctx.json","activate":true}
+require-live-snap: 30 threat-model:import saved | imported
+submit: map
+require-live-snap: 25 2 components have no recorded flows | map-review
+nav-mode:
+keys: u
+require-live-snap: 25 Map ✓ | accepted
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dfd_connectivity.py @TMP_TARGET @ART accepted
+keys: G
+require-live-snap: 25 Principal definition | unconnected-summary
+expect: No incoming or outgoing flows recorded
+expect-not: definition.Runtime
+ask: Does Summary keep the recorded connected flows while identifying both components without recorded flows, without claiming that their roles are invalid or starting repair work?
+keys: Enter z
+require-live-snap: 25 No incoming or outgoing | selected-component-120x36
+expect: Principal definition
+resize: 160x48
+live-snap: selected-component-160x48
+expect: No incoming or outgoing
+resize: 96x89
+live-snap: selected-component-96x89
+expect: No incoming or outgoing
+resize: 80x24
+live-snap: selected-component-80x24
+expect: no recorded flows
+resize: 60x20
+live-snap: selected-component-60x20
+expect: no recorded flows
+expect: Resize to read selected details
+resize: 40x12
+live-snap: selected-component-40x12
+keys: NPage
+live-snap: selected-component-paged-40x12
+keys: NPage
+live-snap: selected-component-flow-notice-40x12
+keys: NPage NPage NPage NPage
+live-snap: selected-component-tail-40x12
+keys: PPage
+live-snap: selected-component-back-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dfd_connectivity.py @TMP_TARGET @ART paged
+ask: Is the selected component's missing recorded flow membership readable at all six sizes, with paging and existing context/scan controls preserved?
+resize: 120x36
+keys: k
+require-live-snap: 25 Invoice definition | other-unconnected-component
+keys: k
+require-live-snap: 25 Owned records | connected-component
+keys: j j
+require-live-snap: 25 Principal definition | selected-component-restored
+keys: s
+require-live-snap: 25 PLAN A STUDY | separate-proposal
+expect: No jobs started
+keys: Escape
+require-live-snap: 25 Principal definition | proposal-return
+expect: No incoming or outgoing
+ask: Does changing selection show each component's own recorded flow membership, and does canceling a separate scan proposal preserve the original component without saving jobs or changing context?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dfd_connectivity.py @TMP_TARGET @ART inspected
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: map
+require-live-snap: 25 2 components have no recorded flows | restarted-summary
+nav-mode:
+keys: G Enter z
+require-live-snap: 25 No incoming or outgoing | restarted-component
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dfd_connectivity.py @TMP_TARGET @ART restarted
+ask: Does no-color restart retain the same context and source, both unconnected-component notices and unchanged zero job/request counts?
+keys: C-c
+require-exit: 10
