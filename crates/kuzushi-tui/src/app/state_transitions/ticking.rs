@@ -15,6 +15,8 @@ impl ShellApp {
         changed |= self.reload_operator_keymap(now);
         changed |= self.drain_core_runtime_diagnostics();
         changed |= self.poll_campaign_completion();
+        changed |= self.poll_live_campaign_progress(now);
+        changed |= self.poll_live_replay(now);
         changed |= self.poll_relationship_write();
         changed |= self.poll_lesson_write();
         changed |= self.poll_source_review();

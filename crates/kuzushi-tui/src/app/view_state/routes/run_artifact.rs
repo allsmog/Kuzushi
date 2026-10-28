@@ -30,6 +30,10 @@ pub struct RunArtifactRouteState {
     pub(super) scroll_reset_pending: bool,
     page: ReadingPage,
     scrolls: [u16; 3],
+    /// When an open replay of an unfinished run last re-read its artifacts.
+    pub(crate) live_refreshed_at: Option<std::time::Instant>,
+    /// The bottom offset seen last tick; a reader parked there follows new rows.
+    pub(crate) live_tail_offset: Option<u16>,
 }
 
 impl RunArtifactRouteState {
@@ -38,6 +42,8 @@ impl RunArtifactRouteState {
         if self.run_id != run_id {
             self.page = ReadingPage::Result;
             self.scrolls = [0; 3];
+            self.live_refreshed_at = None;
+            self.live_tail_offset = None;
         }
         self.scroll_reset_pending |= self.run_id != run_id;
         self.run_id = run_id;

@@ -54,6 +54,8 @@ pub struct CampaignRouteState {
     /// Recorded observation membership, independent of completed-pass recurrence.
     pub(crate) active_batch_observation_fingerprints: BTreeSet<String>,
     pub(crate) scan_study_origin: Option<crate::app::state_transitions::LinkedFindingsOrigin>,
+    /// When the open deck last re-read queue state for a running dispatcher.
+    pub(crate) live_refreshed_at: Option<std::time::Instant>,
 }
 
 impl Default for CampaignRouteState {
@@ -73,6 +75,7 @@ impl Default for CampaignRouteState {
             notice: None,
             trend: None,
             trend_history: Vec::new(),
+            live_refreshed_at: None,
             batch_scan_config: None,
             dfd_study_return: None,
             setup_context_study: None,

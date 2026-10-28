@@ -682,6 +682,33 @@ impl ShellApp {
         InputUpdate::handled()
     }
 
+    /// A Map built by an approved plan is frozen work: re-dispatching it with
+    /// changed options is refused by the allowance ledger. Refine and
+    /// Regenerate therefore open the separately approved context-regeneration
+    /// flow instead of a rerun draft that could never dispatch.
+    fn route_frozen_map_regeneration(
+        &mut self,
+        derivation: Option<kuzushi_core::workflow_attempts::PhaseAttemptDerivation>,
+        tool: &str,
+        input: &Value,
+    ) -> bool {
+        let frozen = input
+            .get("allowanceRef")
+            .is_some_and(|reference| !reference.is_null());
+        if !(frozen && !phase_rerun_action_overrides(derivation, tool).is_empty()) {
+            return false;
+        }
+        self.set_aside_finished_study();
+        match self.open_context_regeneration_entry() {
+            Ok(()) => self.set_info_notice(
+                "map",
+                "This Map came from an approved plan, so changes go through a new, separately approved regeneration.",
+            ),
+            Err(error) => self.refuse_phase_result_action(error.to_string()),
+        }
+        true
+    }
+
     /// The tool and input an exact rerun would replay, taken from the latest
     /// referenced run that still has both. Refuses out loud, because `r` is
     /// advertised on the card whether or not a rerun can be reconstructed.
@@ -715,6 +742,9 @@ impl ShellApp {
     ) -> Option<PhaseRerunDraft> {
         let record = self.current_phase_result_record()?;
         let (tool, input) = self.rerun_specification_for(&record)?;
+        if self.route_frozen_map_regeneration(derivation, &tool, &input) {
+            return None;
+        }
         let overrides = phase_rerun_action_overrides(derivation, &tool);
         let prepared_input = self.phase_rerun_draft_input(&tool, input.clone(), overrides)?;
         let descriptor = self.registry().resolve_tool(&tool)?;

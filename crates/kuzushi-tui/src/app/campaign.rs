@@ -13,6 +13,7 @@ use kuzushi_core::capabilities::campaign::snapshot::{
 use std::path::Path;
 mod dispatcher_control;
 mod dispatcher_results;
+mod live_progress;
 mod observations;
 mod scan_progress;
 
@@ -416,7 +417,7 @@ fn refresh_trend_history(
     trend_history::load_trend_history(target, trend_history::TREND_HISTORY_LIMIT)
 }
 
-fn load_campaign_snapshots(target: &Path) -> (Vec<CampaignSnapshot>, usize) {
+pub(super) fn load_campaign_snapshots(target: &Path) -> (Vec<CampaignSnapshot>, usize) {
     let ids = campaign_ids(target).unwrap_or_default();
     let mut snapshots = Vec::new();
     let mut unreadable = 0usize;
