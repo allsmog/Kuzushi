@@ -18,8 +18,14 @@ pub(in crate::renderer) fn render_context_rail(frame: &mut Frame<'_>, area: Rect
 /// `│ <content…>` — every rail row carries the gutter so the seam stays
 /// unbroken for the full terminal height.
 fn gutter_line(content: Line<'static>) -> Line<'static> {
+    // A heading row carries its style on the Line itself; push it onto the
+    // spans so rebuilding the row around the gutter keeps the heading colour.
+    let line_style = content.style;
     let mut spans = vec![Span::styled("│ ", theme::subtle())];
-    spans.extend(content.spans);
+    spans.extend(content.spans.into_iter().map(|span| {
+        let style = line_style.patch(span.style);
+        span.style(style)
+    }));
     Line::from(spans)
 }
 
@@ -71,6 +77,15 @@ mod tests {
                     .collect::<String>()
             })
             .collect()
+    }
+
+    #[test]
+    fn gutter_keeps_a_heading_line_style() {
+        use ratatui::style::Color;
+        let style = Style::default().fg(Color::Rgb(1, 2, 3));
+        let line = gutter_line(Line::styled("JOURNEY", style));
+
+        assert_eq!(line.spans[1].style.fg, Some(Color::Rgb(1, 2, 3)));
     }
 
     #[test]

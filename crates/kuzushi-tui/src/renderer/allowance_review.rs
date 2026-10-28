@@ -54,13 +54,7 @@ fn render_pinned_terms(frame: &mut Frame<'_>, area: Rect, model: &AllowanceRevie
 }
 
 fn review_line(line: &str) -> Line<'static> {
-    let style = match line {
-        "SPENDING LIMITS" | "CURRENT ACCOUNTING" | "RESOURCE ESTIMATE" | "PLAN DETAILS" => {
-            theme::heading()
-        }
-        _ => theme::primary(),
-    };
-    Line::styled(line.to_owned(), style)
+    readable_line(line)
 }
 
 fn review_block(model: &AllowanceReviewModel) -> Block<'static> {

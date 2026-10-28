@@ -8,7 +8,7 @@ pub(super) fn append_batch_occurrence(
     area: Rect,
 ) {
     lines.push(blank());
-    lines.push(divider("BATCH OCCURRENCE", area.width));
+    lines.push(divider("FOUND ACROSS PASSES", area.width));
     lines.extend(batch_wrapped(
         &batch_summary(report),
         area.width as usize,
@@ -20,7 +20,7 @@ pub(super) fn append_batch_occurrence(
         theme::primary(),
     ));
     lines.extend(batch_wrapped(
-        "Occurrence counts completed trials; it does not establish proof.",
+        "How many discovery passes found each finding. Recurrence shows stability; it does not establish proof.",
         area.width as usize,
         theme::muted(),
     ));
@@ -71,46 +71,88 @@ fn append_batch_receipt(
 
 fn batch_summary(report: &BatchOccurrenceReport) -> String {
     format!(
-        "  completed {} / planned {} · failed {} · pending {}",
+        "  {} of {} passes completed · {} failed · {} pending",
         report.completed, report.planned, report.failed, report.pending
     )
 }
 
 fn batch_occurrence_row(row: &BatchOccurrenceRow, width: usize) -> Vec<Line<'static>> {
-    let title = format!(
-        "{} · {}",
-        row.representative_severity, row.representative_title
-    );
     let mut lines = vec![blank()];
-    lines.extend(batch_wrapped(&title, width, theme::primary()));
+    lines.extend(batch_title_lines(row, width));
     if let Some(hint) = row.completed_pass_hint() {
         lines.extend(batch_wrapped(hint, width, theme::muted()));
     }
     lines.extend(batch_wrapped(
-        &format!(
-            "seen {} / completed {} · planned {} · failed {}",
-            row.seen, row.completed, row.planned, row.failed
-        ),
+        &recurrence_label(row),
         width,
         theme::primary(),
     ));
     lines.extend(batch_wrapped(
         &row.representative_location,
         width,
-        theme::primary(),
+        theme::accent(),
     ));
     lines.extend(batch_wrapped(
-        &format!("finding {}", row.representative_fingerprint),
+        &format!("finding id {}", row.representative_fingerprint),
         width,
         theme::subtle(),
     ));
     let runs = if row.run_ids.is_empty() {
-        "runs —".to_string()
+        "found by —".to_string()
     } else {
-        format!("runs {}", row.run_ids.join(", "))
+        format!("found by {}", row.run_ids.join(", "))
     };
     lines.extend(batch_wrapped(&runs, width, theme::subtle()));
     lines
+}
+
+/// `found in 1 of 2 completed passes`, adding planned and failed passes only
+/// when they differ from the completed count, so it reads as a sentence.
+fn recurrence_label(row: &BatchOccurrenceRow) -> String {
+    let mut label = format!(
+        "found in {} of {} completed passes",
+        row.seen, row.completed
+    );
+    if row.planned != row.completed {
+        label.push_str(&format!(" · {} planned", row.planned));
+    }
+    if row.failed > 0 {
+        label.push_str(&format!(" · {} failed", row.failed));
+    }
+    label
+}
+
+/// `critical · SQL injection in login…` with the severity in its tone and the
+/// title bold, so each occurrence block starts with what matters.
+fn batch_title_lines(row: &BatchOccurrenceRow, width: usize) -> Vec<Line<'static>> {
+    let severity = row.representative_severity.as_str();
+    let prefix = format!("  {severity} · ");
+    let budget = width.saturating_sub(prefix.chars().count()).max(1);
+    let mut titles = wrap_text(&row.representative_title, budget).into_iter();
+    let first = Line::from(vec![
+        Span::styled(
+            format!("  {severity}"),
+            theme::severity_tone(severity_tone(severity)),
+        ),
+        Span::styled(" · ", theme::muted()),
+        Span::styled(titles.next().unwrap_or_default(), theme::heading()),
+    ]);
+    let indent = " ".repeat(prefix.chars().count());
+    std::iter::once(first)
+        .chain(titles.map(|rest| Line::styled(format!("{indent}{rest}"), theme::heading())))
+        .collect()
+}
+
+fn severity_tone(severity: &str) -> crate::ui_view_models::SeverityTone {
+    use crate::ui_view_models::SeverityTone;
+    match severity.to_ascii_lowercase().as_str() {
+        "critical" => SeverityTone::Critical,
+        "high" => SeverityTone::High,
+        "medium" => SeverityTone::Medium,
+        "low" => SeverityTone::Low,
+        "info" => SeverityTone::Info,
+        _ => SeverityTone::Unknown,
+    }
 }
 
 fn batch_wrapped(text: &str, width: usize, style: ratatui::style::Style) -> Vec<Line<'static>> {

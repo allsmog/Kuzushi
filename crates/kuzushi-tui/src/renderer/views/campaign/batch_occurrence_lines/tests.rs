@@ -166,8 +166,8 @@ fn title_leads_and_complete_location_identity_and_runs_survive_narrow_columns() 
             .collect::<Vec<_>>()
             .join(" ");
         assert!(text.contains(&row.representative_title));
-        assert!(text.contains("seen 2 / completed 3"));
-        assert!(text.contains("planned 5 · failed 1"));
+        assert!(text.contains("found in 2 of 3 completed passes"));
+        assert!(text.contains("5 planned · 1 failed"));
         assert!(text.contains(&row.representative_fingerprint));
         for run in &row.run_ids {
             assert!(text.contains(run));
@@ -188,7 +188,10 @@ fn terminal_buffer_keeps_the_title_visible_before_occurrence_metadata() {
     let buffer = terminal.backend().buffer();
     let rendered = format!("{buffer:?}");
     assert!(rendered.contains("high · Untrusted repository paths"));
-    assert!(rendered.find("high ·").unwrap() < rendered.find("seen 2 / completed 3").unwrap());
+    assert!(
+        rendered.find("high ·").unwrap()
+            < rendered.find("found in 2 of 3 completed passes").unwrap()
+    );
     assert!(rendered.contains("finding-exact-identity"));
     assert!(rendered.contains("run-discovery-exact-reference-2"));
     assert!(!rendered.contains("..."));
@@ -207,7 +210,7 @@ fn retained_only_observations_keep_guidance_and_provenance_at_every_width() {
             .collect::<Vec<_>>()
             .join(" ");
         assert!(text.contains("Retained outside completed passes"));
-        assert!(text.contains("seen 0 / completed 3"));
+        assert!(text.contains("found in 0 of 3 completed passes"));
         assert!(text.contains("run-discovery-exact-reference-1"));
     }
 }

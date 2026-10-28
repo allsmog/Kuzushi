@@ -34,37 +34,60 @@ pub(super) fn receipt_lines(
         "Question and context cannot change after approval. n prepares a separately approved question.".into()]
 }
 
-pub(super) fn answer_lines(
-    generation: &crate::app::StudyContextGeneration,
-    width: usize,
-) -> Vec<String> {
+/// The answer view in three parts so a renderer can draw the model's Markdown
+/// body as formatted text while the receipt around it stays plain.
+pub(crate) struct AnswerSections {
+    pub(crate) head: Vec<String>,
+    pub(crate) markdown: Option<String>,
+    pub(crate) tail: Vec<String>,
+}
+
+pub(crate) fn answer_sections(generation: &crate::app::StudyContextGeneration) -> AnswerSections {
     let Some(answer) = &generation.generated_answer else {
-        return vec!["Question answer is unavailable; inspect its run receipt.".into()];
+        return AnswerSections {
+            head: vec!["Question answer is unavailable; inspect its run receipt.".into()],
+            markdown: None,
+            tail: Vec::new(),
+        };
     };
     let status = if answer.partial {
         "Partial model answer"
     } else {
         "Model answer"
     };
-    let lines = vec![
-        status.into(),
-        "QUESTION".into(),
-        answer.question.clone(),
-        "ANSWER".into(),
-        answer.answer.clone(),
-        "This answer changes no context or finding decision.".into(),
-        "CONTEXT AND RUN".into(),
-        format!("Context: {}", answer.context_ref.revision_id),
-        format!("Source: {}", answer.source_identity),
-        format!(
-            "Model: {}",
-            crate::app::display_model_selector(&answer.model)
-        ),
-        format!("Run: {}", answer.run_id),
-        "Esc returns to the plan · PgUp/PgDn reads · n needs a new approved question".into(),
-    ];
-    lines
+    AnswerSections {
+        head: vec![
+            status.into(),
+            "QUESTION".into(),
+            answer.question.clone(),
+            "ANSWER".into(),
+        ],
+        markdown: Some(answer.answer.clone()),
+        tail: vec![
+            "This answer changes no context or finding decision.".into(),
+            "CONTEXT AND RUN".into(),
+            format!("Context: {}", answer.context_ref.revision_id),
+            format!("Source: {}", answer.source_identity),
+            format!(
+                "Model: {}",
+                crate::app::display_model_selector(&answer.model)
+            ),
+            format!("Run: {}", answer.run_id),
+            "Esc returns to the plan · PgUp/PgDn reads · n needs a new approved question".into(),
+        ],
+    }
+}
+
+pub(super) fn answer_lines(
+    generation: &crate::app::StudyContextGeneration,
+    width: usize,
+) -> Vec<String> {
+    let sections = answer_sections(generation);
+    sections
+        .head
         .into_iter()
+        .chain(sections.markdown)
+        .chain(sections.tail)
         .flat_map(|line| {
             line.lines()
                 .flat_map(|part| wrap_text(part, width.max(1)))

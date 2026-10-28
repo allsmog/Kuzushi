@@ -7,6 +7,7 @@ mod evidence;
 mod planning;
 mod proposal;
 mod question;
+pub(crate) use question::{answer_sections, AnswerSections};
 mod receipts;
 mod result;
 mod scope;

@@ -47,35 +47,79 @@ fn disclose_hidden_filters(lines: &mut Vec<String>, budget: usize, path_history:
 }
 
 fn card(row: &ReviewQueueRow, width: usize, height: usize, selected: bool) -> Vec<Line<'static>> {
-    let style = review_queue_row_style(theme::primary(), selected);
-    let pointer = if selected { "▸" } else { " " };
     let source = if height < 3 {
         format!(" s{}", row.source_count)
     } else {
         String::new()
     };
-    let mut text = vec![format!(
-        "{pointer}{} {} {}{source}",
-        row.alias,
-        severity_glyph(row.severity_tone),
-        proof_label(row)
-    )];
-    text.extend(title_preview(
-        &row.title,
+    let titles = title_preview(&row.title, width, height.saturating_sub(2).clamp(1, 2));
+    let mut lines = vec![card_header(row, &source, width, selected)];
+    lines.extend(
+        titles
+            .iter()
+            .map(|text| card_text(text, theme::heading(), width, selected)),
+    );
+    lines.push(card_decision_line(row, width, selected));
+    lines.push(card_text(
+        &card_location_or_occurrence(row, width),
+        theme::muted(),
         width,
-        height.saturating_sub(2).clamp(1, 2),
+        selected,
     ));
-    text.push(format!(
-        "  sources:{} · {} · {}",
+    lines.truncate(height);
+    lines
+}
+
+/// `F-0003 H unverified`: identity, severity and proof each in their own tone
+/// so a critical finding stands out before its title is read.
+fn card_header(row: &ReviewQueueRow, source: &str, width: usize, selected: bool) -> Line<'static> {
+    let pointer = if selected { "▸" } else { " " };
+    if selected {
+        let text = format!(
+            "{pointer}{} {} {}{source}",
+            row.alias,
+            severity_glyph(row.severity_tone),
+            proof_label(row)
+        );
+        return card_text(&text, theme::primary(), width, true);
+    }
+    Line::from(vec![
+        Span::styled(format!("{pointer}{} ", row.alias), theme::label()),
+        Span::styled(
+            severity_glyph(row.severity_tone).to_owned(),
+            theme::severity_tone(row.severity_tone),
+        ),
+        Span::styled(
+            format!(" {}", proof_label(row)),
+            theme::proof_confidence_tone(row.proof_confidence),
+        ),
+        Span::styled(source.to_owned(), theme::muted()),
+    ])
+}
+
+fn card_decision_line(row: &ReviewQueueRow, width: usize, selected: bool) -> Line<'static> {
+    let meta = format!(
+        "  sources:{} · {} · ",
         row.source_count,
-        authority_marker(row),
-        review_queue_compact_decision(row)
-    ));
-    text.push(card_location_or_occurrence(row, width));
-    text.into_iter()
-        .take(height)
-        .map(|text| Line::styled(fit(&text, width), style))
-        .collect()
+        authority_marker(row)
+    );
+    let decision = review_queue_compact_decision(row);
+    if selected {
+        return card_text(&format!("{meta}{decision}"), theme::primary(), width, true);
+    }
+    Line::from(vec![
+        Span::styled(fit(&meta, width), theme::muted()),
+        Span::styled(decision.to_owned(), review_queue_decision_style(row)),
+    ])
+}
+
+fn card_text(
+    text: &str,
+    style: ratatui::style::Style,
+    width: usize,
+    selected: bool,
+) -> Line<'static> {
+    Line::styled(fit(text, width), review_queue_row_style(style, selected))
 }
 
 fn proof_label(row: &ReviewQueueRow) -> &str {

@@ -688,9 +688,7 @@ impl ShellApp {
                     || generation.supports_brief_guidance()
             }),
         );
-        let count =
-            crate::ui_view_models::context_generation::generation_lines(self, body.width as usize)
-                .len();
+        let count = crate::renderer::generation_document_lines(self, body.width as usize).len();
         let max = count.saturating_sub(body.height as usize);
         if let Some(generation) = self
             .router

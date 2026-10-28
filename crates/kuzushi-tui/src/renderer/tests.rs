@@ -1572,9 +1572,9 @@ fn scan_batch_results_have_tty_and_plain_content_parity() {
     let plain = render_plain_app(&app, 132);
     for text in [
         "BATCH batch-parity",
-        "BATCH OCCURRENCE",
-        "seen 2 / completed 3",
-        "runs run-1",
+        "FOUND ACROSS PASSES",
+        "found in 2 of 3 completed passes",
+        "found by run-1",
     ] {
         assert!(tty.contains(text), "TTY missing {text:?}: {tty}");
         assert!(plain.contains(text), "plain missing {text:?}: {plain}");
