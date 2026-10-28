@@ -12,7 +12,15 @@ pub(super) fn insert_after_scope(
         .iter()
         .position(|line| line.starts_with("Scope: ") || line.starts_with("Scope study: "))
         .map_or(0, |index| index + 1);
-    content.splice(position..position, lines(attempts, details));
+    let mut summary = lines(attempts, false);
+    if details {
+        let (completed, other): (Vec<_>, Vec<_>) = attempts
+            .iter()
+            .partition(|attempt| outcome_label(attempt) == "completed");
+        summary.extend(other.into_iter().map(attempt_line));
+        content.extend(completed.into_iter().map(attempt_line));
+    }
+    content.splice(position..position, summary);
 }
 
 fn lines(attempts: &[InvestigationAttemptReceipt], details: bool) -> Vec<String> {

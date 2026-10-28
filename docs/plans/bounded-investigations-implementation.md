@@ -5871,3 +5871,20 @@ and unknown facts. Sixty focused Rust checks and final sequential J129/J352
 provide 89 machine passes with no failures; eight operator judgments remain open.
 No new live call, module promotion or broad milestone completion follows. The
 original five open delivery items retain their scope.
+
+
+### Recorded scan settings in Report, 2026-10-28
+
+The shared Report reader now retains task and Semgrep settings from each
+authenticated study input or frozen case. The TUI groups identical settings
+without merging cases or jobs, shows full escaped values in details and keeps
+spending, coverage and source ahead of configuration. Completed run IDs move
+later; failures remain prominent. The [assessment](../assessments/recorded-scan-settings-2026-10-28.md)
+records 31 Core and 89 TUI checks, build, Clippy and risk evidence. Final J399
+has 84 machine passes, zero failures, seven answered agent questions and eight
+inspected replays across six sizes. Changing the current rule setting leaves
+all seven frozen selections unchanged in Report, export and a fresh CLI export
+after restart. All 602 source files and 624 protected original files retain
+their hashes. No live provider request occurs. Requested settings do not pin
+rule-source bytes or prove the full effective rule policy; broader quality,
+compact reading polish and operator acceptance remain open.

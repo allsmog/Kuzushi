@@ -1,5 +1,25 @@
 # Releasing Kuzushi
 
+## Recorded scan settings in investigation reports
+
+Study, context-matrix and scope-study reports add optional `scanSelection`.
+Each record contains an optional `caseId` and a `parameters` object copied
+from the authenticated plan. The recorded subset is `taskMode`, `tasks`,
+`semgrepConfig`, `semgrepBinary`, `semgrepJobs` and `semgrepTimeoutMs`.
+Every matrix or scope case retains its own values. Missing fields and explicit
+nulls stay distinct. Reports never substitute current tool settings or reread
+rule-source files. Rule-source contents and the full enabled-rule policy are
+not established by these requested settings; completed engine receipts remain
+separate evidence of actual work.
+
+Existing plans, digests, approvals and jobs are unchanged. Empty selection
+arrays are omitted for compatibility. Rust consumers constructing
+`InvestigationReportReceipt`, `ContextMatrixInvestigationReceipt` or
+`ScopeStudyInvestigationReceipt` literals must initialize `scan_selection`,
+using an empty vector when no recorded selection is available. The borrowed
+report summary adds the corresponding slice. Reading or exporting settings
+starts no job or provider request.
+
 ## Exact observation links in study results
 
 Occurrence rows add optional `representativeObservationRef`, an opaque

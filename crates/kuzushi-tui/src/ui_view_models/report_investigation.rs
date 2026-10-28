@@ -10,6 +10,7 @@ mod engine_details;
 mod matrix;
 mod models;
 mod scan_receipt;
+mod scan_selection;
 mod scope;
 mod scopes;
 use engine_details::append_document_engine_details;
@@ -98,7 +99,7 @@ fn selected_document_lines(app: &ShellApp, document: &InvestigationReportDocumen
     let details = app.router.report().provenance_details();
     let mut lines = document_scope_lines(document, details, current);
     let mut overview = shared_allowance_lines(document.summary().allowance);
-    overview.extend(context_evidence::lines(document, details));
+    overview.extend(context_evidence::lines(document, false));
     let overview_position = 1.min(lines.len());
     lines.splice(overview_position..overview_position, overview);
     lines.splice(
@@ -109,7 +110,18 @@ fn selected_document_lines(app: &ShellApp, document: &InvestigationReportDocumen
     lines.extend(context_guidance::lines(document));
     append_recorded_source_notice(&mut lines, explicit);
     append_document_engine_details(&mut lines, document, details);
+    if details {
+        append_context_details(&mut lines, document);
+    }
     lines
+}
+
+fn append_context_details(lines: &mut Vec<String>, document: &InvestigationReportDocument) {
+    let overview = context_evidence::lines(document, false);
+    let details = context_evidence::lines(document, true);
+    if details != overview {
+        lines.extend(details);
+    }
 }
 
 fn document_scope_lines(

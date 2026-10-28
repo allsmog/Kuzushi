@@ -78,6 +78,7 @@ fn receipt(references: Vec<Option<Value>>) -> ScopeStudyInvestigationReceipt {
         },
         inherited_threat_model_ref: Value::Null,
         context_selections: vec![],
+        scan_selection: vec![],
         cases,
         scope: json!({}),
         unplanned_scope_ids: vec!["unplanned".into()],
@@ -124,6 +125,17 @@ fn identical_context_revision_is_shown_once_without_collapsing_work_or_source_li
 fn report_prioritizes_allowance_and_coverage_over_repeated_context_and_boundaries() {
     let mut receipt = receipt(vec![Some(reference("digest-a")); 7]);
     receipt.evidence.reassessment_required_count = 1;
+    receipt.scan_selection = receipt
+        .cases
+        .iter()
+        .map(|case| kuzushi_core::workspace::InvestigationScanSelection {
+            case_id: Some(case.id.clone()),
+            parameters: serde_json::from_value(
+                json!({"tasks":["semgrep"],"semgrepConfig":["p/owned"]}),
+            )
+            .unwrap(),
+        })
+        .collect();
     receipt.scope = receipt
         .cases
         .iter()
@@ -157,7 +169,17 @@ fn report_prioritizes_allowance_and_coverage_over_repeated_context_and_boundarie
     assert!(position("Allowance:") < position("Context grounding:"));
     assert!(position("Coverage:") < position("Boundary Boundary 0:"));
     app.router.report_mut().toggle_provenance();
-    let details = selected_document_lines(&app, &document).join("\n");
+    let detail_lines = selected_document_lines(&app, &document);
+    let settings = detail_lines
+        .iter()
+        .position(|line| line.starts_with("Planned scan settings:"))
+        .unwrap();
+    let boundary = detail_lines
+        .iter()
+        .position(|line| line.starts_with("Boundary Boundary 0:"))
+        .unwrap();
+    assert!(settings < boundary);
+    let details = detail_lines.join("\n");
     for index in 0..7 {
         assert!(details.contains(&format!("Boundary {index}: Context grounding: verified.")));
     }

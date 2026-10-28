@@ -29,6 +29,7 @@ pub(super) fn load_matrix_report(
         campaign_id: campaign.into(),
         plan_sha256: plan.plan_sha256,
         workers: plan.workers,
+        scan_selection: scan_selection::cases(&plan.matrix.cases),
         baseline_case_id: plan.matrix.baseline_case_id.clone(),
         cases: plan
             .matrix
