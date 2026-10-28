@@ -5,10 +5,12 @@ const LIVE_REPLAY_REFRESH: Duration = Duration::from_secs(2);
 
 impl ShellApp {
     /// A replay opened on a run that is still executing (a detached campaign
-    /// job, for instance) re-reads its lifecycle every few seconds so model
-    /// calls and agent actions appear as they happen, plus once more when the
-    /// run finishes. A reader parked at the bottom keeps following new rows;
-    /// one who scrolled up is left in place.
+    /// job, for instance) re-reads its lifecycle every few seconds, keeping the
+    /// previous read on screen until the new one lands, so model calls and
+    /// agent actions appear as they happen. When the run finishes, every cached
+    /// artifact is read once more so the replay can switch to its result. A
+    /// reader parked at the bottom keeps following new rows; one who scrolled
+    /// up is left in place.
     pub(crate) fn poll_live_replay(&mut self, now: Instant) -> bool {
         let Some((target, finished)) = self.open_replay_run() else {
             return false;
@@ -28,7 +30,10 @@ impl ShellApp {
             .is_none_or(|last| now.duration_since(last) >= LIVE_REPLAY_REFRESH);
         if due {
             self.router.replay_mut().live_refreshed_at = Some(now);
-            self.refresh_replay_run(&target);
+            let run_id = self.router.replay().run_id_owned();
+            self.workbench_cache()
+                .borrow_mut()
+                .mark_run_projection_stale(&target, &run_id);
             changed = true;
         }
         changed

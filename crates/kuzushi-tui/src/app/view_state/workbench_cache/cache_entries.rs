@@ -95,6 +95,9 @@ pub(crate) enum DirectoryListingState {
 pub(super) struct RunProjectionCache {
     pub(super) state: Result<kuzushi_core::run_lifecycle::RunProjectionRead, String>,
     pub(super) bytes: usize,
+    /// Marked by a live replay of a running run: keep serving this read while
+    /// a fresh one is hydrated, so the timeline never blanks mid-refresh.
+    pub(super) stale: bool,
 }
 
 #[derive(Debug)]
