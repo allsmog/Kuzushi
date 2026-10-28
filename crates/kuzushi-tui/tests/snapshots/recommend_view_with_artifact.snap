@@ -2,7 +2,8 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 0
 ---
-KUZUSHI shell route · view:recommend · phase:Scan 2/3 · report ready · target:./recommend · model:unconfigured ·...
+KUZUSHI Commands · view:recommend · phase:Scan 2/3 · report ready · target:./recommend
+session:$0.00 · repo index not built · model:unconfigured
 
  -- GENERATED SUGGESTIONS ----------------------------------------------------------------------------------------------
 recommendations: .kuzushi/v3/runs/run-rec/recommendations.json

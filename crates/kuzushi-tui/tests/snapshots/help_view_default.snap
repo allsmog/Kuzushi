@@ -2,12 +2,12 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 162
 ---
- KUZUSHI › help · shell route · target:none · ctx:not built · model:unconfigured · cost:$0.00
+ KUZUSHI › help · Commands · target:none · repo index not built · model:unconfigured · session:$0.00
 
  -- HELP ---------------------------------------------------------------------------------------------------------------
 Input: ? opens help; ?text, /ask <question>, and ask <question> enter agent mode.
-Glossary: TP=true positive; FP=false positive; DFD=data-flow diagram; taint-iris=source-to-sink hunt; x-ray=architecture
-review; randori=threat model; tob/shinsa=plugin adapters.
+Glossary: TP=true positive; FP=false positive; DFD=data-flow diagram; taint-iris=source-to-sink hunt;
+x-ray=architecture review; randori=threat model; tob/shinsa=plugin adapters.
 Examples: kuzushi scan <target>  ·  kuzushi --target <target> run sast:scan  ·  findings export report.sarif sarif
 
 NAVIGATION — browse modules and tools
@@ -60,8 +60,8 @@ batch <id> - open one scan batch's occurrence results and gate receipt
   aliases / examples: /batch <id>
 batch clear - clear the active scan-batch results scope
   aliases / examples: /batch clear
-review - opens a completed phase's page; its planner is interactive TUI only; for scripts use `kuzushi scan <target>` or
-`kuzushi --target <target> run sast:scan`
+review - opens a completed phase's page; its planner is interactive TUI only; for scripts use `kuzushi scan <target>`
+or `kuzushi --target <target> run sast:scan`
   aliases / examples: /review, /rv
 prove - opens a completed phase's page; its planner is interactive TUI only; for scripts use `kuzushi scan <target>` or
 `kuzushi --target <target> run sast:scan`
@@ -169,10 +169,10 @@ workspace reindex - refresh the v3 content-addressed workspace index
   aliases / examples: /workspace reindex, workspace index
 findings export <path> [format] [--completeness open|complete] [--allow-empty] - export findings; choose
 all/open/complete and pass --allow-empty for metadata-only exports
-aliases / examples: findings export report.sarif sarif, /findings export <path> [format] [--completeness open|complete]
-[--allow-empty], /workspace export findings <path> [format] [--completeness open|complete] [--allow-empty], workspace
-export findings <path> [format] [--completeness open|complete] [--allow-empty], export <path> [format] [--completeness
-open|complete] [--allow-empty]
+  aliases / examples: findings export report.sarif sarif, /findings export <path> [format] [--completeness
+open|complete] [--allow-empty], /workspace export findings <path> [format] [--completeness open|complete]
+[--allow-empty], workspace export findings <path> [format] [--completeness open|complete] [--allow-empty], export
+<path> [format] [--completeness open|complete] [--allow-empty]
 workspace scope init - write an editable .kuzushi/scope.toml scaffold
   aliases / examples: /workspace scope init
 
@@ -182,14 +182,14 @@ findings refresh - reload findings while keeping filters, study selection and th
 findings - open persisted findings
   aliases / examples: /f, f, /findings
 findings filter <expr> - filter findings by severity, confidence, decision, or completeness; use clear to reset
-aliases / examples: findings filter state:new rank:high, findings filter decision:confirmed completeness:open, findings
-filter confidence:confirmed, findings filter clear, /findings filter <expr>
+  aliases / examples: findings filter state:new rank:high, findings filter decision:confirmed completeness:open,
+findings filter confidence:confirmed, findings filter clear, /findings filter <expr>
 component <scope|path|all> - focus Workbench findings on a detected component
   aliases / examples: component web/app, component entrypoint-cmd-proxy, component all
 open <id> - open a finding alias or fingerprint
   aliases / examples: open F-0001, /open <id>
 decision <verdict> <reason> - record triage status; use dismiss for false positives or suppress for a rule
-aliases / examples: decision confirmed reviewed source-linked evidence, decision deferred needs runtime harness,
+  aliases / examples: decision confirmed reviewed source-linked evidence, decision deferred needs runtime harness,
 decision needs_review confirm the trust boundary
 proof defer <id> --reason <text> - record a human proof deferral for the current finding generation
   aliases / examples: /proof defer F-0001 --reason production harness unavailable

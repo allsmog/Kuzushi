@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 137
 ---
- KUZUSHI › tasks · shell route · target:none · ctx:not built · model:unconfigured · cost:$0.00
+ KUZUSHI › tasks · Commands · target:none · repo index not built · model:unconfigured · session:$0.00
 
  -- SAST TASKS ---------------------------------------------------------------------------------------------------------
 mode: auto + denylist
@@ -20,7 +20,7 @@ state  id                        cost    scan                notes
 [A]    license-scan              low     license-scan        package license risk scanner
 [A]    agentic                   high    agentic             model-backed detector set; run via sast:scan
 [A]    offense-review            high    offense-review      threat-model-guided review; run via sast:scan
-[A]    taint-iris                high    taint-iris          source-to-sink analysis; run via sast:scan
+[A]    taint-iris                high    taint-iris          compatibility task alias for taint-iris-next; no...
 [A]    taint-iris-next           high    taint-iris-next     next taint workflow; run via sast:scan
 [A]    systems-hunt              high    systems-hunt        deferred exact opt-in systems invariant hunt; run via...
 

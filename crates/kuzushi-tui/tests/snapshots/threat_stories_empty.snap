@@ -1,7 +1,7 @@
 ---
 source: crates/kuzushi-tui/tests/snapshots.rs
 ---
- KUZUSHI › threats:stories · shell route · target:none · ctx:not built · model:unconfigured · cost:$0.00
+ KUZUSHI › threats:stories · Commands · target:none · repo index not built · model:unconfigured · session:$0.00
 
 1 STRIDE  2 STORIES  3 SCOPE  4 SUMMARY  5 VERSIONS  6 MODELS
 
