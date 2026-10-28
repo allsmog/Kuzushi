@@ -572,6 +572,7 @@ fn unsupported_platform_kill_dispatcher_process_tree(
 mod tests {
     mod background_history;
     mod history;
+    mod live_refresh;
     use super::*;
     use kuzushi_core::{FindingStore, Severity, V2Config};
 
