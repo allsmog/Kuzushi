@@ -426,6 +426,22 @@ impl WorkbenchCache {
         }
     }
 
+    /// Whether a settled projection read (current or stale) is cached for the run.
+    pub(crate) fn run_projection_is_ready(&self, target: &Path, run_id: &str) -> bool {
+        self.run_projections
+            .contains_key(&(target.to_path_buf(), run_id.to_string()))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn seed_run_projection_for_test(
+        &mut self,
+        target: &Path,
+        run_id: &str,
+        state: Result<kuzushi_core::run_lifecycle::RunProjectionRead, String>,
+    ) {
+        self.store_run_projection(target.to_path_buf(), run_id.to_string(), state);
+    }
+
     pub(crate) fn run_projection_is_stale(&self, target: &Path, run_id: &str) -> bool {
         let key = (target.to_path_buf(), run_id.to_string());
         self.run_projections

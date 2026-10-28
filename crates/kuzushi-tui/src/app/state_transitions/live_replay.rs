@@ -62,10 +62,24 @@ impl ShellApp {
             .invalidate_one_run_cache(target, &run_id);
     }
 
+    fn replay_projection_ready(&self) -> bool {
+        let Some(target) = self.target() else {
+            return false;
+        };
+        self.workbench_cache()
+            .borrow()
+            .run_projection_is_ready(target, self.router.replay().run_id())
+    }
+
     fn follow_live_replay_tail(&mut self) -> bool {
         let replay = self.router.replay();
         if replay.live_tail_offset.is_none() && replay.live_refreshed_at.is_none() {
             // An ordinary replay of a finished run never follows.
+            return false;
+        }
+        if !self.replay_projection_ready() {
+            // A re-read in flight renders a short loading document; measuring
+            // it would forget that the reader was parked at the bottom.
             return false;
         }
         let Some(bottom) = crate::renderer::run_artifact_max_scroll(self) else {
@@ -126,5 +140,41 @@ mod tests {
 
         assert!(app.poll_live_replay(start + Duration::from_millis(100)));
         assert!(!app.poll_live_replay(start + LIVE_REPLAY_REFRESH));
+    }
+
+    fn park_reader_at(app: &mut ShellApp, offset: u16) {
+        app.router.replay_mut().live_tail_offset = Some(offset);
+        app.router.default_scroll_mut().set(offset);
+    }
+
+    #[test]
+    fn the_completion_reread_keeps_a_parked_reader_following() {
+        let (root, mut app) = replay_of_run(false);
+        let start = Instant::now();
+        assert!(app.poll_live_replay(start));
+        park_reader_at(&mut app, 40);
+        let done = kuzushi_core::run_dir(root.path(), "run-live").join("done.json");
+        std::fs::write(done, "{}").unwrap();
+
+        assert!(app.poll_live_replay(start + Duration::from_millis(100)));
+        assert!(!app.poll_live_replay(start + Duration::from_millis(200)));
+
+        assert_eq!(app.router.replay().live_tail_offset, Some(40));
+    }
+
+    #[test]
+    fn a_ready_projection_updates_the_followed_tail() {
+        let (root, mut app) = replay_of_run(false);
+        assert!(app.poll_live_replay(Instant::now()));
+        park_reader_at(&mut app, 40);
+        app.workbench_cache().borrow_mut().seed_run_projection_for_test(
+            root.path(),
+            "run-live",
+            Err("unreadable".into()),
+        );
+
+        app.follow_live_replay_tail();
+
+        assert_ne!(app.router.replay().live_tail_offset, Some(40));
     }
 }
