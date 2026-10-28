@@ -55,20 +55,87 @@ impl Drop for ExternalTerminalSuspension {
     }
 }
 
-/// Without this hook a panic prints its message into the alternate screen
-/// while raw mode is still active: the terminal is wiped on unwind and the
-/// operator never sees why Kuzushi died. Restore the terminal FIRST, then
+/// What the hook owes one panic.
+///
+/// A panic the hook is about to see is not always the shell's last act:
+/// `std::panic::catch_unwind` runs the hook before the unwind reaches the
+/// boundary that recovers, so every job worker, view-hydration read, report
+/// export and run-item subscriber built to survive a panic reaches here too.
+/// Restoring the terminal for one of those would leave the live shell drawing
+/// into the normal screen with raw mode off, and the chained hook's message
+/// would land in the frame the operator is reading.
+#[derive(Debug, PartialEq, Eq)]
+enum PanicDisclosure {
+    /// Fatal: put the operator's terminal back, then let the message through.
+    RestoreAndChain,
+    /// Recovered under a live terminal. The frame is the only output surface
+    /// here, and the recovering boundary reports the failure through the
+    /// shell's own surfaces, so the hook leaves both alone.
+    LeaveToBoundary,
+    /// Recovered with no terminal of ours engaged (headless, plain, scripted),
+    /// where stderr is still the honest place for the message.
+    ChainOnly,
+}
+
+fn panic_disclosure(recovered: bool, terminal_armed: bool) -> PanicDisclosure {
+    match (recovered, terminal_armed) {
+        (false, _) => PanicDisclosure::RestoreAndChain,
+        (true, true) => PanicDisclosure::LeaveToBoundary,
+        (true, false) => PanicDisclosure::ChainOnly,
+    }
+}
+
+/// Without this hook a fatal panic prints its message into the alternate
+/// screen while raw mode is still active: the terminal is wiped on unwind and
+/// the operator never sees why Kuzushi died. Restore the terminal FIRST, then
 /// chain to the previous hook so the message lands on the normal screen.
 pub(crate) fn install_terminal_panic_hook() {
     TERMINAL_PANIC_HOOK.call_once(|| {
         let previous = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
-            if take_terminal_guard() {
-                rollback_terminal_mode();
+            match panic_disclosure(
+                kuzushi_core::recovered_panic::in_boundary(),
+                terminal_guard_active(),
+            ) {
+                PanicDisclosure::LeaveToBoundary => {}
+                PanicDisclosure::ChainOnly => previous(info),
+                PanicDisclosure::RestoreAndChain => {
+                    if take_terminal_guard() {
+                        rollback_terminal_mode();
+                    }
+                    previous(info);
+                }
             }
-            previous(info);
         }));
     });
+}
+
+#[cfg(test)]
+mod panic_disclosure_tests {
+    use super::{panic_disclosure, PanicDisclosure};
+
+    #[test]
+    fn a_fatal_panic_restores_the_terminal_and_discloses_either_way() {
+        for terminal_armed in [true, false] {
+            assert_eq!(
+                panic_disclosure(false, terminal_armed),
+                PanicDisclosure::RestoreAndChain
+            );
+        }
+    }
+
+    #[test]
+    fn a_recovered_panic_leaves_a_live_terminal_to_its_boundary() {
+        assert_eq!(
+            panic_disclosure(true, true),
+            PanicDisclosure::LeaveToBoundary
+        );
+    }
+
+    #[test]
+    fn a_recovered_panic_without_our_terminal_still_reaches_stderr() {
+        assert_eq!(panic_disclosure(true, false), PanicDisclosure::ChainOnly);
+    }
 }
 
 pub(crate) fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
