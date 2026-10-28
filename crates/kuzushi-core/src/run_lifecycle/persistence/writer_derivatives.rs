@@ -189,7 +189,7 @@ fn notify_derivative_subscriber(
         first_seq: applied_seq.saturating_add(1),
         through_seq,
     };
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| subscriber(range))).map_err(|_| {
+    crate::recovered_panic::catch(|| subscriber(range)).map_err(|_| {
         RunItemDeliveryFault::new(
             RunItemDeliveryFailureStage::DerivativeSubscriber,
             applied_seq,

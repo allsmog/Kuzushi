@@ -886,6 +886,23 @@ mod tests {
             !take_terminal_guard(),
             "hook must consume the guard so restore runs exactly once"
         );
+
+        // A panic a recovery boundary will catch reaches the same hook. It must
+        // leave the live terminal armed and keep its message out of the frame,
+        // so the shell the boundary kept alive still owns a usable screen.
+        observed.store(false, std::sync::atomic::Ordering::SeqCst);
+        mark_terminal_guard_active();
+        let recovered = kuzushi_core::recovered_panic::catch(|| panic!("recovered probe"));
+
+        assert!(recovered.is_err(), "the boundary must recover the panic");
+        assert!(
+            !observed.load(std::sync::atomic::Ordering::SeqCst),
+            "a recovered panic must not disclose into the operator's frame"
+        );
+        assert!(
+            take_terminal_guard(),
+            "a recovered panic must leave the terminal armed"
+        );
         let _ = std::panic::take_hook();
     }
 }
