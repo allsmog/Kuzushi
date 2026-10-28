@@ -5,6 +5,19 @@ pub(crate) struct CampaignReaderScroll {
     pub(crate) page_rows: usize,
 }
 
+pub(crate) fn campaign_plain_document_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    let document = campaign_lines(app, area);
+    let inspecting_job = app.router.campaign().job_detail
+        && app.pending_campaign_selection().is_none()
+        && !study_editor_is_open(app);
+    if inspecting_job {
+        let mut lines = pinned_reader_identity(app, area);
+        lines.extend(document);
+        return lines;
+    }
+    document
+}
+
 pub(crate) fn campaign_reader_scroll(app: &ShellApp) -> Option<CampaignReaderScroll> {
     if app.pending_campaign_selection().is_some() {
         return None;
@@ -89,7 +102,11 @@ impl ReaderChrome {
 }
 
 fn reader_chrome(app: &ShellApp, area: Rect) -> ReaderChrome {
-    let mut controls = sticky_controls(app, area.width);
+    let mut controls = if compact_campaign_document(app, area) {
+        sticky_controls(app, area.width)
+    } else {
+        primary_controls(app, area.width)
+    };
     if compact_campaign_document(app, area) {
         controls.extend(compact_navigation_controls(app, area.width));
     }
@@ -108,6 +125,38 @@ fn reader_chrome(app: &ShellApp, area: Rect) -> ReaderChrome {
     ReaderChrome {
         notice: header,
         controls,
+    }
+}
+
+fn primary_controls(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
+    let hint = crate::ui_view_models::campaign_reader_action_hint(app);
+    let mut lines = wrap_text(&hint, usize::from(width).max(1));
+    if let Some(state) = reader_work_state(app.router.campaign()) {
+        lines.extend(wrap_text(state, usize::from(width).max(1)));
+    }
+    lines
+        .into_iter()
+        .take(2)
+        .map(|line| Line::styled(line, theme::accent()))
+        .collect()
+}
+
+fn reader_work_state(deck: &crate::app::CampaignRouteState) -> Option<&'static str> {
+    if deck.dispatcher_stop_requested {
+        return Some("Stop requested · saving partial work");
+    }
+    let commands = super::campaign_lines::deck_commands(deck);
+    ["work paused", "work ended", "work finished"]
+        .into_iter()
+        .find(|state| commands.contains(state))
+        .map(work_state_hint)
+}
+
+fn work_state_hint(state: &str) -> &'static str {
+    match state {
+        "work paused" => "work paused · review plan to resume",
+        "work ended" => "work ended · new work needs a new plan",
+        _ => "work finished",
     }
 }
 

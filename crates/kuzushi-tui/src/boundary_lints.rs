@@ -34,9 +34,20 @@ const AUDITED_ENV_READ_FILES: &[&str] = &[
     "renderer/phase_composition_contract/snapshots.rs", // KUZUSHI_PHASE_SNAPSHOT_OUT regen
 ];
 
-/// Directories whose production code paints panes or folds artifacts
-/// into view models; a panic here tears down the raw-mode terminal.
-const PANIC_SCAN_DIRS: &[&str] = &["renderer", "ui_view_models", "commands"];
+/// Directories whose production code paints panes, folds artifacts into view
+/// models, or reduces an operator action into shell state; a panic here tears
+/// down the raw-mode terminal. The four `app/` subtrees carry every keystroke,
+/// background job event, tool result and queued terminal event, so a panic in
+/// one of them reaches the operator exactly as a panic in the renderer does.
+const PANIC_SCAN_DIRS: &[&str] = &[
+    "renderer",
+    "ui_view_models",
+    "commands",
+    "app/state_transitions",
+    "app/background_events",
+    "app/tool_runner",
+    "app/runtime",
+];
 
 /// The snapshot-contract harness lives outside `#[cfg(test)]` so the
 /// regen path works, but it is only invoked from its own tests.

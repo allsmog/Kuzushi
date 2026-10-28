@@ -12,6 +12,7 @@ use std::path::Path;
 
 mod fold;
 mod gate_binding;
+mod gate_freshness;
 mod load;
 mod pending_receipt;
 mod phase_runs;
@@ -335,16 +336,13 @@ fn load_batch_gate(
         outcome.equivalence_key == report.equivalence_key,
         "batch gate equivalence key disagrees with its occurrence report"
     );
-    let (binding, blocking_count) = derive_batch_gate_binding(
+    let current = derive_batch_gate_binding(
         store,
         report,
         outcome.policy.fail_on,
         outcome.binding.sarif_path.as_deref(),
     )?;
-    anyhow::ensure!(
-        outcome.binding == binding && outcome.blocking_safe_fold_count == blocking_count,
-        "batch gate is stale for the current trial/finding/SARIF state"
-    );
+    gate_freshness::validate(root, plan, report, &outcome, current)?;
     Ok(Some(outcome))
 }
 

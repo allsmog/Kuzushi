@@ -12,6 +12,14 @@ scan/shell/run dispatch contracts are unchanged. See the
 [Study layout qualification](study-reading-layout-2026-10-27.md) for the six-size
 tmux check, exact references, retained failures and remaining craft findings.
 
+The Scan result footer exposes its actual study-reader key, including compact
+layouts. Result and receipt cost labels identify Scan jobs rather than implying
+an investigation total. Shared accounting and headless contracts retain their
+existing behavior. The [controls and cost qualification](study-controls-cost-2026-10-27.md)
+records the forty-column reader round trip and retained unknown-cost states.
+Opening that linked reader reveals the selected job after immediate or background
+loading, while composer input retains ownership during completion.
+
 Scan presentation waits for every recorded run summary to become terminal
 before using a legacy aggregate. A complete typed receipt can replace that
 pending read without relying on the stale summary index. Report puts shared

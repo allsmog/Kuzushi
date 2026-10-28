@@ -3,6 +3,7 @@ use crate::ui_view_models::footer_keybindings;
 
 mod dfd_navigation;
 mod replay_navigation;
+mod study_navigation;
 
 pub(crate) fn justify_prefer_right(left: String, right: String, width: usize) -> String {
     if width == 0 {
@@ -53,18 +54,36 @@ fn keybinding_rows(app: &ShellApp, width: usize, rows: u16) -> Vec<Line<'static>
 }
 
 fn split_keybindings_for_wrap(app: &ShellApp) -> (Vec<(String, String)>, Vec<(String, String)>) {
-    let mut bindings: Vec<(String, String)> = footer_keybindings(app)
+    if let Some(bindings) = crate::ui_view_models::campaign_reader_footer(app) {
+        return distribute_wrapped_bindings(
+            bindings
+                .into_iter()
+                .map(|binding| (binding.key, binding.label))
+                .collect(),
+        );
+    }
+    let bindings: Vec<(String, String)> = footer_keybindings(app)
         .into_iter()
         .map(|binding| (binding.key, binding.label))
         .collect();
+    if replay_navigation::applies(app, &bindings) {
+        return replay_navigation::rows(bindings);
+    }
+    phase_navigation_rows(app, bindings)
+}
+
+fn phase_navigation_rows(
+    app: &ShellApp,
+    mut bindings: Vec<(String, String)>,
+) -> (Vec<(String, String)>, Vec<(String, String)>) {
     if review_navigation_applies(app, &bindings) {
         return review_navigation_rows(bindings);
     }
     if dfd_navigation::has_findings_link(&bindings) {
         return dfd_navigation::rows(bindings);
     }
-    if replay_navigation::applies(app, &bindings) {
-        return replay_navigation::rows(bindings);
+    if study_navigation::applies(&bindings) {
+        return study_navigation::rows(bindings);
     }
     bindings = bindings.into_iter().map(compact_export_binding).collect();
     bindings.sort_by_key(|binding| wrapped_binding_priority((&binding.0, &binding.1)));
@@ -172,10 +191,12 @@ fn keybindings_line_for_wrapped_row<K: Into<String>, L: Into<String>>(
 }
 
 pub(crate) fn keybindings_line(app: &ShellApp, width: usize) -> Line<'static> {
-    let bindings = footer_keybindings(app)
+    let bindings = crate::ui_view_models::campaign_reader_footer(app)
+        .unwrap_or_else(|| footer_keybindings(app))
         .into_iter()
         .map(|binding| (binding.key, binding.label))
         .collect();
+    let bindings = study_navigation::single_row(bindings);
     let gap = if app.input_mode() == crate::InputMode::Navigate
         && crate::ui_view_models::workbench_prompt_mode(app)
             == Some(crate::app::WorkbenchPage::Review)

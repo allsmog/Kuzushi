@@ -1,4 +1,8 @@
 mod active;
+mod campaign_reader;
+pub(crate) use campaign_reader::{
+    campaign_reader_action_hint, campaign_reader_footer, campaign_reader_navigation_owns_input,
+};
 mod catalog;
 mod lessons;
 mod relationships;
@@ -447,7 +451,10 @@ fn idle_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
 
 pub(super) fn push_view_keybindings(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp) {
     for binding in app.view_keybindings() {
-        let candidate = bind(binding.hint, binding.label);
+        let Some(label) = campaign_reader::footer_label(app, binding.action, binding.label) else {
+            continue;
+        };
+        let candidate = bind(binding.hint, label);
         if !bindings.contains(&candidate) {
             bindings.push(candidate);
         }

@@ -257,7 +257,10 @@ pub(crate) use journey::{
     CheckpointDrift, JourneyDestination, JourneyModel, JourneyPhaseAccess, JourneyPhaseState,
     JourneyPhaseStatus, JourneyPhaseTone, JourneyRealityProjection, ReportReason,
 };
-pub(crate) use keybindings::{footer_keybindings, review_queue_navigation_footer};
+pub(crate) use keybindings::{
+    campaign_reader_action_hint, campaign_reader_footer, campaign_reader_navigation_owns_input,
+    footer_keybindings, review_queue_navigation_footer,
+};
 pub(crate) use keymap::{keymap_model, KeymapModel};
 pub(crate) use knowledge_base::{
     knowledge_base_model, plain_knowledge_base_model, KnowledgeBaseArtifactRow,
@@ -355,8 +358,8 @@ pub(crate) use review_yield::{
 };
 pub(crate) use routing::{
     has_run_activity, plain_render_mode, routing_mode, routing_mode_segment, uses_activity_frame,
-    uses_scene_frame, uses_workbench_frame, PlainInteractiveOnlyModel, PlainRenderMode,
-    RoutingMode,
+    uses_campaign_document, uses_scene_frame, uses_workbench_frame, PlainInteractiveOnlyModel,
+    PlainRenderMode, RoutingMode,
 };
 pub(crate) use run_diff::{
     run_diff_model, RunDiffChangedRow, RunDiffDecisionSummary, RunDiffFindingRow,

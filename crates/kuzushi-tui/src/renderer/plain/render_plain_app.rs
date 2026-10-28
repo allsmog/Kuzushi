@@ -163,7 +163,7 @@ fn plain_line_based_view_lines(
     include_context_strip: bool,
 ) -> Vec<String> {
     let area = Rect::new(0, 0, width.min(u16::MAX as usize) as u16, u16::MAX);
-    let body = shell_view_lines(app, area)
+    let body = plain_document_lines(app, area)
         .into_iter()
         .map(line_to_unstyled_text)
         .collect::<Vec<_>>();
@@ -175,6 +175,13 @@ fn plain_line_based_view_lines(
     lines.push(String::new());
     lines.extend(body);
     lines
+}
+
+fn plain_document_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    if crate::ui_view_models::uses_campaign_document(app) {
+        return crate::renderer::views::campaign_plain_document_lines(app, area);
+    }
+    shell_view_lines(app, area)
 }
 
 fn plain_logs_view_lines(app: &ShellApp, width: usize) -> Vec<String> {

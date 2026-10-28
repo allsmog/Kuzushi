@@ -110,6 +110,7 @@ pub use batch::{
     SCAN_BATCH_EQUIVALENCE_RECEIPT_FILE, SCAN_BATCH_KIND, SCAN_BATCH_SCHEMA_VERSION,
 };
 pub use coverage::execute_campaign_coverage;
+pub(crate) use dispatcher_lease::batch_controller_owns_publication;
 pub use dispatcher_lease::{
     acquire_batch_controller_lease, acquire_dispatcher_lease, BatchControllerLease,
     CampaignDispatcherLease,

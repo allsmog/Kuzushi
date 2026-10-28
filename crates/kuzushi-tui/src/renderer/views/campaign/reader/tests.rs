@@ -3,6 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use kuzushi_core::V2Config;
 use ratatui::{backend::TestBackend, Terminal};
 mod budget_choices;
+mod controls;
 mod job_detail;
 mod linked_study;
 mod progress;
@@ -309,6 +310,36 @@ fn plain_campaign_output_is_exhaustive_from_a_short_navigation_viewport() {
     }
     assert!(!text.contains("Esc compose"));
     assert_eq!(app.input(), "held plain draft");
+}
+
+#[test]
+fn paged_job_lists_leave_commands_to_chrome_and_preserve_the_plain_document() {
+    for (width, height) in [(40, 12), (60, 20), (80, 24), (96, 89), (120, 36), (160, 48)] {
+        let mut app = large_job_reader(width, height);
+        app.set_input("Unsubmitted reader draft");
+        app.router.campaign_mut().notice = Some(format!(
+            "First retained notice\n{}Last retained notice",
+            "Retained detail.\n".repeat(usize::from(height))
+        ));
+        let area = Rect::new(0, 0, width, height);
+        let body = super::super::campaign_lines::campaign_body_lines(&app, area)
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!body.contains("▸ try:"), "{width}x{height}: {body}");
+        assert!(body.contains("First retained notice") && body.contains("Last retained notice"));
+        let plain = crate::renderer::render_plain_app(&app, width as usize);
+        assert!(plain.contains("> try:"), "{width}x{height}: {plain}");
+        assert!(plain.contains("First retained notice") && plain.contains("Last retained notice"));
+        let screen = draw(&app);
+        assert!(
+            screen.contains("K stop") && screen.contains("R report"),
+            "{screen}"
+        );
+        assert!(!screen.contains("▸ try:"), "{width}x{height}: {screen}");
+        assert_eq!(app.input(), "Unsubmitted reader draft");
+    }
 }
 
 #[test]

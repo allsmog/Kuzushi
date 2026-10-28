@@ -43,9 +43,25 @@ impl ShellApp {
         };
         let query = self.active_findings_filter().clone().unwrap_or_default();
         let origin = self.capture_linked_findings_origin(target, query);
-        self.open_campaign_view(Some(campaign_id));
+        self.open_campaign_view(Some(campaign_id.clone()));
         self.router.campaign_mut().scan_study_origin = Some(origin);
         self.set_input_mode(crate::InputMode::Navigate);
+        self.reveal_scan_study_job(&campaign_id);
+    }
+
+    pub(super) fn reveal_scan_study_job(&mut self, campaign_id: &str) {
+        if !self.scan_study_navigation_active() || self.input_mode() != crate::InputMode::Navigate {
+            return;
+        }
+        let offset = self
+            .router
+            .campaign()
+            .selected_campaign()
+            .filter(|campaign| campaign.campaign_id == campaign_id)
+            .and_then(|_| crate::renderer::campaign_selection_scroll(self));
+        if let Some(offset) = offset {
+            self.router.campaign_mut().read_scroll = offset;
+        }
     }
 
     pub(crate) fn restore_scan_study_origin(&mut self) -> bool {

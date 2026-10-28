@@ -125,6 +125,7 @@ impl ShellApp {
 
     fn campaign_view_keybindings(&self) -> Vec<ViewKeybinding> {
         let mut bindings = campaign_keybindings();
+        self.campaign_job_return_binding(&mut bindings);
         self.linked_scan_study_bindings(&mut bindings);
         if self.selected_fixed_study_has_ended() {
             if let Some(binding) = bindings
@@ -135,6 +136,18 @@ impl ShellApp {
             }
         }
         bindings
+    }
+
+    fn campaign_job_return_binding(&self, bindings: &mut [ViewKeybinding]) {
+        if !self.router.campaign().job_detail {
+            return;
+        }
+        for binding in bindings
+            .iter_mut()
+            .filter(|binding| binding.action == ViewHotkeyAction::CampaignBackToList)
+        {
+            binding.label = "jobs".into();
+        }
     }
 
     fn linked_scan_study_bindings(&self, bindings: &mut Vec<ViewKeybinding>) {
@@ -196,13 +209,14 @@ impl ShellApp {
     }
 
     pub(super) fn module_run_keybindings(&self) -> Vec<ViewKeybinding> {
-        let mut bindings = (1..=4)
-            .map(|index| {
+        let mut bindings = [('1', 1), ('2', 2), ('3', 3), ('4', 4)]
+            .into_iter()
+            .map(|(digit, actor)| {
                 bind(
-                    HotkeyTrigger::Char(char::from_digit(index as u32, 10).unwrap()),
+                    HotkeyTrigger::Char(digit),
                     "1..4",
                     "actor",
-                    ViewHotkeyAction::ActorDetail(index),
+                    ViewHotkeyAction::ActorDetail(actor),
                 )
             })
             .collect::<Vec<_>>();
@@ -246,6 +260,30 @@ mod keymap_collision_tests {
             .find(|binding| binding.action == ViewHotkeyAction::CampaignLaunch)
             .unwrap();
         assert_eq!(binding.label, "launch");
+    }
+
+    /// The four actor digits are one-based on screen ("1..4"), so an
+    /// off-by-one here would open the wrong actor for every key.
+    #[test]
+    fn actor_digits_open_the_actor_the_operator_pressed() {
+        let app = ShellApp::new(V2Config::default(), None);
+        let actors = app
+            .module_run_keybindings()
+            .into_iter()
+            .filter_map(|binding| match binding.action {
+                ViewHotkeyAction::ActorDetail(index) => Some((binding.trigger, index)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actors,
+            vec![
+                (HotkeyTrigger::Char('1'), 1),
+                (HotkeyTrigger::Char('2'), 2),
+                (HotkeyTrigger::Char('3'), 3),
+                (HotkeyTrigger::Char('4'), 4),
+            ]
+        );
     }
 
     /// Dispatch is first-match over the composed list, so a duplicate trigger

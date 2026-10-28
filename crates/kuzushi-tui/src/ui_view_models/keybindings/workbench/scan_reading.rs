@@ -1,6 +1,19 @@
 use crate::ui_view_models::PhaseSurfaceId;
 use crate::ShellApp;
 
+pub(super) fn jobs_binding(app: &ShellApp) -> Option<super::FooterKeybinding> {
+    if app.input_mode() != crate::InputMode::Navigate {
+        return None;
+    }
+    let binding = app
+        .workbench_view_keybindings_for_plan(None)
+        .into_iter()
+        .find(|binding| {
+            binding.action == crate::app::state_transitions::ViewHotkeyAction::WorkbenchStudyJobs
+        })?;
+    Some(super::bind(&binding.hint, "study jobs"))
+}
+
 pub(super) fn label(app: &ShellApp) -> &'static str {
     let surface = crate::renderer::workbench_scroll_metrics(app).map(|metrics| metrics.surface);
     reader_label(surface, app.scan_study_progress_key().is_some())

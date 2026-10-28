@@ -794,6 +794,10 @@ and `sample_limit` aliases accept integers from 1 through 2000; malformed or
 out-of-range values fail through shared preparation before replacing a snapshot.
 The inventory preserves its 100,000-entry, 512 MiB inspection and 256 KiB per-file
 inspection limits, containment checks, ignored-path rules and cancellation.
+Filesystem collection buffers only the remaining entry allowance and probes
+one extra entry to detect truncation, then sorts the admitted subset. Truncated filesystem coverage
+depends on directory enumeration order; it does not promise a globally lexical
+prefix. See the [bounded directory qualification](assessments/bounded-directory-integration-2026-10-27.md).
 Git path acquisition has a 30-second subprocess deadline, 64 MiB stdout and
 1 MiB stderr capture limits. Cancellation is polled during acquisition, before
 file inspection. The parser retains at most the entry cap plus one overflow
@@ -4564,6 +4568,15 @@ result remains unselected. When Resume owns `c`, the displayed reader shortcut
 is `C`. Prompt typing, drafts, pane selection and result disposition survive the
 round trip. Full run references remain in job detail and plain output. See the
 [study layout qualification](assessments/study-reading-layout-2026-10-27.md).
+
+The pending-result footer includes the actual study-reader binding. Compact
+footers keep Escape, interrupt, paging and Jobs visible before secondary actions.
+Opening Jobs reveals its selected row after immediate or background loading.
+Paging still reaches the full study summary, and background completion yields
+to composer input. Scan result cards name jobs spending, and receipt metrics distinguish `jobs cost`
+from `scan cost`; unavailable and incomplete metering stay qualified. These labels
+describe the recorded Scan work, with shared investigation totals remaining in
+the allowance reader. See the [controls and cost qualification](assessments/study-controls-cost-2026-10-27.md).
 
 The jobs and job-detail readers bind Scan, context, context-matrix, scope and
 Review studies to the exact plan digest retained by bounded campaign history.

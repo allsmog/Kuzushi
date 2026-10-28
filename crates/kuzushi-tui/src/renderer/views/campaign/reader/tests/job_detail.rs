@@ -46,6 +46,9 @@ fn inspection_back_next_and_resize_preserve_input_and_exact_recorded_context() {
                 && details.contains("recorded-context")
         );
         let continuous = details.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(details.contains("Model id: recorded-context"), "{details}");
+        assert!(details.contains("Revision id: frozen-r1"), "{details}");
+        assert!(!details.contains("\"modelId\""), "{details}");
         assert!(
             continuous.contains("explicitly omitted")
                 && continuous.contains("Recorded cost: unknown"),
@@ -81,6 +84,42 @@ fn job_failure_and_unknown_cost_precede_full_input_references() {
     assert!(detail.contains("Recorded cost: unknown") && !detail.contains("$0.00"));
     assert!(detail.contains("no run recorded"));
     assert!(detail.contains("model: not supplied"));
+}
+
+#[test]
+fn paged_detail_keeps_full_notices_and_leaves_controls_to_reader_chrome() {
+    for (width, height) in [(40, 12), (80, 24), (120, 36)] {
+        let mut app = named_reader(width, height);
+        press(&mut app, KeyCode::Enter);
+        let notice =
+            "Owned first notice\nOwned second notice\nOwned third notice\nOwned fourth notice";
+        app.router.campaign_mut().notice = Some(notice.into());
+        let area = Rect::new(0, 0, width, height);
+        let body = super::super::super::campaign_lines::campaign_body_lines(&app, area)
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        for line in notice.lines() {
+            assert!(body.contains(line), "{width}x{height}: {body}");
+        }
+        assert!(!body.contains("▸ try:"), "{body}");
+        let plain = crate::renderer::render_plain_app(&app, width as usize);
+        assert!(plain.contains("> try:"), "{plain}");
+        assert!(plain.contains("Study: owned"), "{plain}");
+        assert!(
+            plain.contains("r refresh") && plain.contains("q jobs"),
+            "{plain}"
+        );
+        for line in notice.lines() {
+            assert!(plain.contains(line), "{plain}");
+        }
+        let screen = draw(&app);
+        assert!(
+            screen.contains("K stop") && screen.contains("q jobs"),
+            "{screen}"
+        );
+    }
 }
 
 #[test]

@@ -20,17 +20,18 @@ pub(crate) fn campaign_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         lines.push(Line::styled(allowance.summary, theme::primary()));
     }
     lines.push(blank());
-    build_campaign_lines(app, area, lines)
+    build_campaign_lines(app, area, lines, true)
 }
 
 pub(super) fn campaign_body_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
-    build_campaign_lines(app, area, Vec::new())
+    build_campaign_lines(app, area, Vec::new(), false)
 }
 
 fn build_campaign_lines(
     app: &ShellApp,
     area: Rect,
     mut lines: Vec<Line<'static>>,
+    inline_commands: bool,
 ) -> Vec<Line<'static>> {
     let deck = app.router.campaign();
     if append_study_surfaces(&mut lines, app, area) {
@@ -41,6 +42,23 @@ fn build_campaign_lines(
         return lines;
     }
     append_history_coverage(&mut lines, deck, area.width);
+    lines = campaign_content_lines(app, area, lines);
+    append_deck_footer(
+        &mut lines,
+        deck,
+        area,
+        app.study_navigation_return_active(),
+        inline_commands,
+    );
+    lines
+}
+
+fn campaign_content_lines(
+    app: &ShellApp,
+    area: Rect,
+    mut lines: Vec<Line<'static>>,
+) -> Vec<Line<'static>> {
+    let deck = app.router.campaign();
     if deck.has_dispatcher_failure_notice() {
         let context = lines;
         lines = Vec::new();
@@ -51,7 +69,6 @@ fn build_campaign_lines(
         Some(campaign) => append_campaign_detail(&mut lines, deck, campaign, area),
         None => append_campaign_list(&mut lines, app, area),
     }
-    append_deck_footer(&mut lines, deck, area, app.study_navigation_return_active());
     lines
 }
 
@@ -510,9 +527,13 @@ fn append_deck_footer(
     deck: &CampaignRouteState,
     area: Rect,
     linked_study: bool,
+    inline_commands: bool,
 ) {
     if !deck.has_dispatcher_failure_notice() {
         append_campaign_notice(lines, deck, area);
+    }
+    if !inline_commands {
+        return;
     }
     lines.push(blank());
     let commands = deck_commands(deck)
@@ -1003,7 +1024,7 @@ mod tests {
         deck.notice = Some("Context result unavailable. Inspect the completed attempt; a replacement draft requires separate approval.".into());
         for width in [40, 60, 80, 96, 120, 160] {
             let mut lines = Vec::new();
-            append_deck_footer(&mut lines, &deck, Rect::new(0, 0, width, 48), false);
+            append_deck_footer(&mut lines, &deck, Rect::new(0, 0, width, 48), false, true);
             let text = lines
                 .iter()
                 .map(ToString::to_string)

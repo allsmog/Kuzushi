@@ -13,11 +13,7 @@ pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
 }
 
 fn workbench_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
-    if let Some(mut bindings) = crate::ui_view_models::phase_cockpit::result_keybindings(app) {
-        if let Some(reader) = result_reader_binding(app) {
-            bindings.insert(0, reader);
-        }
-        bindings.push(bind("Ctrl+C", workbench_exit_label(app)));
+    if let Some(bindings) = pending_result_keybindings(app) {
         return bindings;
     }
     let plan = workbench_plan(app);
@@ -25,6 +21,18 @@ fn workbench_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
         return bindings;
     }
     regular_workbench_keybindings(app, plan.as_ref())
+}
+
+fn pending_result_keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
+    let mut bindings = crate::ui_view_models::phase_cockpit::result_keybindings(app)?;
+    if let Some(reader) = result_reader_binding(app) {
+        bindings.insert(0, reader);
+    }
+    if let Some(jobs) = scan_reading::jobs_binding(app) {
+        bindings.insert(0, jobs);
+    }
+    bindings.push(bind("Ctrl+C", workbench_exit_label(app)));
+    Some(bindings)
 }
 
 fn result_reader_binding(app: &ShellApp) -> Option<FooterKeybinding> {

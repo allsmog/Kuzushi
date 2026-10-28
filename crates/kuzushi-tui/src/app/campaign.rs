@@ -334,7 +334,7 @@ impl ShellApp {
         Some(target)
     }
 
-    pub(super) fn selected_fixed_study_has_ended(&self) -> bool {
+    pub(crate) fn selected_fixed_study_has_ended(&self) -> bool {
         self.router
             .campaign()
             .selected_campaign()

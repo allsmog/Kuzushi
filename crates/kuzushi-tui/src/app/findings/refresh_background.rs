@@ -13,6 +13,8 @@ pub(crate) struct FindingsRefreshState {
     pending: Option<PendingFindingsRefresh>,
     failed_target: Option<PathBuf>,
     waiting_target: Option<PathBuf>,
+    // Retain a wait across retries until a projection or failure settles it.
+    receipt_recovery_target: Option<PathBuf>,
 }
 
 struct PendingFindingsRefresh {
@@ -38,6 +40,7 @@ impl std::fmt::Debug for FindingsRefreshState {
             )
             .field("failed_target", &self.failed_target)
             .field("waiting_target", &self.waiting_target)
+            .field("receipt_recovery_target", &self.receipt_recovery_target)
             .finish()
     }
 }
@@ -47,6 +50,7 @@ impl FindingsRefreshState {
         self.pending = None;
         self.failed_target = None;
         self.waiting_target = None;
+        self.receipt_recovery_target = None;
     }
     pub(crate) fn invalidate_scheduling(&mut self) {
         if let Some(pending) = &mut self.pending {
@@ -320,11 +324,26 @@ impl ShellApp {
             .is_some_and(|target| self.target() == Some(target))
     }
 
+    pub(crate) fn accept_findings_projection(&mut self, target: &Path) {
+        let recovered = self
+            .runtime_state
+            .findings_refresh
+            .receipt_recovery_target
+            .as_deref()
+            == Some(target)
+            && self.target() == Some(target);
+        self.runtime_state.findings_refresh.accept_projection();
+        if recovered {
+            self.log("note", "Findings refreshed; receipt wait cleared");
+        }
+    }
+
     pub(crate) fn record_pending_findings_receipt(&mut self) {
         if self.waiting_for_findings_receipt() {
             return;
         }
         self.runtime_state.findings_refresh.waiting_target = self.target_owned();
+        self.runtime_state.findings_refresh.receipt_recovery_target = self.target_owned();
         self.runtime_state.findings_refresh.failed_target = None;
         self.invalidate_findings_review_completion();
         self.log(
@@ -349,6 +368,7 @@ impl ShellApp {
 
     pub(crate) fn record_findings_read_failure(&mut self) {
         self.runtime_state.findings_refresh.waiting_target = None;
+        self.runtime_state.findings_refresh.receipt_recovery_target = None;
         self.runtime_state.findings_refresh.failed_target = self.target_path_buf().cloned();
         let deck = self.router.campaign_mut();
         if deck.active_batch_id.is_some() {

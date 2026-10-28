@@ -50,6 +50,12 @@ impl ShellApp {
         snapshot: CampaignHistoryReadSnapshot,
         pending: PendingHistoryRead,
     ) {
+        let loaded_study = self
+            .router
+            .campaign()
+            .selected_campaign()
+            .filter(|_| self.router.campaign().detail)
+            .map(|campaign| campaign.campaign_id.clone());
         let notice = self
             .router
             .campaign()
@@ -64,10 +70,21 @@ impl ShellApp {
         self.router.campaign_mut().trend_history = snapshot.trend_history;
         self.apply_campaign_phase_read(snapshot.phase, pending.phase_generation);
         self.finish_campaign_history_selection(&pending);
+        self.reveal_new_scan_study_job(&pending, loaded_study.as_deref());
         if notice.is_some() {
             self.router.campaign_mut().notice = notice;
         }
         self.restore_dispatcher_failure_notice();
+    }
+
+    fn reveal_new_scan_study_job(&mut self, pending: &PendingHistoryRead, loaded: Option<&str>) {
+        if let Some(id) = pending
+            .select_requested
+            .as_deref()
+            .filter(|id| Some(*id) != loaded)
+        {
+            self.reveal_scan_study_job(id);
+        }
     }
 
     fn apply_campaign_phase_read(&mut self, phase: Option<CampaignPhaseRead>, generation: u64) {

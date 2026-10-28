@@ -284,8 +284,9 @@ expect: Study jobs
 expect-not: Commands · view:campaign
 require-live-snap: 20 repo index ready | canceled-partial-work-index-ready
 expect-not: repo index not built
-expect: session:$0.00
-expect: cost unavailable
+expect-not: Study severity assessment unavailable
+expect: 2 Review protected
+expect: cost not recorded
 expect-not: cost:$0.00
 expect: 2 parked
 expect: 1 completed
@@ -324,12 +325,16 @@ keys: r
 require-live-snap: 25 2 completed | stopped-at-limit
 require-live-snap: 20 repo index ready | stopped-at-limit-index-ready
 expect-not: repo index not built
-expect: session:$0.00
-expect: cost unavailable
+expect-not: Study severity assessment unavailable
+expect: 2 Review protected
+expect: cost not recorded
 expect-not: cost:$0.00
 expect: 1 parked
 expect: Allowance reached
 expect-not: Review the recorded failure
+expect-not: Esc to type
+expect: Ctrl+G palette
+expect: Ctrl+C exit
 ask: Does the approved plan stop with two completed passes and one parked pass, preserving the two Review calls without cap doubling, new jobs or a completeness claim?
 expect: R report
 expect: a plan/allowance
@@ -354,10 +359,18 @@ resize: 160x48
 live-snap: refused-160x48
 resize: 96x89
 live-snap: refused-96x89
+expect: Esc/q Scan
+expect: Ctrl+G palette
+expect: Ctrl+C exit
 resize: 80x24
 live-snap: refused-80x24
+expect: Esc/q Scan
+expect: Ctrl+G palette
+expect: Ctrl+C exit
 resize: 60x20
 live-snap: refused-60x20
+expect: Ctrl+G palette
+expect: Ctrl+C exit
 resize: 40x12
 require-live-snap: 20 allowance exhausted | refused-40x12
 keys: NPage NPage NPage
@@ -469,8 +482,12 @@ keys: r
 require-live-snap: 25 3 completed | original-plan-completed
 require-live-snap: 20 repo index ready | original-plan-completed-index-ready
 expect-not: repo index not built
-expect: session:$0.00
-expect: cost unavailable
+expect-not: Study severity assessment unavailable
+expect-not: ▸ try:
+expect: PgUp/PgDn
+expect: Enter inspect job
+expect: 2 Review protected
+expect: cost not recorded
 expect-not: cost:$0.00
 ask: Does explicit resume run only the original remaining pass, preserve prior attempts and decisions, and keep a missed nondeterministic observation separate from a fix?
 keys: Escape

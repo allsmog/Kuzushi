@@ -152,7 +152,7 @@ fn read_finding_page_projection(
         before.applied_seq,
         request.order,
     )
-    .map(|mut page| {
+    .and_then(|mut page| {
         page.page.scope_filter = query.scope.map(|scope| scope.receipt);
         study_receipt::page_snapshot(page, study, workspace, store)
     })
