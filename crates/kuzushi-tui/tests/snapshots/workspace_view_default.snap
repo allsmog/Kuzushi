@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 253
 ---
- KUZUSHI › workspace · shell route · target:none · ctx:not built · model:unconfigured · cost:$0.00
+ KUZUSHI › workspace · Commands · target:none · repo index not built · model:unconfigured · session:$0.00
 
  -- WORKSPACE ----------------------------------------------------------------------------------------------------------
 status: no active workspace. Next: target <path>, then map; or full <path>

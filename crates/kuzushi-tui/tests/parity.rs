@@ -7,7 +7,7 @@ mod common;
 
 use std::{collections::BTreeMap, path::PathBuf, process::Command, sync::OnceLock};
 
-use kuzushi_core::{ToolOptionStore, V2Config};
+use kuzushi_core::{run_dir, write_run_summary, RunSummary, ToolOptionStore, V2Config};
 use kuzushi_tui::{
     render_plain_app, AuthScreenFooter, AuthScreenSnapshot, AuthScreenStatus, BootSplashCheck,
     BootSplashCheckState, BootSplashSnapshot, CommandPaletteFooter, CommandPaletteSnapshot,
@@ -430,6 +430,23 @@ fn run_diff_view(app: &mut ShellApp, left: &str, right: &str) {
 
 fn replay_view(app: &mut ShellApp, run_id: &str) {
     app.open_replay_for_test(run_id);
+}
+
+/// Opens the run timeline over a target holding one completed run, the
+/// entry point from which an operator inspects a run via replay or trace.
+fn inspectable_run_timeline(app: &mut ShellApp, run_id: &str) {
+    let root = std::env::temp_dir()
+        .join(format!("kuzushi-tui-parity-{}", std::process::id()))
+        .join("run-inspect");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(run_dir(&root, run_id)).unwrap();
+    let mut summary = RunSummary::running(run_id, "run", None, "~/work/acme-checkout");
+    summary.started_at_unix = 1;
+    summary.findings = Some(1);
+    write_run_summary(&root, &summary.complete()).unwrap();
+    app.set_target(Some(root));
+    app.set_shell_view(ShellView::Runs);
+    app.hydrate_all_view_data_for_test();
 }
 
 fn trace_view(app: &mut ShellApp, run_id: &str) {
@@ -2759,10 +2776,9 @@ parity_case!(run_controls, "run-controls.jsx", |app| view(
     app,
     ShellView::Cost
 ));
-parity_case!(run_inspect, "run-inspect.jsx", |app| view(
-    app,
-    ShellView::Runs
-));
+parity_case!(run_inspect, "run-inspect.jsx", |app| {
+    inspectable_run_timeline(app, "r-2113")
+});
 parity_case!(runs_list, "runs-list.jsx", |app| view(app, ShellView::Runs));
 parity_case!(runs, "runs.jsx", |app| view(app, ShellView::Runs));
 parity_case!(sast_running, "sast-running.jsx", |app| module_run(

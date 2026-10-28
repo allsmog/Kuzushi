@@ -279,11 +279,15 @@ fn repository_failure_is_partial_in_both_report_and_finding_history() {
     };
     let report = run_uaf_hunt_report(&json!({}), &ctx, Some(&runtime)).unwrap();
     assert_eq!(report.repo_tool_calls, 1);
-    assert!(report
-        .first_repo_error
-        .as_deref()
-        .unwrap()
-        .contains("search failed"));
+    // The invalid pattern fails inside `rg` where ripgrep is installed
+    // ("repository search failed: ..."); on hosts without `rg` the spawn
+    // fails instead ("Could not start uaf-hunt repository search"). Either
+    // way the grep tool must record a repository-search failure.
+    let first_repo_error = report.first_repo_error.as_deref().unwrap();
+    assert!(
+        first_repo_error.contains("grep: ") && first_repo_error.contains("repository search"),
+        "unexpected repository tool error: {first_repo_error}"
+    );
     assert!(report.is_partial());
     assert_eq!(
         store.run_status("owned-uaf-partial").unwrap().as_deref(),

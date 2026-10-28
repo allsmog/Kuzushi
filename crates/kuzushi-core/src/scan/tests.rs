@@ -9,6 +9,17 @@ mod tests {
 
     static ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
 
+    /// Writes a source file long enough to contain `anchor_line`, so the
+    /// observation an engine reports there binds to captured source.
+    fn write_bindable_source(root: &Path, relative: &str, anchor_line: usize) {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let body: String = (1..=anchor_line)
+            .map(|line| format!("// fixture line {line}\n"))
+            .collect();
+        fs::write(path, body).unwrap();
+    }
+
     struct EnvVarGuard {
         key: &'static str,
         previous: Option<std::ffi::OsString>,
@@ -95,6 +106,7 @@ mod tests {
             r#"{"dependencies":{"lodash":"latest"}}"#,
         )
         .unwrap();
+        write_bindable_source(tmp.path(), "src/app.rs", 12);
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let scanners: Vec<Box<dyn ScanEngine>> =
@@ -136,6 +148,7 @@ mod tests {
         }
 
         let tmp = tempfile::tempdir().unwrap();
+        write_bindable_source(tmp.path(), "src/app.rs", 12);
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let scanners: Vec<Box<dyn ScanEngine>> = vec![Box::new(StaticScanner)];
@@ -299,7 +312,7 @@ mod tests {
         }
 
         let tmp = tempfile::tempdir().unwrap();
-        fs::create_dir_all(tmp.path().join("web/src")).unwrap();
+        write_bindable_source(tmp.path(), "web/src/app.ts", 7);
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let scanners: Vec<Box<dyn ScanEngine>> = vec![Box::new(ScopedScanner)];
@@ -1374,7 +1387,7 @@ JSON
         permissions.set_mode(0o755);
         fs::set_permissions(&scanner_path, permissions).unwrap();
 
-        fs::write(tmp.path().join("server.js"), "res.send(req.query.name)\n").unwrap();
+        write_bindable_source(tmp.path(), "server.js", 9);
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let scanner = SemgrepScanner {
@@ -1527,7 +1540,7 @@ exit 2
             r#"{"dependencies":{"lodash":"latest"}}"#,
         )
         .unwrap();
-        fs::write(tmp.path().join("server.js"), "db.query(req.query.q)\n").unwrap();
+        write_bindable_source(tmp.path(), "server.js", 9);
         let binary = fake_codeql_binary(tmp.path());
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();

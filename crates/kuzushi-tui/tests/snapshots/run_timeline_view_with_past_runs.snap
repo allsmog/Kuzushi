@@ -2,7 +2,8 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 0
 ---
-KUZUSHI shell route · view:run-timeline · phase:Scan 2/3 · report ready · target:./runs · model:unconfigured · repo...
+KUZUSHI Commands · view:run-timeline · phase:Scan 2/3 · report ready · target:./runs
+session:$0.00 · repo index not built · model:unconfigured
 
  -- RUN TIMELINE -------------------------------------------------------------------------------------------------------
 runId           status        findings   revision       target

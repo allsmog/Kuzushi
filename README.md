@@ -14,6 +14,30 @@ The primary operator path is the native Rust CLI and Ratatui shell. The npm
 `kuzushi` binary, plus the shorter `kz` alias, invokes that native CLI through
 `bin/kuzushi-rs.mjs`.
 
+**Release status:** this repository is at `0.24.0-alpha.14`. Hosted release
+qualification has not completed for the current commit, and its binary
+packages are not published. Build from this checkout to use its exact code.
+The npm registry's `latest` tag is independent of this version.
+
+## Try Kuzushi
+
+Install Node.js 26.3.1, Rust 1.96.1, and Corepack, then clone the repo. The
+published CLI supports Node.js 22 or newer; 26.3.1 is the development pin.
+
+```bash
+git clone https://github.com/allsmog/Kuzushi.git
+cd Kuzushi
+corepack enable
+pnpm setup
+pnpm dev -- demo
+pnpm dev -- --target /path/to/repository
+```
+
+`demo` scans a bundled vulnerable fixture without a model, API key, or external
+scanner. Setup and the first source build may download dependencies. The final
+command opens the interactive shell for a repository you explicitly select.
+Use `pnpm dev -- --plain --target /path/to/repository` for line-oriented output.
+
 ## Product Focus
 
 The supported guided workflow is local repository investigation:
@@ -52,6 +76,12 @@ The cockpit projects durable repository evidence:
   opt-in run-scoped view. Durable human decisions remain attached to finding
   identity with their original source basis. A later SHA or dirty-content change
   requires checking applicability before reusing a decision.
+- Repeated scan passes retain raw observations. Review separates duplicate
+  observations from related findings and keeps source and inspected coverage
+  attached to each result. A later missed finding does not establish a fix.
+- Scope drafts, context revisions, failed attempts, and follow-up work retain
+  their original source and spending basis. Correcting a failed draft does not
+  grant a fresh allowance or silently accept Map.
 
 - Findings retain durable identities, exact recorded locations, source
   signatures, observations, confidence, severity, human decisions and run/context
@@ -116,7 +146,7 @@ re-applied when the stream is read back. Bridge failures surface as a fixed set
 of error classes instead of raw provider or subprocess output, and `items.jsonl`
 carries no prompts or model-response previews.
 
-## Install
+## Install a published package
 
 Kuzushi requires Node.js 22 or newer. The npm package declares this in
 `engines.node`; upgrade Node before installing if `node --version` reports an
@@ -127,6 +157,11 @@ npm install -g kuzushi
 kuzushi --help
 kz --help
 ```
+
+This installs the version currently published under npm's `latest` tag. Check
+`npm view kuzushi version` before installing if you need a specific version.
+Use the source steps in [Try Kuzushi](#try-kuzushi) for the code in this
+repository.
 
 From a source checkout:
 
@@ -186,10 +221,9 @@ Release platform policy is explicit:
 | `darwin-arm64` | Required; a failed build blocks publication. |
 | `win32-x64` | Required; a failed build blocks publication. |
 
-This checkout is prepared as `0.24.0-alpha.14`. It remains a release
-candidate until the nonpublishing candidate workflow and the separate tagged
-release workflow both pass. `npm install -g kuzushi` always installs the
-registry's current `latest`, which may differ from this checkout.
+`0.24.0-alpha.14` remains a release candidate until its hosted candidate and
+tagged release workflows pass. Native archives and npm tarballs assembled
+locally are not public downloads until a release is published.
 
 ## Quick Start
 
@@ -285,7 +319,7 @@ inside the TUI and your terminal still gives you a selection modifier.
 | Command | Purpose |
 | --- | --- |
 | `kuzushi shell [--target <repo>]` | Start the Ratatui shell. |
-| `kuzushi demo` | Scan a vendored vulnerable fixture offline — no API key, no model, no external scanners. It records real scanner signals and redacted locations at the honest `signal_only` proof state; it does not claim source-grounded proof. |
+| `kuzushi demo` | Scan a bundled vulnerable fixture offline, with no API key, model, or external scanner. It records scanner signals at the `signal_only` proof state. |
 | `kuzushi scan <repo> [--mode standard\|whitebox-static] [--tasks a,b] [--triage] [--json] [--ci] [--fail-on low\|medium\|high\|critical] [--sarif out.sarif]` | Run the Rust SAST umbrella executor and persist findings. `--fail-on` exits 3 when findings at/above the severity exist (CI gating); `--sarif` writes a SARIF 2.1.0 export for Code Scanning upload. Descriptor-backed inputs also support `verifyWhen`, `verifyMax`, and `verifyVotes` for post-triage verification selection. |
 | `kuzushi findings --target <repo> [--severity high,critical] [--verdict true_positive] [--name text] [--file-path path] [--vuln-source sarif,...] [--limit 50] [--json]` | List persisted findings. |
 | `kuzushi finding <F-0001\|fingerprint-prefix> --target <repo> [--json]` | Inspect one finding's evidence, proof state, verification summary, patch result, and next action. |
@@ -300,12 +334,19 @@ inside the TUI and your terminal still gives you a selection modifier.
 | `kuzushi modules [--json]` | List visible native modules. |
 | `kuzushi tools [--json]` | List visible executable tool descriptors. |
 | `kuzushi doctor [--target <repo>] [--json]` | Check config, local state, findings DB openability, scanner binaries, bridge readiness, and model/auth setup. |
-| `kuzushi run <module:tool> --input '<json>' [--option key=value]` | Execute one explicit tool through the Rust registry. Use global `--target` for workspace-backed tools; `run .` is shell-only focused-module shorthand.Batch contract for unattended callers: exit `0` completed/skipped, `2` run could not be prepared (unknown tool, bad input — retry is pointless), `3` tool executed and failed, `4` `status=partial`; every prepared run atomically publishes `.kuzushi/v3/runs/<runId>/done.json` (`runId`, `tool`, `status`, `ok`, `exitCode`) at its terminal envelope, so a run directory without it and with a dead `processId` in `run.json` crashed. |
+| `kuzushi run <module:tool> --input '<json>' [--option key=value]` | Execute one explicit tool through the Rust registry. Use global `--target` for workspace-backed tools. The shell-only `run .` shorthand uses the focused module. |
 | `kuzushi mcp serve\|health <backend>` | Run or health-check a shipped local MCP server over stdio. Backends: `gtags`, `clang`, `cpg`, `tree-sitter`, `codeql`, `revng`, `context`, `entry-points`, `threat-model`, `threat-intel`, `x-ray`. |
 | `kuzushi auth ping [provider] [--model <spec>]` | Round-trip a 1-token request to verify credentials, network, and bridge. Interactive provider login is handled inside `kuzushi shell`. |
 | `kuzushi config show` | Print effective config. |
 | `kuzushi config init [--force]` | Write the default global config. |
 | `kuzushi config path` | Print the global config path. |
+
+For unattended `run` callers, exit `0` means completed or skipped, `2` means
+preparation failed, `3` means the tool ran and failed, and `4` means a partial
+result. Every prepared run atomically publishes
+`.kuzushi/v3/runs/<runId>/done.json` with `runId`, `tool`, `status`, `ok`, and
+`exitCode`. A run directory without that file and with a dead `processId` in
+`run.json` indicates a crash.
 
 Examples:
 
@@ -528,7 +569,7 @@ The npm and native release payloads include every `kuzushi-mcp-*` server.
 Some servers wrap an operator-installed analysis engine: `gtags` needs GNU
 GLOBAL, `clang` needs clangd, `codeql` needs CodeQL plus a database, and `revng`
 needs its documented container runtime. `cpg` is fully self-contained: the
-cpg-rs engine is compiled in and builds its graphs in-process — no JVM, no
+cpg-rs engine is compiled in and builds its graphs in-process, with no JVM or
 external install. `tree-sitter` and the artifact readers are also
 self-contained; their `health` commands work without external engines.
 
@@ -670,3 +711,10 @@ their focused tests. New product execution paths belong in
 Rust MCP crate. Third-party module authors export the plain brokered KWP object
 documented in [docs/modules.md](docs/modules.md); they do not import an
 authoring SDK from this package.
+
+## Contributing and security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, tests, and pull requests.
+Kuzushi is available under the [MIT license](LICENSE). Follow
+[SECURITY.md](SECURITY.md) to report vulnerabilities privately; do not put
+exploit details in a public issue.

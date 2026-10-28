@@ -2157,14 +2157,39 @@ fn scan_tasks_codeql_reaches_scan_engine_path() {
         .output()
         .unwrap();
 
+    // The fixture SARIF anchors server.js:9 in a one-line file, so observation
+    // source binding is unavailable and the scan is honestly partial: the
+    // finding still persists, the JSON payload still reports it, and the
+    // process exits nonzero with the first warning as the reason (mirroring
+    // `run_codeql_scan_reaches_subprocess_executor_and_persists`).
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
+        !output.status.success(),
+        "partial scan should exit nonzero; stdout: {stdout}; stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("scan partial: codeql: Observation source binding unavailable"),
+        "stderr: {stderr}"
     );
     let body: Value = serde_json::from_slice(&output.stdout).unwrap();
 
-    assert_eq!(body.get("findingsCount").and_then(Value::as_u64), Some(1));
+    assert_eq!(
+        body.get("status").and_then(Value::as_str),
+        Some("partial"),
+        "body: {body}"
+    );
+    assert!(
+        body.pointer("/warnings/0")
+            .and_then(Value::as_str)
+            .is_some_and(|warning| warning.contains("Observation source binding unavailable")),
+        "body: {body}"
+    );
+    assert_eq!(
+        body.get("findingsCount").and_then(Value::as_u64),
+        Some(1),
+        "body: {body}"
+    );
     let workspace = WorkspaceTarget::new(&repo).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     let findings = store.list_findings(10).unwrap();
