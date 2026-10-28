@@ -2,7 +2,8 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 0
 ---
-KUZUSHI shell route · view:failure-handoff · phase:Map 1/3 · target:./failure · model:unconfigured · repo index not...
+KUZUSHI Commands · view:failure-handoff · phase:Map 1/3 · target:./failure
+session:$0.00 · repo index not built · model:unconfigured
 
  -- FAILURE HANDOFF ----------------------------------------------------------------------------------------------------
 stage              semgrep:scan

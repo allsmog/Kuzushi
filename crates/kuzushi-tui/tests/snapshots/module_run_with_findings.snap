@@ -2,7 +2,8 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 239
 ---
- KUZUSHI › run · run route · target:none · ctx:not built · model:unconfigured · stage:* searching · cost:$0.00
+KUZUSHI Run active · view:run · target:none
+session:$0.00 · repo index not built · model:unconfigured · stage:* searching
 
 * ./acme-checkout · running: agentic-sast tracing · findings pending · run run-abc1
 

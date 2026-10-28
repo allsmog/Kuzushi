@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 89
 ---
- KUZUSHI › activity · shell route · target:none · ctx:not built · model:unconfigured · cost:$0.00
+ KUZUSHI › activity · Commands · target:none · repo index not built · model:unconfigured · session:$0.00
 
  -- RUN FOCUS  run r-snapshot  ·  2/3 done  ·  1 running ---------------------------------------------------------------
 target:none  ·  repo index not built  ·  execution:none · receipt pending  ·  0 findings
