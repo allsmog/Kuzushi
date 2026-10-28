@@ -15,13 +15,16 @@ impl ShellApp {
     }
 
     pub(super) fn handle_map_text_key(&mut self, key: KeyEvent) -> InputUpdate {
-        let list = self.router.setup().map_run_config().text().unwrap();
+        let Some(list) = self.router.setup().map_run_config().text() else {
+            return InputUpdate::ignored();
+        };
         let document = list.row == MapRunConfigRowId::DesignDocs;
+        let editing_field = list.field.is_some();
         if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('o') && document {
             self.open_map_document_picker();
             return InputUpdate::handled();
         }
-        if list.field.is_some() {
+        if editing_field {
             return self.handle_map_field_key(key, document);
         }
         self.handle_map_entry_list_key(key, document)
@@ -33,12 +36,20 @@ impl ShellApp {
         }
         let state = self.router.setup_mut().map_run_config_mut();
         state.clear_error();
-        let list = state.text_mut().unwrap();
+        let Some(list) = state.text_mut() else {
+            return InputUpdate::handled();
+        };
+        if key.code == KeyCode::Esc {
+            list.field = None;
+            return InputUpdate::handled();
+        }
+        let Some(field) = list.field.as_mut() else {
+            return InputUpdate::handled();
+        };
         match key.code {
-            KeyCode::Esc => list.field = None,
-            KeyCode::Enter => list.field.as_mut().unwrap().insert("\n"),
+            KeyCode::Enter => field.insert("\n"),
             _ => {
-                list.field.as_mut().unwrap().handle_key(key);
+                field.handle_key(key);
             }
         }
         InputUpdate::handled()
@@ -64,7 +75,9 @@ impl ShellApp {
     fn update_map_entry_selection(&mut self, code: KeyCode) {
         let state = self.router.setup_mut().map_run_config_mut();
         state.clear_error();
-        let list = state.text_mut().unwrap();
+        let Some(list) = state.text_mut() else {
+            return;
+        };
         match code {
             KeyCode::Up => list.move_cursor(-1),
             KeyCode::Down => list.move_cursor(1),
@@ -88,7 +101,12 @@ impl ShellApp {
         if list.field.is_none() {
             list.add();
         }
-        list.field.as_mut().unwrap().insert(text);
+        // `add` always opens an editor. If one is ever missing, refuse the
+        // capture rather than report an insertion that did not happen.
+        let Some(field) = list.field.as_mut() else {
+            return false;
+        };
+        field.insert(text);
         state.clear_error();
         true
     }
