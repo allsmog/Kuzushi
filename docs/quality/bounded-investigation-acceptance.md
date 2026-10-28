@@ -1265,3 +1265,24 @@ records, four retained Scan attempts, one unresolved reservation and two unused
 Review calls remain. Source is unchanged and never executes; five intercepted
 requests add zero live requests. Raw review status, earlier failed candidates,
 formal operator acceptance and broader reference quality remain distinct.
+
+
+## Recorded Report settings checkpoint, 2026-10-28
+
+[Recorded scan settings](../assessments/recorded-scan-settings-2026-10-28.md)
+now come from the authenticated plan and every frozen context/scope case.
+Missing and null parameters remain distinct, current settings do not replace
+recorded values, and credentials/context bodies are excluded from this subset.
+The TUI preserves spending and coverage before configuration and moves complete
+run IDs behind the main receipt. Actual engine outcomes remain separate.
+
+There are 120 distinct focused Rust passes: 31 Core and 89 TUI. Build, Clippy
+and the current risk proxy pass. Final J399 has 84 machine passes, zero failures,
+seven answered agent questions and eight inspected replays across six sizes.
+It completes twenty-one fixed local scanner jobs, changes the current setting,
+retains all seven frozen selections through export/restart and reconciles a
+fresh headless export without changing findings, decisions or spending.
+All source hashes remain unchanged and no live model request occurs. This
+qualifies recorded-setting plumbing and this keyboard route. Historical rule
+contents, full enabled-policy capture, broader model/engine usefulness,
+reference-interface parity and operator UX acceptance remain open.

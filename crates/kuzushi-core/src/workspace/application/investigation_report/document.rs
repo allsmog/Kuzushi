@@ -26,6 +26,8 @@ pub struct ScopeStudyInvestigationReceipt {
     pub context_selections: Vec<crate::capabilities::campaign::ScopeStudyCaseInput>,
     pub cases: Vec<InvestigationContextCase>,
     pub scope: serde_json::Value,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub scan_selection: Vec<InvestigationScanSelection>,
     pub unplanned_scope_ids: Vec<String>,
     pub occurrence: crate::findings::ScopeStudyOccurrenceReport,
     #[serde(flatten)]
@@ -47,6 +49,8 @@ pub struct ContextMatrixInvestigationReceipt {
     pub baseline_case_id: String,
     pub cases: Vec<InvestigationContextCase>,
     pub scope: serde_json::Value,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub scan_selection: Vec<InvestigationScanSelection>,
     pub occurrence: ContextMatrixOccurrenceReport,
     #[serde(flatten)]
     pub evidence: InvestigationReportEvidence,
@@ -93,6 +97,7 @@ pub struct InvestigationReportSummary<'a> {
     pub campaign_id: &'a str,
     pub plan_sha256: &'a str,
     pub workers: usize,
+    pub scan_selection: &'a [InvestigationScanSelection],
     pub observation_run_refs: &'a [String],
     pub observation_count: usize,
     pub finding_count: usize,
@@ -217,6 +222,7 @@ fn scope_study_summary(receipt: &ScopeStudyInvestigationReceipt) -> Investigatio
         campaign_id: &receipt.campaign_id,
         plan_sha256: &receipt.plan_sha256,
         workers: receipt.workers,
+        scan_selection: &receipt.scan_selection,
         observation_run_refs: &evidence.observation_run_refs,
         observation_count: evidence.observation_count,
         finding_count: evidence.finding_count,
@@ -245,6 +251,7 @@ fn study_summary(receipt: &InvestigationReportReceipt) -> InvestigationReportSum
         campaign_id: &receipt.campaign_id,
         plan_sha256: &receipt.plan_sha256,
         workers: receipt.workers,
+        scan_selection: &receipt.scan_selection,
         observation_run_refs: &receipt.observation_run_refs,
         observation_count: receipt.observation_count,
         finding_count: receipt.finding_count,
@@ -265,6 +272,7 @@ fn matrix_summary(receipt: &ContextMatrixInvestigationReceipt) -> InvestigationR
         campaign_id: &receipt.campaign_id,
         plan_sha256: &receipt.plan_sha256,
         workers: receipt.workers,
+        scan_selection: &receipt.scan_selection,
         observation_run_refs: &evidence.observation_run_refs,
         observation_count: evidence.observation_count,
         finding_count: evidence.finding_count,
