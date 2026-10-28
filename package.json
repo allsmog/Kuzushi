@@ -78,6 +78,7 @@
     "scripts/native-runtime-contract.mjs",
     "scripts/source-native-runtime.mjs",
     "scripts/langgraph-bridge.mjs",
+    "scripts/langgraph-bridge/anthropic-model-policy.mjs",
     "scripts/langgraph-bridge/confined-file-read.mjs",
     "scripts/langgraph-bridge/diagnostics.mjs",
     "scripts/langgraph-bridge/errors.mjs",

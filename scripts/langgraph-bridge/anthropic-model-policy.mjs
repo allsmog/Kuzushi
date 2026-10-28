@@ -22,7 +22,6 @@ const DEFAULT_MAX_OUTPUT_TOKENS_BY_PREFIX = [
   ["claude-sonnet-5", 16384],
   ["claude-haiku-5", 16384],
   ["claude-fable-5", 16384],
-  ["claude-mythos-5", 16384],
   ["claude-opus-4", 16384],
   ["claude-sonnet-4", 16384],
   ["claude-haiku-4-5", 16384],
