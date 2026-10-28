@@ -7,6 +7,7 @@ use self::views::*;
 use crate::app::{ShellApp, ThreatView};
 use crate::theme;
 pub(in crate::renderer) use chrome::*;
+pub(crate) use context_generation::generation_document_lines;
 pub(in crate::renderer) use plain::*;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Frame, Line, Modifier, Span, Style};

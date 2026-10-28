@@ -138,24 +138,13 @@ pub(super) fn render_generation_document(
     body: Rect,
     scroll: usize,
 ) -> (usize, usize) {
-    let lines = generation_lines(app, body.width as usize);
+    let lines = generation_document_lines(app, body.width as usize);
     let max = lines.len().saturating_sub(body.height as usize);
     let offset = scroll.min(max);
     let visible = lines
         .into_iter()
         .skip(offset)
         .take(body.height as usize)
-        .enumerate()
-        .map(|(index, line)| {
-            Line::styled(
-                line,
-                if offset + index == 0 {
-                    theme::heading()
-                } else {
-                    theme::primary()
-                },
-            )
-        })
         .collect::<Vec<_>>();
     frame.render_widget(Paragraph::new(visible), body);
     (offset, max)

@@ -15,12 +15,8 @@ pub(super) fn append_context_jobs(
         } else {
             " "
         };
-        let label = format!(
-            "{} · {}",
-            job.tool.as_deref().unwrap_or("tool unavailable"),
-            job.state
-        );
-        lines.extend(marked_lines(&label, marker, width));
+        let tool = job.tool.as_deref().unwrap_or("tool unavailable");
+        lines.push(job_state_line(marker, tool, &job.state, width));
     }
     if let Some(job) = campaign.jobs.get(deck.selected_job) {
         let detail = format!(
@@ -38,13 +34,17 @@ pub(super) fn append_context_jobs(
     super::campaign_lines::append_attempt_count_hint(lines, campaign, width);
 }
 
-fn marked_lines(text: &str, marker: &str, width: usize) -> Vec<Line<'static>> {
-    wrap_text(text, width.saturating_sub(2).max(1))
-        .into_iter()
-        .enumerate()
-        .map(|(index, line)| {
-            let marker = if index == 0 { marker } else { " " };
-            styled(&format!("{marker} {line}"), theme::primary())
-        })
-        .collect()
+/// `▸ tool · state` with the state in its campaign job colour.
+fn job_state_line(marker: &str, tool: &str, state: &str, width: usize) -> Line<'static> {
+    let head = fit(
+        &format!("{marker} {tool} · "),
+        width.saturating_sub(state.chars().count()).max(1),
+    );
+    Line::from(vec![
+        Span::styled(head, theme::primary()),
+        Span::styled(
+            state.to_owned(),
+            super::campaign_lines::job_state_style(state),
+        ),
+    ])
 }

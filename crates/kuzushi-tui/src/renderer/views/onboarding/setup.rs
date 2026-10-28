@@ -243,12 +243,33 @@ fn setup_row_line(
         SetupReadinessTone::Blocked => "!",
         SetupReadinessTone::Action => " ",
     };
-    let body = if compact {
-        format!("{glyph} {:<12} {}", row.label, row.status)
+    let label = if compact {
+        format!("{:<12} ", row.label)
     } else {
-        format!("{glyph} {:<14} {:<16}", row.label, row.status)
+        format!("{:<14} ", row.label)
     };
-    selection_band(&body, selected, width)
+    if selected {
+        return selection_band(&format!("{glyph} {label}{}", row.status), selected, width);
+    }
+    let tone = readiness_tone_style(row.tone);
+    let status_width = width.saturating_sub(5 + label.chars().count()).max(1);
+    Line::from(vec![
+        Span::styled(format!("   {glyph} "), tone),
+        Span::styled(label, theme::primary()),
+        Span::styled(fit(&row.status, status_width), tone),
+    ])
+}
+
+/// Readiness rows colour their glyph and status so a blocked or pending row
+/// stands out from the ready ones without reading each word.
+fn readiness_tone_style(tone: SetupReadinessTone) -> Style {
+    match tone {
+        SetupReadinessTone::Ready => theme::success(),
+        SetupReadinessTone::Attention => theme::warn(),
+        SetupReadinessTone::Blocked => theme::danger(),
+        SetupReadinessTone::Optional => theme::muted(),
+        SetupReadinessTone::Action => theme::accent(),
+    }
 }
 
 #[cfg(test)]

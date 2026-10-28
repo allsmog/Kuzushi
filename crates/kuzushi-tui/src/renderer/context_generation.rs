@@ -1,7 +1,9 @@
 use super::*;
 use crate::ui_view_models::context_generation::{generation_body, generation_lines};
+pub(crate) use answer_document::generation_document_lines;
 use ratatui::widgets::{Block, Borders};
 
+mod answer_document;
 mod controls;
 mod document;
 mod scope_correction;

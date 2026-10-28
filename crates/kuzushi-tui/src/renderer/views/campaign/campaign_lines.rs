@@ -852,9 +852,9 @@ mod tests {
         let text = rendered_text(&app);
 
         assert!(text.contains("BATCH batch-1"), "{text}");
-        assert!(text.contains("BATCH OCCURRENCE"), "{text}");
-        assert!(text.contains("seen 2 / completed 3"), "{text}");
-        assert!(text.contains("runs run-1, run-2"), "{text}");
+        assert!(text.contains("FOUND ACROSS PASSES"), "{text}");
+        assert!(text.contains("found in 2 of 3 completed passes"), "{text}");
+        assert!(text.contains("found by run-1, run-2"), "{text}");
         assert!(
             text.contains("Severity cutoff high: reached · 1 qualifying finding"),
             "{text}"
