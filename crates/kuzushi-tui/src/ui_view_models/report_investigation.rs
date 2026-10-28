@@ -97,14 +97,13 @@ fn selected_document_lines(app: &ShellApp, document: &InvestigationReportDocumen
             .is_none_or(|attempt| attempt.current);
     let details = app.router.report().provenance_details();
     let mut lines = document_scope_lines(document, details, current);
+    let mut overview = shared_allowance_lines(document.summary().allowance);
+    overview.extend(context_evidence::lines(document, details));
+    let overview_position = 1.min(lines.len());
+    lines.splice(overview_position..overview_position, overview);
     lines.splice(
         0..0,
         reassessment_lines(document.summary().reassessment_required_count),
-    );
-    let context_position = 1.min(lines.len());
-    lines.splice(
-        context_position..context_position,
-        context_evidence::lines(document, details),
     );
     lines.extend(operator_brief_lines(document));
     lines.extend(context_guidance::lines(document));
@@ -191,7 +190,6 @@ fn study_lines(receipt: &InvestigationReportReceipt, details: bool, current: boo
         source_label(receipt), context_label(receipt),
         discovery_model_line(receipt.equivalence.components.model.as_deref(), receipt.workers)];
     lines.splice(1..1, source_currency_lines(current));
-    lines.splice(1..1, allowance_lines(receipt));
     lines.extend(scope::lines(&receipt.scope, details));
     if details {
         lines.extend(provenance_lines(receipt));
@@ -245,10 +243,6 @@ fn context_components_label(
         ),
         None => "Context: explicitly omitted from this study".into(),
     }
-}
-
-fn allowance_lines(receipt: &InvestigationReportReceipt) -> Vec<String> {
-    shared_allowance_lines(receipt.allowance.as_ref())
 }
 
 fn shared_allowance_lines(

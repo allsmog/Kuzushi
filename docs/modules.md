@@ -3604,6 +3604,14 @@ provides the same one-job path for headless use. A later accepted-scope scan stu
 retains the proposal's investigation accounting and requires its own work approval.
 Missing or mismatched generation receipts fail instead of resetting spending.
 
+Opening saved model-generated scopes reads the current shared allowance through
+the recorded generation run. The overview and Tab reader show committed calls,
+remaining calls, protected Review capacity and charge availability. End reaches
+the investigation identity and full receipt; plain output includes the same
+facts. These totals include other work sharing the investigation. Loading,
+missing and failed reads remain explicit, and unavailable charges stay unknown.
+Scope and context acceptance, further work and spending need their own approval.
+
 
 ### Source framework extraction and partial Map evidence
 
@@ -4548,6 +4556,14 @@ for sequential native evidence and qualification limits.
 
 
 ### Fixed-study jobs and shared accounting
+
+The Scan study overview gives job labels the main reading width beside a compact
+summary and recorded result. Overflow ranges count wrapped rows; paging names
+the pane that owns it. In Navigate, `c` opens exact study jobs while a completed
+result remains unselected. When Resume owns `c`, the displayed reader shortcut
+is `C`. Prompt typing, drafts, pane selection and result disposition survive the
+round trip. Full run references remain in job detail and plain output. See the
+[study layout qualification](assessments/study-reading-layout-2026-10-27.md).
 
 The jobs and job-detail readers bind Scan, context, context-matrix, scope and
 Review studies to the exact plan digest retained by bounded campaign history.

@@ -121,6 +121,49 @@ fn identical_context_revision_is_shown_once_without_collapsing_work_or_source_li
 }
 
 #[test]
+fn report_prioritizes_allowance_and_coverage_over_repeated_context_and_boundaries() {
+    let mut receipt = receipt(vec![Some(reference("digest-a")); 7]);
+    receipt.evidence.reassessment_required_count = 1;
+    receipt.scope = receipt
+        .cases
+        .iter()
+        .map(|case| {
+            (
+                case.id.clone(),
+                json!({
+                    "contextEvidence":{"status":"recorded","verification":{"verdict":"verified"}}
+                }),
+            )
+        })
+        .collect();
+    let document = InvestigationReportDocument::ScopeStudy(receipt);
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    let lines = selected_document_lines(&app, &document);
+    assert!(lines[0].starts_with("Review: 1 finding needs source reassessment."));
+    assert!(lines[1].starts_with("Scope study:"));
+    let text = lines.join("\n");
+    assert_eq!(
+        text.matches("Context grounding: verified.").count(),
+        1,
+        "{text}"
+    );
+    assert!(text.contains("7 boundaries"));
+    let position = |prefix: &str| {
+        lines
+            .iter()
+            .position(|line| line.starts_with(prefix))
+            .unwrap()
+    };
+    assert!(position("Allowance:") < position("Context grounding:"));
+    assert!(position("Coverage:") < position("Boundary Boundary 0:"));
+    app.router.report_mut().toggle_provenance();
+    let details = selected_document_lines(&app, &document).join("\n");
+    for index in 0..7 {
+        assert!(details.contains(&format!("Boundary {index}: Context grounding: verified.")));
+    }
+}
+
+#[test]
 fn details_keep_each_boundarys_complete_context_reference_and_digest() {
     let receipt = receipt(vec![Some(reference("digest-a")); 2]);
     let text = lines(&receipt, true, true).join("\n");

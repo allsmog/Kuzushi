@@ -375,11 +375,10 @@ fn scan_composition(body: &PhaseCockpitBody) -> Option<Composition> {
         return None;
     };
     if model.study.is_some() {
-        return Some(Composition::OperationalColumns {
-            left: PhaseSurfaceId::ScanEngines,
-            center: PhaseSurfaceId::ScanDelta,
-            right: PhaseSurfaceId::ScanReceipt,
-            log_strip: None,
+        return Some(Composition::ReadingSidebar {
+            body: PhaseSurfaceId::ScanEngines,
+            summary: PhaseSurfaceId::ScanDelta,
+            receipt: PhaseSurfaceId::ScanReceipt,
         });
     }
     model

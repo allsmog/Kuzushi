@@ -1,5 +1,6 @@
 //! Pure scope-review projections. No workspace reads or dispatch policy.
 mod action_search;
+mod allowance;
 mod detail;
 mod generation;
 mod overview;
@@ -250,6 +251,7 @@ pub(crate) fn scope_detail_lines(
     }
     let detail = action_search::search_detail(state)
         .unwrap_or_else(|| scope_detail(state, context::scope_context_detail(app, state)));
+    text.extend(allowance::summary(app));
     text.extend(detail);
     if let Some(review) = &state.review {
         text.push(format!(
@@ -262,6 +264,7 @@ pub(crate) fn scope_detail_lines(
         ));
     }
     text.extend(source.details());
+    text.extend(allowance::detail(app));
     text.into_iter()
         .flat_map(|line| wrap_document_text(&line, width.max(1), width.max(1)))
         .collect()

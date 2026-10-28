@@ -5,6 +5,7 @@ use crate::ui_view_models::WORKBENCH_REPORT_COMMAND;
 use crate::{ShellApp, ShellView};
 
 mod prove_details;
+mod scan_reading;
 pub(super) use prove_details::prove_detail_bindings;
 
 pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
@@ -28,7 +29,8 @@ fn workbench_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
 
 fn result_reader_binding(app: &ShellApp) -> Option<FooterKeybinding> {
     if scan_coverage_reader_is_open(app) {
-        return Some(bind("PgUp/PgDn", "coverage"));
+        let label = scan_reading::label(app);
+        return Some(bind("PgUp/PgDn", label));
     }
     crate::renderer::workbench_scroll_page_rows(app).map(|_| bind("PgUp/PgDn", "scroll"))
 }

@@ -66,11 +66,13 @@ fn persisted_labels_reasons_and_unknown_states_cannot_inject_terminal_controls()
     let (_root, mut snapshot) = snapshot(&["\u{1b}[31munknown"]);
     snapshot.jobs[0].display_label = Some("case\u{1b}[2Jlabel".into());
     snapshot.jobs[0].reason = Some("reason\u{1b}]0;title\u{7}".into());
+    snapshot.jobs[0].run_id = Some("run\u{1b}]0;title\u{7}".into());
     let model = queue_model(&snapshot);
     for value in [
         &model.jobs[0].engine,
         &model.jobs[0].outcome,
         model.jobs[0].detail.as_ref().unwrap(),
+        model.jobs[0].run_ref.as_ref().unwrap(),
     ] {
         assert!(!value.contains('\u{1b}') && !value.contains('\u{7}'));
     }

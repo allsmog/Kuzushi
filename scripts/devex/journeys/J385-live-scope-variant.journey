@@ -9,7 +9,7 @@ launch: --target @REPO/scripts/devex/artifacts/monorepo-scope-live-20261025/atte
 require-live-snap: 30 KUZUSHI | ready
 submit: scopes
 require-live-snap: 25 DRAFT SCOPES · r2 | real-proposal
-expect: 496/602 files
+expect: 496/602 filenames
 expect: Proposal context: saved revision tmr_b8b5f79cd3ab42f3a5184a8d96084030
 expect-not: ACCEPTED SCOPES
 ask: Does the real proposal show its model, exact saved architecture revision, bounded input, component groups and unaccepted state without implying complete source understanding or approved scan jobs?

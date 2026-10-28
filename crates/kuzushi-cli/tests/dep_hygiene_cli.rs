@@ -2131,8 +2131,7 @@ fn run_codeql_scan_reaches_subprocess_executor_and_persists() {
 }
 
 #[cfg(unix)]
-#[test]
-fn scan_tasks_codeql_reaches_scan_engine_path() {
+fn run_codeql_scan_fixture(source: &str) -> (tempfile::TempDir, std::process::Output) {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
@@ -2141,7 +2140,7 @@ fn scan_tasks_codeql_reaches_scan_engine_path() {
     std::fs::create_dir_all(&home).unwrap();
     std::fs::create_dir_all(&fake_bin).unwrap();
     std::fs::write(repo.join("package.json"), "{}\n").unwrap();
-    std::fs::write(repo.join("server.js"), "db.query(req.query.q)\n").unwrap();
+    std::fs::write(repo.join("server.js"), source).unwrap();
     fake_codeql_binary(&fake_bin);
     seed_taint_iris_next_mcp_artifacts(&repo, &home);
 
@@ -2156,12 +2155,46 @@ fn scan_tasks_codeql_reaches_scan_engine_path() {
         .arg("--json")
         .output()
         .unwrap();
+    (temp, output)
+}
 
-    // The fixture SARIF anchors server.js:9 in a one-line file, so observation
-    // source binding is unavailable and the scan is honestly partial: the
-    // finding still persists, the JSON payload still reports it, and the
-    // process exits nonzero with the first warning as the reason (mirroring
-    // `run_codeql_scan_reaches_subprocess_executor_and_persists`).
+#[cfg(unix)]
+fn assert_persisted_codeql_scan(repo: &std::path::Path, body: &Value) {
+    assert_eq!(
+        body.get("findingsCount").and_then(Value::as_u64),
+        Some(1),
+        "body: {body}"
+    );
+    let workspace = WorkspaceTarget::new(repo).unwrap();
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    let findings = store.list_findings(10).unwrap();
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].tool, "codeql");
+}
+
+#[cfg(unix)]
+#[test]
+fn scan_tasks_codeql_reaches_scan_engine_path() {
+    let source = format!(
+        "{}db.query(req.query.q)\n",
+        "// Owned routing fixture.\n".repeat(8)
+    );
+    let (temp, output) = run_codeql_scan_fixture(&source);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let body: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_persisted_codeql_scan(&temp.path().join("repo"), &body);
+}
+
+#[cfg(unix)]
+#[test]
+fn scan_tasks_codeql_retains_unbound_findings_as_partial() {
+    let (temp, output) = run_codeql_scan_fixture("db.query(req.query.q)\n");
+
+    // The reported ninth line is absent; retain the claim with a partial receipt.
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -2185,16 +2218,7 @@ fn scan_tasks_codeql_reaches_scan_engine_path() {
             .is_some_and(|warning| warning.contains("Observation source binding unavailable")),
         "body: {body}"
     );
-    assert_eq!(
-        body.get("findingsCount").and_then(Value::as_u64),
-        Some(1),
-        "body: {body}"
-    );
-    let workspace = WorkspaceTarget::new(&repo).unwrap();
-    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
-    let findings = store.list_findings(10).unwrap();
-    assert_eq!(findings.len(), 1);
-    assert_eq!(findings[0].tool, "codeql");
+    assert_persisted_codeql_scan(&temp.path().join("repo"), &body);
 }
 
 #[test]

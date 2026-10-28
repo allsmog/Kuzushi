@@ -22,7 +22,7 @@ fn compact_summary_keeps_recorded_input_counts_and_first_limitation() {
         "Detailed recorded limitation".into(),
     ]);
     let summary = generation_summary(Some(&value)).join("\n");
-    assert!(summary.contains("4096 bytes; 4/8 files"));
+    assert!(summary.contains("4096 bytes; 4/8 filenames"));
     assert!(summary.contains("Context sections: 0/1; omitted 1."));
     assert!(!summary.contains("recorded-run"));
 }

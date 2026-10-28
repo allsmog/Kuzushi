@@ -2,6 +2,17 @@ use super::*;
 use crate::app::ViewHydrationKey;
 
 impl ShellApp {
+    pub(crate) fn scan_study_jobs_key(&self) -> char {
+        let policy = self
+            .phase_result_target_phase()
+            .and_then(|phase| self.projected_phase_result_policy(phase));
+        let actions = policy
+            .as_ref()
+            .map(|policy| policy.actions.as_slice())
+            .unwrap_or(&[]);
+        study_jobs_key(actions)
+    }
+
     pub(crate) fn study_navigation_return_active(&self) -> bool {
         self.scan_study_navigation_active() || self.dfd_study_jobs_navigation_active()
     }
@@ -52,5 +63,32 @@ impl ShellApp {
         }
         self.restore_linked_findings_origin(origin);
         true
+    }
+}
+
+fn study_jobs_key(actions: &[kuzushi_core::workflow_attempts::PhaseResultAction]) -> char {
+    if actions.contains(&kuzushi_core::workflow_attempts::PhaseResultAction::ContinueRun) {
+        'C'
+    } else {
+        'c'
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kuzushi_core::workflow_attempts::PhaseResultAction;
+
+    #[test]
+    fn study_reading_does_not_claim_the_resume_action() {
+        assert_eq!(
+            study_jobs_key(&[PhaseResultAction::ContinueRun, PhaseResultAction::Open]),
+            'C'
+        );
+        assert_eq!(
+            study_jobs_key(&[PhaseResultAction::Select, PhaseResultAction::Open]),
+            'c'
+        );
+        assert_eq!(study_jobs_key(&[]), 'c');
     }
 }

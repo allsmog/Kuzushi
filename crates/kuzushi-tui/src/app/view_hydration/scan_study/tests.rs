@@ -6,6 +6,8 @@ use serde_json::json;
 
 const ID: &str = "owned-study-progress";
 
+mod pending_result;
+
 fn fixture() -> (tempfile::TempDir, ShellApp) {
     let root = tempfile::tempdir().unwrap();
     std::fs::write(

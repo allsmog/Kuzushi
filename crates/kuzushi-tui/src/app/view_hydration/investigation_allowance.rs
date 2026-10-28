@@ -16,6 +16,13 @@ impl StudyAllowanceSelection<'_> {
 
 impl ShellApp {
     pub(crate) fn investigation_allowance_key(&self) -> Option<ViewHydrationKey> {
+        if self.scope_review_is_visible() {
+            return self.scope_generation_run_id().map(|run| {
+                ViewHydrationKey::InvestigationAllowance {
+                    run_refs: vec![run.into()],
+                }
+            });
+        }
         if let Some(study) = self.study_allowance_selection() {
             return study.key();
         }
@@ -23,6 +30,9 @@ impl ShellApp {
     }
 
     pub(crate) fn study_allowance_selection(&self) -> Option<StudyAllowanceSelection<'_>> {
+        if self.scope_review_is_visible() {
+            return None;
+        }
         self.target()?;
         if let Some(id) = self
             .pending_campaign_selection()
@@ -35,6 +45,14 @@ impl ShellApp {
         }
         self.matrix_allowance_selection()
             .or_else(|| self.jobs_allowance_selection())
+    }
+
+    pub(crate) fn scope_generation_run_id(&self) -> Option<&str> {
+        if !self.scope_review_is_visible() {
+            return None;
+        }
+        let review = self.scope_review()?.review.as_ref()?;
+        Some(review.record.generation.as_ref()?.run_id.as_str())
     }
 
     fn matrix_allowance_selection(&self) -> Option<StudyAllowanceSelection<'_>> {

@@ -4,11 +4,8 @@ impl ShellApp {
     pub fn scroll_up(&mut self, amount: u16) {
         match self.scroll_target() {
             ScrollTarget::Activity => self.scroll_active_activity_pane(-(amount as isize)),
-            ScrollTarget::WorkbenchSurface(focus) => {
-                self.router
-                    .workbench_mut()
-                    .scroll_mut()
-                    .shift(focus, -(amount as i32));
+            ScrollTarget::WorkbenchSurface(metrics) => {
+                self.shift_workbench_scroll(metrics, -(amount as i32));
             }
             ScrollTarget::Logs => self.shift_logs_scroll(-(amount as isize)),
             ScrollTarget::Default => self.shift_default_scroll(-(amount as isize)),
@@ -18,14 +15,28 @@ impl ShellApp {
     pub fn scroll_down(&mut self, amount: u16) {
         match self.scroll_target() {
             ScrollTarget::Activity => self.scroll_active_activity_pane(amount as isize),
-            ScrollTarget::WorkbenchSurface(focus) => {
-                self.router
-                    .workbench_mut()
-                    .scroll_mut()
-                    .shift(focus, amount as i32);
+            ScrollTarget::WorkbenchSurface(metrics) => {
+                self.shift_workbench_scroll(metrics, amount as i32);
             }
             ScrollTarget::Logs => self.shift_logs_scroll(amount as isize),
             ScrollTarget::Default => self.shift_default_scroll(amount as isize),
+        }
+    }
+
+    pub(in crate::app) fn shift_workbench_scroll(
+        &mut self,
+        metrics: crate::renderer::WorkbenchScrollMetrics,
+        amount: i32,
+    ) {
+        let scroll = self.router.workbench_mut().scroll_mut();
+        if let Some(limit) = metrics.max_offset {
+            let current = usize::from(scroll.get(metrics.surface).min(limit));
+            let next = current
+                .saturating_add_signed(amount as isize)
+                .min(limit as usize);
+            scroll.set(metrics.surface, next as u16);
+        } else {
+            scroll.shift(metrics.surface, amount);
         }
     }
 
@@ -63,8 +74,11 @@ impl ShellApp {
                     focused_pane_to_top(session, self.router.activity_mut());
                 }
             }
-            ScrollTarget::WorkbenchSurface(focus) => {
-                self.router.workbench_mut().scroll_mut().set(focus, 0);
+            ScrollTarget::WorkbenchSurface(metrics) => {
+                self.router
+                    .workbench_mut()
+                    .scroll_mut()
+                    .set(metrics.surface, 0);
             }
             ScrollTarget::Logs => self.router.logs_mut().open(),
             ScrollTarget::Default => self.router.default_scroll_mut().reset(),
@@ -74,11 +88,11 @@ impl ShellApp {
     pub fn scroll_to_bottom(&mut self) {
         match self.scroll_target() {
             ScrollTarget::Activity => self.focused_activity_pane_to_bottom(),
-            ScrollTarget::WorkbenchSurface(focus) => {
+            ScrollTarget::WorkbenchSurface(metrics) => {
                 self.router
                     .workbench_mut()
                     .scroll_mut()
-                    .set(focus, u16::MAX);
+                    .set(metrics.surface, metrics.max_offset.unwrap_or(u16::MAX));
             }
             ScrollTarget::Logs => self.router.logs_mut().follow_tail(),
             ScrollTarget::Default => self.router.default_scroll_mut().tail(),
@@ -123,24 +137,12 @@ impl ShellApp {
     fn scroll_target(&self) -> ScrollTarget {
         match self.shell_view() {
             ShellView::Activity => ScrollTarget::Activity,
-            ShellView::Workbench => self
-                .scrollable_workbench_surface()
+            ShellView::Workbench => crate::renderer::workbench_scroll_metrics(self)
                 .map(ScrollTarget::WorkbenchSurface)
                 .unwrap_or(ScrollTarget::Default),
             ShellView::Logs => ScrollTarget::Logs,
             _ => ScrollTarget::Default,
         }
-    }
-
-    fn scrollable_workbench_surface(&self) -> Option<crate::ui_view_models::PhaseSurfaceId> {
-        let viewport = self.viewport();
-        let plan = crate::renderer::workbench_phase_plan_for_app(
-            self,
-            ratatui::layout::Rect::new(0, 0, viewport.columns, viewport.rows),
-        )?;
-        let surface = plan.surface(plan.effective_focus)?;
-        (surface.interaction == crate::ui_view_models::SurfaceInteraction::Scrollable)
-            .then_some(surface.id)
     }
 
     pub(crate) fn sync_view_change(&mut self) -> bool {
@@ -160,7 +162,7 @@ impl ShellApp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ScrollTarget {
     Activity,
-    WorkbenchSurface(crate::ui_view_models::PhaseSurfaceId),
+    WorkbenchSurface(crate::renderer::WorkbenchScrollMetrics),
     Logs,
     Default,
 }

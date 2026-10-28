@@ -13,7 +13,8 @@ pub(crate) fn investigation_allowance_model(app: &ShellApp) -> Option<Investigat
     let Some(state) = allowance_state(app) else {
         return study.map(|study| unavailable_plan_model(app, study.campaign_id));
     };
-    let mut model = present_state(state, study.is_some())?;
+    let bound = study.is_some() || app.scope_generation_run_id().is_some();
+    let mut model = present_state(state, bound)?;
     if let Some(id) = study {
         model
             .rows

@@ -40,6 +40,7 @@ pub(crate) use views::{option_detail_page_bounds, option_error_page_bounds};
 pub(crate) use views::{recommendation_max_scroll, recommendation_page_rows};
 pub(crate) use views::{run_artifact_max_scroll, run_artifact_page_rows};
 pub(crate) use views::{strategy_queue_max_scroll, strategy_queue_page_rows};
+pub(crate) use views::{workbench_scroll_metrics, WorkbenchScrollMetrics};
 mod allowance_review;
 mod answers;
 mod campaign_reader;

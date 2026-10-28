@@ -29,11 +29,9 @@ fn boundary_overview(app: &ShellApp, state: &ScopeReviewState) -> Option<Vec<Str
     }
     let review = state.review.as_deref()?;
     let scope = selected_scope(state)?;
-    let mut lines = vec![
-        scope.name.clone(),
-        membership_summary(review, scope),
-        path_preview(scope),
-    ];
+    let mut lines = vec![scope.name.clone()];
+    lines.extend(super::allowance::summary(app));
+    lines.extend([membership_summary(review, scope), path_preview(scope)]);
     lines.extend(workload::summary(state));
     lines.push(format!("Why: {}", preview(&scope.rationale, 120)));
     lines.extend(coverage_summary(review));

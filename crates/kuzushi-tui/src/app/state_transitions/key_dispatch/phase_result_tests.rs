@@ -10,6 +10,8 @@ use super::*;
 use kuzushi_core::workflow_attempts::{PhaseAttemptOutcome, PhaseResultAction};
 use kuzushi_core::{V2Config, WorkflowPhase, WorkspaceTarget};
 
+mod scan_reading;
+
 #[test]
 fn review_result_controls_name_report_and_own_their_footer_keys() {
     let mut fixture = review_continuation_fixture(false);
@@ -175,7 +177,13 @@ fn pending_scan_reading_pages_without_accepting_or_changing_the_draft() {
         .workbench()
         .scroll()
         .get(PhaseSurfaceId::ScanEngines);
-    assert!(offset > 0, "advertised paging must reach engine evidence");
+    assert!(
+        offset > 0,
+        "advertised paging must reach engine evidence; limit {:?}; body {:?}",
+        crate::renderer::workbench_scroll_metrics(&fixture.app),
+        crate::ui_view_models::phase_cockpit_model_for_phase(&fixture.app, WorkflowPhase::Scan)
+            .body
+    );
     assert!(fixture.app.reduce_key(key(KeyCode::PageUp)).handled);
     assert_eq!(
         fixture
@@ -225,11 +233,26 @@ impl ResultCardFixture {
             serde_json::json!({
                 "ok": outcome == PhaseAttemptOutcome::Completed,
                 "status": outcome,
-                "data": { "snapshot": { "filesIndexed": 1 } }
+                "data": if phase == WorkflowPhase::Scan {
+                    scan_reading::scan_result_data(temp.path())
+                } else {
+                    serde_json::json!({ "snapshot": { "filesIndexed": 1 } })
+                }
             }),
         );
         crate::test_support::append_typed_attempt(temp.path(), phase, "run-result-card", outcome);
         app.refresh_phase_attempt_projection();
+        if phase == WorkflowPhase::Scan {
+            app.hydrate_view_keys_blocking(
+                workspace.root(),
+                vec![
+                    ViewHydrationKey::RunSummaryEntries,
+                    ViewHydrationKey::ScanStageReceipt {
+                        run_id: "run-result-card".into(),
+                    },
+                ],
+            );
+        }
         app.set_shell_view(ShellView::Workbench);
         app.router
             .workbench_mut()

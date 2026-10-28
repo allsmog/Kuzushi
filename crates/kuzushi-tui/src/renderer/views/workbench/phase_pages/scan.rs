@@ -15,6 +15,15 @@ const GRID_MIN_WIDTH: u16 = 78;
 const COMBINED_MAX_WIDTH: u16 = WorkbenchPage::SCAN_GRID_MIN_COLUMNS - 1;
 const COMBINED_MIN_HEIGHT: u16 = WorkbenchPage::SCAN_GRID_MIN_BODY_ROWS;
 
+pub(in crate::renderer::views) fn engine_max_scroll(model: &ScanPhaseModel, area: Rect) -> u16 {
+    let inner = cockpit_pane_block("", false).inner(area);
+    let lines = engine_lines(model, area.width.saturating_sub(2) as usize);
+    let rows = Paragraph::new(lines)
+        .wrap(ratatui::widgets::Wrap { trim: false })
+        .line_count(inner.width);
+    super::clamped_scroll(u16::MAX, rows, inner.height)
+}
+
 pub(super) fn render(
     frame: &mut Frame<'_>,
     area: Rect,

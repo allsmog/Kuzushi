@@ -14,7 +14,7 @@ pub(super) fn lines(
         receipt.cases.len(),
         receipt.unplanned_scope_ids.len()
     )];
-    lines.extend(shared_allowance_lines(receipt.allowance.as_ref()));
+    lines.push("Coverage: only selected discovery scopes were planned. Inventory and engine omissions remain; no complete repository coverage claim.".into());
     lines.extend(source_currency_lines(current));
     lines.extend(source_model_lines(receipt));
     lines.push("Recurrence is measured inside each scope's completed passes. Shared context is not additional discovery work; a missing observation does not establish a fix.".into());
@@ -24,7 +24,6 @@ pub(super) fn lines(
         receipt,
         details || repeated.is_none(),
     ));
-    lines.push("Coverage: only selected discovery scopes were planned. Inventory and engine omissions remain; no complete repository coverage claim.".into());
     lines.push(format!(
         "Unplanned boundaries: {}",
         receipt.unplanned_scope_ids.join(", ")

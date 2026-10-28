@@ -27,6 +27,24 @@ fn an_empty_history_makes_no_attempt_or_completion_claim() {
 }
 
 #[test]
+fn scope_study_history_preserves_reassessment_and_scope_before_work_totals() {
+    let mut content = vec![
+        "Review: source reassessment needed".into(),
+        "Scope study: 7 boundaries · 0 unplanned".into(),
+        "Shared allowance: existing calls".into(),
+    ];
+    insert_after_scope(
+        &mut content,
+        &[receipt("retained", Some(PhaseStageOutcome::Failed))],
+        false,
+    );
+    assert_eq!(content[0], "Review: source reassessment needed");
+    assert_eq!(content[1], "Scope study: 7 boundaries · 0 unplanned");
+    assert_eq!(content[2], "Recorded attempts: 1 · 1 failed");
+    assert_eq!(content[3], "Shared allowance: existing calls");
+}
+
+#[test]
 fn a_successful_retry_keeps_the_failed_receipt_visible_without_more_jobs() {
     let attempts = vec![
         receipt("pass-1", Some(PhaseStageOutcome::Completed)),

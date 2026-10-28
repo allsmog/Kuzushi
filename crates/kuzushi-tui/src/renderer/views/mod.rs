@@ -39,8 +39,10 @@ pub(in crate::renderer) use system::*;
 pub(crate) use system::{cost_max_scroll, cost_page_rows};
 pub(in crate::renderer) use threat::*;
 pub(in crate::renderer) use viewport_lines::*;
-pub(crate) use workbench::workbench_phase_plan_for_app;
 pub(in crate::renderer) use workbench::*;
+pub(crate) use workbench::{
+    workbench_phase_plan_for_app, workbench_scroll_metrics, WorkbenchScrollMetrics,
+};
 pub(crate) use workspace::context_page_rows;
 pub(in crate::renderer) use workspace::*;
 pub(crate) use workspace::{strategy_queue_max_scroll, strategy_queue_page_rows};

@@ -9,6 +9,8 @@
 use super::PhaseSurfaceId;
 use ratatui::layout::Rect;
 
+mod reading_sidebar;
+
 /// Bottom drawers exist in two mockup variants: a compact strip that keeps
 /// the workspace dominant, and an expanded card for a full recommendation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,6 +55,12 @@ pub(crate) enum Composition {
         center: PhaseSurfaceId,
         right: PhaseSurfaceId,
         log_strip: Option<PhaseSurfaceId>,
+    },
+    /// A wide document beside a compact summary and its recorded result.
+    ReadingSidebar {
+        body: PhaseSurfaceId,
+        summary: PhaseSurfaceId,
+        receipt: PhaseSurfaceId,
     },
     /// Master list beside a reading detail, with an optional bottom drawer
     /// (Findings triage).
@@ -138,6 +146,10 @@ impl Composition {
         if area.width == 0 || area.height == 0 {
             return Vec::new();
         }
+        self.solve_nonempty(area)
+    }
+
+    fn solve_nonempty(&self, area: Rect) -> Vec<(PhaseSurfaceId, Rect)> {
         match self {
             Self::Columns(ids) => solve_columns(ids, area),
             Self::CanvasWithDrawer { canvas, drawer } => {
@@ -155,6 +167,11 @@ impl Composition {
                 right,
                 log_strip,
             } => solve_operational(*left, *center, *right, *log_strip, area),
+            Self::ReadingSidebar {
+                body,
+                summary,
+                receipt,
+            } => reading_sidebar::solve(*body, *summary, *receipt, area),
             Self::ListDetail {
                 list,
                 detail,

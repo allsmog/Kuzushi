@@ -1,0 +1,115 @@
+name: Read study scopes and passes without starting or accepting work
+size: 120x36
+cwd: @REPO/scripts/devex/artifacts/scan-report-readiness-current-20261027/J399-attempt-1/native/20261027-155631/J399/fixture-target
+env-unset: NODE_OPTIONS KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE KUZUSHI_AGENT_MCPS ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NODE_OPTIONS=--import=@REPO/scripts/devex/fixtures/deny_provider_transport.mjs KUZUSHI_TEST_DENIED_FETCH_LOG=@ART/denied-fetch.jsonl
+require-shell: python3 -B @REPO/scripts/devex/fixtures/study_job_reader.py @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target .
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/open-study.txt
+keys: Enter
+require-live-snap: 25 21 completed | completed-study
+submit: workbench
+require-live-snap: 25 21/21 complete | scan-study
+expect: Account profile service
+expect: pass 1/3
+expect: pass 2/3
+expect: pass 3/3
+expect-not: ✓ …
+ask: Can the operator distinguish the recorded scope, pass and state without long run references reducing every study label to an ellipsis?
+nav-mode:
+keys: Tab
+require-live-snap: 20 ▸ STUDY JOBS | focused-jobs
+keys: PgDn PgDn PgDn PgDn PgDn PgDn
+require-live-snap: 20 Asynchronous job worker | tail-jobs
+expect: pass 3/3
+expect: PgUp/PgDn jobs
+keys: PgUp PgUp PgUp PgUp PgUp PgUp
+require-live-snap: 20 Account profile service | top-jobs
+resize: 160x48
+wait: 1
+require-live-snap: 20 KUZUSHI | jobs-160x48
+keys: PgDn PgDn
+require-live-snap: 20 Asynchronous job worker | tail-160x48
+expect: pass 3/3
+keys: PgUp PgUp
+require-live-snap: 20 Account profile | top-160x48
+expect: Account profile
+resize: 96x89
+wait: 1
+require-live-snap: 20 KUZUSHI | jobs-96x89
+keys: PgDn PgDn
+require-live-snap: 20 Asynchronous | tail-96x89
+expect: pass 3/3
+keys: PgUp PgUp
+require-live-snap: 20 Account profile | top-96x89
+expect: Account profile
+resize: 80x24
+wait: 1
+require-live-snap: 20 KUZUSHI | jobs-80x24
+keys: PgDn PgDn PgDn PgDn PgDn PgDn
+require-live-snap: 20 rows 14-27/27 | tail-80x24
+expect: pass 3/3
+expect: JOBS
+expect: rows
+keys: PgUp PgUp PgUp PgUp PgUp PgUp
+require-live-snap: 20 rows 1-14/27 | top-80x24
+expect: Account profile
+expect: pass 1/3
+resize: 60x20
+wait: 1
+require-live-snap: 20 KUZUSHI | jobs-60x20
+keys: PgDn PgDn PgDn
+require-live-snap: 20 rows 17-24/24 | tail-60x20
+expect: pass 3/3
+expect: rows
+expect: PgUp/PgDn jobs
+keys: PgUp PgUp PgUp
+require-live-snap: 20 rows 1-8/24 | top-60x20
+expect: Account profile
+expect: pass 1/3
+resize: 40x12
+wait: 1
+require-live-snap: 20 KUZUSHI | jobs-40x12
+keys: PgDn PgDn PgDn PgDn PgDn PgDn PgDn PgDn PgDn PgDn PgDn PgDn PgDn PgDn
+require-live-snap: 20 rows 40-42/42 | tail-40x12
+expect: pass 3/3
+expect: JOBS
+expect: rows
+expect: PgUp/PgDn jobs
+keys: PgUp PgUp PgUp PgUp PgUp PgUp PgUp PgUp PgUp PgUp PgUp PgUp PgUp PgUp
+require-live-snap: 20 rows 1-3/42 | top-40x12
+expect: Account profile
+expect: pass 1/3
+ask: Across the six sizes, do component names, pass numbers, states and reading controls remain usable, with all twenty-one fixed jobs reachable through paging?
+resize: 120x36
+wait: 1
+require-live-snap: 20 KUZUSHI | before-exit
+keys: c
+require-live-snap: 25 21 completed | job-receipts
+keys: Enter
+keys: PgDn PgDn PgDn PgDn PgDn PgDn
+require-live-snap: 20 Run: | exact-job-receipt
+expect: trial-001
+keys: Escape Escape
+require-live-snap: 20 STUDY JOBS | returned-jobs
+expect: Account profile
+ask: Does the wider Jobs reader use available space well, with a compact recorded result, exact references available on demand and return preserving the same study?
+keys: Escape C-c
+require-exit: 10
+require-shell: python3 -B @REPO/scripts/devex/fixtures/study_job_reader.py @ART inspected
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NODE_OPTIONS=--import=@REPO/scripts/devex/fixtures/deny_provider_transport.mjs KUZUSHI_TEST_DENIED_FETCH_LOG=@ART/denied-fetch.jsonl
+launch: --target .
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/open-study.txt
+keys: Enter
+require-live-snap: 25 21 completed | recovered-study
+submit: workbench
+require-live-snap: 25 21/21 complete | recovered-scan
+expect: Account profile service
+expect: pass 1/3
+require-shell: python3 -B @REPO/scripts/devex/fixtures/study_job_reader.py @ART recovered
+ask: Does no-color recovery retain readable job labels and the same unresolved completed result, with no new decisions, work, allowance or model request?
+keys: C-c
+require-exit: 10

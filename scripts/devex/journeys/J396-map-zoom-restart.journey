@@ -1,0 +1,65 @@
+name: Cold restart preserves explicit Map selection, zoom and return
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dfd_connectivity.py @TMP_TARGET @ART seed
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: run threat-model:import {"path":"ctx.json","activate":true}
+require-live-snap: 30 threat-model:import saved | imported
+submit: map
+require-live-snap: 25 2 components have no recorded flows | map-review
+nav-mode:
+keys: u
+require-live-snap: 25 Map ✓ | accepted
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dfd_connectivity.py @TMP_TARGET @ART accepted
+keys: G
+require-live-snap: 25 application · 5/5 | selected-summary
+keys: Enter
+require-live-snap: 25 DETAIL · node 5/8 | embedded-detail
+expect: Viewing Map
+expect: Principal definition
+expect-not: KUZUSHI VIZ
+keys: z
+require-live-snap: 25 KUZUSHI VIZ · DATA-FLOW DIAGRAM | zoomed-detail
+expect: Principal definition
+expect: NAVIGATION MODE
+expect: No incoming or outgoing
+ask: Does explicit zoom show the same Principal component in the full-frame DFD, with navigation ownership and readable recorded-flow uncertainty?
+keys: q
+require-live-snap: 25 Viewing Map | returned-detail
+expect: Principal definition
+expect: DETAIL · node 5/8
+expect-not: KUZUSHI VIZ
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: map
+require-live-snap: 25 2 components have no recorded flows | restarted-summary
+nav-mode:
+keys: G
+require-live-snap: 25 application · 5/5 | restarted-selected-summary
+keys: Enter
+require-live-snap: 25 DETAIL · node 5/8 | restarted-embedded-detail
+expect: Viewing Map
+expect: Principal definition
+expect-not: KUZUSHI VIZ
+keys: z
+require-live-snap: 25 KUZUSHI VIZ · DATA-FLOW DIAGRAM | restarted-zoomed-detail
+expect: Principal definition
+expect: NAVIGATION MODE
+expect: No incoming or outgoing
+ask: Does no-color restart reach the full-frame DFD only after the explicit zoom key, without changing component identity, accepted context or input ownership?
+keys: q
+require-live-snap: 25 Viewing Map | restarted-returned-detail
+expect: Principal definition
+expect: DETAIL · node 5/8
+expect-not: KUZUSHI VIZ
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dfd_connectivity.py @TMP_TARGET @ART restarted
+ask: Does Back restore the embedded Map DFD and the same selected component after restart, with no saved work or provider requests?
+keys: C-c
+require-exit: 10

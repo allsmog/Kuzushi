@@ -10,7 +10,7 @@ pub(super) fn insert_after_scope(
 ) {
     let position = content
         .iter()
-        .position(|line| line.starts_with("Scope: "))
+        .position(|line| line.starts_with("Scope: ") || line.starts_with("Scope study: "))
         .map_or(0, |index| index + 1);
     content.splice(position..position, lines(attempts, details));
 }

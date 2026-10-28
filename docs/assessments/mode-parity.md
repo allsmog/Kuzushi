@@ -1,5 +1,27 @@
 # Mode Parity Assessment
 
+The shell Study jobs pane gives recorded scope names, pass numbers and states
+the main reading width beside a compact summary and result. Its overflow ranges
+name rows, and its paging hint names the focused reader. The study shortcut
+remains available during a pending result and uses `C` when Resume owns `c`.
+Plain output retains full terminal-safe run
+references and failure reasons. Scan movement uses the same wrapped rows and
+pane geometry as rendering; paging resolves ownership and bounds from one
+presentation snapshot. Source, context, work approval, findings, spending and
+scan/shell/run dispatch contracts are unchanged. See the
+[Study layout qualification](study-reading-layout-2026-10-27.md) for the six-size
+tmux check, exact references, retained failures and remaining craft findings.
+
+Scan presentation waits for every recorded run summary to become terminal
+before using a legacy aggregate. A complete typed receipt can replace that
+pending read without relying on the stale summary index. Report puts shared
+allowance information ahead of context details, groups identical context
+statuses in its overview and retains named cases in details. Coverage limits
+precede scope-by-scope recurrence. These changes use the shared shell view
+models for terminal and plain output. Execution, exports, source identity,
+allowances and scan/shell/run dispatch contracts are unchanged.
+See the [Scan and Report qualification](scan-report-readiness-2026-10-27.md).
+
 The Lessons `s` shortcut is shell navigation into the existing finite Scan
 planner. A shared Core reader authenticates the saved reviewed context and
 retains durable investigation accounting. It creates no plan or approval.

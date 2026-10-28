@@ -468,7 +468,11 @@ pub(super) fn render_receipt(
         } else {
             "SCAN RECEIPT"
         },
-        receipt_lines(model, area.width.saturating_sub(2) as usize),
+        if model.study.is_some() {
+            super::study::result_lines(model, area.width.saturating_sub(2) as usize)
+        } else {
+            receipt_lines(model, area.width.saturating_sub(2) as usize)
+        },
         PhaseSurfaceId::ScanReceipt,
         state,
     );
