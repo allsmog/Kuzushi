@@ -74,9 +74,11 @@ fn frozen_map_regeneration_sets_aside_a_finished_study() {
 fn an_exact_rerun_of_a_frozen_map_is_not_intercepted() {
     let mut fixture = frozen_map();
 
-    assert!(fixture
-        .press(advertised_key(PhaseResultCommand::RunAgain))
-        .handled);
+    assert!(
+        fixture
+            .press(advertised_key(PhaseResultCommand::RunAgain))
+            .handled
+    );
 
     // The ordinary rerun review owns it: its input validation consults the
     // allowance ledger (empty in this fixture) and refuses out loud, rather

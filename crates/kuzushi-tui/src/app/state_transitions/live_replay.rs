@@ -167,11 +167,9 @@ mod tests {
         let (root, mut app) = replay_of_run(false);
         assert!(app.poll_live_replay(Instant::now()));
         park_reader_at(&mut app, 40);
-        app.workbench_cache().borrow_mut().seed_run_projection_for_test(
-            root.path(),
-            "run-live",
-            Err("unreadable".into()),
-        );
+        app.workbench_cache()
+            .borrow_mut()
+            .seed_run_projection_for_test(root.path(), "run-live", Err("unreadable".into()));
 
         app.follow_live_replay_tail();
 
