@@ -28,6 +28,16 @@ fn finish_generation(app: &mut ShellApp) {
     generation.generated = Some(generated);
 }
 
+impl ShellApp {
+    /// Open a context-generation study whose result has already landed.
+    pub(crate) fn open_finished_context_study_for_test(&mut self) {
+        self.open_batch_scan_config(None);
+        self.open_study_context_picker();
+        self.open_context_generation();
+        finish_generation(self);
+    }
+}
+
 #[test]
 fn a_finished_study_is_set_aside_for_regeneration() {
     let (_root, mut app) = fixture();
