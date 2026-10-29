@@ -15,6 +15,7 @@ use std::path::Path;
 mod dispatcher_control;
 mod dispatcher_results;
 pub(super) mod history_refresh;
+mod live_progress;
 mod observations;
 mod scan_progress;
 
@@ -571,6 +572,7 @@ fn unsupported_platform_kill_dispatcher_process_tree(
 mod tests {
     mod background_history;
     mod history;
+    mod live_refresh;
     use super::*;
     use kuzushi_core::{FindingStore, Severity, V2Config};
 

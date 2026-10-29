@@ -410,6 +410,7 @@ fn large_run_caches_share_a_byte_budget() {
         RunProjectionCache {
             state: Err("cached".to_string()),
             bytes: 6,
+            stale: false,
         },
     );
 
@@ -508,6 +509,7 @@ fn seed_run_caches(cache: &mut WorkbenchCache, target: &Path, run_id: &str) {
         RunProjectionCache {
             state: Err("cached".to_string()),
             bytes: 6,
+            stale: false,
         },
     );
     cache.run_artifact_texts.insert(
@@ -600,4 +602,36 @@ fn project_scope_tree_reads_persisted_scope_map() {
     let state = cache.project_scope_tree(Some(temp.path())).unwrap();
 
     assert!(matches!(state, ProjectScopeTreeState::Persisted(_)));
+}
+
+#[test]
+fn a_stale_run_projection_keeps_serving_until_a_fresh_read_lands() {
+    let mut cache = WorkbenchCache::default();
+    let target = std::path::Path::new("/tmp/live-target");
+    cache.store_run_projection(
+        target.to_path_buf(),
+        "run-1".into(),
+        Err("first read".into()),
+    );
+    let key = ViewHydrationKey::RunProjection {
+        run_id: "run-1".into(),
+    };
+    assert!(!cache.view_hydration_needed(target, &key));
+
+    cache.mark_run_projection_stale(target, "run-1");
+
+    assert!(matches!(
+        cache.cached_run_projection(target, "run-1"),
+        ViewDataState::Ready(Err(ref read)) if read == "first read"
+    ));
+    assert!(cache.view_hydration_needed(target, &key));
+
+    cache.store_run_projection(
+        target.to_path_buf(),
+        "run-1".into(),
+        Err("second read".into()),
+    );
+
+    assert!(!cache.run_projection_is_stale(target, "run-1"));
+    assert!(!cache.view_hydration_needed(target, &key));
 }

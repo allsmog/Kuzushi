@@ -10,6 +10,7 @@ use super::*;
 use kuzushi_core::workflow_attempts::{PhaseAttemptOutcome, PhaseResultAction};
 use kuzushi_core::{V2Config, WorkflowPhase, WorkspaceTarget};
 
+mod frozen_map;
 mod scan_reading;
 
 #[test]

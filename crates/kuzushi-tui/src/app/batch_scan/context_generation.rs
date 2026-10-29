@@ -663,18 +663,40 @@ impl ShellApp {
         let Some(receipt) = &generation.receipt else {
             return InputUpdate::handled();
         };
-        self.retain_setup_context_study();
-        self.retain_lesson_study();
-        if let Some(config) = self.router.campaign().batch_scan_config.clone() {
-            self.retain_dfd_study_return(&config);
-        }
-        self.router.campaign_mut().batch_scan_config = None;
+        self.set_aside_open_study();
         self.open_batch_results(&receipt.campaign_id);
         self.router.answers_mut().focus = crate::app::AnswerFocus::Workspace;
         self.set_input_mode(crate::app::InputMode::Navigate);
         self.clear_notice();
         self.router.campaign_mut().notice = Some(notice);
         InputUpdate::handled()
+    }
+
+    /// Close the open study form while keeping it retrievable, as opening its
+    /// jobs does.
+    fn set_aside_open_study(&mut self) {
+        self.retain_setup_context_study();
+        self.retain_lesson_study();
+        if let Some(config) = self.router.campaign().batch_scan_config.clone() {
+            self.retain_dfd_study_return(&config);
+        }
+        self.router.campaign_mut().batch_scan_config = None;
+    }
+
+    /// A Map study stays open after its result is reviewed. Once its approved
+    /// work has a result, set it aside so a separate regeneration can start.
+    /// A study whose work is unapproved or still running stays open.
+    pub(crate) fn set_aside_finished_study(&mut self) {
+        let finished = self
+            .router
+            .campaign()
+            .batch_scan_config
+            .as_ref()
+            .and_then(|config| config.context_generation.as_ref())
+            .is_some_and(|generation| generation.receipt.is_some() && generation.has_result());
+        if finished && !self.has_running_work() {
+            self.set_aside_open_study();
+        }
     }
 
     pub(super) fn cache_context_generation_result(&mut self, tool: &str, data: &Value) -> bool {

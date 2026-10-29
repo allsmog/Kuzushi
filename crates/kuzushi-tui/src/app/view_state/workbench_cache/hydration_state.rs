@@ -98,9 +98,12 @@ impl WorkbenchCache {
             ViewHydrationKey::RunArtifactText { run_id, leaf } => self
                 .cached_run_artifact_text(target, run_id, leaf)
                 .is_not_requested(),
-            ViewHydrationKey::RunProjection { run_id } => self
-                .cached_run_projection(target, run_id)
-                .is_not_requested(),
+            ViewHydrationKey::RunProjection { run_id } => {
+                self.run_projection_is_stale(target, run_id)
+                    || self
+                        .cached_run_projection(target, run_id)
+                        .is_not_requested()
+            }
             key @ ViewHydrationKey::RunResultDocument { .. } => self
                 .cached_run_result_document(target, key)
                 .is_not_requested(),
@@ -398,7 +401,11 @@ impl WorkbenchCache {
         insert_bounded(
             &mut self.run_projections,
             key.clone(),
-            RunProjectionCache { state, bytes },
+            RunProjectionCache {
+                state,
+                bytes,
+                stale: false,
+            },
             MAX_LARGE_RUN_CACHE_ENTRIES,
         );
         self.trim_large_run_caches(&LargeRunCacheKey::Projection(key));

@@ -417,6 +417,38 @@ impl WorkbenchCache {
         }
     }
 
+    /// Ask for a fresh read of one run's lifecycle while the current read
+    /// keeps serving (used while following a run that is still executing).
+    pub(crate) fn mark_run_projection_stale(&mut self, target: &Path, run_id: &str) {
+        let key = (target.to_path_buf(), run_id.to_string());
+        if let Some(cache) = self.run_projections.get_mut(&key) {
+            cache.stale = true;
+        }
+    }
+
+    /// Whether a settled projection read (current or stale) is cached for the run.
+    pub(crate) fn run_projection_is_ready(&self, target: &Path, run_id: &str) -> bool {
+        self.run_projections
+            .contains_key(&(target.to_path_buf(), run_id.to_string()))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn seed_run_projection_for_test(
+        &mut self,
+        target: &Path,
+        run_id: &str,
+        state: Result<kuzushi_core::run_lifecycle::RunProjectionRead, String>,
+    ) {
+        self.store_run_projection(target.to_path_buf(), run_id.to_string(), state);
+    }
+
+    pub(crate) fn run_projection_is_stale(&self, target: &Path, run_id: &str) -> bool {
+        let key = (target.to_path_buf(), run_id.to_string());
+        self.run_projections
+            .get(&key)
+            .is_some_and(|cache| cache.stale)
+    }
+
     fn mark_run_summary_entries_stale(&mut self) {
         if let Some(cache) = self.run_summary_entries.as_mut() {
             cache.stale = true;

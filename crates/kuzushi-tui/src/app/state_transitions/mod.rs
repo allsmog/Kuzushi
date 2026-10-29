@@ -57,6 +57,7 @@ pub(crate) type DfdReviewOrigin = LinkedFindingsOrigin;
 mod exit_requests;
 mod key_dispatch;
 mod keybinding_types;
+mod live_replay;
 mod logs_reader;
 mod map_scope_keys;
 mod map_text_keys;

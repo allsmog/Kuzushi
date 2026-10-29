@@ -416,3 +416,21 @@ fn history_persists_the_review_counts_accepted_before_its_read_is_admitted() {
     reader.released.store(true, Ordering::Release);
     finish(&mut app);
 }
+
+#[test]
+fn a_live_refresh_reads_in_the_background_and_never_restarts_an_inflight_read() {
+    let (_root, mut app, reader) = controlled_app();
+    app.router.campaign_mut().dispatcher_pid = Some(u32::MAX);
+    let start = Instant::now();
+
+    assert!(app.poll_live_campaign_progress(start));
+    wait_for_history(&mut app, &reader, 1);
+    assert!(app.campaign_history_loading());
+    let later = start + Duration::from_secs(10);
+    assert!(!app.poll_live_campaign_progress(later));
+    assert_eq!(reader.canceled.load(Ordering::Acquire), 0);
+
+    reader.released.store(true, Ordering::Release);
+    finish(&mut app);
+    assert!(app.poll_live_campaign_progress(later));
+}

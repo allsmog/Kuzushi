@@ -10,6 +10,7 @@ mod missing_state;
 mod navigation;
 mod recovery;
 mod scope_correction;
+mod set_aside;
 mod stored_settings;
 mod workflow_proposal;
 
