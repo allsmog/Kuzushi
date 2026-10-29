@@ -31,5 +31,13 @@ libc.workspace = true
 tempfile.workspace = true
 strum = { version = "0.28", features = ["derive"] }
 
+[features]
+# TEMPORARY: exposes the Map gallery widgets to the threat-revisions PoC example.
+threat-revisions-poc = []
+
+[[example]]
+name = "threat_revisions_poc"
+required-features = ["threat-revisions-poc"]
+
 [lints]
 workspace = true

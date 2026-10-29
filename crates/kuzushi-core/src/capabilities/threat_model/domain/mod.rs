@@ -25,6 +25,11 @@ pub(crate) use document_schema::*;
 pub(crate) use dread::*;
 pub(crate) use evidence_anchors::*;
 pub(in crate::capabilities::threat_model) use normalization::*;
+pub use revision_diff::{
+    diff_threat_model_documents, document_threat_count, CoverageComparison, CoverageCounts,
+    DfdElementDiff, ThreatFieldChange, ThreatModelDocumentDiff, ThreatSetDiff, ThreatSummary,
+    UnkeyedThreatCounts,
+};
 pub(crate) use persistence_validation::{
     validate_legacy_threat_model, validate_persisted_threat_model,
 };

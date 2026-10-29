@@ -50,3 +50,7 @@ pub use build_provenance::{
 pub use commands::{parse_command, AskAttachment, AskRequest, ShellCommand};
 pub use kuzushi_core::ScanProgress;
 pub use renderer::{render_app, render_plain_app};
+// TEMPORARY: threat-revisions PoC hook; delete with examples/threat_revisions_poc.rs.
+#[cfg(feature = "threat-revisions-poc")]
+#[doc(hidden)]
+pub use renderer::poc_map_gallery;

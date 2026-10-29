@@ -11,6 +11,8 @@ mod line_page;
 mod render_scene_view;
 mod scene_color;
 mod worklist;
+#[cfg(feature = "threat-revisions-poc")]
+pub mod poc_map_gallery;
 
 pub(in crate::renderer) use diagram::{DfdDiagram, TreeDiagram};
 pub(crate) use entry_points::entry_point_page_scroll;

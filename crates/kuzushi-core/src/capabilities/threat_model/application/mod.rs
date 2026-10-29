@@ -21,7 +21,7 @@ pub(crate) use revision_commit::{
     load_selected_build_threat_model, resolve_build_lineage_selection,
     should_preserve_selected_user_edited_model, BuildRevisionSelection,
 };
-pub(crate) use schema_markdown::*;
+pub use schema_markdown::render_schema_markdown;
 pub(crate) use scope_binding::{bind_scope_ref, root_scope};
 pub use scope_binding::{classify_scope_binding, current_scope_ref_for_path, ScopeBindingStatus};
 pub(crate) use source_bundle::*;

@@ -437,6 +437,9 @@ pub(crate) use update_available::{update_available_model, UpdateAvailableModel};
 pub(crate) use view_status::view_status_segment;
 #[cfg(test)]
 pub(crate) use viz_data::selected_taint_flow_path;
+// TEMPORARY: threat-revisions PoC hook (renderer/views/scene/poc_map_gallery.rs).
+#[cfg(feature = "threat-revisions-poc")]
+pub(crate) use viz_data::dfd_model_from_doc;
 pub(crate) use viz_data::{
     attack_tree, cached_findings_heatmap, cached_findings_heatmap_with_selection,
     cached_risk_by_module, component_stack, dfd_model, dfd_model_is_empty, dfd_overview,

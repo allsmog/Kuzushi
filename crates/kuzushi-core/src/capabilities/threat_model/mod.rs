@@ -25,6 +25,7 @@ pub(crate) use persistence::*;
 pub use adapters::execute_threat_model_tool;
 pub use application::{
     apply_threat_model_patch_revision, classify_scope_binding, current_scope_ref_for_path,
+    render_schema_markdown,
     ScopeBindingStatus, ThreatModelPatchCommit,
 };
 pub use domain::validate_threat_model_import_source;
@@ -37,6 +38,11 @@ pub use domain::{
 pub use domain::{
     context_document_differences, ContextCollectionOrderDifference, ContextDifferenceMatching,
     ContextDifferenceSection, ContextDocumentDiff, ContextSourceClaims, ContextValueDifference,
+};
+pub use domain::{
+    diff_threat_model_documents, document_threat_count, CoverageComparison, CoverageCounts,
+    DfdElementDiff, ThreatFieldChange, ThreatModelDocumentDiff, ThreatSetDiff, ThreatSummary,
+    UnkeyedThreatCounts,
 };
 pub use domain::{security_context_link_report, SecurityContextLinkReport, ThreatModelBuildRoots};
 #[cfg(test)]

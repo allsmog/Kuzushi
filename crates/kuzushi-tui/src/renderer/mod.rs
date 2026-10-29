@@ -33,6 +33,8 @@ pub(crate) use views::setup_detail_scroll;
 pub(crate) use views::summary_page_rows;
 pub(crate) use views::workbench_phase_plan_for_app;
 pub(in crate::renderer) use views::*;
+#[cfg(feature = "threat-revisions-poc")]
+pub use views::poc_map_gallery;
 pub(crate) use views::{activity_output_scroll, ActivityOutputScroll};
 pub(crate) use views::{campaign_reader_scroll, campaign_selection_scroll, coverage_page_rows};
 pub(crate) use views::{cost_max_scroll, cost_page_rows};

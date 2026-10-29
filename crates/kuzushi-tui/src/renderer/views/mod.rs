@@ -65,6 +65,8 @@ mod report;
 mod runs;
 mod scene;
 pub(in crate::renderer) use scene::DfdDiagram;
+#[cfg(feature = "threat-revisions-poc")]
+pub use scene::poc_map_gallery;
 mod system;
 mod threat;
 mod workbench;

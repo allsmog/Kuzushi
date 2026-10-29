@@ -5,7 +5,7 @@ use super::*;
 /// column orders, and the closed enum vocabulary — downstream tooling parses
 /// this file with regex. Sections with no backing data render the heading and
 /// an empty table; nothing is invented.
-pub(crate) fn render_schema_markdown(document: &Value, system_name: &str, target: &str) -> String {
+pub fn render_schema_markdown(document: &Value, system_name: &str, target: &str) -> String {
     let sections = [
         format!("# Threat Model: {system_name}"),
         system_context_section(document, system_name),
