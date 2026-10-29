@@ -49,7 +49,7 @@ impl WorkbenchCache {
         }
         let view = crate::app::view_hydration::repository_index::unavailable_view(
             &failure.target,
-            "repository index read failed",
+            &failure.message("repository index read failed"),
         );
         self.repository_index.store(failure.target.clone(), view);
     }

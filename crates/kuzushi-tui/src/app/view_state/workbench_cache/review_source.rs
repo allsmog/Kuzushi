@@ -7,7 +7,7 @@ impl WorkbenchCache {
             self.store_finding_review_source(
                 failure.target.clone(),
                 failure.key.clone(),
-                Err("Decision source reader failed. Refresh to retry.".into()),
+                Err(failure.message("Decision source reader failed. Refresh to retry.")),
             );
         }
     }

@@ -12,15 +12,60 @@
 //! Every in-process recovery boundary therefore runs its body through
 //! [`catch`], which marks the thread for the body's duration. The marker is
 //! thread-local, so a panic on any other thread is still read as fatal.
+//!
+//! A hook that suppresses its own output then holds the only account of the
+//! failure — the panic's source location is reachable nowhere else — so it
+//! [`record`]s what it saw and [`catch_disclosed`] hands that account to the
+//! boundary, which owes the operator a reason and not just a refusal.
 
 use std::any::Any;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 thread_local! {
     /// How many recovery boundaries this thread is inside. A counter rather
     /// than a flag, so leaving a nested boundary does not clear the outer one.
     static BOUNDARY_DEPTH: Cell<usize> = const { Cell::new(0) };
+    /// What a process panic hook saw about the panic this thread is currently
+    /// unwinding out of a boundary, kept until the boundary reads it.
+    static RECORDED: RefCell<Option<RecoveredPanic>> = const { RefCell::new(None) };
+}
+
+/// What a recovery boundary can tell the operator about a panic it caught.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecoveredPanic {
+    message: String,
+    location: Option<String>,
+}
+
+impl RecoveredPanic {
+    /// The disclosure a caught payload alone supports: its message, and no
+    /// location, because only a process panic hook is given one.
+    pub fn from_payload(payload: &(dyn Any + Send)) -> Self {
+        Self {
+            message: payload_text(payload),
+            location: None,
+        }
+    }
+
+    /// The panic's own message, or a stand-in when its payload is not a string.
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// Where the panic was raised, when a hook recorded it.
+    pub fn location(&self) -> Option<&str> {
+        self.location.as_deref()
+    }
+}
+
+impl std::fmt::Display for RecoveredPanic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.location {
+            Some(location) => write!(f, "panicked: {} at {location}", self.message),
+            None => write!(f, "panicked: {}", self.message),
+        }
+    }
 }
 
 /// `true` while this thread is inside a [`catch`] body — that is, while a
@@ -41,6 +86,53 @@ pub fn in_boundary() -> bool {
 pub fn catch<T>(body: impl FnOnce() -> T) -> Result<T, Box<dyn Any + Send>> {
     let _boundary = Boundary::enter();
     catch_unwind(AssertUnwindSafe(body))
+}
+
+/// Run `body` as [`catch`] does, naming a recovered panic the way the operator
+/// needs to read it: the hook's account when one was recorded, the payload
+/// alone otherwise.
+pub fn catch_disclosed<T>(body: impl FnOnce() -> T) -> Result<T, RecoveredPanic> {
+    // An account a hook recorded for an earlier panic that no boundary read
+    // must not be mistaken for this body's.
+    let _stale = take_recorded();
+    catch(body).map_err(|payload| {
+        take_recorded().unwrap_or_else(|| RecoveredPanic::from_payload(&*payload))
+    })
+}
+
+/// Record what a process panic hook saw, for the boundary about to recover
+/// this panic to disclose. A hook that leaves its message to the boundary owes
+/// this call.
+///
+/// Ignored outside a boundary: that panic is fatal, and the hook discloses it
+/// itself.
+pub fn record(payload: &(dyn Any + Send), location: Option<String>) {
+    if !in_boundary() {
+        return;
+    }
+    let disclosure = RecoveredPanic {
+        message: payload_text(payload),
+        location,
+    };
+    let _ = RECORDED.try_with(|slot| slot.replace(Some(disclosure)));
+}
+
+/// Takes this thread's recorded account, leaving the slot empty so one account
+/// is never read for two panics.
+fn take_recorded() -> Option<RecoveredPanic> {
+    RECORDED.try_with(RefCell::take).unwrap_or(None)
+}
+
+/// `std` puts a `&str` or a `String` in the payload of every `panic!`; any
+/// other payload carries no readable message.
+fn payload_text(payload: &(dyn Any + Send)) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        return (*message).to_string();
+    }
+    if let Some(message) = payload.downcast_ref::<String>() {
+        return message.clone();
+    }
+    "non-string panic payload".to_string()
 }
 
 /// Marks the thread for as long as it is held, including while a panic unwinds
@@ -102,6 +194,57 @@ mod tests {
 
         assert!(outer_still_live);
         assert!(!in_boundary());
+    }
+
+    #[test]
+    fn a_recovered_panic_without_a_hook_still_names_its_payload() {
+        let disclosure = catch_disclosed(|| panic!("probe")).unwrap_err();
+
+        assert_eq!(disclosure.message(), "probe");
+        assert_eq!(disclosure.location(), None);
+        assert_eq!(disclosure.to_string(), "panicked: probe");
+    }
+
+    #[test]
+    fn a_hooks_account_is_preferred_over_the_payload() {
+        let disclosure = catch_disclosed(|| {
+            record(&"from the hook", Some("reader.rs:12".to_string()));
+            panic!("payload")
+        })
+        .unwrap_err();
+
+        assert_eq!(disclosure.message(), "from the hook");
+        assert_eq!(disclosure.location(), Some("reader.rs:12"));
+        assert_eq!(
+            disclosure.to_string(),
+            "panicked: from the hook at reader.rs:12"
+        );
+    }
+
+    #[test]
+    fn an_unread_account_does_not_explain_the_next_panic() {
+        catch(|| record(&"stale", Some("stale.rs:1".to_string()))).unwrap();
+
+        let disclosure = catch_disclosed(|| panic!("fresh")).unwrap_err();
+
+        assert_eq!(disclosure.message(), "fresh");
+        assert_eq!(disclosure.location(), None);
+    }
+
+    #[test]
+    fn an_account_recorded_outside_a_boundary_is_dropped() {
+        record(&"fatal", Some("fatal.rs:1".to_string()));
+
+        let disclosure = catch_disclosed(|| panic!("recovered")).unwrap_err();
+
+        assert_eq!(disclosure.message(), "recovered");
+    }
+
+    #[test]
+    fn a_non_string_payload_is_named_as_one() {
+        let disclosure = catch_disclosed(|| std::panic::panic_any(7u8)).unwrap_err();
+
+        assert_eq!(disclosure.message(), "non-string panic payload");
     }
 
     #[test]

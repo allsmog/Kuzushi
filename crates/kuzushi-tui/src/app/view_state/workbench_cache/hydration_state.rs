@@ -38,14 +38,17 @@ impl WorkbenchCache {
                 self.store_run_request_context(
                     failure.target.clone(),
                     run_id.clone(),
-                    Err("Request context read failed. r refreshes without starting work.".into()),
+                    Err(failure.message(
+                        "Request context read failed. r refreshes without starting work.",
+                    )),
                 );
             }
             if matches!(failure.key, ViewHydrationKey::RunResultDocument { .. }) {
                 self.run_result_document = Some((
                     failure.target.clone(),
                     failure.key.clone(),
-                    Err("Saved output read failed. Reopen replay to retry this read.".into()),
+                    Err(failure
+                        .message("Saved output read failed. Reopen replay to retry this read.")),
                 ));
             }
         }
@@ -72,7 +75,7 @@ impl WorkbenchCache {
         if !is_report_hydration_key(&failure.key) {
             return;
         }
-        let error = "Report read failed. Press r to refresh.".to_string();
+        let error = failure.message("Report read failed. Press r to refresh.");
         let target = failure.target.clone();
         let key = failure.key.clone();
         if matches!(key, ViewHydrationKey::WorkspaceReportReview { .. }) {

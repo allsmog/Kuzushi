@@ -273,10 +273,10 @@ fn failed_study_reader_replaces_previous_content_and_requires_explicit_retry() {
     );
     app.open_report_from_current_origin();
     assert!(report_is_refreshing(&app));
-    let failure = crate::app::ViewHydrationFailure {
-        target: root.path().into(),
-        key: app.report_hydration_key(),
-    };
+    let failure = crate::app::ViewHydrationFailure::unexplained(
+        root.path().into(),
+        app.report_hydration_key(),
+    );
     app.workbench_cache()
         .borrow_mut()
         .clear_failed_view_hydrations(&[failure]);

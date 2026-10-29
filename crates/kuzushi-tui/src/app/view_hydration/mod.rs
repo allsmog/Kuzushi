@@ -436,6 +436,57 @@ pub(crate) struct ViewHydrationResult {
 pub(crate) struct ViewHydrationFailure {
     pub(crate) target: PathBuf,
     pub(crate) key: ViewHydrationKey,
+    /// Why the read failed, when a recovery boundary caught a panic and could
+    /// name it. `None` when the read returned nothing or was canceled: there
+    /// is no cause to disclose beyond the surface's own guidance.
+    reason: Option<String>,
+}
+
+/// A panic message is arbitrary text from the panicking code. One pane line is
+/// as much of it as a reader can use, and the surface's own guidance has to fit
+/// beside it.
+const MAX_FAILURE_REASON_CHARS: usize = 160;
+
+impl ViewHydrationFailure {
+    /// A read with no cause to name beyond the surface's own guidance.
+    pub(crate) fn unexplained(target: PathBuf, key: ViewHydrationKey) -> Self {
+        Self {
+            target,
+            key,
+            reason: None,
+        }
+    }
+
+    /// A read a recovery boundary caught panicking, carrying that panic so the
+    /// surface can say why its data is missing.
+    pub(crate) fn panicked(
+        target: PathBuf,
+        key: ViewHydrationKey,
+        panic: &kuzushi_core::recovered_panic::RecoveredPanic,
+    ) -> Self {
+        Self {
+            target,
+            key,
+            reason: Some(clipped_reason(&panic.to_string())),
+        }
+    }
+
+    /// The operator-facing sentence for this failure: the surface's own
+    /// guidance, plus the recovered panic when one explains it.
+    pub(crate) fn message(&self, guidance: &str) -> String {
+        match &self.reason {
+            Some(reason) => format!("{guidance} ({reason})"),
+            None => guidance.to_string(),
+        }
+    }
+}
+
+fn clipped_reason(reason: &str) -> String {
+    if reason.chars().count() <= MAX_FAILURE_REASON_CHARS {
+        return reason.to_string();
+    }
+    let kept: String = reason.chars().take(MAX_FAILURE_REASON_CHARS).collect();
+    format!("{kept}…")
 }
 
 #[derive(Debug, Default)]
