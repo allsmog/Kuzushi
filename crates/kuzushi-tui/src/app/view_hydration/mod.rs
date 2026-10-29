@@ -467,7 +467,7 @@ impl ViewHydrationFailure {
         Self {
             target,
             key,
-            reason: Some(clipped_reason(&panic.to_string())),
+            reason: Some(panic_reason(panic)),
         }
     }
 
@@ -478,6 +478,17 @@ impl ViewHydrationFailure {
             Some(reason) => format!("{guidance} ({reason})"),
             None => guidance.to_string(),
         }
+    }
+}
+
+/// Only the message is clipped: the location is the one fact only the panic
+/// hook could capture, so it rides after the clipped message rather than
+/// being the first thing a long message pushes out of the budget.
+fn panic_reason(panic: &kuzushi_core::recovered_panic::RecoveredPanic) -> String {
+    let message = clipped_reason(panic.message());
+    match panic.location() {
+        Some(location) => format!("panicked: {message} at {location}"),
+        None => format!("panicked: {message}"),
     }
 }
 

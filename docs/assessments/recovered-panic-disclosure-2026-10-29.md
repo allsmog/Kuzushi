@@ -76,8 +76,15 @@ are combined, and the nine recorders call it instead of their fixed strings. A
 rebuilding it on receipt, and a hydration worker thread that panics outside
 `caught_read` reports the message its join payload carries.
 
-A panic message is arbitrary text from the panicking code, so the reason is
-clipped to 160 characters before it reaches a pane.
+A panic message is arbitrary text from the panicking code, so the message is
+clipped to 160 characters before it reaches a pane; the location is appended
+after the clipped message, so a long message never pushes it out.
+
+The recorded account is only the last panic the hook saw on the thread, so
+`catch_disclosed` uses it only when its message matches the caught payload's.
+A panic caught during the unwind, or a payload re-raised with `resume_unwind`
+(which skips the hook), otherwise discloses the payload's own message with no
+location rather than another panic's.
 
 ## What is not claimed
 

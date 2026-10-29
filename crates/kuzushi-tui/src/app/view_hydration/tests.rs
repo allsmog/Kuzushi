@@ -772,6 +772,29 @@ fn a_long_panic_message_is_clipped_to_one_readable_reason() {
     assert!(message.chars().count() < 240, "{}", message.chars().count());
 }
 
+/// A long message — an `expect` quoting a serde error on a malformed artifact —
+/// must not clip away where the panic was raised.
+#[test]
+fn a_long_panic_message_keeps_its_location_after_clipping() {
+    let long_message = "y".repeat(600);
+    let panic = kuzushi_core::recovered_panic::catch_disclosed(|| {
+        kuzushi_core::recovered_panic::record(&long_message, Some("reader.rs:42:9".to_string()));
+        std::panic::resume_unwind(Box::new(long_message.clone()))
+    })
+    .unwrap_err();
+    assert_eq!(panic.location(), Some("reader.rs:42:9"));
+
+    let failure = ViewHydrationFailure::panicked(
+        PathBuf::from("/target"),
+        ViewHydrationKey::RepositoryIndex,
+        &panic,
+    );
+    let message = failure.message("Report read failed.");
+
+    assert!(message.ends_with("… at reader.rs:42:9)"), "{message}");
+    assert!(message.chars().count() < 240, "{}", message.chars().count());
+}
+
 #[derive(Debug, Default)]
 struct LongPanicReader;
 

@@ -89,15 +89,29 @@ pub fn catch<T>(body: impl FnOnce() -> T) -> Result<T, Box<dyn Any + Send>> {
 }
 
 /// Run `body` as [`catch`] does, naming a recovered panic the way the operator
-/// needs to read it: the hook's account when one was recorded, the payload
-/// alone otherwise.
+/// needs to read it: the hook's account when one was recorded for this
+/// panic, the payload alone otherwise.
 pub fn catch_disclosed<T>(body: impl FnOnce() -> T) -> Result<T, RecoveredPanic> {
     // An account a hook recorded for an earlier panic that no boundary read
     // must not be mistaken for this body's.
     let _stale = take_recorded();
-    catch(body).map_err(|payload| {
-        take_recorded().unwrap_or_else(|| RecoveredPanic::from_payload(&*payload))
-    })
+    catch(body).map_err(|payload| disclose_caught(&*payload, take_recorded()))
+}
+
+/// The recorded account is only the last panic the hook saw on this thread —
+/// a panic raised and caught while this one unwound, or a payload re-raised
+/// with `resume_unwind`, which skips the hook, leaves an account of some other
+/// panic. It is used only when it describes the caught payload; otherwise the
+/// payload alone is disclosed, without a location borrowed from another panic.
+fn disclose_caught(
+    payload: &(dyn Any + Send),
+    recorded: Option<RecoveredPanic>,
+) -> RecoveredPanic {
+    let caught = RecoveredPanic::from_payload(payload);
+    match recorded {
+        Some(account) if account.message == caught.message => account,
+        _ => caught,
+    }
 }
 
 /// Record what a process panic hook saw, for the boundary about to recover
@@ -208,17 +222,52 @@ mod tests {
     #[test]
     fn a_hooks_account_is_preferred_over_the_payload() {
         let disclosure = catch_disclosed(|| {
-            record(&"from the hook", Some("reader.rs:12".to_string()));
+            record(&"payload", Some("reader.rs:12".to_string()));
             panic!("payload")
         })
         .unwrap_err();
 
-        assert_eq!(disclosure.message(), "from the hook");
+        assert_eq!(disclosure.message(), "payload");
         assert_eq!(disclosure.location(), Some("reader.rs:12"));
-        assert_eq!(
-            disclosure.to_string(),
-            "panicked: from the hook at reader.rs:12"
-        );
+        assert_eq!(disclosure.to_string(), "panicked: payload at reader.rs:12");
+    }
+
+    #[test]
+    fn an_account_of_another_panic_does_not_explain_the_caught_one() {
+        let disclosure = catch_disclosed(|| {
+            record(&"inner", Some("inner.rs:7".to_string()));
+            panic!("outer")
+        })
+        .unwrap_err();
+
+        assert_eq!(disclosure.message(), "outer");
+        assert_eq!(disclosure.location(), None);
+    }
+
+    /// Panics while its owner unwinds, the way a cleanup step guarded by its
+    /// own `catch` might — and records that inner panic as a hook would.
+    struct PanickingCleanup;
+
+    impl Drop for PanickingCleanup {
+        fn drop(&mut self) {
+            let _ = catch(|| {
+                record(&"cleanup", Some("cleanup.rs:3".to_string()));
+                std::panic::resume_unwind(Box::new("cleanup"))
+            });
+        }
+    }
+
+    #[test]
+    fn a_panic_caught_during_unwind_does_not_lend_its_account_to_the_outer_one() {
+        let disclosure = catch_disclosed(|| {
+            let _cleanup = PanickingCleanup;
+            record(&"outer", Some("outer.rs:1".to_string()));
+            std::panic::resume_unwind(Box::new("outer"))
+        })
+        .unwrap_err();
+
+        assert_eq!(disclosure.message(), "outer");
+        assert_eq!(disclosure.location(), None);
     }
 
     #[test]
