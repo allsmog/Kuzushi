@@ -406,3 +406,49 @@ fn a_new_target_without_a_ledger_keeps_its_honest_empty_state() {
         assert_eq!(app.domain().finding_ledger_counts().unwrap().total, 0);
     }
 }
+
+/// `restore_linked_findings` defers a passive refresh without consulting
+/// `can_defer_findings_refresh`, so a deferral can reach a shell with no
+/// active target. There is no target-scoped ledger to read then, and nothing
+/// failed either — so the slot stays empty and no read failure is recorded.
+#[test]
+fn a_passive_deferral_without_a_target_reads_nothing_and_records_no_failure() {
+    let (_root, mut app) = fixture();
+    app.set_target(None);
+
+    app.defer_findings_refresh(
+        FindingsRefresh {
+            announce: false,
+            filter: None,
+        },
+        Vec::new(),
+    );
+
+    assert!(app.runtime_state.findings_refresh.pending.is_none());
+    assert!(app.findings_read_feedback().is_none());
+    assert!(!app
+        .log_lines()
+        .iter()
+        .any(|line| line.prefix == "error" && line.body.contains("No target is active")));
+}
+
+/// An operator who asked for the refresh is told why nothing was read.
+#[test]
+fn an_announced_deferral_without_a_target_names_the_missing_target() {
+    let (_root, mut app) = fixture();
+    app.set_target(None);
+
+    app.defer_findings_refresh(
+        FindingsRefresh {
+            announce: true,
+            filter: None,
+        },
+        Vec::new(),
+    );
+
+    assert!(app.runtime_state.findings_refresh.pending.is_none());
+    assert!(app
+        .log_lines()
+        .iter()
+        .any(|line| line.prefix == "error" && line.body.contains("No target is active")));
+}

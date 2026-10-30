@@ -80,6 +80,20 @@ impl ShellApp {
         refresh: FindingsRefresh,
         continuation: Vec<ShellEffect>,
     ) {
+        // A findings read is target-scoped, so a deferral without one has
+        // nothing to read — and nothing to report as failed either, which is
+        // why this does not record a read failure. `restore_linked_findings`
+        // defers without the `can_defer_findings_refresh` guard, so this is
+        // reachable; only an operator-initiated refresh is worth naming.
+        let Some(target) = self.target_owned() else {
+            if refresh.announce {
+                self.log_refresh_findings_error(
+                    anyhow::anyhow!("No target is active. Open a target, then refresh findings."),
+                    true,
+                );
+            }
+            return;
+        };
         if refresh.announce {
             self.reset_findings_page_request();
         }
@@ -94,7 +108,8 @@ impl ShellApp {
         self.runtime_state.findings_refresh.next_id =
             self.runtime_state.findings_refresh.next_id.wrapping_add(1);
         let id = self.runtime_state.findings_refresh.next_id;
-        let pending = self.pending_findings_refresh(id, operator, refresh, continuation, carried);
+        let pending =
+            self.pending_findings_refresh(id, target, operator, refresh, continuation, carried);
         self.runtime_state.findings_refresh.pending = Some(pending);
         self.runtime_state.requested_findings_page = None;
         self.runtime_state.findings_refresh.failed_target = None;
@@ -146,6 +161,7 @@ impl ShellApp {
     fn pending_findings_refresh(
         &self,
         id: u64,
+        target: PathBuf,
         operator: PathBuf,
         refresh: FindingsRefresh,
         continuation: Vec<ShellEffect>,
@@ -160,9 +176,7 @@ impl ShellApp {
                     .or_else(|| self.active_findings_filter().clone())
             });
         let pending = PendingFindingsRefresh {
-            target: self
-                .target_owned()
-                .expect("explicit target checked before deferral"),
+            target,
             request: self.findings_read_request(id, operator, filter),
             prior_filter: self.active_findings_filter().clone(),
             prior_watermark: self.findings_read_watermark(),
@@ -206,12 +220,9 @@ impl ShellApp {
             .runtime_state
             .schedule_view_hydration(target, vec![key])
             .is_empty();
-        self.runtime_state
-            .findings_refresh
-            .pending
-            .as_mut()
-            .unwrap()
-            .scheduled = scheduled;
+        if let Some(pending) = self.runtime_state.findings_refresh.pending.as_mut() {
+            pending.scheduled = scheduled;
+        }
         scheduled
     }
 
@@ -283,13 +294,13 @@ impl ShellApp {
         request: &FindingsReadRequest,
         value: Result<FindingsReadSnapshot, FindingsReadFailure>,
     ) {
-        let Some(pending) = &self.runtime_state.findings_refresh.pending else {
+        let Some(pending) = self.runtime_state.findings_refresh.pending.take() else {
             return;
         };
         if pending.request != *request || pending.target != target {
+            self.runtime_state.findings_refresh.pending = Some(pending);
             return;
         }
-        let pending = self.runtime_state.findings_refresh.pending.take().unwrap();
         if !self.findings_refresh_request_is_current(&pending) {
             return;
         }

@@ -176,26 +176,26 @@ impl ShellApp {
     fn handle_relationship_note_key(&mut self, key: KeyEvent) -> state_transitions::InputUpdate {
         match key.code {
             KeyCode::Esc => self.router.relationships.note = None,
-            KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => self
-                .router
-                .relationships
-                .note
-                .as_mut()
-                .unwrap()
-                .field
-                .insert("\n"),
-            KeyCode::Enter => self.submit_relationship_note(),
-            _ => {
-                self.router
-                    .relationships
-                    .note
-                    .as_mut()
-                    .unwrap()
-                    .field
-                    .handle_key(key);
+            KeyCode::Enter if !key.modifiers.contains(KeyModifiers::SHIFT) => {
+                self.submit_relationship_note()
             }
+            _ => self.edit_relationship_note(key),
         }
         state_transitions::InputUpdate::handled()
+    }
+
+    /// Shift+Enter opens a line; every other key edits the field. A note that
+    /// is no longer open has nothing to edit, so the keystroke is dropped
+    /// rather than panicking in a reducer that owns the live terminal.
+    fn edit_relationship_note(&mut self, key: KeyEvent) {
+        let Some(note) = self.router.relationships.note.as_mut() else {
+            return;
+        };
+        if key.code == KeyCode::Enter {
+            note.field.insert("\n");
+        } else {
+            note.field.handle_key(key);
+        }
     }
 
     pub(crate) fn paste_relationship_note(&mut self, text: &str) -> bool {
