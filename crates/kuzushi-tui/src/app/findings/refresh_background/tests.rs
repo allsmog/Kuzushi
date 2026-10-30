@@ -432,11 +432,20 @@ fn a_passive_deferral_without_a_target_reads_nothing_and_records_no_failure() {
         .any(|line| line.prefix == "error" && line.body.contains("No target is active")));
 }
 
-/// An operator who asked for the refresh is told why nothing was read.
+/// An operator who asked for the refresh is told why nothing was read, without
+/// that explanation being recorded as a read failure that clears receipt waits
+/// or the active campaign batch projection.
 #[test]
 fn an_announced_deferral_without_a_target_names_the_missing_target() {
-    let (_root, mut app) = fixture();
+    let (root, mut app) = fixture();
     app.set_target(None);
+    let retained = root.path().to_path_buf();
+    app.runtime_state.findings_refresh.waiting_target = Some(retained.clone());
+    app.runtime_state.findings_refresh.receipt_recovery_target = Some(retained.clone());
+    let deck = app.router.campaign_mut();
+    deck.active_batch_id = Some("retained-study".into());
+    deck.active_batch_observation_fingerprints
+        .insert("retained-fingerprint".into());
 
     app.defer_findings_refresh(
         FindingsRefresh {
@@ -451,4 +460,13 @@ fn an_announced_deferral_without_a_target_names_the_missing_target() {
         .log_lines()
         .iter()
         .any(|line| line.prefix == "error" && line.body.contains("No target is active")));
+    let refresh = &app.runtime_state.findings_refresh;
+    assert!(refresh.failed_target.is_none());
+    assert_eq!(refresh.waiting_target.as_ref(), Some(&retained));
+    assert_eq!(refresh.receipt_recovery_target.as_ref(), Some(&retained));
+    let deck = app.router.campaign();
+    assert_eq!(deck.active_batch_id.as_deref(), Some("retained-study"));
+    assert!(deck
+        .active_batch_observation_fingerprints
+        .contains("retained-fingerprint"));
 }

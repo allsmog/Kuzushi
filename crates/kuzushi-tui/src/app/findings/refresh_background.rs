@@ -83,13 +83,18 @@ impl ShellApp {
         // A findings read is target-scoped, so a deferral without one has
         // nothing to read — and nothing to report as failed either, which is
         // why this does not record a read failure. `restore_linked_findings`
-        // defers without the `can_defer_findings_refresh` guard, so this is
-        // reachable; only an operator-initiated refresh is worth naming.
+        // defers without the `can_defer_findings_refresh` guard; its current
+        // production callers establish a target first, so this is a defensive
+        // boundary proven by direct-call tests rather than an observed crash.
+        // Only an operator-initiated refresh is worth naming.
         let Some(target) = self.target_owned() else {
             if refresh.announce {
-                self.log_refresh_findings_error(
-                    anyhow::anyhow!("No target is active. Open a target, then refresh findings."),
-                    true,
+                self.log(
+                    "error",
+                    with_next_step(
+                        "No target is active. Open a target, then refresh findings.".to_string(),
+                        "findings refresh or workspace status",
+                    ),
                 );
             }
             return;

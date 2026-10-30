@@ -560,6 +560,23 @@ mod tests {
         );
     }
 
+    /// The exclusion match is a string prefix, so a directory entry without
+    /// its trailing `/` would silently exempt a sibling file of the same stem.
+    /// An entry ends in `/` exactly when it names a directory.
+    #[test]
+    fn every_excluded_panic_scan_directory_ends_with_a_slash() {
+        let mismatched: Vec<&&str> = PANIC_SCAN_EXCLUDED_DIRS
+            .iter()
+            .filter(|excluded| src_root().join(excluded).is_dir() != excluded.ends_with('/'))
+            .collect();
+        assert!(
+            mismatched.is_empty(),
+            "PANIC_SCAN_EXCLUDED_DIRS entries must end in `/` exactly when they \
+             name a directory, or the prefix match exempts sibling files: \
+             {mismatched:?}"
+        );
+    }
+
     #[test]
     fn pane_facing_code_stays_free_of_unaudited_panic_sites() {
         let patterns = panic_patterns();

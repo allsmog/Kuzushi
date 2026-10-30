@@ -15,8 +15,9 @@ reachable from on-disk data — `app/view_hydration`, which parses
 workbench cache. Naming subtrees one at a time also meant a new subtree
 joined the scan the day someone remembered it, not the day it was added.
 
-Scanning the whole tree found one reachable panic and one silent exemption
-hazard, described below.
+Scanning the whole tree found one latent panic (reachable by direct
+invocation, guarded by every current production caller) and one silent
+exemption hazard, described below.
 
 ## Ranked, and why this one
 
@@ -24,7 +25,7 @@ Ten candidates were weighed from this tree (CI green on `main`, no open
 PRs, no `TODO`/`FIXME` in Rust, `pnpm verify:quick:summary` `"ok": true`
 on `d86f59a`):
 
-1. **This change.** A reachable reducer panic plus 34 subtrees and 43
+1. **This change.** A latent reducer panic plus 34 subtrees and 43
    modules of coverage that was already earned and not locked in.
 2. `app/effect_runtime.rs` — twelve `unreachable!` arms that fire when the
    category router and one of its sub-matches drift. Routing a stray effect
@@ -52,11 +53,11 @@ on `d86f59a`):
 10. Issue #172 (TUI operator-experience audit) and #85 (AI-triage
     governance policy) remain open and are larger than one PR.
 
-(1) ranked first because it is the only candidate that both fixes a
-reachable operator-visible crash and prevents the same class from
+(1) ranked first because it is the only candidate that both closes a
+latent operator-visible crash and prevents the same class from
 reappearing across 34 subtrees, in under 400 diff lines.
 
-## The reachable panic
+## The latent panic
 
 `defer_findings_refresh` built its pending read with
 
@@ -68,9 +69,13 @@ Two of its three callers do check. `EffectRuntime` gates on
 `can_defer_findings_refresh`, which requires `target().is_some()`.
 `restore_linked_findings`
 (`app/state_transitions/linked_findings.rs:84`) does not: it restores a
-saved navigation origin and defers a passive refresh unconditionally. With
-no active target — the state `Esc` on the target picker leaves the shell in
-— that `expect` fired in a reducer that owns the terminal.
+saved navigation origin and defers a passive refresh without that guard.
+Every current production chain into it (`linked_findings_origin_matches`,
+`dfd_review_origin_matches`, `belongs_to_target`) establishes the target
+first, so no crash was observed; a direct invocation with no active target
+— the state `Esc` on the target picker leaves the shell in — proves by test
+that the `expect` was reachable, in a reducer that owns the terminal. The
+early return below is a defensive boundary against a future caller.
 
 A findings read is target-scoped, so a deferral without one has nothing to
 read, and nothing failed either. It now returns early without recording a
@@ -96,8 +101,9 @@ relative to `src/`. A bare `app/relationships` entry therefore also exempts
 the sibling module `app/relationships.rs` — a file that is scanned, and
 whose name eight of these subtrees share with a loose module. The first
 draft of this change hid the two sites above exactly that way. Every
-directory entry now ends in `/`, and the reason is recorded beside the
-constant.
+directory entry now ends in `/`; the reason is recorded beside the
+constant, and `every_excluded_panic_scan_directory_ends_with_a_slash`
+fails any entry whose trailing `/` disagrees with what the path names.
 
 ## Coverage
 
@@ -129,8 +135,9 @@ new tests in `app/findings/refresh_background/tests.rs` panic with
 
 On this tree:
 
-- `cargo test -p kuzushi-tui --lib boundary_lints` — 11 passed / 0 failed,
-  including the widened scan and the new exclusion-freshness test. Appending
+- `cargo test -p kuzushi-tui --lib boundary_lints` — 12 passed / 0 failed,
+  including the widened scan, the new exclusion-freshness test, and the
+  trailing-slash shape test. Appending
   a throwaway `unwrap` to `app/jobs/mod.rs`, a newly covered subtree, fails
   it; the entry was removed again.
 - `cargo test -p kuzushi-tui --lib refresh_background` — 24 passed / 0
