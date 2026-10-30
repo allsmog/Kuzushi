@@ -49,7 +49,7 @@ impl WorkbenchCache {
                 failure.target.clone(),
                 failure.key.clone(),
                 ViewHydrationValue::ScanStudyProgress(Err(
-                    "Study queue unavailable; retrying this read.".into(),
+                    failure.message("Study queue unavailable; retrying this read.")
                 )),
             );
         }

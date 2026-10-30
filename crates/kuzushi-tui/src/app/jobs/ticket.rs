@@ -252,18 +252,8 @@ where
 fn worker_panic_message(worker_label: &str, payload: Box<dyn Any + Send>) -> String {
     format!(
         "{worker_label} worker panicked: {}",
-        panic_payload_text(&*payload)
+        kuzushi_core::recovered_panic::RecoveredPanic::from_payload(&*payload).message()
     )
-}
-
-fn panic_payload_text(payload: &(dyn Any + Send)) -> String {
-    if let Some(message) = payload.downcast_ref::<&str>() {
-        return (*message).to_string();
-    }
-    if let Some(message) = payload.downcast_ref::<String>() {
-        return message.clone();
-    }
-    "non-string panic payload".to_string()
 }
 
 fn notify_terminal_loop(wake: &Option<TerminalLoopWake>) {

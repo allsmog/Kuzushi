@@ -70,7 +70,8 @@ enum PanicDisclosure {
     RestoreAndChain,
     /// Recovered under a live terminal. The frame is the only output surface
     /// here, and the recovering boundary reports the failure through the
-    /// shell's own surfaces, so the hook leaves both alone.
+    /// shell's own surfaces, so the hook leaves both alone — after handing
+    /// that boundary its account of the panic.
     LeaveToBoundary,
     /// Recovered with no terminal of ours engaged (headless, plain, scripted),
     /// where stderr is still the honest place for the message.
@@ -97,8 +98,11 @@ pub(crate) fn install_terminal_panic_hook() {
                 kuzushi_core::recovered_panic::in_boundary(),
                 terminal_guard_active(),
             ) {
-                PanicDisclosure::LeaveToBoundary => {}
-                PanicDisclosure::ChainOnly => previous(info),
+                PanicDisclosure::LeaveToBoundary => record_for_boundary(info),
+                PanicDisclosure::ChainOnly => {
+                    record_for_boundary(info);
+                    previous(info);
+                }
                 PanicDisclosure::RestoreAndChain => {
                     if take_terminal_guard() {
                         rollback_terminal_mode();
@@ -108,6 +112,13 @@ pub(crate) fn install_terminal_panic_hook() {
             }
         }));
     });
+}
+
+/// Hands the recovering boundary what only the hook is given: the panic's
+/// payload and the source location it was raised at. Without this the
+/// boundary can disclose that a read failed but never why.
+fn record_for_boundary(info: &std::panic::PanicHookInfo<'_>) {
+    kuzushi_core::recovered_panic::record(info.payload(), info.location().map(ToString::to_string));
 }
 
 #[cfg(test)]

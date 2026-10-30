@@ -59,7 +59,7 @@ impl WorkbenchCache {
                 failure.target.clone(),
                 failure.key.clone(),
                 ViewHydrationValue::InvestigationAllowance(Err(
-                    "Investigation allowance read failed; retrying this read.".into(),
+                    failure.message("Investigation allowance read failed; retrying this read.")
                 )),
             );
         }

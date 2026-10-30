@@ -2,7 +2,7 @@ use super::*;
 
 impl WorkbenchCache {
     pub(super) fn record_failed_study_usage(&mut self, failure: &ViewHydrationFailure) {
-        let error = "Usage reader failed. Refresh to retry.".to_string();
+        let error = failure.message("Usage reader failed. Refresh to retry.");
         let value = match &failure.key {
             ViewHydrationKey::StudyHistory => ViewHydrationValue::StudyHistory(Err(error)),
             ViewHydrationKey::StudyUsageCatalogue => {
@@ -10,9 +10,8 @@ impl WorkbenchCache {
             }
             ViewHydrationKey::StudyUsageRun { .. } => ViewHydrationValue::StudyUsageRun(Err(error)),
             ViewHydrationKey::ContextMatrixReport { .. } => {
-                ViewHydrationValue::ContextMatrixReport(Err(
-                    "Matrix reader failed. r refreshes results without starting work.".into(),
-                ))
+                ViewHydrationValue::ContextMatrixReport(Err(failure
+                    .message("Matrix reader failed. r refreshes results without starting work.")))
             }
             _ => return,
         };

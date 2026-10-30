@@ -66,10 +66,10 @@ fn failed_index_read_preserves_an_explicit_unavailable_state_and_draft() {
     app.set_input("held index inspection");
     app.apply_view_hydration_drain(ViewHydrationDrain {
         results: vec![],
-        failures: vec![ViewHydrationFailure {
-            target: workspace.root().to_path_buf(),
-            key: ViewHydrationKey::RepositoryIndex,
-        }],
+        failures: vec![ViewHydrationFailure::unexplained(
+            workspace.root().to_path_buf(),
+            ViewHydrationKey::RepositoryIndex,
+        )],
     });
     assert_eq!(
         crate::ui_view_models::context_snapshot_state(&app),

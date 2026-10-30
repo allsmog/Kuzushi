@@ -44,10 +44,10 @@ fn allowance_refresh_is_bounded_and_keeps_previous_read_until_new_result() {
         cache.cached_investigation_allowance(target, &key("run")),
         ViewDataState::Ready(Ok(None))
     ));
-    cache.clear_failed_view_hydrations(&[ViewHydrationFailure {
-        target: target.into(),
-        key: key("run"),
-    }]);
+    cache.clear_failed_view_hydrations(&[ViewHydrationFailure::unexplained(
+        target.into(),
+        key("run"),
+    )]);
     assert!(matches!(
         cache.cached_investigation_allowance(target, &key("run")),
         ViewDataState::Ready(Err(_))

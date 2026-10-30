@@ -715,6 +715,95 @@ fn reader_panic_clears_in_flight_key_for_retry() {
     assert_eq!(schedule_latest(&mut runtime, temp.path()).len(), 1);
 }
 
+/// A panicking reader is the case the recovery boundary exists for, and it is
+/// reachable from a malformed `.kuzushi` artifact. The surface that loses its
+/// data has to be able to say why, so the failure carries the panic the
+/// boundary caught — never the bare guidance a canceled read gets.
+#[test]
+fn a_panicking_reader_names_its_panic_in_the_failure() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut runtime = ViewHydrationRuntime::default();
+    runtime.set_reader(Arc::new(PanicReader));
+    schedule_latest(&mut runtime, temp.path());
+    wait_until(|| runtime.workers_finished());
+
+    let failures = runtime.drain_current().failures;
+    let [failure] = failures.as_slice() else {
+        panic!("one failed read: {failures:?}");
+    };
+    let message = failure.message("Report read failed.");
+
+    assert!(message.starts_with("Report read failed. ("), "{message}");
+    assert!(
+        message.contains("panicked: fixture reader panic"),
+        "{message}"
+    );
+}
+
+#[test]
+fn a_read_that_returned_nothing_adds_no_cause_to_the_guidance() {
+    let failure = ViewHydrationFailure::unexplained(
+        PathBuf::from("/target"),
+        ViewHydrationKey::RepositoryIndex,
+    );
+
+    assert_eq!(
+        failure.message("Report read failed."),
+        "Report read failed."
+    );
+}
+
+#[test]
+fn a_long_panic_message_is_clipped_to_one_readable_reason() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut runtime = ViewHydrationRuntime::default();
+    runtime.set_reader(Arc::new(LongPanicReader));
+    schedule_latest(&mut runtime, temp.path());
+    wait_until(|| runtime.workers_finished());
+
+    let failures = runtime.drain_current().failures;
+    let [failure] = failures.as_slice() else {
+        panic!("one failed read: {failures:?}");
+    };
+    let message = failure.message("Report read failed.");
+
+    assert!(message.contains("panicked: xxx"), "{message}");
+    assert!(message.contains('…'), "{message}");
+    assert!(message.chars().count() < 240, "{}", message.chars().count());
+}
+
+/// A long message — an `expect` quoting a serde error on a malformed artifact —
+/// must not clip away where the panic was raised.
+#[test]
+fn a_long_panic_message_keeps_its_location_after_clipping() {
+    let long_message = "y".repeat(600);
+    let panic = kuzushi_core::recovered_panic::catch_disclosed(|| {
+        kuzushi_core::recovered_panic::record(&long_message, Some("reader.rs:42:9".to_string()));
+        std::panic::resume_unwind(Box::new(long_message.clone()))
+    })
+    .unwrap_err();
+    assert_eq!(panic.location(), Some("reader.rs:42:9"));
+
+    let failure = ViewHydrationFailure::panicked(
+        PathBuf::from("/target"),
+        ViewHydrationKey::RepositoryIndex,
+        &panic,
+    );
+    let message = failure.message("Report read failed.");
+
+    assert!(message.ends_with("… at reader.rs:42:9)"), "{message}");
+    assert!(message.chars().count() < 240, "{}", message.chars().count());
+}
+
+#[derive(Debug, Default)]
+struct LongPanicReader;
+
+impl ViewArtifactReader for LongPanicReader {
+    fn read(&self, _target: &Path, _key: &ViewHydrationKey) -> ViewHydrationValue {
+        panic!("{}", "x".repeat(600))
+    }
+}
+
 #[test]
 fn invalidation_discards_queued_reader_failures() {
     let temp = tempfile::tempdir().unwrap();

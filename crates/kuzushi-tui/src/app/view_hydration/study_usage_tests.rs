@@ -308,10 +308,10 @@ fn failed_usage_reader_is_honest_and_waits_for_explicit_refresh() {
     };
     app.apply_view_hydration_drain(ViewHydrationDrain {
         results: vec![],
-        failures: vec![ViewHydrationFailure {
-            target: root.path().into(),
-            key: key.clone(),
-        }],
+        failures: vec![ViewHydrationFailure::unexplained(
+            root.path().into(),
+            key.clone(),
+        )],
     });
     assert!(!app
         .workbench_cache()

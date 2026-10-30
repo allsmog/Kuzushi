@@ -80,10 +80,9 @@ fn hydration_message(
             },
         }),
         Ok(None) => None,
-        Err(()) => Some(ViewHydrationMessage::Failed {
+        Err(panic) => Some(ViewHydrationMessage::Failed {
             generation,
-            target: target.to_path_buf(),
-            key,
+            failure: ViewHydrationFailure::panicked(target.to_path_buf(), key, &panic),
         }),
     }
 }

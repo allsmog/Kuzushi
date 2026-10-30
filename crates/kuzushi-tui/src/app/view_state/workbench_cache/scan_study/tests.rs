@@ -40,10 +40,10 @@ fn failed_worker_replaces_the_read_with_an_explicit_retryable_error() {
     let target = Path::new("/owned/first");
     let mut cache = WorkbenchCache::default();
     cache.mark_view_hydration_loading(target, &[key("one")]);
-    cache.clear_failed_view_hydrations(&[ViewHydrationFailure {
-        target: target.into(),
-        key: key("one"),
-    }]);
+    cache.clear_failed_view_hydrations(&[ViewHydrationFailure::unexplained(
+        target.into(),
+        key("one"),
+    )]);
     let ViewDataState::Ready(Err(error)) = cache.cached_scan_study_progress(target, &key("one"))
     else {
         panic!("Failed read cannot remain a loading or ready queue");

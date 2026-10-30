@@ -1,5 +1,6 @@
 use super::reader::FsViewArtifactReader;
 use super::*;
+use kuzushi_core::recovered_panic::RecoveredPanic;
 use std::collections::BTreeSet;
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::Arc;
@@ -19,8 +20,7 @@ enum ViewHydrationMessage {
     },
     Failed {
         generation: u64,
-        target: PathBuf,
-        key: ViewHydrationKey,
+        failure: ViewHydrationFailure,
     },
 }
 
@@ -96,10 +96,14 @@ impl ViewHydrationRuntime {
                     key,
                     value,
                 }),
-                Ok(None) | Err(()) => drain.failures.push(ViewHydrationFailure {
-                    target: target.clone(),
-                    key,
-                }),
+                Ok(None) => drain
+                    .failures
+                    .push(ViewHydrationFailure::unexplained(target.clone(), key)),
+                Err(panic) => {
+                    drain
+                        .failures
+                        .push(ViewHydrationFailure::panicked(target.clone(), key, &panic))
+                }
             }
         }
         drain
@@ -190,11 +194,10 @@ impl ViewHydrationRuntime {
             }
             ViewHydrationMessage::Failed {
                 generation,
-                target,
-                key,
-            } if self.is_current(generation, &target) => {
-                self.in_flight.remove(&key);
-                drain.failures.push(ViewHydrationFailure { target, key });
+                failure,
+            } if self.is_current(generation, &failure.target) => {
+                self.in_flight.remove(&failure.key);
+                drain.failures.push(failure);
             }
             _ => {}
         }
@@ -223,7 +226,10 @@ impl ViewHydrationRuntime {
                     cancellation,
                     handle,
                 } = batch;
-                let panicked = handle.join().is_err();
+                let worker_panic = handle
+                    .join()
+                    .err()
+                    .map(|payload| RecoveredPanic::from_payload(&*payload));
                 release_canceled_batch_claims(
                     batch_generation,
                     &keys,
@@ -235,7 +241,7 @@ impl ViewHydrationRuntime {
                     batch_generation,
                     target,
                     keys,
-                    panicked,
+                    worker_panic,
                     self.generation,
                     self.active_target.as_deref(),
                     &mut self.in_flight,
@@ -286,30 +292,31 @@ fn caught_read(
     target: &Path,
     key: &ViewHydrationKey,
     cancellation: &ViewHydrationCancellation,
-) -> Result<Option<ViewHydrationValue>, ()> {
-    kuzushi_core::recovered_panic::catch(|| reader.read_cancellable(target, key, cancellation))
-        .map_err(|_| ())
+) -> Result<Option<ViewHydrationValue>, RecoveredPanic> {
+    kuzushi_core::recovered_panic::catch_disclosed(|| {
+        reader.read_cancellable(target, key, cancellation)
+    })
 }
 
 fn collect_panicked_batch_failures(
     batch_generation: u64,
     target: PathBuf,
     keys: Vec<ViewHydrationKey>,
-    panicked: bool,
+    worker_panic: Option<RecoveredPanic>,
     generation: u64,
     active_target: Option<&Path>,
     in_flight: &mut BTreeSet<ViewHydrationKey>,
     failures: &mut Vec<ViewHydrationFailure>,
 ) {
-    if !panicked || batch_generation != generation || active_target != Some(&target) {
+    let Some(panic) = worker_panic else {
+        return;
+    };
+    if batch_generation != generation || active_target != Some(&target) {
         return;
     }
     for key in keys {
         if in_flight.remove(&key) {
-            failures.push(ViewHydrationFailure {
-                target: target.clone(),
-                key,
-            });
+            failures.push(ViewHydrationFailure::panicked(target.clone(), key, &panic));
         }
     }
 }
