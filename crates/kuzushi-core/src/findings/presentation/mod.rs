@@ -8,6 +8,7 @@ mod finding_lines;
 mod observation_gap;
 pub mod pr_comment;
 mod reporting;
+pub(crate) mod sarif_location;
 mod study_severity;
 
 pub(crate) use finding_lines::top_finding_lines;
