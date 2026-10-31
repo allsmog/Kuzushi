@@ -36,22 +36,62 @@ const AUDITED_ENV_READ_FILES: &[&str] = &[
 
 /// Directories whose production code paints panes, folds artifacts into view
 /// models, or reduces an operator action into shell state; a panic here tears
-/// down the raw-mode terminal. The four `app/` subtrees carry every keystroke,
-/// background job event, tool result and queued terminal event, so a panic in
-/// one of them reaches the operator exactly as a panic in the renderer does.
-const PANIC_SCAN_DIRS: &[&str] = &[
-    "renderer",
-    "ui_view_models",
-    "commands",
-    "app/state_transitions",
-    "app/background_events",
-    "app/tool_runner",
-    "app/runtime",
-];
+/// down the raw-mode terminal. `app` is scanned whole: every subtree under it
+/// either carries an operator action, a background event or a tool result into
+/// shell state, or folds an on-disk `.kuzushi` artifact into a view model, and
+/// a panic in any of them reaches the operator exactly as a panic in the
+/// renderer does. Scanning the tree rather than named subtrees also covers a
+/// new subtree the day it is added, instead of the day someone remembers it.
+const PANIC_SCAN_DIRS: &[&str] = &["renderer", "ui_view_models", "commands", "app"];
 
-/// The snapshot-contract harness lives outside `#[cfg(test)]` so the
-/// regen path works, but it is only invoked from its own tests.
-const PANIC_SCAN_EXCLUDED_DIRS: &[&str] = &["renderer/phase_composition_contract"];
+/// Paths the panic scan does not reach yet, each for one of two reasons.
+///
+/// The first two are test-only code that cannot live under `#[cfg(test)]`: the
+/// snapshot-contract harness needs its regen path, and the owned-dispatcher
+/// fixtures are built by tests in several modules.
+///
+/// The rest is the remaining audit backlog — subtrees and files whose panic
+/// sites predate this scan and have not been read yet. Each entry is a debt,
+/// not a dispensation: the panic sites inside it reach the operator exactly as
+/// the scanned ones do. Removing an entry is how that subtree gets audited, and
+/// `every_excluded_panic_scan_path_exists` keeps the list from rotting into a
+/// blanket exemption for paths that no longer exist.
+///
+/// Every directory entry ends in `/`. The match is a path prefix, so a bare
+/// `app/campaign` would also exempt the sibling file `app/campaign.rs` — a
+/// module that is scanned, and whose name several of these subtrees share.
+const PANIC_SCAN_EXCLUDED_DIRS: &[&str] = &[
+    // Test-only code outside `#[cfg(test)]`.
+    "renderer/phase_composition_contract/",
+    "app/owned_dispatcher_test_support.rs",
+    // Audit backlog. `app/effect_runtime.rs` is the largest single item: its
+    // twelve `unreachable!` arms fire when the category router and one of its
+    // sub-matches drift, and routing a stray effect to an honest notice
+    // instead is its own change. `app/session_state.rs` holds `#[cfg(test)]`
+    // helpers inside an `impl` block, which the column-0 region rule, which
+    // only strips a whole top-level item, does not reach.
+    "app/effect_runtime.rs",
+    "app/session_state.rs",
+    "app/agent_session/",
+    "app/batch_scan/",
+    "app/campaign/",
+    "app/devex_phase_fixture/",
+    "app/file_picker/",
+    "app/goal_review/",
+    "app/guided_scan/",
+    "app/lessons/",
+    "app/line_editor/",
+    "app/onboarding/",
+    "app/operator_questions/",
+    "app/options/",
+    "app/relationships/",
+    "app/runtime_keymap/",
+    "app/scan/",
+    "app/scope_review/",
+    "app/source_review/",
+    "app/strategy/",
+    "app/threats/",
+];
 
 /// Audited panic sites: (path relative to `src/`, unique line substring).
 const AUDITED_PANIC_SITES: &[(&str, &str)] = &[
@@ -88,6 +128,22 @@ const AUDITED_PANIC_SITES: &[(&str, &str)] = &[
     (
         "ui_view_models/study_context/comparison/content.rs",
         "JSON values serialize",
+    ),
+    // Split-match classification invariant: the completion, transient and run
+    // keys are mapped by `hydration_group` before it delegates, so only a
+    // `ViewHydrationKey` variant added without a cache group reaches this arm.
+    // A group decides eviction, so there is no honest default to fall back to.
+    (
+        "app/view_state/workbench_cache/hydration_state.rs",
+        "completion, transient and run keys are classified first",
+    ),
+    // The same shape on the reader side, and contained twice over: the arm is
+    // reachable only from a `ViewHydrationKey` variant that no reader boundary
+    // claims, and every call runs inside `caught_read`, which since #356
+    // discloses the recovered panic on the surface whose data went missing.
+    (
+        "app/view_hydration/reader.rs",
+        "view hydration key was not assigned to a reader boundary",
     ),
 ];
 
@@ -486,6 +542,39 @@ mod tests {
             .filter(|file| !found.contains(**file))
             .collect();
         assert!(stale.is_empty(), "stale AUDITED_ENV_READ_FILES: {stale:?}");
+    }
+
+    /// An exclusion that no longer names a real path is a blanket exemption
+    /// nobody can see: it never fails, so the backlog it records stops
+    /// shrinking and a renamed subtree silently leaves the scan.
+    #[test]
+    fn every_excluded_panic_scan_path_exists() {
+        let missing: Vec<&&str> = PANIC_SCAN_EXCLUDED_DIRS
+            .iter()
+            .filter(|excluded| !src_root().join(excluded).exists())
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "stale PANIC_SCAN_EXCLUDED_DIRS — the path is gone, so drop the \
+             entry rather than leave an exemption that cannot fail: {missing:?}"
+        );
+    }
+
+    /// The exclusion match is a string prefix, so a directory entry without
+    /// its trailing `/` would silently exempt a sibling file of the same stem.
+    /// An entry ends in `/` exactly when it names a directory.
+    #[test]
+    fn every_excluded_panic_scan_directory_ends_with_a_slash() {
+        let mismatched: Vec<&&str> = PANIC_SCAN_EXCLUDED_DIRS
+            .iter()
+            .filter(|excluded| src_root().join(excluded).is_dir() != excluded.ends_with('/'))
+            .collect();
+        assert!(
+            mismatched.is_empty(),
+            "PANIC_SCAN_EXCLUDED_DIRS entries must end in `/` exactly when they \
+             name a directory, or the prefix match exempts sibling files: \
+             {mismatched:?}"
+        );
     }
 
     #[test]
