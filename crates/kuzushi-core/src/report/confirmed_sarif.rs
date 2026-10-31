@@ -11,6 +11,9 @@ use crate::capabilities::campaign::trend::{
     latest_confirmed_finding_ids, trend_json, trend_metrics_for_findings, trend_metrics_with_spend,
     workspace_campaign_spend_report,
 };
+use crate::findings::presentation::sarif_location::{
+    sarif_artifact_location, sarif_original_uri_base_ids, sarif_region,
+};
 use crate::findings::{extract_cwe, Finding, ReviewDecisionRecord};
 use crate::workspace::InvestigationReportReceipt;
 use anyhow::{Context, Result};
@@ -80,7 +83,7 @@ fn export_selection(
         trend_metrics_for_findings(findings, records, spend)
     };
     let trend = trend_json(&metrics);
-    let mut document = sarif_document(&confirmed, trend.clone());
+    let mut document = sarif_document(root, &confirmed, trend.clone())?;
     metadata::attach_export_metadata(
         &mut document,
         &confirmed,
@@ -137,8 +140,8 @@ fn confirmed_findings_with_metadata(
         .collect()
 }
 
-fn sarif_document(findings: &[Finding], trend: Value) -> Value {
-    json!({
+fn sarif_document(root: &Path, findings: &[Finding], trend: Value) -> Result<Value> {
+    Ok(json!({
         "$schema": SARIF_SCHEMA,
         "version": SARIF_VERSION,
         "runs": [{
@@ -147,10 +150,11 @@ fn sarif_document(findings: &[Finding], trend: Value) -> Value {
                 "informationUri": DRIVER_INFORMATION_URI,
                 "rules": sarif_rules(findings),
             }},
+            "originalUriBaseIds": sarif_original_uri_base_ids(root)?,
             "results": findings.iter().map(sarif_result).collect::<Vec<_>>(),
             "properties": { "kuzushiTrend": trend },
         }],
-    })
+    }))
 }
 
 /// One rule per distinct rule id, CWE-first: findings with an extractable
@@ -188,10 +192,7 @@ fn sarif_result(finding: &Finding) -> Value {
         "level": sarif_level(finding),
         "message": { "text": finding.message },
         "fingerprints": { "kuzushi/v1": finding.fingerprint },
-        "locations": [{ "physicalLocation": {
-            "artifactLocation": { "uri": finding.file_path },
-            "region": sarif_region(finding),
-        }}],
+        "locations": [{ "physicalLocation": physical_location(finding) }],
         "properties": {
             "kuzushiSeverity": finding.severity.as_str(),
             "kuzushiTool": finding.tool,
@@ -202,13 +203,14 @@ fn sarif_result(finding: &Finding) -> Value {
     })
 }
 
-fn sarif_region(finding: &Finding) -> Value {
-    let start_line = finding.start_line.max(1);
-    let mut region = json!({ "startLine": start_line });
-    if let Some(end_line) = finding.end_line {
-        region["endLine"] = json!(end_line.max(start_line));
+fn physical_location(finding: &Finding) -> Value {
+    let mut physical_location = json!({
+        "artifactLocation": sarif_artifact_location(&finding.file_path),
+    });
+    if let Some(region) = sarif_region(finding.start_line, finding.end_line) {
+        physical_location["region"] = region;
     }
-    region
+    physical_location
 }
 
 fn sarif_level(finding: &Finding) -> &'static str {
@@ -473,5 +475,79 @@ mod tests {
         );
         let document = written_document(&result);
         assert_eq!(document["runs"][0]["results"], json!([]));
+    }
+
+    /// `bounty:import-har` and `bounty:import-burp` build every
+    /// `http-request` finding with line 0 against a URL. Reading that as line 1
+    /// told a CI gate a reviewed finding sat at the first line of a URL; the
+    /// location belongs at artifact granularity instead.
+    #[test]
+    fn a_confirmed_capture_finding_is_located_without_a_forged_line() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-sarif", tmp.path(), "running")
+            .unwrap();
+        let url = "https://api.lab.test/orders?id=1";
+        let captured = Finding::new_tool(
+            "burp-har",
+            "http-evidence",
+            url,
+            0,
+            None,
+            Severity::Info,
+            "GET https://api.lab.test/orders?id=1 (imported)",
+        );
+        let captured_id = store.insert_finding("run-sarif", &captured).unwrap();
+        store
+            .append_user_review_decision(captured_id, &decision(ReviewDecisionVerdict::Confirmed))
+            .unwrap();
+
+        let document = written_document(&export(tmp.path(), &store, json!({})));
+        let physical = &document["runs"][0]["results"][0]["locations"][0]["physicalLocation"];
+
+        assert_eq!(physical["artifactLocation"]["uri"], url);
+        assert!(physical["artifactLocation"].get("uriBaseId").is_none());
+        assert!(
+            physical.get("region").is_none(),
+            "a finding with no reported line must claim no line: {physical}"
+        );
+    }
+
+    /// A repository path is a URI reference, not a literal. An unencoded space
+    /// is rejected outright, and an unencoded `#` or `?` silently renames the
+    /// file for any consumer that parses the location.
+    #[test]
+    fn a_confirmed_findings_path_reaches_sarif_as_a_valid_uri_reference() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-sarif", tmp.path(), "running")
+            .unwrap();
+        let spaced = Finding::new_semgrep(
+            "demo.rule",
+            "docs/My Notes.md",
+            7,
+            None,
+            Severity::High,
+            "unsafe sink",
+        );
+        let spaced_id = store.insert_finding("run-sarif", &spaced).unwrap();
+        store
+            .append_user_review_decision(spaced_id, &decision(ReviewDecisionVerdict::Confirmed))
+            .unwrap();
+
+        let document = written_document(&export(tmp.path(), &store, json!({})));
+        let run = &document["runs"][0];
+        let physical = &run["results"][0]["locations"][0]["physicalLocation"];
+
+        assert_eq!(physical["artifactLocation"]["uri"], "docs/My%20Notes.md");
+        assert_eq!(physical["artifactLocation"]["uriBaseId"], "WORKSPACE_ROOT");
+        assert_eq!(physical["region"], json!({ "startLine": 7 }));
+        // A `uriBaseId` the run never declares leaves the location unresolvable.
+        let base = run["originalUriBaseIds"]["WORKSPACE_ROOT"]["uri"]
+            .as_str()
+            .unwrap();
+        assert!(base.starts_with("file:///"), "unexpected base uri: {base}");
     }
 }
