@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { access, copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, mkdtemp, readlink, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -355,6 +355,32 @@ test("allows pruning when Cargo runs in an unrelated worktree", async () => {
   }
 });
 
+// A dead sleeper makes the refusal assertion vacuous: the guard correctly
+// finds no live process and prunes. Prove the precondition — the child is
+// alive and observable where the guard looks — before invoking the script,
+// so an environment that kills the sleeper fails loudly here instead.
+async function waitForLiveSleeper(child, binary, spawnError) {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    assert.equal(spawnError(), null, `sleeper failed to spawn: ${spawnError()}`);
+    assert.equal(
+      child.exitCode ?? child.signalCode,
+      null,
+      `sleeper exited before the guard ran (code ${child.exitCode}, signal ${child.signalCode})`,
+    );
+    if (process.platform === "darwin") {
+      // No /proc view; the guard reads ps comm, which reflects the argv0 the
+      // spawn above announced. A live, non-exited child is the precondition.
+      if (child.pid !== undefined) return;
+    } else {
+      const exe = await readlink(`/proc/${child.pid}/exe`).catch(() => null);
+      if (exe === binary) return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.fail("sleeper never became observable to the process enumeration");
+}
+
 test("live process enumeration refuses a running executable from the target", async () => {
   const fixture = await createFixture();
   try {
@@ -362,6 +388,7 @@ test("live process enumeration refuses a running executable from the target", as
     await mkdir(path.join(target, "debug"), { recursive: true });
     const binary = path.join(target, "debug", "live-sleeper");
     let child;
+    let spawnError = null;
     if (process.platform === "darwin") {
       // Copies of Apple-signed binaries are killed on exec, and ps comm
       // reflects argv[0]; spawn the system sleep announcing the target path.
@@ -369,10 +396,17 @@ test("live process enumeration refuses a running executable from the target", as
       child = spawn("/bin/sleep", ["60"], { argv0: binary, stdio: "ignore" });
     } else {
       await copyFile("/bin/sleep", binary);
-      child = spawn(binary, ["60"], { stdio: "ignore" });
+      // Ubuntu 25.10+ ships sleep as a uutils multicall binary that dispatches
+      // on argv[0]: invoked as "live-sleeper" it exits immediately instead of
+      // sleeping. Announce "sleep" so the copy keeps running; the guard reads
+      // /proc/<pid>/exe, which still resolves to the copied path in target.
+      child = spawn(binary, ["60"], { argv0: "sleep", stdio: "ignore" });
     }
+    child.on("error", (error) => {
+      spawnError = error;
+    });
     try {
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await waitForLiveSleeper(child, binary, () => spawnError);
       const result = buildDiskResult(fixture, ["--prune-all", "--apply"], {
         KUZUSHI_BUILD_DISK_PROCESS_TABLE: "",
       });
