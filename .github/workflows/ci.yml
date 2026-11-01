@@ -102,8 +102,8 @@ jobs:
         run: |
           sudo rm -rf -- /usr/local/lib/android /usr/local/.ghcup /opt/ghc
           df -h "$GITHUB_WORKSPACE"
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -150,8 +150,8 @@ jobs:
         run: |
           sudo rm -rf -- /usr/local/lib/android /usr/local/.ghcup /opt/ghc
           df -h "$GITHUB_WORKSPACE"
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -217,7 +217,7 @@ jobs:
         run: |
           cargo test --manifest-path third-party/crossterm/Cargo.toml --lib --locked --target-dir target
           cargo test --manifest-path third-party/crossterm/Cargo.toml --lib kuzushi_parser_tests --features use-dev-tty --locked --target-dir target
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         if: ${{ needs.quality-gauntlet.outputs.platform-launcher == 'true' }}
         with:
           node-version: ${{ env.NODE_VERSION }}
