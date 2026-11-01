@@ -14,6 +14,18 @@ runs:
       run: |
         sudo apt-get update
         sudo apt-get install --yes --no-install-recommends bubblewrap
+        # Ubuntu 25.10+ images ship AppArmor policy that lets bwrap create a
+        # user namespace but strips capabilities inside it, so --unshare-net
+        # cannot even configure loopback (RTM_NEWADDR: Operation not
+        # permitted). Unload whichever packaged bwrap profile is present so
+        # the repo's trusted unconfined+userns profile below is the one that
+        # governs /usr/bin/bwrap.
+        for packaged in /etc/apparmor.d/bwrap /etc/apparmor.d/bwrap-userns-restrict; do
+          if [ -f "$packaged" ]; then
+            sudo apparmor_parser --remove "$packaged" 2>/dev/null || true
+            sudo mv "$packaged" "$packaged.disabled-for-kuzushi-ci"
+          fi
+        done
         sudo tee /etc/apparmor.d/usr.bin.bwrap >/dev/null <<'APPARMOR'
         abi <abi/4.0>,
         include <tunables/global>
@@ -23,9 +35,19 @@ runs:
         }
         APPARMOR
         sudo apparmor_parser --replace /etc/apparmor.d/usr.bin.bwrap
-        bwrap --unshare-all --ro-bind /usr /usr --ro-bind /bin /bin \
+        if ! bwrap --unshare-all --ro-bind /usr /usr --ro-bind /bin /bin \
           --ro-bind /lib /lib --ro-bind /lib64 /lib64 \
-          --proc /proc --dev /dev -- /bin/true
+          --proc /proc --dev /dev -- /bin/true; then
+          echo '::group::bwrap smoke-test diagnostics'
+          grep -E '^(NAME|VERSION)=' /etc/os-release || true
+          sudo aa-status 2>/dev/null | grep -iE 'bwrap|userns' || true
+          ls /etc/apparmor.d/ | grep -iE 'bwrap|userns' || true
+          sysctl -a 2>/dev/null | grep -iE 'apparmor|userns' || true
+          sudo dmesg 2>/dev/null | grep -iE 'apparmor|bwrap' | tail -40 || true
+          echo '::endgroup::'
+          echo '::error title=Patch-validation sandbox unusable::bwrap cannot build its namespace sandbox on this runner; see diagnostics above.'
+          exit 1
+        fi
     - name: Report skipped sandbox install
       if: ${{ runner.os != 'Linux' }}
       shell: bash

@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { access, copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readlink,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -355,6 +364,60 @@ test("allows pruning when Cargo runs in an unrelated worktree", async () => {
   }
 });
 
+// The guard's enumeration reads /proc/<pid>/exe from its own process — a
+// sibling of the sleeper, not its parent. Observe the sleeper the same way,
+// through the same readlink executable the script spawns, so this check
+// proves exactly the fact the guard depends on.
+function sleeperSiblingExe(pid) {
+  const probe = spawnSync("readlink", [`/proc/${pid}/exe`], { encoding: "utf8" });
+  if (probe.error) {
+    return { exe: null, detail: String(probe.error) };
+  }
+  if (probe.status !== 0) {
+    return { exe: null, detail: `readlink exited ${probe.status}: ${probe.stderr.trim()}` };
+  }
+  return { exe: probe.stdout.trim(), detail: null };
+}
+
+// A dead sleeper makes the refusal assertion vacuous: the guard correctly
+// finds no live process and prunes. Prove the precondition — the child is
+// alive and observable where the guard looks — before invoking the script,
+// so an environment that kills or hides the sleeper fails loudly here with
+// the observed evidence instead.
+async function waitForLiveSleeper(child, binary, spawnError) {
+  // /proc/<pid>/exe is kernel-canonical; compare against the resolved path so
+  // a symlinked TMPDIR does not fail an otherwise-live sleeper.
+  const expected = await realpath(binary);
+  const deadline = Date.now() + 5000;
+  let parentView = null;
+  let siblingView = null;
+  while (Date.now() < deadline) {
+    assert.equal(spawnError(), null, `sleeper failed to spawn: ${spawnError()}`);
+    assert.equal(
+      child.exitCode ?? child.signalCode,
+      null,
+      `sleeper exited before the guard ran (code ${child.exitCode}, signal ${child.signalCode})`,
+    );
+    if (process.platform === "darwin") {
+      // No /proc view; the guard reads ps comm, which reflects the argv0 the
+      // spawn above announced. A live, non-exited child is the precondition.
+      if (child.pid !== undefined) return;
+    } else {
+      parentView = await readlink(`/proc/${child.pid}/exe`).catch(
+        (error) => `unreadable (${error.code})`,
+      );
+      siblingView = sleeperSiblingExe(child.pid);
+      if (parentView === expected && siblingView.exe === expected) return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.fail(
+    "sleeper never became observable to the process enumeration: " +
+      `expected ${expected}, parent readlink saw ${JSON.stringify(parentView)}, ` +
+      `sibling readlink saw ${JSON.stringify(siblingView)}`,
+  );
+}
+
 test("live process enumeration refuses a running executable from the target", async () => {
   const fixture = await createFixture();
   try {
@@ -362,21 +425,36 @@ test("live process enumeration refuses a running executable from the target", as
     await mkdir(path.join(target, "debug"), { recursive: true });
     const binary = path.join(target, "debug", "live-sleeper");
     let child;
+    let spawnError = null;
     if (process.platform === "darwin") {
       // Copies of Apple-signed binaries are killed on exec, and ps comm
       // reflects argv[0]; spawn the system sleep announcing the target path.
       await writeFile(binary, "stand-in for a running build product");
       child = spawn("/bin/sleep", ["60"], { argv0: binary, stdio: "ignore" });
     } else {
-      await copyFile("/bin/sleep", binary);
-      child = spawn(binary, ["60"], { stdio: "ignore" });
+      // Copy the system shell, not sleep: Ubuntu 25.10+ ships sleep as a
+      // uutils multicall binary whose behavior depends on how it is invoked,
+      // while a shell runs `-c` the same everywhere. The copy idles as the
+      // parent of a real sleep, so /proc/<pid>/exe keeps resolving to the
+      // copied path inside target — the fact the guard checks.
+      await copyFile("/bin/sh", binary);
+      child = spawn(binary, ["-c", "sleep 60"], { stdio: "ignore" });
     }
+    child.on("error", (error) => {
+      spawnError = error;
+    });
     try {
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await waitForLiveSleeper(child, binary, () => spawnError);
       const result = buildDiskResult(fixture, ["--prune-all", "--apply"], {
         KUZUSHI_BUILD_DISK_PROCESS_TABLE: "",
       });
-      assert.equal(result.status, 3, result.stdout + result.stderr);
+      if (result.status !== 3) {
+        assert.fail(
+          `${result.stdout}${result.stderr}\n` +
+            `sleeper after the guard: code ${child.exitCode}, signal ${child.signalCode}, ` +
+            `sibling readlink ${JSON.stringify(sleeperSiblingExe(child.pid))}`,
+        );
+      }
       assert.match(result.stderr, /refusing/);
       assert.equal(await exists(binary), true);
     } finally {
