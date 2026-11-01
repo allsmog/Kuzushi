@@ -1,4 +1,5 @@
 use super::*;
+use crate::text::truncate::utf8_prefix;
 
 pub(crate) fn group_registry_by_kind(
     matches: &[StaticRegistryMatch],
@@ -15,9 +16,5 @@ pub(crate) fn truncate_for_prompt(s: &str, max: usize) -> String {
     if s.len() <= max {
         return s.to_string();
     }
-    let mut cap = max;
-    while !s.is_char_boundary(cap) {
-        cap -= 1;
-    }
-    format!("{}...", &s[..cap])
+    format!("{}...", utf8_prefix(s, max))
 }

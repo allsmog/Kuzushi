@@ -1,4 +1,5 @@
 use super::*;
+use crate::text::truncate::utf8_prefix;
 
 const X_RAY_DIR: &str = "x-ray";
 const X_RAY_MD: &str = "x-ray.md";
@@ -910,13 +911,9 @@ fn truncate_source_content(content: String, limit: usize) -> (String, bool) {
     if content.len() <= limit {
         return (content, false);
     }
-    let mut end = limit;
-    while end > 0 && !content.is_char_boundary(end) {
-        end -= 1;
-    }
     let truncated = format!(
         "{}\n[truncated by kuzushi: original_bytes={}]",
-        &content[..end],
+        utf8_prefix(&content, limit),
         content.len()
     );
     (truncated, true)

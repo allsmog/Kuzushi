@@ -2,6 +2,7 @@ use super::*;
 use crate::app::ChatTurn;
 use crate::ui_view_models::{ScreenContext, ThreatModelSceneContext};
 use kuzushi_core::run_artifacts::FailureToLlmContext;
+use kuzushi_core::text::truncate::utf8_prefix;
 use serde_json::json;
 
 pub(super) const UNTRUSTED_CONTEXT_BYTE_LIMIT: usize = 64 * 1024;
@@ -193,17 +194,6 @@ fn truncation_metadata(original_bytes: usize, truncated: bool) -> String {
     format!(
         "truncation: {{\"truncated\":{truncated},\"originalBytes\":{original_bytes},\"maxBytes\":{UNTRUSTED_CONTEXT_BYTE_LIMIT}}}\n"
     )
-}
-
-fn utf8_prefix(text: &str, max_bytes: usize) -> &str {
-    if text.len() <= max_bytes {
-        return text;
-    }
-    let mut end = max_bytes;
-    while end > 0 && !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    &text[..end]
 }
 
 fn failure_context_prompt_json(context: &FailureToLlmContext) -> String {

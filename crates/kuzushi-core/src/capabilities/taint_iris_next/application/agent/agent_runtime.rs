@@ -1,4 +1,5 @@
 use super::*;
+use crate::text::truncate::utf8_prefix;
 
 pub(in crate::capabilities::taint_iris_next) fn run_taint_iris_next_agent(
     plan: &TaintIrisNextPlan,
@@ -319,14 +320,10 @@ fn truncate_for_excerpt(text: &str) -> String {
     if trimmed.len() <= MAX_LEN {
         return trimmed.to_string();
     }
-    let mut end = MAX_LEN;
-    while !trimmed.is_char_boundary(end) {
-        end -= 1;
-    }
+    let kept = utf8_prefix(trimmed, MAX_LEN);
     format!(
-        "{}…[truncated {} bytes]",
-        &trimmed[..end],
-        trimmed.len() - end
+        "{kept}…[truncated {} bytes]",
+        trimmed.len() - kept.len()
     )
 }
 
