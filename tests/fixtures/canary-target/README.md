@@ -1,7 +1,7 @@
 # Canary target — scanner-fidelity fixture
 
 Three planted findings (see `expected-findings.json`) that test
-*calibration*, not just recall. Plant B is the trap: a real command
+_calibration_, not just recall. Plant B is the trap: a real command
 injection behind operator authentication. Its precondition ceiling is
 HIGH — a scanner that reports it critical is finding bugs without
 applying trust-boundary calibration.

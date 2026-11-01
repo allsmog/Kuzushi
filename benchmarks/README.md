@@ -13,12 +13,12 @@ pnpm setup:benchmarks all
 
 Cloned repos land in `benchmarks/<name>/repo/` (gitignored).
 
-| Corpus            | Target                                    |
-|-------------------|-------------------------------------------|
-| `govwa/`          | Go vulnerable web application             |
-| `juice-shop/`     | OWASP Juice Shop (Node/TypeScript)        |
-| `owasp-benchmark/`| OWASP BenchmarkJava                       |
-| `cve-corpus/`     | Real-CVE checkouts per `manifest.json`    |
+| Corpus             | Target                                 |
+| ------------------ | -------------------------------------- |
+| `govwa/`           | Go vulnerable web application          |
+| `juice-shop/`      | OWASP Juice Shop (Node/TypeScript)     |
+| `owasp-benchmark/` | OWASP BenchmarkJava                    |
+| `cve-corpus/`      | Real-CVE checkouts per `manifest.json` |
 
 Scan a corpus with the CLI, e.g.:
 
