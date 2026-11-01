@@ -5,6 +5,7 @@
 //! repository data and must only reach prompts inside untrusted-source armor.
 
 use crate::git_rev::ensure_safe_git_rev;
+use crate::text::truncate::utf8_prefix;
 use anyhow::{Context, Result};
 use std::path::Path;
 use std::process::Command;
@@ -178,11 +179,10 @@ fn truncate_to_bytes(text: &str, max_bytes: usize) -> String {
     if text.len() <= max_bytes {
         return text.to_string();
     }
-    let mut cut = max_bytes;
-    while cut > 0 && !text.is_char_boundary(cut) {
-        cut -= 1;
-    }
-    format!("{}\n[... diff truncated ...]", &text[..cut])
+    format!(
+        "{}\n[... diff truncated ...]",
+        utf8_prefix(text, max_bytes)
+    )
 }
 
 fn run_git(target: &Path, args: &[&str], timeout: Duration) -> Result<std::process::Output> {

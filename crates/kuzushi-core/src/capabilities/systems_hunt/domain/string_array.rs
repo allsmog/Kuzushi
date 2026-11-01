@@ -1,4 +1,9 @@
 use super::*;
+use crate::text::truncate::utf8_prefix;
+
+/// Evidence lines are quoted scanned source, so the budget is in bytes and
+/// the cut has to respect character boundaries.
+const MAX_LINE_BYTES: usize = 240;
 
 pub(crate) fn string_array(value: Option<&Value>) -> Vec<String> {
     match value {
@@ -60,10 +65,10 @@ pub(crate) fn sanitize_rule_segment(value: &str) -> String {
 
 pub(crate) fn trim_line(line: &str) -> String {
     let trimmed = line.trim();
-    if trimmed.len() <= 240 {
+    if trimmed.len() <= MAX_LINE_BYTES {
         trimmed.to_string()
     } else {
-        format!("{}...", &trimmed[..240])
+        format!("{}...", utf8_prefix(trimmed, MAX_LINE_BYTES))
     }
 }
 
@@ -79,5 +84,45 @@ pub(crate) fn empty_context() -> SystemsContextOutput {
             systems_source_files: 1,
             inspection: None,
         },
+    }
+}
+
+#[cfg(test)]
+mod trim_line_tests {
+    use super::{trim_line, MAX_LINE_BYTES};
+
+    #[test]
+    fn a_long_ascii_line_is_cut_at_the_byte_budget() {
+        let line = "a".repeat(MAX_LINE_BYTES + 10);
+        assert_eq!(
+            trim_line(&line),
+            format!("{}...", "a".repeat(MAX_LINE_BYTES))
+        );
+    }
+
+    #[test]
+    fn a_multi_byte_character_straddling_the_budget_is_dropped_not_split() {
+        // Byte 240 lands inside the first three-byte character, which is
+        // exactly where `&line[..240]` used to panic on a scanned source line.
+        let line = format!("{}\u{65e5}\u{672c}\u{8a9e}", "x".repeat(MAX_LINE_BYTES - 2));
+        assert!(line.len() > MAX_LINE_BYTES);
+        assert_eq!(
+            trim_line(&line),
+            format!("{}...", "x".repeat(MAX_LINE_BYTES - 2))
+        );
+    }
+
+    #[test]
+    fn every_offset_of_a_multi_byte_run_survives_the_budget() {
+        for pad in 0..8 {
+            let line = format!(
+                "{}{}",
+                "x".repeat(MAX_LINE_BYTES - pad),
+                "\u{1f512}".repeat(4)
+            );
+            let trimmed = trim_line(&line);
+            assert!(trimmed.ends_with("..."));
+            assert!(line.starts_with(trimmed.trim_end_matches('.')));
+        }
     }
 }

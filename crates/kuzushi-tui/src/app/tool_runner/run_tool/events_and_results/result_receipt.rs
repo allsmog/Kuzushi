@@ -1,3 +1,4 @@
+use kuzushi_core::text::truncate::floor_char_boundary;
 use serde_json::Value;
 
 const MAX_RESULT_LOG_LINES: usize = 12;
@@ -110,13 +111,6 @@ fn clip_result_body(body: &str) -> String {
     }
     let omitted = lines.len().saturating_sub(MAX_RESULT_LOG_LINES);
     format!("{clipped}\n… {omitted} more lines · full result in the run's result.json")
-}
-
-fn floor_char_boundary(text: &str, limit: usize) -> usize {
-    (0..=limit)
-        .rev()
-        .find(|at| text.is_char_boundary(*at))
-        .unwrap_or_default()
 }
 
 fn generic_count_receipt(result: &serde_json::Value) -> Option<String> {

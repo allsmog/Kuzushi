@@ -1,4 +1,5 @@
 use super::auth_ping::AuthPingLog;
+use kuzushi_core::text::truncate::utf8_prefix;
 
 pub(crate) fn record_anthropic_oauth_readiness(
     readiness: kuzushi_openai::OauthReadiness,
@@ -73,11 +74,15 @@ fn record_openai_base_url_presence(log: &mut AuthPingLog) {
     }
 }
 
+/// An operator may configure any base URL, including a non-ASCII host or
+/// path, so this budget is in bytes and the cut respects characters.
+const MASKED_BASE_URL_BYTES: usize = 96;
+
 fn masked_openai_base_url(base_url: String) -> String {
-    if base_url.len() <= 96 {
+    if base_url.len() <= MASKED_BASE_URL_BYTES {
         return base_url;
     }
-    format!("{}…", &base_url[..96])
+    format!("{}…", utf8_prefix(&base_url, MASKED_BASE_URL_BYTES))
 }
 
 fn record_hosted_openai_presence(log: &mut AuthPingLog) -> bool {
@@ -127,4 +132,38 @@ pub(crate) fn format_unix_ms(ms: u64) -> String {
         Err(e) => format!("{}s ago", e.duration().as_secs()),
     };
     format!("{ms}ms unix; {delta}")
+}
+
+#[cfg(test)]
+mod masked_base_url_tests {
+    use super::{masked_openai_base_url, MASKED_BASE_URL_BYTES};
+
+    #[test]
+    fn a_short_base_url_is_reported_verbatim() {
+        let url = "https://api.openai.com/v1".to_string();
+        assert_eq!(masked_openai_base_url(url.clone()), url);
+    }
+
+    #[test]
+    fn a_long_base_url_is_clipped_at_the_byte_budget() {
+        let url = format!("https://{}.test/v1", "a".repeat(MASKED_BASE_URL_BYTES));
+        let masked = masked_openai_base_url(url.clone());
+        assert_eq!(masked.len(), MASKED_BASE_URL_BYTES + '\u{2026}'.len_utf8());
+        assert!(url.starts_with(masked.trim_end_matches('\u{2026}')));
+    }
+
+    #[test]
+    fn a_multi_byte_character_at_the_budget_is_dropped_not_split() {
+        // The budget falls inside the trailing three-byte character, which is
+        // where `&base_url[..96]` used to panic on an operator-configured URL.
+        const SCHEME: &str = "https://";
+        let host = "a".repeat(MASKED_BASE_URL_BYTES - 1 - SCHEME.len());
+        let url = format!("{SCHEME}{host}\u{65e5}");
+        assert!(url.len() > MASKED_BASE_URL_BYTES);
+
+        assert_eq!(
+            masked_openai_base_url(url),
+            format!("{SCHEME}{host}\u{2026}")
+        );
+    }
 }
