@@ -135,7 +135,7 @@
     "esbuild": "^0.28.1",
     "husky": "^9.1.7",
     "lint-staged": "^17.0.8",
-    "yaml": "2.9.0"
+    "yaml": "2.9.1"
   },
   "keywords": [
     "sast",
