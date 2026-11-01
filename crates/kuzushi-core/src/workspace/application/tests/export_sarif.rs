@@ -1,4 +1,7 @@
 use super::*;
+use crate::findings::presentation::sarif_location::{
+    absolute_file_uri, has_uri_scheme, relative_uri_reference, sarif_root_uri,
+};
 use crate::findings::Severity;
 
 #[test]
@@ -271,7 +274,7 @@ fn workspace_root_base_uri_is_an_encoded_file_uri_with_a_trailing_slash() {
         .unwrap();
     let workspace = WorkspaceTarget::new(temp.path()).unwrap();
 
-    let uri = workspace_root_uri(&workspace).unwrap();
+    let uri = sarif_root_uri(workspace.root()).unwrap();
 
     assert!(uri.starts_with("file:///"), "unexpected base uri: {uri}");
     assert!(uri.ends_with('/'), "base uri must be a directory: {uri}");
