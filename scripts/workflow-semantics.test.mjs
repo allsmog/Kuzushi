@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { parse } from "yaml";
-import { selectQualityBase } from "./quality-interval.mjs";
+import { parseBootstrapBaseline, selectQualityBase } from "./quality-interval.mjs";
 
 const workflow = (name) =>
   parse(readFileSync(new URL(`../.github/workflows/${name}.yml`, import.meta.url), "utf8"));
@@ -187,6 +187,61 @@ test("stacked pull requests cannot be excluded from the CI trigger", () => {
   const ignoredStack = structuredClone(ci);
   ignoredStack.on.pull_request["branches-ignore"] = ["codex/**"];
   assert.throws(() => requireAllPullRequestBranches(ignoredStack));
+});
+
+test("a declared baseline bootstraps a branch with no successful full run", () => {
+  const bootstrap = "4".repeat(40),
+    success = "5".repeat(40);
+  const runs = [
+    {
+      id: 7,
+      created_at: "2026-02-01",
+      head_sha: success,
+      conclusion: "success",
+      head_branch: "main",
+    },
+  ];
+  // A successful ancestral run always outranks the declared baseline.
+  assert.deepEqual(
+    selectQualityBase(runs, 8, "main", () => true, bootstrap),
+    {
+      base: success,
+      sourceRunId: 7,
+      source: "run",
+    },
+  );
+  // With none - every Full CI run on this branch so far failed, and the
+  // schedule trigger carries no quality_base_ref input - the declared
+  // baseline is the explicit initial base, disclosed as such.
+  assert.deepEqual(
+    selectQualityBase([], 8, "main", () => true, bootstrap),
+    {
+      base: bootstrap,
+      sourceRunId: null,
+      source: "bootstrap",
+    },
+  );
+  assert.deepEqual(
+    selectQualityBase(runs, 8, "main", () => false, bootstrap),
+    {
+      base: bootstrap,
+      sourceRunId: null,
+      source: "bootstrap",
+    },
+  );
+  assert.throws(() => selectQualityBase([], 8, "main", () => true, null), /explicitly/);
+});
+
+test("the declared Full CI baseline is exactly one full commit SHA", () => {
+  const declared = readFileSync(new URL("../.github/quality-baseline", import.meta.url), "utf8");
+  assert.match(parseBootstrapBaseline(declared), /^[a-f0-9]{40}$/);
+  assert.equal(parseBootstrapBaseline(`# comment\n\n${"a".repeat(40)}\n`), "a".repeat(40));
+  for (const invalid of ["", "# only a comment\n", "HEAD^\n", "a".repeat(39), "A".repeat(40)])
+    assert.throws(() => parseBootstrapBaseline(invalid), /commit SHA/);
+  assert.throws(
+    () => parseBootstrapBaseline(`${"a".repeat(40)}\n${"b".repeat(40)}\n`),
+    /exactly one/,
+  );
 });
 
 test("quality interval selects the latest successful ancestral run, never HEAD parent", () => {

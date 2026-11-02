@@ -113,7 +113,10 @@ ready pull-request head. It executes `pnpm verify:quick:summary` — the same
 gate you run locally — plus an actionlint pass over every workflow. Full CI
 (`.github/workflows/ci-full.yml`) adds the cross-platform, coverage, mutation,
 packaging, and end-to-end jobs, and runs monthly, on release candidates, or on
-request.
+request. Its changed-code gates measure the interval since the newest
+successful ancestral full run. A release candidate passes that base explicitly;
+the monthly schedule cannot, so it falls back to the baseline declared in
+`.github/quality-baseline`.
 
 Both workflows run on **one ephemeral self-hosted Apple-Silicon runner on the
 repository owner's Mac**, labelled `self-hosted, macOS, ARM64, kuzushi-mac`.

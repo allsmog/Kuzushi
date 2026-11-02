@@ -1,9 +1,11 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-export function selectQualityBase(runs, currentRunId, branch, isAncestor) {
+const bootstrapFile = new URL("../.github/quality-baseline", import.meta.url);
+
+export function selectQualityBase(runs, currentRunId, branch, isAncestor, bootstrap = null) {
   const prior = runs.filter(
     (run) =>
       run.conclusion === "success" &&
@@ -13,11 +15,25 @@ export function selectQualityBase(runs, currentRunId, branch, isAncestor) {
   );
   prior.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
   const run = prior.find((candidate) => isAncestor(candidate.head_sha));
-  if (!run)
+  if (run) return { base: run.head_sha, sourceRunId: run.id, source: "run" };
+  // Ancestry of the declared baseline is left to the caller so a stale
+  // bootstrap SHA fails as a non-ancestor instead of as a missing baseline.
+  if (bootstrap) return { base: bootstrap, sourceRunId: null, source: "bootstrap" };
+  throw Error(
+    "No successful ancestral Full CI baseline and no declared bootstrap baseline; supply quality_base_ref explicitly for the initial run",
+  );
+}
+
+export function parseBootstrapBaseline(text) {
+  const declared = text
+    .split(/\r?\n/)
+    .map((line) => line.replace(/#.*$/, "").trim())
+    .filter(Boolean);
+  if (declared.length !== 1 || !/^[a-f0-9]{40}$/.test(declared[0]))
     throw Error(
-      "No successful ancestral Full CI baseline; supply quality_base_ref explicitly for the initial run",
+      ".github/quality-baseline must declare exactly one full lowercase 40-character commit SHA",
     );
-  return { base: run.head_sha, sourceRunId: run.id };
+  return declared[0];
 }
 
 const git = (...args) => execFileSync("git", args, { encoding: "utf8", timeout: 30_000 }).trim();
@@ -29,12 +45,22 @@ function isAncestor(base, head) {
   throw result.error ?? Error("could not verify quality baseline ancestry");
 }
 
+function declaredBootstrapBaseline() {
+  try {
+    return parseBootstrapBaseline(readFileSync(bootstrapFile, "utf8"));
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 function resolveBaseline(head) {
   const explicit = process.env.QUALITY_BASE_REF;
   if (explicit)
     return {
       base: git("rev-parse", "--verify", "--end-of-options", `${explicit}^{commit}`),
       sourceRunId: null,
+      source: "input",
     };
   const repo = process.env.GITHUB_REPOSITORY;
   const branch = process.env.GITHUB_REF_NAME;
@@ -47,8 +73,12 @@ function resolveBaseline(head) {
       maxBuffer: 4 * 1024 * 1024,
     }),
   );
-  return selectQualityBase(receipt.workflow_runs, process.env.GITHUB_RUN_ID, branch, (base) =>
-    isAncestor(base, head),
+  return selectQualityBase(
+    receipt.workflow_runs,
+    process.env.GITHUB_RUN_ID,
+    branch,
+    (base) => isAncestor(base, head),
+    declaredBootstrapBaseline(),
   );
 }
 
@@ -56,7 +86,9 @@ function main() {
   const head = git("rev-parse", "HEAD");
   const baseline = resolveBaseline(head);
   if (!isAncestor(baseline.base, head))
-    throw Error("quality baseline is not an ancestor of the tested commit");
+    throw Error(
+      `quality baseline (${baseline.source}) is not an ancestor of the tested commit: ${baseline.base}`,
+    );
   const count = git("rev-list", "--count", `${baseline.base}..${head}`);
   if (!process.env.GITHUB_OUTPUT) throw Error("GITHUB_OUTPUT is required");
   appendFileSync(process.env.GITHUB_OUTPUT, `base=${baseline.base}\n`);

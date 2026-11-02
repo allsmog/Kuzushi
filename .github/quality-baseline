@@ -1,0 +1,13 @@
+# Declared bootstrap baseline for the Full CI changed-code quality interval.
+#
+# scripts/quality-interval.mjs prefers, in order: an explicit quality_base_ref
+# input, then the newest successful ancestral Full CI run. A trigger that
+# cannot carry an input - the monthly schedule - had no third option, so a
+# repository with no successful Full CI run on the branch could never start
+# one. This file is that explicit initial base: reviewed in-repo, verified to
+# be an ancestor of the tested commit, and ignored the moment a successful
+# ancestral Full CI run exists on the branch.
+#
+# Exactly one full lowercase 40-character commit SHA. Move it only forward, to
+# a commit whose complete sweep is known good.
+f49b882d6229d957ed6e165d3ee8c12bbc6fe8e5
