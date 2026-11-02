@@ -1,4 +1,5 @@
 use super::*;
+use crate::text::truncate::utf8_prefix;
 
 pub(crate) struct NdiffFixPatternSource {
     pub(crate) record: Option<CveRecord>,
@@ -333,7 +334,7 @@ pub(crate) fn ndiff_fix_pattern_response(
 }
 
 fn ndiff_diff_source_receipt(source: &NdiffFixPatternSource) -> Value {
-    let included = ndiff_diff_prefix(&source.patch_text, source.max_source_bytes).len();
+    let included = utf8_prefix(&source.patch_text, source.max_source_bytes).len();
     json!({"schemaVersion":1,"kind":source.source_kind,"digest":crate::run_lifecycle::sha256_content_digest(source.patch_text.as_bytes()),
         "bytes":source.patch_text.len(),"includedBytes":included,"omittedBytes":source.patch_text.len()-included,
         "complete":included==source.patch_text.len(),"sourceVerified":false})

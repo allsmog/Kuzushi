@@ -9,12 +9,12 @@ Runner labels: `self-hosted`, `macOS`, `ARM64`, `kuzushi-mac`. The workflows
 select on the full set, so a stray runner carrying only the built-in labels
 never picks up a Kuzushi job.
 
-| File | Role |
-| --- | --- |
-| `setup-mac-runner.sh` | Owner-run installer: creates the user, installs the pinned runner and toolchains, writes the LaunchDaemon. Also `--dry-run` and `--set-pat`. |
-| `run-ephemeral-loop.sh` | The daemon's target: one ephemeral registration per job, forever. |
-| `lint-workflows.sh` | Daemon-free actionlint step used by both CI workflows. |
-| `report-sandbox-coverage.sh` | Job-summary disclosure that bubblewrap was not exercised. |
+| File                         | Role                                                                                                                                         |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `setup-mac-runner.sh`        | Owner-run installer: creates the user, installs the pinned runner and toolchains, writes the LaunchDaemon. Also `--dry-run` and `--set-pat`. |
+| `run-ephemeral-loop.sh`      | The daemon's target: one ephemeral registration per job, forever.                                                                            |
+| `lint-workflows.sh`          | Daemon-free actionlint step used by both CI workflows.                                                                                       |
+| `report-sandbox-coverage.sh` | Job-summary disclosure that bubblewrap was not exercised.                                                                                    |
 
 ## Why a LaunchDaemon and a secret file
 
@@ -76,7 +76,7 @@ code as the runner user. Mitigations, in the order they matter:
   this machine. The darwin release legs are a separate, later decision.
 - **Runner access scoped to this repository.** See step 4 below.
 
-What is *not* mitigated: a job can read anything `_ghrunner` can read — which
+What is _not_ mitigated: a job can read anything `_ghrunner` can read — which
 includes that PAT file — can use the network, and can consume the machine's CPU
 and disk. Treat a suspicious dependency bump as a reason to keep that PR on the
 default hosted runner rather than to trust the sandbox. There is no sandbox here.

@@ -1,4 +1,5 @@
 use super::*;
+use crate::text::truncate::utf8_prefix;
 use std::time::Duration;
 
 /// Result of running the `taint-iris-next:codeql-db` tool. A success carries
@@ -423,14 +424,22 @@ exists, else just install. For Cargo, `cargo build --release`. For \
 Maven, `mvn -B -DskipTests package`. Do NOT run tests. Do NOT clean \
 between steps unnecessarily.";
 
+/// `manifest_keywords` joins up to sixteen scanned manifests at 2000 chars
+/// each, so the excerpt passes this byte budget on ordinary repositories and
+/// the cut must respect character boundaries.
+const MAX_MANIFEST_PROMPT_BYTES: usize = 6_000;
+
 fn build_codeql_build_prompt(
     target: &Path,
     languages: &[String],
     top_level: &[String],
     manifest_excerpt: &str,
 ) -> String {
-    let manifest = if manifest_excerpt.len() > 6_000 {
-        format!("{}\n... (truncated)", &manifest_excerpt[..6_000])
+    let manifest = if manifest_excerpt.len() > MAX_MANIFEST_PROMPT_BYTES {
+        format!(
+            "{}\n... (truncated)",
+            utf8_prefix(manifest_excerpt, MAX_MANIFEST_PROMPT_BYTES)
+        )
     } else {
         manifest_excerpt.to_string()
     };
@@ -557,6 +566,34 @@ mod tests {
     use std::process::Command;
     use std::sync::Mutex;
     use tempfile::tempdir;
+
+    #[test]
+    fn build_prompt_truncates_a_long_manifest_excerpt_at_a_character_boundary() {
+        let excerpt = format!(
+            "{}{}",
+            "x".repeat(MAX_MANIFEST_PROMPT_BYTES - 1),
+            "\u{65e5}\u{672c}\u{8a9e}"
+        );
+        assert!(excerpt.len() > MAX_MANIFEST_PROMPT_BYTES);
+
+        let prompt = build_codeql_build_prompt(Path::new("/tmp/t"), &[], &[], &excerpt);
+
+        assert!(prompt.contains(&format!(
+            "{}\n... (truncated)",
+            "x".repeat(MAX_MANIFEST_PROMPT_BYTES - 1)
+        )));
+        assert!(!prompt.contains("\u{65e5}"));
+    }
+
+    #[test]
+    fn build_prompt_keeps_a_manifest_excerpt_within_the_budget_verbatim() {
+        let excerpt = "[package]\nname = \"caf\u{e9}\"\n";
+
+        let prompt = build_codeql_build_prompt(Path::new("/tmp/t"), &[], &[], excerpt);
+
+        assert!(prompt.contains(excerpt));
+        assert!(!prompt.contains("... (truncated)"));
+    }
 
     struct BuildPlanRuntime;
 

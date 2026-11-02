@@ -1,3 +1,4 @@
+use crate::text::truncate::utf8_prefix;
 use std::collections::VecDeque;
 use std::sync::{Mutex, OnceLock};
 
@@ -79,11 +80,7 @@ fn bounded_text(value: String, max_bytes: usize) -> String {
         return value;
     }
     let content_limit = max_bytes.saturating_sub(TRUNCATION_MARKER.len());
-    let mut end = content_limit.min(value.len());
-    while !value.is_char_boundary(end) {
-        end = end.saturating_sub(1);
-    }
-    format!("{}{TRUNCATION_MARKER}", &value[..end])
+    format!("{}{TRUNCATION_MARKER}", utf8_prefix(&value, content_limit))
 }
 
 fn diagnostic_queue() -> &'static Mutex<DiagnosticQueue> {

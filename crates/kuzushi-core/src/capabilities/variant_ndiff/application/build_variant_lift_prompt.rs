@@ -1,5 +1,6 @@
 use super::*;
 use crate::findings::ReviewConfirmation;
+use crate::text::truncate::utf8_prefix;
 
 pub(crate) fn build_variant_lift_prompt(
     finding: &Finding,
@@ -101,7 +102,7 @@ pub(crate) fn build_ndiff_fix_pattern_prompt(
     max_source_bytes: usize,
 ) -> String {
     let advisory = ndiff_advisory_context(record);
-    let prefix = ndiff_diff_prefix(patch_text, max_source_bytes);
+    let prefix = utf8_prefix(patch_text, max_source_bytes);
     let trimmed = if prefix.len() < patch_text.len() {
         format!("{prefix}\n... [truncated]")
     } else {
@@ -120,14 +121,6 @@ pub(crate) fn build_ndiff_fix_pattern_prompt(
         "```",
     ]
     .join("\n")
-}
-
-pub(crate) fn ndiff_diff_prefix(text: &str, limit: usize) -> &str {
-    let mut end = text.len().min(limit);
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    &text[..end]
 }
 
 fn ndiff_advisory_context(record: Option<&CveRecord>) -> String {
