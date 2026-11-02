@@ -252,6 +252,22 @@ test("a discovered MCP session renames tools provider-safely and closes on reque
   assert.equal(closeCalls, 1);
 });
 
+test("the MCP client keeps unprefixed tool names across adapter majors", async (t) => {
+  const root = temporaryDirectory(t);
+  let clientOptions;
+  const createClient = (options) => {
+    clientOptions = options;
+    return { getTools: async () => [] };
+  };
+
+  await mcpToolsForRequest(
+    requestForRoot(root, { toolPolicy: { mcps: true, mcpReadRoots: [root] } }),
+    createClient,
+  );
+
+  assert.equal(clientOptions.prefixToolNameWithServerName, false);
+});
+
 test("provider-safe renaming keeps sanitized collisions and over-long names distinct", async (t) => {
   const root = temporaryDirectory(t);
   const createClient = () => ({

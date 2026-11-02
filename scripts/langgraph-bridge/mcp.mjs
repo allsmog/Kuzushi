@@ -62,6 +62,9 @@ export async function mcpToolsForRequest(request, createClient = createMcpClient
     client = createClient({
       mcpServers,
       defaultToolTimeout,
+      // @langchain/mcp-adapters 2.x prefixes tool names with the server name
+      // by default; keep the 1.x model-visible names unchanged.
+      prefixToolNameWithServerName: false,
       onConnectionError: (server, error) => {
         throw new Error(mcpConnectionFailureMessage(server, error, mcpServers));
       },
