@@ -3,10 +3,10 @@
 ## The defect
 
 `.github/workflows/ci-full.yml` is the only workflow that runs `rust-core`,
-`windows-compile`, `cargo-deny`, `coverage`, `mutation`, `e2e`, `real-semgrep`,
-`verify-pack`, and `node22-compat`. Every one of those jobs declares
-`needs: quality-gauntlet`, and `quality-gauntlet`'s ninth step resolves the
-changed-code quality interval:
+`windows-compile`, `cargo-deny`, `rust-cli`, `coverage`, `mutation`, `e2e`,
+`real-semgrep`, `verify-pack`, and `node22-compat`. All ten depend on
+`quality-gauntlet`, directly or through `rust-cli`, and `quality-gauntlet`'s
+ninth step resolves the changed-code quality interval:
 
 ```yaml
 - name: Resolve the complete quality interval
@@ -28,7 +28,8 @@ explicitly for the initial run
 ```
 
 The advice in that message was unreachable from the trigger that hit it. The
-run died 40 seconds in and skipped all eleven downstream jobs. Observed on
+run died 40 seconds in and skipped all ten dependent jobs; only the
+independent `fresh-dependencies` job ran. Observed on
 run 41328219289 (2026-11-01, `main` at `efb5de8`) and run 36896353990
 (2026-10-01); run 41361400731's monthly predecessors show the same shape. The
 release path was never affected: `release-candidate.yml` declares
@@ -43,7 +44,7 @@ no successful run to point at, while `main` kept merging. Pull-request CI
 ## Why this ranked first
 
 Highest blast radius of anything found this pass: one deterministic error
-disabled nine CI jobs that nothing else in the repository runs, and it will
+disabled ten CI jobs that nothing else in the repository runs, and it will
 recur every month until the bootstrap is reachable. It is also the cheapest to
 fix correctly — the policy was already written down, only its initial case was
 missing — and it is independently reviewable without touching product code.
@@ -72,10 +73,10 @@ Absent, malformed, and non-ancestral declared baselines remain hard failures.
 
 ## What this does not claim
 
-The nine downstream jobs have not had a successful run in this repository, so
+The ten dependent jobs have not had a successful run in this repository, so
 this change unblocks them rather than attesting that they pass. The first
 monthly sweep after it lands is the first real signal from `cargo-deny`,
-`windows-compile`, `e2e`, `coverage`, `mutation`, `verify-pack`,
+`windows-compile`, `rust-cli`, `e2e`, `coverage`, `mutation`, `verify-pack`,
 `node22-compat`, `real-semgrep`, and `rust-core`, and it may surface genuine
 failures in any of them. That is the gate working, not a regression from this
 change.
