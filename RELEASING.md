@@ -3565,8 +3565,14 @@ an earlier cursor is refused rather than reused for a changed query.
   `latest` tag to the previously verified exact version and then restore platform
   tags; never republish different bytes under an existing version.
 - Full-quality runs compare with the latest successful ancestral full run, not
-  the previous commit. The initial run requires `quality_base_ref`; failures to
-  resolve a baseline fail the gate rather than silently narrowing the interval.
+  the previous commit. Release candidates pass `quality_base_ref` explicitly.
+  A trigger that cannot carry an input — the monthly schedule — falls back to
+  the baseline declared in `.github/quality-baseline`, which is consulted only
+  while no successful ancestral full run exists on the branch. Every baseline
+  is verified to be an ancestor of the tested commit and the resolved rung is
+  disclosed as `source` in the step receipt; an absent, malformed, or
+  non-ancestral baseline fails the gate rather than silently narrowing the
+  interval.
 
 See [the audit ledger](docs/quality/audit-remediation-2026-09-30.md) for acceptance
 work that remains open; these changes are not an all-items completion claim.
