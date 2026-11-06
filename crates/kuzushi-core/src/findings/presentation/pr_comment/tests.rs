@@ -211,6 +211,47 @@ mod tests {
     }
 
     #[test]
+    fn new_in_pr_does_not_credit_a_file_that_only_shares_a_name_ending() {
+        let mut touched = make_finding(Severity::High, "fp-touched", "in the PR");
+        touched.file_path = "auth.rs".to_string();
+        let mut untouched = make_finding(Severity::Critical, "fp-untouched", "not in the PR");
+        untouched.file_path = "src/notauth.rs".to_string();
+        let input = PrCommentInput {
+            findings: vec![untouched, touched],
+            changed_files: vec!["auth.rs".to_string()],
+            ..PrCommentInput::default()
+        };
+        let body = build_pr_comment(&input);
+
+        assert!(body.contains("\u{1f195} **1 new in this PR**"), "{body}");
+        assert!(!new_in_pr_section(&body).contains("src/notauth.rs"), "{body}");
+    }
+
+    #[test]
+    fn new_in_pr_credits_a_changed_file_named_against_a_different_root() {
+        let mut finding = make_finding(Severity::High, "fp-changed", "in the PR");
+        finding.file_path = "src/auth.rs".to_string();
+        let input = PrCommentInput {
+            findings: vec![finding],
+            // What `git diff --name-only` reports for a repository whose
+            // scanned target is the `app/` subdirectory.
+            changed_files: vec!["app/src/auth.rs".to_string()],
+            ..PrCommentInput::default()
+        };
+        let body = build_pr_comment(&input);
+
+        assert!(body.contains("\u{1f195} **1 new in this PR**"), "{body}");
+        assert!(new_in_pr_section(&body).contains("src/auth.rs"), "{body}");
+    }
+
+    fn new_in_pr_section(body: &str) -> &str {
+        body.split("#### New in this PR")
+            .nth(1)
+            .and_then(|section| section.split("#### Top findings").next())
+            .unwrap_or("")
+    }
+
+    #[test]
     fn exploit_chain_section_renders_story_steps() {
         let input = PrCommentInput {
             chains: vec![PrCommentChain {

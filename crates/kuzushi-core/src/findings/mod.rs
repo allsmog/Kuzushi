@@ -6,7 +6,7 @@ pub use application::{FindingGoalPage, FindingGoalRow};
 mod domain;
 pub use domain::distinct_recorded_source_count;
 pub(crate) use domain::merge_ordered_source_histories;
-pub(crate) use domain::normalize_reported_source_path;
+pub(crate) use domain::{normalize_reported_source_path, reported_paths_name_same_file};
 pub use domain::FindingEvidenceOrigin;
 pub use domain::RecordedObservationSource;
 pub(crate) use domain::FINDING_LESSON_SUBJECT;

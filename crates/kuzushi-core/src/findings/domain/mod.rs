@@ -30,7 +30,9 @@ mod persisted_results;
 mod proof_confidence;
 mod relationship;
 mod reported_source_path;
-pub(crate) use reported_source_path::normalize_reported_source_path;
+pub(crate) use reported_source_path::{
+    normalize_reported_source_path, reported_paths_name_same_file,
+};
 mod review_decision;
 mod review_decision_counts;
 pub use review_decision_counts::ReviewDecisionCounts;

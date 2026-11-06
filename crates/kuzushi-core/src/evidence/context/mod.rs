@@ -13,7 +13,7 @@
 
 /// Infer language from extension. Mirrors `code_nav::symbol_index::detect_language`
 /// but kept local to avoid a public-API coupling.
-use crate::findings::{Finding, StaticProofState};
+use crate::findings::{reported_paths_name_same_file, Finding, StaticProofState};
 use crate::static_evidence::{
     StaticEvidenceEdge, StaticEvidenceNode, StaticEvidenceNodeKind, StaticEvidenceStore,
 };
