@@ -187,4 +187,35 @@ mod tests {
         // is exercised regardless.
         let _ = block;
     }
+
+    #[test]
+    fn subgraph_window_admits_a_differing_root_and_excludes_a_shared_name_ending() {
+        let node = |path: &str| {
+            StaticEvidenceNode::new(StaticEvidenceNodeKind::Sink, "sink", "body")
+                .with_source_span(path, 42, Some(42))
+        };
+
+        assert!(node_within_window(&node("app/src/auth.rs"), 42, "src/auth.rs"));
+        assert!(node_within_window(&node("src/auth.rs"), 42, "src/auth.rs"));
+
+        // `src/notauth.rs` ends with `auth.rs`, but it is another file and its
+        // graph is not this finding's evidence.
+        assert!(!node_within_window(&node("src/notauth.rs"), 42, "auth.rs"));
+        assert!(!node_within_window(&node("auth.rs"), 42, "src/notauth.rs"));
+    }
+
+    #[test]
+    fn subgraph_window_keeps_a_pathless_node_and_still_bounds_it_by_line() {
+        let pathless = StaticEvidenceNode::new(StaticEvidenceNodeKind::Sink, "sink", "body");
+        assert!(node_within_window(&pathless, 42, "src/auth.rs"));
+
+        // A recorded path that names no file is not the finding's file.
+        let unnamed = StaticEvidenceNode::new(StaticEvidenceNodeKind::Sink, "sink", "body")
+            .with_source_span("", 42, Some(42));
+        assert!(!node_within_window(&unnamed, 42, "src/auth.rs"));
+
+        let far = StaticEvidenceNode::new(StaticEvidenceNodeKind::Sink, "sink", "body")
+            .with_source_span("src/auth.rs", 42 + SUBGRAPH_LINE_WINDOW + 1, None);
+        assert!(!node_within_window(&far, 42, "src/auth.rs"));
+    }
 }

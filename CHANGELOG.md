@@ -60,6 +60,21 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- A reported path no longer names a file it only shares a name ending with.
+  Two call sites answered "is this the file?" with a bidirectional
+  `str::ends_with`, and a raw string suffix is not a path suffix:
+  `src/notauth.rs` ends with `auth.rs`. The PR comment's `New in this PR`
+  section and its `N new in this PR` count therefore credited a pull request
+  with findings in files it never touched, and the static-evidence subgraph
+  attached another file's source, sink, sanitizer and guard nodes to a finding
+  before handing them to the triage model as that finding's own evidence. Both
+  now ask one shared `reported_paths_name_same_file`, which still accepts the
+  root difference these sites exist for — a scan of `app/` reports
+  `src/main.rs` where `git diff --name-only` reports `app/src/main.rs` — but
+  requires the trailing part to begin at a separator. A recorded evidence path
+  that is present but empty is no longer read as every file; a node with no
+  path at all is kept as before.
+
 - A Workbench page digit the keymap does not bind now says so instead of
   becoming prompt text. The Workbench binds page digits for the investigation
   pages only, so `4` and `5` — the digits that name the visible Prove and Fix

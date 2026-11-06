@@ -104,9 +104,11 @@ pub(crate) fn node_within_window(
     finding_line: u32,
     finding_file: &str,
 ) -> bool {
-    // Different file -> out of window.
+    // Different file -> out of window. A node kept here is presented as the
+    // finding's own evidence, so matching on a shared name ending would attach
+    // another file's graph to it.
     if let Some(path) = &node.source_path {
-        if path != finding_file && !finding_file.ends_with(path) && !path.ends_with(finding_file) {
+        if !reported_paths_name_same_file(path, finding_file) {
             return false;
         }
     }

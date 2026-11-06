@@ -170,11 +170,13 @@ pub(crate) fn changed_set(files: &[String]) -> Option<HashSet<String>> {
     )
 }
 
+/// `true` when one of the PR's changed files is the file this finding was
+/// reported against. Decides the `New in this PR` section and the `new in this
+/// PR` count, so a wrong yes credits the PR with a finding it did not
+/// introduce.
 pub(crate) fn in_changed(file_path: &str, changed: &HashSet<String>) -> bool {
-    if changed.contains(file_path) {
-        return true;
-    }
-    changed
-        .iter()
-        .any(|f| file_path.ends_with(f.as_str()) || f.ends_with(file_path))
+    changed.contains(file_path)
+        || changed
+            .iter()
+            .any(|candidate| reported_paths_name_same_file(file_path, candidate))
 }
