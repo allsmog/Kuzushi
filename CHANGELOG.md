@@ -60,6 +60,20 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- A run no longer reports an artifact it never wrote. Two surfaces decided
+  "does this declared artifact path name the canonical artifact `<leaf>`?" with
+  an unanchored `str::ends_with`, and Kuzushi writes two colliding pairs
+  itself: `scan-input.json` ends with `input.json`, and `phase-stages.jsonl`
+  ends with `stages.jsonl`. The Report surface's `artifacts.json` summary
+  therefore claimed a scan run carried the tool-input and tool-stage artifacts
+  its own pipeline artifacts merely end like, and the failure handoff accepted
+  a declared `phase-report.md` as the canonical `report.md`, dropping a
+  genuinely missing artifact from `missing_artifacts` and from the recovery
+  prompt's `Missing artifacts:` line. Both now ask one shared
+  `declared_path_names_artifact`, which compares the path's final component —
+  the reading `report/application.rs` already used, and which still answers for
+  a path stated against the run directory or as an absolute path.
+
 - A reported path no longer names a file it only shares a name ending with.
   Two call sites answered "is this the file?" with a bidirectional
   `str::ends_with`, and a raw string suffix is not a path suffix:

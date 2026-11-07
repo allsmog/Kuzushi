@@ -124,3 +124,113 @@ pub(crate) fn scan_pipeline_artifact_spec(leaf: &str) -> Option<&'static Canonic
 pub(crate) fn scan_start_source_artifact_leaf(producer: crate::run_lifecycle::RunItemId) -> String {
     format!("source-start-{producer}.json")
 }
+
+/// The leaf file name a declared artifact path names.
+///
+/// A declared path can be stated against the run directory or as an absolute
+/// path, so the leaf is what identifies the artifact. A path with no final
+/// component (`.`, `..`, the empty string) is returned unchanged so a caller
+/// never silently reads it as some other artifact.
+pub(crate) fn declared_artifact_leaf(path: &str) -> &str {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(std::ffi::OsStr::to_str)
+        .unwrap_or(path)
+}
+
+/// `true` when a declared artifact path names the canonical artifact `leaf`.
+///
+/// Call sites asked this with `str::ends_with`, which answers yes whenever one
+/// artifact's name merely ends with another's. Kuzushi writes two such pairs
+/// itself — `scan-input.json` ends with `input.json`, and `phase-stages.jsonl`
+/// ends with `stages.jsonl` — so a scan run's own pipeline artifacts were read
+/// as the tool-input and tool-stage artifacts that run never wrote.
+///
+/// Unlike a reported *source* path, which is literal detector data and keeps
+/// `\` as a filename byte (see `findings::domain::reported_source_path`), a
+/// declared artifact path is one Kuzushi built from a run directory, so the
+/// platform's own separators are the right ones to read.
+pub(crate) fn declared_path_names_artifact(path: &str, leaf: &str) -> bool {
+    declared_artifact_leaf(path) == leaf
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        declared_artifact_leaf, declared_path_names_artifact, CANONICAL_RUN_ARTIFACTS,
+        OPTIONAL_RUN_ARTIFACTS, SCAN_PIPELINE_ARTIFACTS, TOOL_INPUT_ARTIFACTS,
+        TOOL_RESULT_ARTIFACTS,
+    };
+
+    #[test]
+    fn a_declared_path_names_the_artifact_its_leaf_names_against_any_root() {
+        assert!(declared_path_names_artifact("run.json", "run.json"));
+        assert!(declared_path_names_artifact(
+            ".kuzushi/v3/runs/run-1/items.jsonl",
+            "items.jsonl"
+        ));
+        assert!(declared_path_names_artifact(
+            "/home/op/target/.kuzushi/v3/runs/run-1/report.md",
+            "report.md"
+        ));
+    }
+
+    #[test]
+    fn a_shared_name_ending_names_a_different_artifact() {
+        // Both pairs are artifacts Kuzushi writes itself.
+        assert!(!declared_path_names_artifact(
+            "scan-input.json",
+            "input.json"
+        ));
+        assert!(!declared_path_names_artifact(
+            "runs/run-1/phase-stages.jsonl",
+            "stages.jsonl"
+        ));
+        assert!(!declared_path_names_artifact("prior-run.json", "run.json"));
+        assert!(!declared_path_names_artifact(
+            "input.json",
+            "scan-input.json"
+        ));
+    }
+
+    #[test]
+    fn no_contracted_leaf_is_read_as_another_one_it_merely_ends_like() {
+        let leaves: Vec<&str> = CANONICAL_RUN_ARTIFACTS
+            .iter()
+            .chain(OPTIONAL_RUN_ARTIFACTS.iter())
+            .chain(TOOL_INPUT_ARTIFACTS.iter())
+            .chain(TOOL_RESULT_ARTIFACTS.iter())
+            .chain(SCAN_PIPELINE_ARTIFACTS.iter())
+            .map(|spec| spec.leaf)
+            .collect();
+        let mut shared_endings = 0;
+        for declared in &leaves {
+            for leaf in &leaves {
+                assert_eq!(
+                    declared_path_names_artifact(declared, leaf),
+                    declared == leaf,
+                    "{declared} must name {leaf} only when it is that artifact"
+                );
+                if declared != leaf && declared.ends_with(leaf) {
+                    shared_endings += 1;
+                }
+            }
+        }
+        // `scan-input.json`/`input.json` and `phase-stages.jsonl`/
+        // `stages.jsonl` are the pairs a suffix match confuses. A new leaf
+        // that shares an ending with another belongs in that list.
+        assert_eq!(
+            shared_endings, 2,
+            "a contracted leaf newly shares an ending with another one"
+        );
+    }
+
+    #[test]
+    fn a_path_without_a_final_component_is_left_as_it_was_stated() {
+        for path in ["", ".", "..", "runs/.."] {
+            assert_eq!(declared_artifact_leaf(path), path);
+            assert!(!declared_path_names_artifact(path, "run.json"));
+        }
+        assert_eq!(declared_artifact_leaf("runs/run-1/run.json/"), "run.json");
+    }
+}

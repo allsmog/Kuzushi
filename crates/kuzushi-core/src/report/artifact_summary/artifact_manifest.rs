@@ -1,6 +1,6 @@
 use crate::artifact_contract::{
-    CanonicalRunArtifactSpec, CANONICAL_RUN_ARTIFACTS, OPTIONAL_RUN_ARTIFACTS,
-    TOOL_INPUT_ARTIFACTS, TOOL_RESULT_ARTIFACTS,
+    declared_path_names_artifact, CanonicalRunArtifactSpec, CANONICAL_RUN_ARTIFACTS,
+    OPTIONAL_RUN_ARTIFACTS, TOOL_INPUT_ARTIFACTS, TOOL_RESULT_ARTIFACTS,
 };
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -71,7 +71,8 @@ fn manifest_path_matches(artifact: &Value, specs: &[CanonicalRunArtifactSpec]) -
 }
 
 fn manifest_path_matches_leaf(artifact: &Value, leaf: &str) -> bool {
-    nonempty_value_string(artifact, "path").is_some_and(|path| path.ends_with(leaf))
+    nonempty_value_string(artifact, "path")
+        .is_some_and(|path| declared_path_names_artifact(path, leaf))
 }
 
 fn label_segment(artifacts: &[Value]) -> Option<String> {
