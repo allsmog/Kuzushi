@@ -1048,6 +1048,40 @@ fn report_artifact_manifest_summary_uses_only_canonical_fields() {
 }
 
 #[test]
+fn report_artifact_manifest_summary_claims_no_artifact_a_declared_name_merely_ends_like() {
+    let temp = tempdir().unwrap();
+    let source = completed_summary(temp.path(), "run-manifest-shared-endings", "sast:scan");
+    write_run_summary(temp.path(), &source).unwrap();
+    let dir = run_dir(temp.path(), "run-manifest-shared-endings");
+    fs::write(
+        dir.join("artifacts.json"),
+        serde_json::to_string_pretty(&json!({
+            "runId": "run-manifest-shared-endings",
+            "artifacts": [
+                {"label": "scan input", "path": "scan-input.json", "kind": "json"},
+                {
+                    "label": "scan phase stage receipts",
+                    "path": "phase-stages.jsonl",
+                    "kind": "jsonl"
+                }
+            ]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let report = build_run_report(temp.path(), Some("run-manifest-shared-endings")).unwrap();
+
+    assert!(report.report_markdown.contains(
+        "artifacts.json: present - 2 artifact(s), kinds json=1, jsonl=1, labels scan input, scan phase stage receipts"
+    ));
+    assert!(!report.report_markdown.contains("tool inputs tool input"));
+    assert!(!report
+        .report_markdown
+        .contains("optional tool stage receipts"));
+}
+
+#[test]
 fn report_fails_on_malformed_artifact_manifest() {
     let temp = tempdir().unwrap();
     let source = completed_summary(temp.path(), "run-malformed-manifest", "agentic-sast:scan");

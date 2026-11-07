@@ -3,8 +3,8 @@ use super::failure_handoff::load_report_failure_handoffs;
 use super::markdown::render_report_markdown;
 use super::{CanonicalReportArtifact, RunReportBuild};
 use crate::artifact_contract::{
-    canonical_run_artifact_spec, CanonicalRunArtifactSpec, CANONICAL_RUN_ARTIFACTS,
-    OPTIONAL_RUN_ARTIFACTS, TOOL_INPUT_ARTIFACTS, TOOL_RESULT_ARTIFACTS,
+    canonical_run_artifact_spec, declared_artifact_leaf, CanonicalRunArtifactSpec,
+    CANONICAL_RUN_ARTIFACTS, OPTIONAL_RUN_ARTIFACTS, TOOL_INPUT_ARTIFACTS, TOOL_RESULT_ARTIFACTS,
 };
 use crate::run_artifacts::{
     list_run_summaries, load_run_artifacts, load_run_summary, read_run_artifact_text, run_dir,
@@ -162,11 +162,7 @@ fn declared_artifact_path(run_dir: &Path, path: &str) -> PathBuf {
 }
 
 fn artifact_leaf(path: &str) -> String {
-    Path::new(path)
-        .file_name()
-        .and_then(|leaf| leaf.to_str())
-        .unwrap_or(path)
-        .to_string()
+    declared_artifact_leaf(path).to_string()
 }
 
 fn is_shared_report_leaf(leaf: &str) -> bool {
