@@ -1,7 +1,7 @@
 use super::*;
 use crate::artifact_contract::{
-    canonical_run_artifact_spec, CanonicalRunArtifactSpec, CANONICAL_RUN_ARTIFACTS,
-    OPTIONAL_RUN_ARTIFACTS, TOOL_INPUT_ARTIFACTS, TOOL_RESULT_ARTIFACTS,
+    canonical_run_artifact_spec, declared_path_names_artifact, CanonicalRunArtifactSpec,
+    CANONICAL_RUN_ARTIFACTS, OPTIONAL_RUN_ARTIFACTS, TOOL_INPUT_ARTIFACTS, TOOL_RESULT_ARTIFACTS,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -409,7 +409,7 @@ fn declared_failure_artifact_exists(
     available: &RunArtifact,
     artifact: &str,
 ) -> bool {
-    if !available.path.ends_with(artifact) {
+    if !declared_path_names_artifact(&available.path, artifact) {
         return false;
     }
     failure_artifact_candidates(target, run_id, &available.path)

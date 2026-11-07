@@ -3612,6 +3612,37 @@ mod tests {
     }
 
     #[test]
+    fn run_failures_report_a_canonical_artifact_a_declared_name_merely_ends_like_as_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-failed-shared-name-ending";
+        let dir = run_dir(tmp.path(), run_id);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("phase-report.md"), "# Phase\n").unwrap();
+        let declared = RunArtifact {
+            label: "phase report".to_string(),
+            path: dir.join("phase-report.md").display().to_string(),
+            kind: "markdown".to_string(),
+        };
+
+        write_run_failures(
+            tmp.path(),
+            run_id,
+            "sast:scan",
+            "failed",
+            "scan stage failed",
+            &[declared],
+        )
+        .unwrap();
+
+        let context = load_run_failure_context(tmp.path(), run_id)
+            .unwrap()
+            .expect("failure context");
+        assert!(context.missing_artifacts.contains(&"report.md".to_string()));
+        assert!(context.fallback_prompt.contains("Missing artifacts:"));
+        assert!(context.fallback_prompt.contains("report.md"));
+    }
+
+    #[test]
     fn run_failures_prioritize_follow_up_files_under_inspection_cap() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-failed-many-artifacts";
