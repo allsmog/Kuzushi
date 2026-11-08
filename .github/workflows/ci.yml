@@ -167,9 +167,12 @@ jobs:
         if: runner.os == 'Linux'
         run: command -v tmux || (sudo apt-get update && sudo apt-get install -y tmux)
       - run: cargo test --workspace --locked
+      # The vendored suite's check_format_color helper toggles the process-global
+      # ANSI_COLOR_DISABLED AtomicBool, so the parse_ansi loop tests race it under
+      # the default parallel harness; single-threaded runs are deterministic.
       - name: Pinned terminal dependency contracts
         run: |
-          cargo test --manifest-path third-party/crossterm/Cargo.toml --lib --locked --target-dir target
+          cargo test --manifest-path third-party/crossterm/Cargo.toml --lib --locked --target-dir target -- --test-threads=1
           cargo test --manifest-path third-party/crossterm/Cargo.toml --lib kuzushi_parser_tests --features use-dev-tty --locked --target-dir target
 
   platform-runtime:
@@ -212,10 +215,12 @@ jobs:
         run: |
           cargo test -p kuzushi-tui --lib terminal --locked
           cargo test -p kuzushi-tui --lib editor_state:: --locked
+      # Serialized for the same ANSI_COLOR_DISABLED shared-global test race as the
+      # rust-tests "Pinned terminal dependency contracts" step above.
       - name: Unix terminal dependency contracts
         if: ${{ needs.quality-gauntlet.outputs.platform-terminal == 'true' && runner.os != 'Windows' }}
         run: |
-          cargo test --manifest-path third-party/crossterm/Cargo.toml --lib --locked --target-dir target
+          cargo test --manifest-path third-party/crossterm/Cargo.toml --lib --locked --target-dir target -- --test-threads=1
           cargo test --manifest-path third-party/crossterm/Cargo.toml --lib kuzushi_parser_tests --features use-dev-tty --locked --target-dir target
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         if: ${{ needs.quality-gauntlet.outputs.platform-launcher == 'true' }}
