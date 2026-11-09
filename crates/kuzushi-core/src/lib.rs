@@ -31,6 +31,7 @@ pub(crate) mod codeql_repository_execution;
 mod env_boundary_lint;
 pub(crate) mod file_lock;
 pub(crate) mod fs_atomic;
+pub(crate) mod git_quoted_path;
 pub(crate) mod git_rev;
 pub(crate) mod jsonl_tail;
 pub(crate) mod module_result;
