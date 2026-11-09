@@ -199,6 +199,19 @@ fn batch_sarif_metadata(report: &BatchOccurrenceReport) -> serde_json::Value {
     })
 }
 
+/// One surviving result and the index of the run it was emitted in.
+///
+/// `export_scan_findings_sarif` emits one `runs[]` entry per `Finding.tool`,
+/// and SARIF 2.1.0 resolves a result's detector (`tool.driver.name`), its rule
+/// metadata (`tool.driver.rules[]`, looked up by `result.ruleId`) and its path
+/// bases (`originalUriBaseIds`) against the run that contains it. Identity
+/// folding therefore has to keep each representative where its own engine
+/// reported it.
+struct FoldedResult {
+    run_index: usize,
+    result: serde_json::Value,
+}
+
 fn annotate_sarif_results(
     document: &mut serde_json::Value,
     report: &BatchOccurrenceReport,
@@ -209,48 +222,75 @@ fn annotate_sarif_results(
         .context("batch SARIF has no runs array")?;
     anyhow::ensure!(!runs.is_empty(), "batch SARIF has no run");
     let folded = fold_sarif_results(take_sarif_results(runs), report)?;
-    let count = folded.len();
-    runs[0]["results"] = serde_json::Value::Array(folded);
-    Ok(count)
+    restore_folded_results(runs, folded)
 }
 
-fn take_sarif_results(runs: &mut [serde_json::Value]) -> Vec<serde_json::Value> {
+/// Drain every run's results, tagging each with the run it came from. `drain`
+/// leaves each visited run with an empty `results` array, so a run whose only
+/// observation folded away reports no result rather than keeping a stale one.
+fn take_sarif_results(runs: &mut [serde_json::Value]) -> Vec<FoldedResult> {
     let mut results = Vec::new();
-    for run in runs {
+    for (run_index, run) in runs.iter_mut().enumerate() {
         let Some(run_results) = run
             .get_mut("results")
             .and_then(serde_json::Value::as_array_mut)
         else {
             continue;
         };
-        results.append(run_results);
+        results.extend(
+            run_results
+                .drain(..)
+                .map(|result| FoldedResult { run_index, result }),
+        );
     }
     results
 }
 
 fn fold_sarif_results(
-    results: Vec<serde_json::Value>,
+    results: Vec<FoldedResult>,
     report: &BatchOccurrenceReport,
-) -> Result<Vec<serde_json::Value>> {
-    let mut selected = BTreeMap::<usize, (bool, serde_json::Value)>::new();
-    for mut result in results {
-        let fingerprint = sarif_result_fingerprint(&result)?.to_string();
+) -> Result<Vec<FoldedResult>> {
+    let mut selected = BTreeMap::<usize, (bool, FoldedResult)>::new();
+    for mut folded in results {
+        let fingerprint = sarif_result_fingerprint(&folded.result)?.to_string();
         let (index, row) = occurrence_row_for_fingerprint(report, &fingerprint)?;
-        annotate_sarif_result(&mut result, row);
+        annotate_sarif_result(&mut folded.result, row);
         let representative = fingerprint == row.representative_fingerprint;
         match selected.entry(index) {
             std::collections::btree_map::Entry::Vacant(entry) => {
-                entry.insert((representative, result));
+                entry.insert((representative, folded));
             }
             std::collections::btree_map::Entry::Occupied(mut entry)
                 if representative && !entry.get().0 =>
             {
-                entry.insert((true, result));
+                entry.insert((true, folded));
             }
             _ => {}
         }
     }
-    Ok(selected.into_values().map(|(_, result)| result).collect())
+    Ok(selected.into_values().map(|(_, folded)| folded).collect())
+}
+
+/// Return each surviving result to its own run and report how many survived.
+fn restore_folded_results(
+    runs: &mut [serde_json::Value],
+    folded: Vec<FoldedResult>,
+) -> Result<usize> {
+    let count = folded.len();
+    for folded in folded {
+        run_results_array(runs, folded.run_index)?.push(folded.result);
+    }
+    Ok(count)
+}
+
+fn run_results_array(
+    runs: &mut [serde_json::Value],
+    run_index: usize,
+) -> Result<&mut Vec<serde_json::Value>> {
+    runs.get_mut(run_index)
+        .and_then(|run| run.get_mut("results"))
+        .and_then(serde_json::Value::as_array_mut)
+        .with_context(|| format!("batch SARIF run {run_index} lost its results array"))
 }
 
 fn sarif_result_fingerprint(result: &serde_json::Value) -> Result<&str> {
@@ -544,14 +584,16 @@ mod tests {
 
         let sarif: serde_json::Value =
             serde_json::from_slice(&std::fs::read(output).unwrap()).unwrap();
-        let results = sarif
-            .pointer("/runs/0/results")
-            .unwrap()
-            .as_array()
-            .unwrap();
-        assert_eq!(results.len(), 1);
+        let published = published_results(&sarif);
+        assert_eq!(published.len(), 1, "one result per safe occurrence group");
+        let (driver, result) = published[0];
         assert_eq!(
-            results[0].pointer("/properties/kuzushiBatchOccurrence/seen"),
+            driver, "systems-hunt",
+            "the representative stays under the driver that reported it"
+        );
+        assert_eq!(result["ruleId"], "systems/cwe-78");
+        assert_eq!(
+            result.pointer("/properties/kuzushiBatchOccurrence/seen"),
             Some(&serde_json::json!(2))
         );
         assert_eq!(
@@ -570,6 +612,102 @@ mod tests {
         assert!(gate["binding"]["logicalTerminalStateSha256"].is_string());
         assert!(gate["binding"]["blockingFindingsSha256"].is_string());
         assert!(gate["binding"]["sarifSha256"].is_string());
+    }
+
+    /// A batch scan whose engines each report a finding of their own exports
+    /// one `runs[]` entry per tool, and every result must stay in the run whose
+    /// driver reported it. Pooling them into `runs[0]` republished one engine's
+    /// finding under another engine's name and left the other run claiming it
+    /// found nothing.
+    #[test]
+    fn each_engines_result_stays_in_its_own_run() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        record_running_scans(&store, &["trial-a", "trial-b"]);
+        let (semgrep, systems) = distinct_findings_from_two_engines();
+        store.insert_finding("trial-a", &semgrep).unwrap();
+        store.insert_finding("trial-b", &systems).unwrap();
+        let stored_semgrep = store.list_findings_for_scan_id("trial-a").unwrap()[0].clone();
+        let stored_systems = store.list_findings_for_scan_id("trial-b").unwrap()[0].clone();
+        let report = occurrence_report_for_distinct(&stored_semgrep, &stored_systems);
+        let output = temp.path().join("batch.sarif");
+
+        apply_batch_scan_gate_policy(
+            &workspace,
+            &store,
+            &report,
+            &ScanGatePolicy {
+                fail_on: None,
+                sarif: Some(output.clone()),
+            },
+        )
+        .unwrap();
+
+        let sarif: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(output).unwrap()).unwrap();
+        let mut published: Vec<(&str, &str)> = published_results(&sarif)
+            .into_iter()
+            .map(|(driver, result)| (driver, result["ruleId"].as_str().unwrap()))
+            .collect();
+        published.sort_unstable();
+        assert_eq!(
+            published,
+            vec![
+                ("semgrep", "java.injection.tainted-system-call"),
+                ("systems-hunt", "systems/cwe-78"),
+            ],
+            "each result must be published under the driver that reported it"
+        );
+        for (driver, result) in published_results(&sarif) {
+            let rule_id = result["ruleId"].as_str().unwrap();
+            assert!(
+                declared_rule_ids(&sarif, driver).contains(&rule_id),
+                "{driver} carries a result for {rule_id}, which it does not declare"
+            );
+            assert_eq!(
+                result.pointer("/properties/kuzushiBatchOccurrence/seen"),
+                Some(&serde_json::json!(1))
+            );
+        }
+    }
+
+    /// The rule ids a run declares in its own `tool.driver.rules[]`, which is
+    /// where a SARIF consumer resolves `result.ruleId`.
+    fn declared_rule_ids<'a>(sarif: &'a serde_json::Value, driver: &str) -> Vec<&'a str> {
+        sarif["runs"]
+            .as_array()
+            .expect("runs[] present")
+            .iter()
+            .filter(|run| run.pointer("/tool/driver/name") == Some(&serde_json::json!(driver)))
+            .flat_map(|run| {
+                run["tool"]["driver"]["rules"]
+                    .as_array()
+                    .expect("every run declares its rules")
+                    .iter()
+                    .map(|rule| rule["id"].as_str().expect("every rule has an id"))
+            })
+            .collect()
+    }
+
+    /// Every published result paired with the driver of the run carrying it.
+    fn published_results(sarif: &serde_json::Value) -> Vec<(&str, &serde_json::Value)> {
+        sarif["runs"]
+            .as_array()
+            .expect("runs[] present")
+            .iter()
+            .flat_map(|run| {
+                let driver = run
+                    .pointer("/tool/driver/name")
+                    .and_then(serde_json::Value::as_str)
+                    .expect("every run names its driver");
+                run["results"]
+                    .as_array()
+                    .expect("every run publishes a results array")
+                    .iter()
+                    .map(move |result| (driver, result))
+            })
+            .collect()
     }
 
     #[test]
@@ -719,6 +857,72 @@ mod tests {
         finding.identity_basis = Some(FindingIdentityBasis::FileFallback);
         finding.source_signature = Some(signature.to_string());
         finding
+    }
+
+    /// Two findings from two engines that do not fold together: different
+    /// files, rules and source signatures, so the export emits one `runs[]`
+    /// entry per tool and the occurrence report carries one row per finding.
+    fn distinct_findings_from_two_engines() -> (Finding, Finding) {
+        let mut semgrep = Finding::new_tool(
+            "semgrep",
+            "java.injection.tainted-system-call",
+            "src/exec.c",
+            42,
+            Some(42),
+            Severity::High,
+            "user-controlled exec, CWE-78",
+        );
+        let mut systems = Finding::new_tool(
+            "systems-hunt",
+            "systems/cwe-78",
+            "src/spawn.c",
+            108,
+            Some(108),
+            Severity::Critical,
+            "spawn reaches shell with attacker input, CWE-78",
+        );
+        semgrep.identity_basis = Some(FindingIdentityBasis::SourceLocator);
+        systems.identity_basis = Some(FindingIdentityBasis::SourceLocator);
+        semgrep.source_signature = Some("src/exec.c:exec:user".to_string());
+        systems.source_signature = Some("src/spawn.c:spawn:user".to_string());
+        (semgrep, systems)
+    }
+
+    /// One trial per finding, one occurrence row per finding — the shape a
+    /// batch scan produces when its engines report different findings.
+    fn occurrence_report_for_distinct(first: &Finding, second: &Finding) -> BatchOccurrenceReport {
+        let row = |finding: &Finding, run_id: &str| BatchOccurrenceRow {
+            fold_key: finding_dedupe_key(finding),
+            identity_id: finding.identity_id.clone(),
+            identity_basis: finding.identity_basis,
+            seen: 1,
+            completed: 1,
+            planned: 1,
+            failed: 0,
+            severities: vec![finding.severity.as_str().to_string()],
+            locations: vec![finding_location(finding)],
+            titles: vec![finding.title.clone()],
+            fingerprints: vec![finding.fingerprint.clone()],
+            run_ids: vec![run_id.to_string()],
+            representative_observation_ref: None,
+            representative_fingerprint: finding.fingerprint.clone(),
+            representative_title: finding.title.clone(),
+            representative_severity: finding.severity.as_str().to_string(),
+            representative_location: finding_location(finding),
+        };
+        BatchOccurrenceReport {
+            schema_version: 1,
+            batch_id: "batch-test".to_string(),
+            equivalence_key: "sha256:equivalent".to_string(),
+            identity_fold: IdentityFoldPolicy::Safe,
+            planned: 2,
+            completed: 2,
+            failed: 0,
+            pending: 0,
+            gate: None,
+            trials: vec![completed_trial(1, "trial-a"), completed_trial(2, "trial-b")],
+            rows: vec![row(first, "trial-a"), row(second, "trial-b")],
+        }
     }
 
     fn record_running_scans(store: &FindingStore, run_ids: &[&str]) {

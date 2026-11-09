@@ -60,6 +60,19 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- Batch SARIF no longer republishes one engine's finding under another
+  engine's name. `workspace:export-findings` emits one `runs[]` entry per
+  `Finding.tool`, each declaring its own `tool.driver` and the `rules[]` its
+  results resolve `ruleId` against. The batch identity-fold annotation pooled
+  every run's results and assigned the whole folded list to `runs[0]`, so on
+  any `kuzushi scan --sarif` batch whose findings came from more than one
+  engine every result was attributed to the alphabetically first driver, its
+  `ruleId` no longer resolved to a declared rule — losing the rule's
+  `security-severity`, level and CWE tags for a code-scanning consumer — and
+  the other engines' runs published an empty `results` array. Folding now
+  keeps each surviving result in the run that emitted it; the folded count and
+  the one-result-per-occurrence-group guarantee are unchanged.
+
 - A run no longer reports an artifact it never wrote. Two surfaces decided
   "does this declared artifact path name the canonical artifact `<leaf>`?" with
   an unanchored `str::ends_with`, and Kuzushi writes two colliding pairs
