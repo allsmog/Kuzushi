@@ -60,6 +60,24 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- An applied patch's record no longer names files that do not exist. The
+  reviewed-diff reader took the first two whitespace-separated tokens of a
+  `diff --git` line, so `a/my file.txt b/my file.txt` was recorded as the paths
+  `my` and `file.txt`, and it kept git's C-quoted form verbatim, so
+  `src/café.rs` was recorded as `"a/src/caf\303\251.rs"`. Those names are what
+  the durable `PatchLifecycleRecorded` event, its before/after content hashes,
+  the `ensure_planned_files_unchanged` guard, and the finding exports stand on:
+  hashing an absent path yields nothing twice, so for a quoted name the guard
+  compared nothing and could not notice the real file changing under the
+  reviewed diff, and a mode-only diff over a spaced name recorded no real path
+  at all. A new `git_quoted_path` reader decodes git's quoting and refuses a
+  malformed name instead of half-decoding it; the `diff --git` split is
+  resolved the way git resolves it, including the headers where git quotes only
+  the side that needs it. Names are now read only from the header region, since
+  a removed source line can look exactly like one — removing the SQL comment
+  `-- "../legacy"` puts `--- "../legacy"` in a hunk body — and the hunk-body
+  boundary is the rule `recount_hunks` already canonicalized the diff with.
+
 - Batch SARIF no longer republishes one engine's finding under another
   engine's name. `workspace:export-findings` emits one `runs[]` entry per
   `Finding.tool`, each declaring its own `tool.driver` and the `rules[]` its

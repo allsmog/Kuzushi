@@ -73,7 +73,14 @@ fn push_recounted_hunk(
 
 /// The hunk ends at the next hunk or file header, at a line no hunk can
 /// contain, or before trailing blank lines at the end of the diff.
-fn hunk_body_end(lines: &[&str], start: usize) -> usize {
+/// The index past the body of a hunk whose first body line is `start`.
+///
+/// Shared with `apply_reviewed_patch`, which has to skip hunk bodies whole
+/// when it reads file names: a removed source line can look exactly like a
+/// name header. Both readers use this one boundary rule, so the canonicalizer
+/// that recomputed a header's counts and the reader that trusts them agree on
+/// where a body ends.
+pub(super) fn hunk_body_end(lines: &[&str], start: usize) -> usize {
     let mut end = start;
     while end < lines.len() && is_hunk_body_line(lines, end) {
         end += 1;
