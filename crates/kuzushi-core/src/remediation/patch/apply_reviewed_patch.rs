@@ -164,16 +164,45 @@ fn validated_diff_paths(diff: &str) -> Result<Vec<String>> {
     Ok(paths)
 }
 
+/// The names every header in the diff carries, hunk bodies skipped whole.
+///
+/// A hunk body has to be skipped rather than scanned, because a removed source
+/// line can look exactly like a name header: removing the SQL comment
+/// `-- "../legacy"` puts `--- "../legacy"` in the body, which is a
+/// well-formed quoted name and is indistinguishable from a `---` header by its
+/// prefix alone. Git tells the two apart by position, and so does this. The
+/// boundary rule is [`super::recount_hunks::hunk_body_end`], the one `recount_hunks`
+/// canonicalized the diff with, so the two readers agree on where a body ends.
 fn candidate_diff_paths(diff: &str) -> Result<Vec<String>> {
+    let lines = diff
+        .lines()
+        .map(|line| line.strip_suffix('\r').unwrap_or(line))
+        .collect::<Vec<_>>();
     let mut names = Vec::new();
-    for line in diff.lines() {
-        names.extend(candidate_paths_from_line(line)?);
+    let mut index = 0;
+    while index < lines.len() {
+        index = match hunk_body_bounds(&lines, index) {
+            Some(body_end) => body_end,
+            None => take_line_names(&lines, index, &mut names)?,
+        };
     }
     Ok(names)
 }
 
+/// The index past a hunk opening at `index`, or `None` when no hunk opens
+/// there. Always past `index`, so the walk cannot stall on an empty body.
+fn hunk_body_bounds(lines: &[&str], index: usize) -> Option<usize> {
+    lines[index]
+        .starts_with("@@")
+        .then(|| super::recount_hunks::hunk_body_end(lines, index + 1))
+}
+
+fn take_line_names(lines: &[&str], index: usize, names: &mut Vec<String>) -> Result<usize> {
+    names.extend(candidate_paths_from_line(lines[index])?);
+    Ok(index + 1)
+}
+
 fn candidate_paths_from_line(line: &str) -> Result<Vec<String>> {
-    let line = line.strip_suffix('\r').unwrap_or(line);
     if let Some(rest) = line.strip_prefix("diff --git ") {
         return diff_git_paths(rest);
     }
@@ -544,6 +573,45 @@ mod tests {
     }
 
     #[test]
+    fn a_removed_comment_inside_a_hunk_is_not_read_as_a_name() {
+        // Captured from `git diff` after removing the line `-- "../legacy"`.
+        let paths = validated_diff_paths(&diff_text(&[
+            "diff --git a/query.sql b/query.sql",
+            "index af761b7..33791bf 100644",
+            "--- a/query.sql",
+            "+++ b/query.sql",
+            "@@ -1,3 +1,2 @@",
+            " SELECT 1;",
+            "--- \"../legacy\"",
+            " SELECT 2;",
+        ]))
+        .unwrap();
+
+        assert_eq!(paths, vec!["query.sql"]);
+    }
+
+    #[test]
+    fn a_file_section_after_a_hunk_is_still_read() {
+        let paths = validated_diff_paths(&diff_text(&[
+            "diff --git a/first.sql b/first.sql",
+            "--- a/first.sql",
+            "+++ b/first.sql",
+            "@@ -1,2 +1,1 @@",
+            " SELECT 1;",
+            "--- \"../legacy\"",
+            "diff --git a/second.sql b/second.sql",
+            "--- a/second.sql",
+            "+++ b/second.sql",
+            "@@ -1 +1 @@",
+            "-SELECT 2;",
+            "+SELECT 3;",
+        ]))
+        .unwrap();
+
+        assert_eq!(paths, vec!["first.sql", "second.sql"]);
+    }
+
+    #[test]
     fn apply_records_the_real_path_of_a_name_holding_a_space() {
         if git_is_unavailable() {
             return;
@@ -634,6 +702,13 @@ mod tests {
             .status()
             .unwrap();
         assert!(status.success(), "git {args:?} failed");
+    }
+
+    /// A diff written line by line. A `\\`-continued string literal drops the
+    /// leading whitespace of each continued line, which would silently strip
+    /// the leading space off a context line and change where the hunk ends.
+    fn diff_text(lines: &[&str]) -> String {
+        format!("{}\n", lines.join("\n"))
     }
 
     fn spaced_name_diff() -> &'static str {

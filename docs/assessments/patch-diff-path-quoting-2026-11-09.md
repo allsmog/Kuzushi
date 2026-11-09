@@ -89,11 +89,20 @@ malformed quoting instead of returning a half-decoded name. It sits beside
   `git_tracked_paths.rs` already does, which is a different change with a
   different blast radius; the third needs this decoder. They are named here so
   the remaining hole is visible, not left implied.
-- A removed line whose content begins `-- ` reaches a line-oriented diff reader
-  as `--- `, and both the old and the new reader may take such a line for a
-  name header. That ambiguity is pre-existing and is not resolved here; what is
-  new is that malformed quoting on such a line is classified as content rather
-  than failing the whole patch.
+- A removed line whose content begins `-- ` reaches a line-oriented diff
+  reader as `--- `, so removing the SQL comment `-- "../legacy"` puts
+  `--- "../legacy"` in a hunk body. Decoding that as a name made it the path
+  `../legacy` and refused a patch the prior reader accepted, so the reader now
+  skips hunk bodies whole and reads names only from the header region. The
+  boundary rule is `recount_hunks::hunk_body_end`, the one the canonicalizer
+  that recomputed the hunk's counts already used, so both readers agree on
+  where a body ends rather than each carrying a rule of its own.
+
+  What that rule still cannot resolve is a removal immediately followed by an
+  addition whose rendered lines are `--- x` then `+++ y`: that is a file-header
+  pair to any line-oriented reader, and git only tells it apart by counting the
+  hunk body. The ambiguity is pre-existing, shared with `recount_hunks`, and not
+  resolved here.
 - Nothing changes about which diffs `git apply` accepts, nor about the
   `PatchLifecycleRecorded` schema. Only the names written into it change, and
   only where they were wrong.

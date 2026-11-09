@@ -73,7 +73,10 @@ Notable changes to Kuzushi. Release procedure lives in
   at all. A new `git_quoted_path` reader decodes git's quoting and refuses a
   malformed name instead of half-decoding it; the `diff --git` split is
   resolved the way git resolves it, including the headers where git quotes only
-  the side that needs it.
+  the side that needs it. Names are now read only from the header region, since
+  a removed source line can look exactly like one — removing the SQL comment
+  `-- "../legacy"` puts `--- "../legacy"` in a hunk body — and the hunk-body
+  boundary is the rule `recount_hunks` already canonicalized the diff with.
 
 - Batch SARIF no longer republishes one engine's finding under another
   engine's name. `workspace:export-findings` emits one `runs[]` entry per
