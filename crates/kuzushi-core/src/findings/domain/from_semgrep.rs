@@ -29,30 +29,27 @@ impl Severity {
         Self::from_label(value)
     }
 
+    /// The one severity-label parser. Every scanner-native and LLM-emitted
+    /// severity string in the repository resolves through here, so the same
+    /// label lands in the same band whichever engine reported it — a finding
+    /// that fails to parse becomes [`Severity::Unknown`], and an `Unknown`
+    /// finding can never trip `scan --fail-on` or `kuzushi ci`. One engine
+    /// banding a label another engine drops is therefore a gating difference,
+    /// not a cosmetic one.
+    ///
+    /// Covers the Semgrep (`ERROR`/`WARNING`/`INFO`), CodeQL/SARIF
+    /// (`note`/`warning`/`error`) and plain (`critical`…`info`) vocabularies,
+    /// and the short and long spellings models emit for them. Labels outside
+    /// that vocabulary fail closed rather than being mapped to a plausible
+    /// band.
     pub fn from_label(value: &str) -> Self {
         match normalized_severity_label(value).as_str() {
             "critical" | "crit" => Self::Critical,
             "high" | "error" => Self::High,
             "medium" | "med" | "warning" | "warn" => Self::Medium,
             "low" => Self::Low,
-            "info" | "informational" | "note" => Self::Info,
+            "info" | "information" | "informational" | "note" => Self::Info,
             "unknown" => Self::Unknown,
-            _ => Self::Unknown,
-        }
-    }
-
-    /// Canonicalize any scanner-native or LLM-emitted severity label to the
-    /// canonical band. Handles Semgrep (`ERROR`/`WARNING`/`INFO`) and legacy /
-    /// CodeQL-style (`CRITICAL`/`HIGH`/`MEDIUM`/`LOW`) vocabularies in one place.
-    /// Unknown labels fail closed to [`Severity::Unknown`] rather than being
-    /// silently mapped to a plausible band.
-    pub fn from_scanner_label(value: &str) -> Self {
-        match value.trim().to_ascii_uppercase().as_str() {
-            "CRITICAL" => Self::Critical,
-            "ERROR" | "HIGH" => Self::High,
-            "WARNING" | "MEDIUM" | "MED" => Self::Medium,
-            "LOW" => Self::Low,
-            "INFO" | "INFORMATION" | "INFORMATIONAL" => Self::Info,
             _ => Self::Unknown,
         }
     }
@@ -121,16 +118,72 @@ mod scanner_label_tests {
     #[test]
     fn semgrep_and_legacy_labels_normalize_to_canonical_bands() {
         // Semgrep-native
-        assert_eq!(Severity::from_scanner_label("ERROR"), Severity::High);
-        assert_eq!(Severity::from_scanner_label("WARNING"), Severity::Medium);
-        assert_eq!(Severity::from_scanner_label("INFO"), Severity::Info);
+        assert_eq!(Severity::from_label("ERROR"), Severity::High);
+        assert_eq!(Severity::from_label("WARNING"), Severity::Medium);
+        assert_eq!(Severity::from_label("INFO"), Severity::Info);
         // Legacy / CodeQL-style
-        assert_eq!(Severity::from_scanner_label("HIGH"), Severity::High);
-        assert_eq!(Severity::from_scanner_label("medium"), Severity::Medium);
-        assert_eq!(Severity::from_scanner_label("Low"), Severity::Low);
-        assert_eq!(Severity::from_scanner_label("CRITICAL"), Severity::Critical);
+        assert_eq!(Severity::from_label("HIGH"), Severity::High);
+        assert_eq!(Severity::from_label("medium"), Severity::Medium);
+        assert_eq!(Severity::from_label("Low"), Severity::Low);
+        assert_eq!(Severity::from_label("CRITICAL"), Severity::Critical);
         // Fail closed on unknown labels rather than guessing a band.
-        assert_eq!(Severity::from_scanner_label("bogus"), Severity::Unknown);
+        assert_eq!(Severity::from_label("bogus"), Severity::Unknown);
+    }
+
+    /// `INFORMATION` only ever reached a band through the retired
+    /// scanner-label copy; the one parser has to keep banding it.
+    #[test]
+    fn long_information_spelling_keeps_its_band() {
+        assert_eq!(Severity::from_label("INFORMATION"), Severity::Info);
+        assert_eq!(Severity::from_label("Informational"), Severity::Info);
+    }
+
+    /// The vocabulary the retired copies dropped, read through an engine
+    /// adapter that used to carry one. Each of these banded through
+    /// `systems-hunt` and fell to `Unknown` through `agentic-sast`, and an
+    /// `Unknown` finding can never trip `scan --fail-on` or `kuzushi ci`.
+    /// The last two stay `Unknown` on both sides: the parser fails closed
+    /// rather than guessing at a band it was never given.
+    #[test]
+    fn spellings_the_retired_copies_dropped_now_band() {
+        for (label, expected) in [
+            ("crit", Severity::Critical),
+            ("warn", Severity::Medium),
+            ("note", Severity::Info),
+            ("\"high\"", Severity::High),
+            ("very_high", Severity::Unknown),
+            ("MEDIUM-HIGH", Severity::Unknown),
+        ] {
+            assert_eq!(
+                crate::capabilities::agentic_sast::agentic_severity(label),
+                expected,
+                "label {label:?}"
+            );
+        }
+    }
+
+    /// Divergence regression guard. `uaf-hunt` carried a copy with no
+    /// `ERROR`/`WARNING` at all, so a memory-safety finding labelled in
+    /// Semgrep's own vocabulary banded `High` from `agentic-sast` and
+    /// `Unknown` from `uaf-hunt` — the same label, two gating outcomes.
+    #[test]
+    fn every_engine_entry_point_bands_a_label_identically() {
+        for label in [
+            "ERROR", "WARNING", "warn", "note", "crit", "CRITICAL", "HIGH", "medium", "Low",
+            "INFO", "INFORMATION", "bogus",
+        ] {
+            let canonical = Severity::from_label(label);
+            assert_eq!(
+                Severity::from_semgrep(label),
+                canonical,
+                "from_semgrep disagrees on {label:?}"
+            );
+            assert_eq!(
+                crate::capabilities::agentic_sast::agentic_severity(label),
+                canonical,
+                "agentic-sast disagrees on {label:?}"
+            );
+        }
     }
 }
 
