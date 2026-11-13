@@ -69,7 +69,7 @@ fn read_u64(item: &Value, keys: &[&str]) -> Option<u64> {
 fn read_severity(item: &Value) -> Severity {
     item.get("severity")
         .and_then(Value::as_str)
-        .map(severity_from_label)
+        .map(Severity::from_label)
         .unwrap_or(Severity::Unknown)
 }
 
@@ -90,13 +90,40 @@ fn render_trace_block(trace: &Value) -> String {
     format!("\n\nalloc: {alloc}\nfree:  {free}\nuse:   {use_site}\nrationale: {rationale}",)
 }
 
-fn severity_from_label(label: &str) -> Severity {
-    match label.to_ascii_uppercase().as_str() {
-        "CRITICAL" => Severity::Critical,
-        "HIGH" => Severity::High,
-        "MEDIUM" | "MED" => Severity::Medium,
-        "LOW" => Severity::Low,
-        "INFO" | "INFORMATION" | "INFORMATIONAL" => Severity::Info,
-        _ => Severity::Unknown,
+#[cfg(test)]
+mod severity_tests {
+    use super::normalize_uaf_hunt_findings;
+    use crate::findings::Severity;
+    use serde_json::json;
+
+    fn banded(label: &str) -> Severity {
+        let raw = json!({"findings": [{
+            "ruleId": "uaf-hunt/use-after-free",
+            "filePath": "src/foo.c",
+            "startLine": 12,
+            "severity": label,
+            "message": "post-free use",
+        }]});
+        normalize_uaf_hunt_findings(&raw, 10).unwrap().remove(0).severity
+    }
+
+    /// uaf-hunt kept a private label parser that knew neither `ERROR` nor
+    /// `WARNING`, so a memory-safety finding labelled in Semgrep's vocabulary
+    /// arrived `Unknown` — below every `--fail-on` threshold — while the same
+    /// label from agentic-sast arrived `High`.
+    #[test]
+    fn semgrep_vocabulary_bands_instead_of_falling_to_unknown() {
+        assert_eq!(banded("ERROR"), Severity::High);
+        assert_eq!(banded("WARNING"), Severity::Medium);
+        assert_eq!(banded("note"), Severity::Info);
+    }
+
+    #[test]
+    fn prompt_vocabulary_and_unrecognized_labels_are_unchanged() {
+        assert_eq!(banded("HIGH"), Severity::High);
+        assert_eq!(banded("MEDIUM"), Severity::Medium);
+        assert_eq!(banded("CRITICAL"), Severity::Critical);
+        assert_eq!(banded("INFORMATIONAL"), Severity::Info);
+        assert_eq!(banded("not-a-band"), Severity::Unknown);
     }
 }

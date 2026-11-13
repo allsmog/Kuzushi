@@ -114,7 +114,7 @@ pub(crate) fn append_agentic_schema_object_summary(
 }
 
 pub(crate) fn agentic_severity(value: &str) -> Severity {
-    Severity::from_scanner_label(value)
+    Severity::from_label(value)
 }
 
 pub(crate) fn read_object_value<'a>(

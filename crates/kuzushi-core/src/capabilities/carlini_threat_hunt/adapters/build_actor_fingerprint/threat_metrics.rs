@@ -1,7 +1,7 @@
 use super::*;
 
 pub(in crate::capabilities::carlini_threat_hunt) fn carlini_severity(value: &str) -> Severity {
-    Severity::from_scanner_label(value)
+    Severity::from_label(value)
 }
 
 pub(in crate::capabilities::carlini_threat_hunt) fn critical_count(threats: &[Value]) -> usize {

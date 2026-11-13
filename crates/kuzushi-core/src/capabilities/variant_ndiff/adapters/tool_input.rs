@@ -105,7 +105,7 @@ pub(crate) fn normalize_file_path(root: &Path, file_path: &str) -> String {
 }
 
 pub(crate) fn severity_from_agent(value: &str) -> Severity {
-    Severity::from_scanner_label(value)
+    Severity::from_label(value)
 }
 
 pub(crate) fn read_object_value<'a>(
