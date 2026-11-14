@@ -30,7 +30,10 @@ pub fn git_diff_files(target: &Path, since_ref: &str, include_worktree: bool) ->
     );
 
     let mut cmd = Command::new("git");
-    cmd.arg("-C").arg(target).arg("diff").arg("--name-only");
+    // -z prints each name's raw bytes followed by NUL. Without it git quotes
+    // any name holding a non-ASCII byte, a quote, a backslash or a control
+    // character, and a quoted name names no file on disk.
+    cmd.arg("-C").arg(target).arg("diff").arg("--name-only").arg("-z");
     if include_worktree {
         cmd.arg(trimmed);
     } else {
@@ -51,12 +54,8 @@ pub fn git_diff_files(target: &Path, since_ref: &str, include_worktree: bool) ->
         );
     }
 
-    let stdout =
-        String::from_utf8(output.stdout).context("diff_scope: git output was not valid UTF-8")?;
-    let mut files = stdout
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
+    let mut files = crate::git_nul_paths::nul_separated_paths(&output.stdout, "diff_scope")?
+        .into_iter()
         .map(PathBuf::from)
         .collect::<Vec<_>>();
     files.sort();

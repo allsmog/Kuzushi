@@ -209,21 +209,24 @@ pub fn changed_files_since(
 ) -> Result<Option<Vec<String>>> {
     ensure_safe_git_rev(since_rev, "threat-model refine delta")?;
     let range = format!("{since_rev}..HEAD");
-    let Ok(output) = run_git(target, &["diff", "--name-only", &range], timeout) else {
+    // -z keeps each name's raw bytes: git's default output quotes any name
+    // holding a non-ASCII byte or a control character, and the delta is
+    // matched against surface paths by equality, so a quoted name matches
+    // nothing.
+    let Ok(output) = run_git(target, &["diff", "--name-only", "-z", &range], timeout) else {
         return Ok(None);
     };
     if !output.status.success() {
         return Ok(None);
     }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    Ok(Some(
-        stdout
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .take(max_files)
-            .map(str::to_string)
-            .collect(),
-    ))
+    // A name this process cannot spell leaves the delta unknown rather than
+    // partially known: a caller that sees Some(_) treats every absent path as
+    // unchanged.
+    let Ok(paths) = crate::git_nul_paths::nul_separated_paths(&output.stdout, "refine delta")
+    else {
+        return Ok(None);
+    };
+    Ok(Some(paths.into_iter().take(max_files).collect()))
 }
 
 /// Curated commit-message keywords: a language-agnostic base plus
@@ -349,6 +352,47 @@ mod tests {
             .unwrap();
         let excerpt = commits[0].diff_excerpt.as_deref().unwrap();
         assert!(excerpt.contains("[... diff truncated ...]"));
+    }
+
+    /// The refine delta is matched against surface paths by equality, so a
+    /// name git would have quoted has to come back spelled the way it is on
+    /// disk; a newline in a name must stay one record rather than becoming two.
+    #[cfg(unix)]
+    #[test]
+    fn changed_files_since_reads_names_git_would_have_quoted() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        git(root, &["init", "-q"]);
+        std::fs::write(root.join("kept.c"), "int kept() { return 0; }\n").unwrap();
+        git(root, &["add", "."]);
+        git(root, &["commit", "-q", "-m", "base"]);
+        let base = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        assert!(base.status.success());
+        let base = String::from_utf8(base.stdout).unwrap().trim().to_string();
+
+        for name in ["na\u{ef}ve.c", "two words.c", "line\nbreak.c"] {
+            std::fs::write(root.join(name), "int v() { return 1; }\n").unwrap();
+        }
+        git(root, &["add", "."]);
+        git(root, &["commit", "-q", "-m", "awkward names"]);
+
+        let mut changed = changed_files_since(root, &base, 16, Duration::from_secs(30))
+            .unwrap()
+            .expect("fixture repo resolves the base revision");
+        changed.sort();
+        assert_eq!(
+            changed,
+            vec![
+                "line\nbreak.c".to_string(),
+                "na\u{ef}ve.c".to_string(),
+                "two words.c".to_string(),
+            ]
+        );
     }
 
     #[test]
