@@ -382,6 +382,49 @@ mod since_scope_tests {
         }
     }
 
+    /// Git's human-readable output quotes a name holding a non-ASCII byte or a
+    /// control character and leaves a name ending in a space alone, so the old
+    /// reader kept the quoted text verbatim and trimmed the space off the
+    /// other. Either way the path named no file, and `changed_scan_input`
+    /// drops a path that is not a file — silently narrowing the scan scope.
+    #[cfg(unix)]
+    #[test]
+    fn git_diff_files_reads_names_git_would_have_quoted() {
+        let (tmp, base) = make_repo();
+        for name in ["caf\u{e9}.rs", "my file.rs", "line\nbreak.rs", "trailing.rs "] {
+            fs::write(tmp.path().join(name), "void v(){}\n").unwrap();
+        }
+        git(tmp.path(), &["add", "."]);
+        git(
+            tmp.path(),
+            &["commit", "-q", "-m", "awkward names", "--no-gpg-sign"],
+        );
+
+        let scope = git_diff_files(tmp.path(), &base, false).unwrap();
+        let names = scope
+            .files
+            .iter()
+            .map(|path| path.to_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            vec![
+                "caf\u{e9}.rs",
+                "line\nbreak.rs",
+                "my file.rs",
+                "trailing.rs ",
+            ]
+        );
+        for path in &scope.files {
+            assert!(
+                tmp.path().join(path).is_file(),
+                "{} does not name a file",
+                path.display()
+            );
+            assert!(scope.contains_path(path));
+        }
+    }
+
     #[test]
     fn diff_scope_contains_path_and_prefix() {
         let scope = DiffScope {
