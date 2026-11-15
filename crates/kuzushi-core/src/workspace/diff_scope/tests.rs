@@ -455,3 +455,114 @@ mod since_scope_tests {
         assert!(!Path::new("/tmp/pwn").exists());
     }
 }
+
+#[cfg(test)]
+mod quoted_name_tests {
+    use super::super::*;
+    use crate::findings::{Finding, Severity};
+    use std::fs;
+    use std::process::Command;
+    use tempfile::tempdir;
+
+    fn git(dir: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .args([
+                "-c",
+                "user.email=kuzushi@example.test",
+                "-c",
+                "user.name=Kuzushi Test",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .expect("git binary required for these tests");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    /// Every name here is one git prints differently from how it is spelled:
+    /// `café.rs` and `newï.rs` are quoted with octal escapes, and `trail ` is
+    /// followed by a tab terminator in the unified-diff header.
+    #[cfg(unix)]
+    #[test]
+    fn the_report_names_the_files_a_pull_request_really_changed() {
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        fs::write(root.join("café.rs"), "fn a() {}\nfn b() {}\nfn c() {}\n").unwrap();
+        fs::write(root.join("old\u{ef}.rs"), "fn moved() {}\n").unwrap();
+        fs::write(root.join("trail "), "one\n").unwrap();
+        git(root, &["init"]);
+        git(root, &["add", "."]);
+        git(root, &["commit", "-m", "base"]);
+
+        fs::write(
+            root.join("café.rs"),
+            "fn a() {}\nfn vulnerable() {}\nfn c() {}\n",
+        )
+        .unwrap();
+        git(root, &["mv", "old\u{ef}.rs", "new\u{ef}.rs"]);
+        fs::write(root.join("trail "), "one\ntwo\n").unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-m", "pr"]);
+
+        let finding = Finding::new_tool(
+            "codeql",
+            "rs/injection",
+            "café.rs",
+            2,
+            Some(2),
+            Severity::High,
+            "Request input reaches a query",
+        );
+
+        let report =
+            build_whitebox_diff_scope_report(root, "HEAD~1", &[finding.clone()], &[]).unwrap();
+
+        assert_eq!(
+            report
+                .changed_files
+                .iter()
+                .map(|file| file.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["café.rs", "new\u{ef}.rs", "trail "]
+        );
+        assert_eq!(report.summary.changed_files, 3);
+
+        let changed = &report.changed_files[0];
+        assert_eq!(changed.status, DiffFileStatus::Modified);
+        assert_eq!(
+            changed
+                .changed_ranges
+                .iter()
+                .map(|range| (range.start_line, range.end_line))
+                .collect::<Vec<_>>(),
+            vec![(2, 2)]
+        );
+
+        let renamed = &report.changed_files[1];
+        assert_eq!(renamed.status, DiffFileStatus::Renamed);
+        assert_eq!(renamed.previous_path.as_deref(), Some("old\u{ef}.rs"));
+
+        // The lie this guards: before the names were read correctly, no
+        // changed file matched `café.rs`, so a finding on the line the pull
+        // request introduced was reported as pre-existing.
+        assert_eq!(
+            report
+                .finding_tags
+                .iter()
+                .find(|tag| tag.fingerprint == finding.fingerprint)
+                .map(|tag| tag.status),
+            Some(DiffFindingStatus::New)
+        );
+        assert!(report
+            .context
+            .iter()
+            .any(|item| item.kind == DiffContextKind::Caller && item.path == "café.rs"));
+    }
+}

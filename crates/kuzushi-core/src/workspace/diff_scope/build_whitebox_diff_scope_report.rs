@@ -40,15 +40,11 @@ pub fn build_whitebox_diff_scope_report(
 
 pub(crate) fn collect_changed_files(root: &Path, diff_base: &str) -> Result<Vec<ChangedFile>> {
     verify_diff_base(root, diff_base)?;
-    let mut files = parse_name_status(&git_output(
+    let range = format!("{diff_base}...HEAD");
+    let mut files = parse_name_status(&git_stdout(
         root,
-        &[
-            "diff",
-            "--name-status",
-            "--find-renames",
-            &format!("{diff_base}...HEAD"),
-        ],
-    )?);
+        &["diff", "--name-status", "-z", "--find-renames", &range],
+    )?)?;
     parse_unified_diff_ranges(
         &git_output(
             root,
@@ -58,11 +54,11 @@ pub(crate) fn collect_changed_files(root: &Path, diff_base: &str) -> Result<Vec<
                 "--no-color",
                 "--no-ext-diff",
                 "--find-renames",
-                &format!("{diff_base}...HEAD"),
+                &range,
             ],
         )?,
         &mut files,
-    );
+    )?;
 
     Ok(files.into_values().collect())
 }
@@ -87,7 +83,18 @@ pub(crate) fn verify_diff_base(root: &Path, diff_base: &str) -> Result<()> {
     Ok(())
 }
 
+/// Git stdout read as text, for the patch body, whose lines *are* text.
+///
+/// File content need not be UTF-8, so this read stays lossy. That does not
+/// reach the path names in the patch headers: git escapes every byte it must
+/// not emit literally, so a name it quoted arrives as ASCII, and an unquoted
+/// name is UTF-8 that a lossy read returns unchanged. A name listing goes
+/// through [`git_stdout`] instead, because there the bytes are the name.
 pub(crate) fn git_output(root: &Path, args: &[&str]) -> Result<String> {
+    Ok(String::from_utf8_lossy(&git_stdout(root, args)?).to_string())
+}
+
+fn git_stdout(root: &Path, args: &[&str]) -> Result<Vec<u8>> {
     let mut command = Command::new("git");
     command.args(args).current_dir(root);
     let output = crate::bounded_subprocess::output(&mut command, "git diff")
@@ -101,5 +108,5 @@ pub(crate) fn git_output(root: &Path, args: &[&str]) -> Result<String> {
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    Ok(output.stdout)
 }

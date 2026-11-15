@@ -48,7 +48,3 @@ pub(in crate::workspace::diff_scope) fn line_near_range(
 ) -> bool {
     line >= range.start_line.saturating_sub(distance) && line <= range.end_line + distance
 }
-
-pub(in crate::workspace::diff_scope) fn normalize_repo_path(path: &str) -> String {
-    path.trim_matches('"').replace('\\', "/")
-}
