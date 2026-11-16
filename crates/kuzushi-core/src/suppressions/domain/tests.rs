@@ -168,3 +168,121 @@ fn reason_and_origin_round_trip_tokens() {
             < SuppressionOrigin::ScopeToml.specificity_rank()
     );
 }
+
+fn http_capture(fingerprint: &str, url: &str, blob: &str) -> Finding {
+    let mut finding = finding(fingerprint, "burp-xml", "http-evidence", Severity::High);
+    finding.file_path = url.to_string();
+    finding.evidence.push(FindingEvidence {
+        kind: "http-request".to_string(),
+        file_path: url.to_string(),
+        request_blob: Some(blob.to_string()),
+        ..FindingEvidence::default()
+    });
+    finding
+}
+
+fn scope_rule_state(scope: &ProgramScope, findings: &[Finding]) -> Vec<SuppressionState> {
+    let mut predicate = SuppressionPredicate::empty();
+    predicate.scope_status = Some(crate::workspace::ScopeVerdict::OutOfScope);
+    let rules = [rule("sup-scope", SuppressionOrigin::ScopeToml, predicate)];
+    evaluate_suppressions(findings, &rules, Some(scope), 1000)
+        .states
+        .into_iter()
+        .map(|entry| entry.state)
+        .collect()
+}
+
+fn example_com_allow_list() -> ProgramScope {
+    ProgramScope::parse(
+        r#"
+        [in_scope]
+        hosts = ["*.example.com"]
+        "#,
+    )
+    .unwrap()
+}
+
+/// The scope rule compiled from `scope.toml` suppresses an out-of-scope host,
+/// and a suppressed finding is dropped from the `--fail-on` gate. A URL the
+/// request merely carries — in its query string, or in a `Referer` that
+/// precedes `Host` — is not the host it was sent to, so it must not decide
+/// that verdict.
+#[test]
+fn a_url_the_request_carries_does_not_put_an_in_scope_capture_out_of_scope() {
+    let scope = example_com_allow_list();
+    let redirect = http_capture(
+        "fp-redirect",
+        "https://api.example.com/redirect?next=https://partner.out-of-scope.test/",
+        "GET /redirect?next=https://partner.out-of-scope.test/ HTTP/1.1\r\n\
+         Host: api.example.com\r\n\r\n",
+    );
+    let referred = http_capture(
+        "fp-referred",
+        "https://api.example.com/login",
+        "POST /login HTTP/1.1\r\n\
+         Referer: https://cdn.thirdparty.test/sso\r\n\
+         Host: api.example.com\r\n\r\n",
+    );
+    let webhook = http_capture(
+        "fp-webhook",
+        "https://api.example.com/hooks",
+        "POST /hooks HTTP/1.1\r\n\
+         Host: api.example.com\r\n\r\n\
+         {\"callback\":\"https://out-of-scope.test/cb\"}",
+    );
+
+    let states = scope_rule_state(&scope, &[redirect, referred, webhook]);
+
+    for state in &states {
+        assert!(
+            matches!(state, SuppressionState::None),
+            "in-scope capture was suppressed as out of scope: {state:?}"
+        );
+    }
+}
+
+/// A capture genuinely outside the program is still annotated, from whichever
+/// of the two places states its host.
+#[test]
+fn an_out_of_scope_capture_is_still_suppressed_by_the_scope_rule() {
+    let scope = example_com_allow_list();
+    let by_url = http_capture(
+        "fp-url",
+        "https://admin.evil.test/panel",
+        "GET /panel HTTP/1.1\r\nHost: admin.evil.test\r\n\r\n",
+    );
+    let mut by_blob = by_url.clone();
+    by_blob.fingerprint = "fp-blob".to_string();
+    by_blob.evidence[0].file_path = String::new();
+    let mut by_absolute_form = by_url.clone();
+    by_absolute_form.fingerprint = "fp-absolute".to_string();
+    by_absolute_form.evidence[0].file_path = String::new();
+    by_absolute_form.evidence[0].request_blob =
+        Some("GET https://admin.evil.test/panel HTTP/1.1\r\n\r\n".to_string());
+
+    let states = scope_rule_state(&scope, &[by_url, by_blob, by_absolute_form]);
+
+    for state in &states {
+        assert!(
+            matches!(state, SuppressionState::Active(_)),
+            "out-of-scope capture was not annotated: {state:?}"
+        );
+    }
+}
+
+/// The importers gate on the URL the capture recorded and store it on the
+/// evidence, so the sweep reads that same URL rather than re-deriving a host
+/// from the raw message and reaching a different answer about one finding.
+#[test]
+fn the_recorded_capture_url_decides_scope_before_the_raw_request() {
+    let scope = example_com_allow_list();
+    let disagreeing = http_capture(
+        "fp-recorded",
+        "https://api.example.com/login",
+        "POST /login HTTP/1.1\r\nHost: admin.evil.test\r\n\r\n",
+    );
+
+    let states = scope_rule_state(&scope, &[disagreeing]);
+
+    assert!(matches!(states[0], SuppressionState::None), "{:?}", states[0]);
+}
