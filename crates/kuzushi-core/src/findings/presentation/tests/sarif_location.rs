@@ -71,3 +71,76 @@ fn the_run_base_declares_the_same_id_the_locations_reference() {
         "space must be percent-encoded: {uri}"
     );
 }
+
+#[test]
+fn a_relative_reference_decodes_into_the_name_it_encodes() {
+    // What `relative_uri_reference` writes, and what every conformant
+    // producer writes, is what this has to read back.
+    for file in [
+        "src/main.rs",
+        "docs/My Notes.md",
+        "src/café.rs",
+        "data/100%.json",
+        "src/a\\b.rs",
+        "deep/dir name/sub dir/東京.go",
+    ] {
+        assert_eq!(
+            reported_path_from_sarif_uri(&relative_uri_reference(file)).as_deref(),
+            Some(file),
+            "{file} did not survive the round trip"
+        );
+    }
+}
+
+#[test]
+fn an_escaped_separator_byte_stays_a_filename_byte() {
+    // `%5C` is what `relative_uri_reference` emits for a Unix filename holding
+    // `\`; reading it as a separator would name a file that does not exist. A
+    // literal `\` is the separator a Windows producer wrote itself.
+    assert_eq!(
+        reported_path_from_sarif_uri("src/a%5Cb.rs").as_deref(),
+        Some("src/a\\b.rs")
+    );
+    assert_eq!(
+        reported_path_from_sarif_uri(r"src\win\app.cs").as_deref(),
+        Some("src/win/app.cs")
+    );
+}
+
+#[test]
+fn an_absolute_file_uri_is_read_relative_to_the_root_it_names() {
+    assert_eq!(
+        reported_path_from_sarif_uri("file:///Users/me/src%20dir/app.js").as_deref(),
+        Some("Users/me/src dir/app.js")
+    );
+    assert_eq!(
+        reported_path_from_sarif_uri("file:///C:/repo/src%2Fmain.cpp").as_deref(),
+        Some("repo/src/main.cpp")
+    );
+}
+
+#[test]
+fn a_reference_that_names_no_readable_path_is_refused() {
+    // `%E9` is not UTF-8: decoding it lossily would report U+FFFD, which names
+    // a different file than the engine found, and `Finding.file_path` cannot
+    // hold the real bytes.
+    assert_eq!(reported_path_from_sarif_uri("src/caf%E9.rs"), None);
+    assert_eq!(reported_path_from_sarif_uri("file:///"), None);
+    assert_eq!(reported_path_from_sarif_uri(""), None);
+    // A `%` introducing no escape is literal, so the finding keeps a name.
+    assert_eq!(
+        reported_path_from_sarif_uri("a%2Fb%ZZ.rs").as_deref(),
+        Some("a/b%ZZ.rs")
+    );
+}
+
+#[test]
+fn a_non_file_uri_location_reads_back_as_the_identifier_it_names() {
+    for uri in ["https://api.lab.test/orders?id=1%2F2", "urn:cwe:79"] {
+        assert_eq!(
+            reported_path_from_sarif_uri(uri).as_deref(),
+            Some(uri),
+            "{uri} must not be decoded as a path"
+        );
+    }
+}

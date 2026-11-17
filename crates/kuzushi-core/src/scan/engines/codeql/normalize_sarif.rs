@@ -283,6 +283,43 @@ mod tests {
         assert!(error.to_string().contains("lost.rule"));
     }
 
+    /// SARIF 2.1.0 §3.4.3 writes a relative location as a URI reference, so a
+    /// name holding a space or a non-ASCII byte arrives percent-encoded.
+    const ENCODED_NAME_SARIF: &str = r#"{
+      "runs": [{
+        "tool": {"driver": {"rules": [{"id": "rs/sql-injection"}]}},
+        "results": [{
+          "ruleId": "rs/sql-injection",
+          "message": {"text": "untrusted input reaches a query"},
+          "locations": [{
+            "physicalLocation": {
+              "artifactLocation": {"uri": "src/caf%C3%A9/My%20Query.rs"},
+              "region": {"startLine": 7}
+            }
+          }],
+          "codeFlows": [{"threadFlows": [{"locations": [{
+            "location": {"physicalLocation": {
+              "artifactLocation": {"uri": "src/caf%C3%A9/My%20Query.rs"},
+              "region": {"startLine": 7}
+            }}
+          }]}]}]
+        }]
+      }]
+    }"#;
+
+    #[test]
+    fn a_percent_encoded_relative_location_names_the_file_it_encodes() {
+        let findings = normalize_codeql_sarif(ENCODED_NAME_SARIF, "repo").unwrap();
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].file_path, "src/café/My Query.rs");
+        assert!(
+            findings[0].message.contains("src/café/My Query.rs:7"),
+            "flow evidence must name the same file: {}",
+            findings[0].message
+        );
+    }
+
     const GROUNDED_SARIF: &str = r#"{
       "runs": [{
         "tool": {"driver": {"rules": [{"id": "good.rule"}]}},
