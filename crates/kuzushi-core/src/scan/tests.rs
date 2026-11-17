@@ -1026,22 +1026,6 @@ printf '{"results":[]}'
         assert_eq!(severity_rank(Severity::Unknown), 0);
     }
 
-    #[test]
-    fn codeql_uri_normalization_decodes_file_urls_and_windows_drives() {
-        assert_eq!(
-            normalize_artifact_uri("file:///Users/me/src%20dir/app.js"),
-            "Users/me/src dir/app.js"
-        );
-        assert_eq!(
-            normalize_artifact_uri("file:///C:/repo/src%2Fmain.cpp"),
-            "repo/src/main.cpp"
-        );
-        assert_eq!(percent_decode("a%2Fb%ZZ"), "a/b%ZZ");
-        assert_eq!(hex_value(b'f'), Some(15));
-        assert_eq!(hex_value(b'F'), Some(15));
-        assert_eq!(hex_value(b'9'), Some(9));
-        assert_eq!(hex_value(b'g'), None);
-    }
 
     #[test]
     fn codeql_language_json_accepts_arrays_objects_and_aliases() {

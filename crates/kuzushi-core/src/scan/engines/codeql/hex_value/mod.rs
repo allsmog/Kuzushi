@@ -1,6 +1,5 @@
 use super::*;
 
-mod byte_values;
 mod codeql_binary;
 mod input_values;
 mod language_detection;
@@ -10,7 +9,6 @@ mod marker_detection;
 mod marker_rules;
 mod suite_and_paths;
 
-pub(in crate::scan) use byte_values::*;
 pub(in crate::scan) use codeql_binary::*;
 pub(in crate::scan) use input_values::*;
 pub(in crate::scan) use language_detection::*;

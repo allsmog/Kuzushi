@@ -1,4 +1,5 @@
-//! SARIF 2.1.0 location policy, shared by every Kuzushi SARIF emitter.
+//! SARIF 2.1.0 location policy, shared by every Kuzushi SARIF emitter and by
+//! the readers of another engine's SARIF.
 //!
 //! `workspace:export-findings` and `report:sarif` both project a finding's
 //! reported path and line range into `result.locations[].physicalLocation`.
@@ -7,6 +8,12 @@
 //! "no line reported" as line 1. Both documents are handed to CI gates and to
 //! GitHub code scanning, which resolve a location by exactly these two fields,
 //! so the policy lives here once rather than once per emitter.
+//!
+//! Reading a `uri` back into a reported path is the same policy in the other
+//! direction, so [`reported_path_from_sarif_uri`] lives beside the encoder it
+//! inverts. The copies carried by the CodeQL scan engine and the
+//! `taint-iris-next` dataflow reader had drifted the same way: neither decoded
+//! a relative reference at all.
 
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -140,6 +147,105 @@ fn absolute_uri_path(path: &str) -> String {
 /// here. `%5C` is reversible; a wrong split is not.
 pub(crate) fn relative_uri_reference(file: &str) -> String {
     file.bytes().map(encoded_path_byte).collect()
+}
+
+/// The reported path a SARIF `artifactLocation.uri` names: the inverse of
+/// [`relative_uri_reference`] and [`absolute_file_uri`]. `None` when the
+/// reference names no path a reader can open, so a caller skips the location
+/// rather than carrying a name that names nothing.
+///
+/// §3.4.3 requires `uri` to hold a URI reference, so a name holding any byte
+/// outside the RFC 3986 unreserved set arrives percent-encoded whether the
+/// reference is relative or absolute — `docs/My Notes.md` is written
+/// `docs/My%20Notes.md` by [`relative_uri_reference`] and by every other
+/// conformant producer. Decoding only the absolute `file://` form reported a
+/// CodeQL finding on `src/café.rs` at `src/caf%C3%A9.rs`, which names no file:
+/// nothing could open it to triage, verify or patch it,
+/// `reported_paths_name_same_file` matched neither the name git reports for it
+/// nor a path suppression naming it, and re-exporting the finding encoded the
+/// escapes again.
+///
+/// A literal `\` is normalized to `/` before decoding and an escaped one is
+/// not. A producer that meant the separator wrote it literally, while `\` is an
+/// ordinary filename byte on Unix — which is why [`relative_uri_reference`]
+/// escapes it instead of splitting on it, and decoding has to keep that
+/// reversible. `%2F` does decode to a separator: no path segment on a supported
+/// platform can hold `/`, so an escaped one is only ever a separator its
+/// producer escaped.
+///
+/// A reference carrying a non-file URI scheme is returned verbatim, the way
+/// [`sarif_artifact_location`] emits one: it names an identifier rather than a
+/// path, and there is nothing in it to resolve.
+///
+/// A `%` that introduces no escape stays literal, which is the lenient reading
+/// of a non-conformant producer's output and keeps its finding reported. A
+/// sequence that decodes to bytes that are not UTF-8 is `None` instead: a path
+/// holding U+FFFD names a different file than the one the engine reported, and
+/// `Finding.file_path` cannot hold the real bytes.
+pub(crate) fn reported_path_from_sarif_uri(uri: &str) -> Option<String> {
+    let reference = match uri.strip_prefix("file://") {
+        Some(rest) => rest,
+        // A location anchored to a non-file URI names no filesystem path.
+        // `sarif_artifact_location` emits such an identifier verbatim, and
+        // decoding it would rewrite it: `%2F` inside a query string is not a
+        // separator.
+        None if has_uri_scheme(uri) => return Some(uri.to_string()),
+        None => uri,
+    };
+    let decoded = percent_decoded_uri_reference(&reference.replace('\\', "/"))?;
+    let path = strip_absolute_path_prefix(&decoded);
+    (!path.is_empty()).then(|| path.to_string())
+}
+
+/// Drop the leading parts of an absolute path that do not name the file
+/// relative to the root the reader reports against: the leading separator run,
+/// then a Windows drive prefix that run exposed.
+fn strip_absolute_path_prefix(path: &str) -> &str {
+    let path = path.trim_start_matches('/');
+    let bytes = path.as_bytes();
+    if bytes.len() > 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/' {
+        return &path[3..];
+    }
+    path
+}
+
+fn percent_decoded_uri_reference(reference: &str) -> Option<String> {
+    let bytes = reference.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        match escaped_byte(bytes, index) {
+            Some(byte) => {
+                decoded.push(byte);
+                index += 3;
+            }
+            None => {
+                decoded.push(bytes[index]);
+                index += 1;
+            }
+        }
+    }
+    String::from_utf8(decoded).ok()
+}
+
+/// The byte the escape at `index` spells, or `None` when `index` does not start
+/// a well-formed `%HH` escape.
+fn escaped_byte(bytes: &[u8], index: usize) -> Option<u8> {
+    if bytes[index] != b'%' {
+        return None;
+    }
+    let high = hex_digit(*bytes.get(index + 1)?)?;
+    let low = hex_digit(*bytes.get(index + 2)?)?;
+    Some(high * 16 + low)
+}
+
+fn hex_digit(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn encoded_path_byte(byte: u8) -> String {

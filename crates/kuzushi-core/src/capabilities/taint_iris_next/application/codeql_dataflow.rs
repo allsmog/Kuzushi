@@ -497,10 +497,11 @@ fn non_empty_codeql_steps(steps: Vec<CodeqlStep>) -> Option<Vec<CodeqlStep>> {
 
 fn sarif_location_to_step(location: &Value) -> Option<CodeqlStep> {
     let physical = location.get("physicalLocation")?;
-    let file = physical
-        .pointer("/artifactLocation/uri")
-        .and_then(Value::as_str)?
-        .to_string();
+    let file = crate::findings::presentation::sarif_location::reported_path_from_sarif_uri(
+        physical
+            .pointer("/artifactLocation/uri")
+            .and_then(Value::as_str)?,
+    )?;
     let line = physical
         .pointer("/region/startLine")
         .and_then(Value::as_u64)
@@ -952,6 +953,36 @@ JSON
         assert_eq!(flows[0].steps[1].line, 99);
         assert_eq!(flows[0].source_line, 10);
         assert_eq!(flows[0].sink_line, 99);
+    }
+
+    #[test]
+    fn parse_sarif_flows_decodes_a_percent_encoded_relative_location() {
+        // SARIF 2.1.0 §3.4.3 writes a relative location as a URI reference, so
+        // a name holding a space or a non-ASCII byte arrives encoded. Reading
+        // it verbatim put the flow, its linked story and its candidate ids on
+        // a path that names no file.
+        let sarif = r#"{
+            "runs": [{
+                "tool": {"driver": {"rules": []}},
+                "results": [{
+                    "ruleId": "cpp/sql-injection",
+                    "message": {"text": "user input flows to query"},
+                    "codeFlows": [{
+                        "threadFlows": [{
+                            "locations": [
+                                {"location": {"physicalLocation": {"artifactLocation": {"uri": "src/caf%C3%A9/api.c"}, "region": {"startLine": 10, "snippet": {"text": "name = arg"}}}}},
+                                {"location": {"physicalLocation": {"artifactLocation": {"uri": "src/My%20Store/io.c"}, "region": {"startLine": 99, "snippet": {"text": "open(name);"}}}}}
+                            ]
+                        }]
+                    }]
+                }]
+            }]
+        }"#;
+        let flows = parse_sarif_flows(sarif);
+        assert_eq!(flows.len(), 1);
+        assert_eq!(flows[0].file_path, "src/café/api.c");
+        assert_eq!(flows[0].steps[0].file, "src/café/api.c");
+        assert_eq!(flows[0].steps[1].file, "src/My Store/io.c");
     }
 
     #[test]
