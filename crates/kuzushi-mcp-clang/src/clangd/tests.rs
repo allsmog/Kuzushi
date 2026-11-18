@@ -38,6 +38,40 @@ mod tests {
         assert_eq!(locs[1].2, 3);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn parse_locations_decodes_the_uri_clangd_escaped() {
+        // The exact encoding file_uri produces for this path, asserted by
+        // file_uri_percent_encodes_special_and_non_ascii_path_bytes below.
+        let v = json!({
+            "uri": "file:///tmp/a%20b%23%25%C3%A9.c",
+            "range": {
+                "start": {"line": 3, "character": 0},
+                "end": {"line": 3, "character": 4}
+            }
+        });
+
+        let locs = parse_locations(&v);
+
+        assert_eq!(locs, vec![("/tmp/a b#%\u{e9}.c".to_string(), 4, 1)]);
+    }
+
+    // Unix-only: `Url::to_file_path` reads a `file:` host as a UNC share on
+    // Windows, where it names a path clangd's client can open.
+    #[cfg(unix)]
+    #[test]
+    fn parse_locations_skips_a_uri_naming_no_local_path() {
+        let v = json!({
+            "uri": "file://build01/share/a.c",
+            "range": {
+                "start": {"line": 0, "character": 0},
+                "end": {"line": 0, "character": 1}
+            }
+        });
+
+        assert!(parse_locations(&v).is_empty());
+    }
+
     #[test]
     fn parse_locations_handles_null_and_empty() {
         assert!(parse_locations(&json!(null)).is_empty());

@@ -11,6 +11,7 @@ pub mod schema;
 pub mod server;
 pub mod standalone_health;
 pub mod tool;
+pub mod tool_uri;
 
 pub use bundle_identity::{
     bounded_bundle_identity, copy_bounded_bundle, copy_bounded_bundle_with_durability,
