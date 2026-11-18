@@ -26,8 +26,9 @@ use url::Url;
 ///
 /// - A `file:` URI reads back through [`Url::to_file_path`], the inverse of
 ///   the `Url::from_file_path` encoder `kuzushi-mcp-clang` uses for the URIs
-///   it sends. A URI naming a non-local host (`file://build01/share.c`) has no
-///   local path and is `None`.
+///   it sends, and its reading is the platform's own: a URI naming a non-local
+///   host (`file://build01/share.c`) is a UNC path on Windows and `None`
+///   elsewhere, and a URI with no Windows drive letter is `None` on Windows.
 /// - Any other scheme is returned verbatim. It names an identifier rather than
 ///   a path, and decoding it would rewrite it: `%2F` inside a query string is
 ///   not a separator.

@@ -25,12 +25,30 @@ fn escaped_separator_decodes_to_a_separator() {
 }
 
 #[test]
-fn unescaped_name_reads_back_unchanged() {
+fn unescaped_relative_reference_reads_back_unchanged() {
     assert_eq!(reported_path("src/io.c").as_deref(), Some("src/io.c"));
+}
+
+// A `file:` URI reads back through `Url::to_file_path`, whose result is the
+// platform's own: on Windows a path with no drive letter is not absolute and
+// has no reading at all, so the expectations differ rather than the policy.
+#[cfg(unix)]
+#[test]
+fn unescaped_file_uri_reads_back_unchanged() {
     assert_eq!(
         reported_path("file:///repo/a.c").as_deref(),
         Some("/repo/a.c")
     );
+}
+
+#[cfg(windows)]
+#[test]
+fn unescaped_file_uri_reads_back_as_a_drive_path() {
+    assert_eq!(
+        reported_path("file:///C:/repo/a.c").as_deref(),
+        Some(r"C:\repo\a.c")
+    );
+    assert_eq!(reported_path("file:///repo/a.c"), None);
 }
 
 #[test]
@@ -58,9 +76,21 @@ fn windows_drive_reference_is_decoded_rather_than_read_as_a_scheme() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn non_local_file_host_names_no_local_path() {
     assert_eq!(reported_path("file://build01/share/a.c"), None);
+}
+
+#[cfg(windows)]
+#[test]
+fn non_local_file_host_names_a_unc_path() {
+    // `Url::to_file_path` reads a `file:` host as a UNC share on Windows,
+    // where it is a path the agent can open, and rejects it everywhere else.
+    assert_eq!(
+        reported_path("file://build01/share/a.c").as_deref(),
+        Some(r"\\build01\share\a.c")
+    );
 }
 
 #[test]

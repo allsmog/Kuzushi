@@ -56,6 +56,9 @@ mod tests {
         assert_eq!(locs, vec![("/tmp/a b#%\u{e9}.c".to_string(), 4, 1)]);
     }
 
+    // Unix-only: `Url::to_file_path` reads a `file:` host as a UNC share on
+    // Windows, where it names a path clangd's client can open.
+    #[cfg(unix)]
     #[test]
     fn parse_locations_skips_a_uri_naming_no_local_path() {
         let v = json!({
