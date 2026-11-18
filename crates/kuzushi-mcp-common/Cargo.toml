@@ -16,11 +16,13 @@ dirs.workspace = true
 futures = "0.3"
 jsonschema = { version = "0.58.2", default-features = false }
 libc.workspace = true
+percent-encoding = "2"
 serde.workspace = true
 serde_json.workspace = true
 sha2 = "0.11"
 tempfile.workspace = true
 tokio.workspace = true
+url = "2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [

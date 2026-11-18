@@ -42,6 +42,7 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use kuzushi_mcp_common::tool_uri::reported_path;
 use kuzushi_mcp_common::{
     bounded_bundle_identity, resolve_codeql_bundle_root, which, BundleIdentityConfig,
     ReadRootCapability, Tool, ToolHandler, ToolRegistry,
@@ -874,12 +875,14 @@ fn sarif_thread_flow_steps(result: &Value) -> Option<Vec<Value>> {
     }
 }
 
+/// One `{file,line,code}` step, or `None` when the location names no file the
+/// agent can open. SARIF 2.1.0 §3.4.3 holds a URI reference in
+/// `artifactLocation.uri`, so `codeql database analyze` escapes every path byte
+/// outside the RFC 3986 unreserved set: reading the reference verbatim reported
+/// a result on `src/café.rs` at `src/caf%C3%A9.rs`.
 fn sarif_step(location: &Value) -> Option<Value> {
     let physical = location.get("physicalLocation")?;
-    let file = physical
-        .pointer("/artifactLocation/uri")
-        .and_then(Value::as_str)?
-        .to_string();
+    let file = reported_path(physical.pointer("/artifactLocation/uri")?.as_str()?)?;
     let line = physical
         .pointer("/region/startLine")
         .and_then(Value::as_u64)
@@ -1374,6 +1377,57 @@ fi
         assert_eq!(flows[0]["steps"].as_array().unwrap().len(), 2);
         assert_eq!(flows[0]["source"]["line"], json!(10));
         assert_eq!(flows[0]["sink"]["line"], json!(99));
+    }
+
+    #[test]
+    fn parse_sarif_decodes_the_uri_reference_codeql_escaped() {
+        // SARIF 2.1.0 requires a URI reference in artifactLocation.uri, so a
+        // name holding a space or a non-ASCII byte arrives escaped. Reported
+        // verbatim it named no file the agent could open.
+        let sarif = r#"{
+            "runs": [{
+                "tool": {"driver": {"rules": []}},
+                "results": [{
+                    "ruleId": "cpp/path-injection",
+                    "message": {"text": "path traversal"},
+                    "locations": [{
+                        "physicalLocation": {
+                            "artifactLocation": {"uri": "src/caf%C3%A9/My%20Query.c"},
+                            "region": {"startLine": 7, "snippet": {"text": "open(name);"}}
+                        }
+                    }]
+                }]
+            }]
+        }"#;
+
+        let flows = parse_sarif(sarif, 50);
+
+        assert_eq!(flows.len(), 1);
+        assert_eq!(
+            flows[0]["source"]["file"],
+            json!("src/caf\u{e9}/My Query.c")
+        );
+    }
+
+    #[test]
+    fn parse_sarif_skips_a_location_whose_name_cannot_be_read() {
+        let sarif = r#"{
+            "runs": [{
+                "tool": {"driver": {"rules": []}},
+                "results": [{
+                    "ruleId": "cpp/path-injection",
+                    "message": {"text": "path traversal"},
+                    "locations": [{
+                        "physicalLocation": {
+                            "artifactLocation": {"uri": "src/%FF.c"},
+                            "region": {"startLine": 7}
+                        }
+                    }]
+                }]
+            }]
+        }"#;
+
+        assert!(parse_sarif(sarif, 50).is_empty());
     }
 
     #[test]
