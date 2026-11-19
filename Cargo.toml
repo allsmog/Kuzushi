@@ -164,7 +164,7 @@ uuid = { version = "1.11", features = ["v4"] }
 # host-process aborts in builds without the `gc` and `threads` features --
 # exactly this feature set. A caret requirement alone would let a regenerated
 # lock resolve back to an unpatched 49.0.x. 50.x needs rustc 1.97 (#365).
-wasmtime = { version = "49.0.6", default-features = false, features = ["cranelift", "runtime", "std"] }
+wasmtime = { version = "50.0.2", default-features = false, features = ["cranelift", "runtime", "std"] }
 
 [patch.crates-io]
 crossterm = { path = "third-party/crossterm" }
