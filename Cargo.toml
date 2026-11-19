@@ -159,7 +159,12 @@ unicode-width = "0.2"
 unicode-segmentation = "1.13.2"
 pulldown-cmark = { version = "0.13.4", default-features = false }
 uuid = { version = "1.11", features = ["v4"] }
-wasmtime = { version = "49.0.4", default-features = false, features = ["cranelift", "runtime", "std"] }
+# Floor is the patched 49.x line, not merely a compatible one: the plugin
+# sandbox compiles and runs untrusted guest modules, and 49.0.6 fixes
+# host-process aborts in builds without the `gc` and `threads` features --
+# exactly this feature set. A caret requirement alone would let a regenerated
+# lock resolve back to an unpatched 49.0.x. 50.x needs rustc 1.97 (#365).
+wasmtime = { version = "49.0.6", default-features = false, features = ["cranelift", "runtime", "std"] }
 
 [patch.crates-io]
 crossterm = { path = "third-party/crossterm" }
