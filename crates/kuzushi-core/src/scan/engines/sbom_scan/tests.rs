@@ -3698,3 +3698,180 @@ version = "1.0.197"
                 && relationship["relatedSpdxElement"] == exported_spdx_id(&output, "pkg:cargo/serde@1.0.197")
         ));
 }
+
+#[test]
+fn sbom_scan_names_nested_package_lock_entries_after_their_own_install_segment() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("package-lock.json"),
+        r#"{
+  "lockfileVersion": 3,
+  "packages": {
+    "": { "dependencies": { "@babel/core": "^7.0.0", "express": "^4.18.0" } },
+    "node_modules/@babel/core": { "version": "7.0.0" },
+    "node_modules/@babel/core/node_modules/@babel/helper-compilation-targets": {
+      "version": "7.1.0",
+      "dependencies": { "semver": "6.3.0" }
+    },
+    "node_modules/express/node_modules/@babel/plugin-syntax-jsx": { "version": "7.2.0" }
+  }
+}"#,
+    )
+    .unwrap();
+
+    let report = scan_sbom(temp.path(), &ScanCancellation::default()).unwrap();
+    let npm = npm_name_versions(&report);
+
+    assert!(npm.contains(&("@babel/core", Some("7.0.0"))));
+    assert!(npm.contains(&("@babel/helper-compilation-targets", Some("7.1.0"))));
+    assert!(npm.contains(&("@babel/plugin-syntax-jsx", Some("7.2.0"))));
+    // The nested entries' versions must not be attributed to the package whose
+    // install tree they sit under, nor their scope dropped.
+    assert!(!npm.contains(&("@babel/core", Some("7.1.0"))));
+    assert!(!npm.contains(&("plugin-syntax-jsx", Some("7.2.0"))));
+    assert!(report.components.iter().any(|component| {
+        component.name == "@babel/plugin-syntax-jsx"
+            && component.package_url.as_deref() == Some("pkg:npm/%40babel/plugin-syntax-jsx@7.2.0")
+    }));
+    assert!(report.dependencies.iter().any(|edge| {
+        edge.from == "@babel/helper-compilation-targets" && edge.to == "semver"
+    }));
+}
+
+#[test]
+fn sbom_scan_reads_the_package_name_an_aliased_lock_entry_declares() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("package-lock.json"),
+        r#"{
+  "lockfileVersion": 3,
+  "packages": {
+    "": { "dependencies": { "legacy-lodash": "npm:lodash@4.17.21" } },
+    "node_modules/legacy-lodash": {
+      "name": "lodash",
+      "version": "4.17.21",
+      "dependencies": { "left-pad": "1.3.0" }
+    }
+  }
+}"#,
+    )
+    .unwrap();
+
+    let report = scan_sbom(temp.path(), &ScanCancellation::default()).unwrap();
+    let npm = npm_name_versions(&report);
+
+    assert!(npm.contains(&("lodash", Some("4.17.21"))));
+    assert!(!npm.contains(&("legacy-lodash", Some("4.17.21"))));
+    assert!(report
+        .dependencies
+        .iter()
+        .any(|edge| edge.from == "lodash" && edge.to == "left-pad"));
+    // The incoming edge has to name the installed package too, or the export
+    // graph resolves the component and not the relationship that reaches it.
+    assert!(report
+        .dependencies
+        .iter()
+        .any(|edge| edge.from == "root" && edge.to == "lodash"));
+    assert!(!report.dependencies.iter().any(|edge| edge.to == "legacy-lodash"));
+}
+
+#[test]
+fn sbom_scan_exports_an_aliased_dependency_relationship() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("package-lock.json"),
+        r#"{
+  "lockfileVersion": 3,
+  "packages": {
+    "": { "dependencies": { "legacy-lodash": "npm:lodash@4.17.21" } },
+    "node_modules/legacy-lodash": { "name": "lodash", "version": "4.17.21" }
+  }
+}"#,
+    )
+    .unwrap();
+
+    let report = scan_sbom(temp.path(), &ScanCancellation::default()).unwrap();
+    let graph = super::export_graph::ExportGraph::new(&report);
+
+    assert_eq!(graph.omitted_count(), 0);
+    assert_eq!(graph.resolved.len(), 1);
+}
+
+#[test]
+fn sbom_scan_keeps_a_scoped_alias_spec_whole() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("package-lock.json"),
+        r#"{
+  "lockfileVersion": 3,
+  "packages": {
+    "": {
+      "dependencies": {
+        "jsx": "npm:@babel/plugin-syntax-jsx@7.2.0",
+        "unversioned": "npm:left-pad",
+        "plain": "^1.0.0"
+      }
+    }
+  }
+}"#,
+    )
+    .unwrap();
+
+    let report = scan_sbom(temp.path(), &ScanCancellation::default()).unwrap();
+    let targets = report
+        .dependencies
+        .iter()
+        .map(|edge| edge.to.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(targets.contains(&"@babel/plugin-syntax-jsx"));
+    assert!(targets.contains(&"left-pad"));
+    assert!(targets.contains(&"plain"));
+}
+
+#[test]
+fn sbom_scan_names_a_workspace_lock_entry_by_its_declared_name() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("package-lock.json"),
+        r#"{
+  "lockfileVersion": 3,
+  "packages": {
+    "": { "workspaces": ["packages/*"] },
+    "packages/app": {
+      "name": "@my/app",
+      "version": "0.1.0",
+      "dependencies": { "express": "^4.18.0" }
+    },
+    "packages/cli": { "version": "0.2.0", "dependencies": { "yargs": "^17.0.0" } }
+  }
+}"#,
+    )
+    .unwrap();
+
+    let report = scan_sbom(temp.path(), &ScanCancellation::default()).unwrap();
+    let npm = npm_name_versions(&report);
+
+    assert!(npm.contains(&("@my/app", Some("0.1.0"))));
+    assert!(!npm.contains(&("app", Some("0.1.0"))));
+    assert!(npm.contains(&("cli", Some("0.2.0"))));
+    // Components and edges have to agree on the name, or the graph points at a
+    // package the component list never lists.
+    assert!(report
+        .dependencies
+        .iter()
+        .any(|edge| edge.from == "@my/app" && edge.to == "express"));
+    assert!(report
+        .dependencies
+        .iter()
+        .any(|edge| edge.from == "cli" && edge.to == "yargs"));
+}
+
+fn npm_name_versions(report: &SbomScanReport) -> Vec<(&str, Option<&str>)> {
+    report
+        .components
+        .iter()
+        .filter(|component| component.ecosystem == "npm")
+        .map(|component| (component.name.as_str(), component.version.as_deref()))
+        .collect()
+}

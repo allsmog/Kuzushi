@@ -48,6 +48,7 @@ mod maven_pom;
 mod mix;
 mod nimble;
 mod npm_lock;
+mod npm_lock_key;
 mod npm_package_json;
 mod nuget_lock;
 mod opam;

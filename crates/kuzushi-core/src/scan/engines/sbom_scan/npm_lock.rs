@@ -1,4 +1,5 @@
 use super::bounded_fs as fs;
+use super::npm_lock_key;
 use super::SbomInputs;
 use super::{component, relative_display, SbomComponent};
 use anyhow::{Context, Result};
@@ -81,7 +82,7 @@ fn package_component(
     key: &str,
     package: &Value,
 ) -> Option<SbomComponent> {
-    let name = package_name_from_lock_key(key)?;
+    let name = npm_lock_key::package_name(key, package)?;
     Some(component(
         target,
         path,
@@ -98,24 +99,4 @@ fn package_version(package: &Value) -> Option<&str> {
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|version| !version.is_empty())
-}
-
-fn package_name_from_lock_key(key: &str) -> Option<String> {
-    let trimmed = key.trim_matches('/');
-    if trimmed.is_empty() {
-        return None;
-    }
-    let name = trimmed.strip_prefix("node_modules/").unwrap_or(trimmed);
-    if let Some(scoped) = name.strip_prefix('@') {
-        return Some(scoped_package_name(scoped));
-    }
-    Some(name.rsplit('/').next().unwrap_or(name).to_string())
-}
-
-fn scoped_package_name(value: &str) -> String {
-    let mut parts = value.split('/');
-    match (parts.next(), parts.next()) {
-        (Some(scope), Some(name)) => format!("@{scope}/{name}"),
-        _ => format!("@{value}"),
-    }
 }
