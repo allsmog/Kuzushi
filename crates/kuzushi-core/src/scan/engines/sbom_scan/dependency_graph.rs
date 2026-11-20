@@ -1,5 +1,6 @@
 use super::bounded_fs as fs;
 use super::edge_readers::dependency_edges_for_path;
+use super::npm_lock_key;
 use super::SbomInputs;
 use super::*;
 use anyhow::Context;
@@ -76,7 +77,9 @@ fn package_lock_v1_edges(value: &Value, source: &str) -> Vec<SbomDependencyEdge>
     value
         .get("dependencies")
         .and_then(Value::as_object)
-        .map(|dependencies| nested_npm_dependency_edges("root", dependencies, source))
+        .map(|dependencies| {
+            nested_npm_dependency_edges(npm_lock_key::ROOT_PACKAGE, dependencies, source)
+        })
         .unwrap_or_default()
 }
 
@@ -148,12 +151,14 @@ fn go_sum_module_name(line: &str) -> Option<String> {
 }
 
 fn package_dependencies(key: &str, package: &Value, source: &str) -> Vec<SbomDependencyEdge> {
+    let from = npm_lock_key::package_name(key, package)
+        .unwrap_or_else(|| npm_lock_key::ROOT_PACKAGE.to_string());
     NPM_LOCK_DEPENDENCY_FIELDS
         .iter()
         .filter_map(|field| package.get(*field).and_then(Value::as_object))
         .flat_map(|deps| deps.keys())
         .map(|dependency| SbomDependencyEdge {
-            from: package_name_from_lock_key(key),
+            from: from.clone(),
             to: dependency.clone(),
             source: source.to_string(),
         })
@@ -186,28 +191,6 @@ fn nested_npm_dependency_edge(
         edges.extend(nested_npm_dependency_edges(name, children, source));
     }
     edges
-}
-
-fn package_name_from_lock_key(key: &str) -> String {
-    let trimmed = key.trim_matches('/');
-    if trimmed.is_empty() {
-        return "root".to_string();
-    }
-    let Some(name) = trimmed.strip_prefix("node_modules/") else {
-        return trimmed.to_string();
-    };
-    if let Some(scoped) = name.strip_prefix('@') {
-        return scoped_package_name(scoped);
-    }
-    name.rsplit('/').next().unwrap_or(name).to_string()
-}
-
-fn scoped_package_name(value: &str) -> String {
-    let mut parts = value.split('/');
-    match (parts.next(), parts.next()) {
-        (Some(scope), Some(name)) => format!("@{scope}/{name}"),
-        _ => format!("@{value}"),
-    }
 }
 
 fn edge_sort_key(edge: &SbomDependencyEdge) -> (String, String, String) {
