@@ -156,10 +156,10 @@ fn package_dependencies(key: &str, package: &Value, source: &str) -> Vec<SbomDep
     NPM_LOCK_DEPENDENCY_FIELDS
         .iter()
         .filter_map(|field| package.get(*field).and_then(Value::as_object))
-        .flat_map(|deps| deps.keys())
-        .map(|dependency| SbomDependencyEdge {
+        .flat_map(|deps| deps.iter())
+        .map(|(dependency, spec)| SbomDependencyEdge {
             from: from.clone(),
-            to: dependency.clone(),
+            to: npm_lock_key::dependency_target(dependency, spec),
             source: source.to_string(),
         })
         .collect()

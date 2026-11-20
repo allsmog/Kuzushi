@@ -5,6 +5,7 @@ use serde_json::Value;
 pub(super) const ROOT_PACKAGE: &str = "root";
 
 const INSTALL_TREE: &str = "node_modules/";
+const ALIAS_SPEC: &str = "npm:";
 
 /// The package an npm lockfile v2/v3 `packages` entry describes, or `None` for
 /// the root entry, which names the scanned project rather than a dependency.
@@ -49,4 +50,27 @@ fn installed_name(trimmed: &str) -> &str {
         Some((_, name)) => name,
         None => trimmed.rsplit('/').next().unwrap_or(trimmed),
     }
+}
+
+/// The package a dependency entry names. A spec of `npm:<name>@<range>`
+/// installs `<name>` under the declared key, so there the key is a directory
+/// name and only the spec holds the package — the same split as a `packages`
+/// key and its `"name"`. Any other spec is a version range for the package the
+/// key names.
+pub(super) fn dependency_target(key: &str, spec: &Value) -> String {
+    spec.as_str()
+        .and_then(|spec| spec.trim().strip_prefix(ALIAS_SPEC))
+        .and_then(aliased_package_name)
+        .unwrap_or_else(|| key.to_string())
+}
+
+/// `lodash` from `npm:lodash@4.17.21` and `@scope/pkg` from
+/// `npm:@scope/pkg@1.0.0`. The version separator is the last `@`; a scope's
+/// leading `@` is not one, and an alias may carry no version at all.
+fn aliased_package_name(spec: &str) -> Option<String> {
+    let name = match spec.rfind('@') {
+        Some(0) | None => spec,
+        Some(at) => &spec[..at],
+    };
+    (!name.is_empty()).then(|| name.to_string())
 }

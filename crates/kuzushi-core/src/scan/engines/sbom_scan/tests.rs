@@ -3766,6 +3766,67 @@ fn sbom_scan_reads_the_package_name_an_aliased_lock_entry_declares() {
         .dependencies
         .iter()
         .any(|edge| edge.from == "lodash" && edge.to == "left-pad"));
+    // The incoming edge has to name the installed package too, or the export
+    // graph resolves the component and not the relationship that reaches it.
+    assert!(report
+        .dependencies
+        .iter()
+        .any(|edge| edge.from == "root" && edge.to == "lodash"));
+    assert!(!report.dependencies.iter().any(|edge| edge.to == "legacy-lodash"));
+}
+
+#[test]
+fn sbom_scan_exports_an_aliased_dependency_relationship() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("package-lock.json"),
+        r#"{
+  "lockfileVersion": 3,
+  "packages": {
+    "": { "dependencies": { "legacy-lodash": "npm:lodash@4.17.21" } },
+    "node_modules/legacy-lodash": { "name": "lodash", "version": "4.17.21" }
+  }
+}"#,
+    )
+    .unwrap();
+
+    let report = scan_sbom(temp.path(), &ScanCancellation::default()).unwrap();
+    let graph = super::export_graph::ExportGraph::new(&report);
+
+    assert_eq!(graph.omitted_count(), 0);
+    assert_eq!(graph.resolved.len(), 1);
+}
+
+#[test]
+fn sbom_scan_keeps_a_scoped_alias_spec_whole() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("package-lock.json"),
+        r#"{
+  "lockfileVersion": 3,
+  "packages": {
+    "": {
+      "dependencies": {
+        "jsx": "npm:@babel/plugin-syntax-jsx@7.2.0",
+        "unversioned": "npm:left-pad",
+        "plain": "^1.0.0"
+      }
+    }
+  }
+}"#,
+    )
+    .unwrap();
+
+    let report = scan_sbom(temp.path(), &ScanCancellation::default()).unwrap();
+    let targets = report
+        .dependencies
+        .iter()
+        .map(|edge| edge.to.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(targets.contains(&"@babel/plugin-syntax-jsx"));
+    assert!(targets.contains(&"left-pad"));
+    assert!(targets.contains(&"plain"));
 }
 
 #[test]

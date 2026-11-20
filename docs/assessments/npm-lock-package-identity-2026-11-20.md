@@ -74,11 +74,28 @@ outside an install tree is a workspace directory, named by its last segment.
 The root key `""` still yields no component and still appears as `root` in the
 graph.
 
+## Follow-up found in review
+
+Canonicalizing the component name alone left the alias's *incoming* edge
+pointing at the alias: `export_graph::resolve_edge` matches a target against
+component names within the same manifest, so `root -> legacy-lodash` no longer
+reached the component now named `lodash`, and the relationship was disclosed as
+omitted instead of exported. The target side is the same read — a spec of
+`npm:<name>@<range>` installs `<name>` under the declared key, so there the key
+is a directory name and only the spec holds the package — so
+`npm_lock_key::dependency_target` now resolves it, keyed off the last `@` so a
+scope's leading `@` and a version-less alias both survive. A non-alias spec is a
+version range and passes through untouched.
+
 ## What is not claimed
 
 - Only the lockfile v2/v3 `packages` map is corrected. The v1 `dependencies`
   map is keyed by name already, and its own alias spelling
   (`"version": "npm:real@1.0.0"`) is untouched.
+- `npm_package_json.rs` still names a `package.json` alias dependency after the
+  alias, in both its components and its edges. Those agree with each other, so
+  the export graph resolves them and nothing is dropped; correcting that name is
+  its own change.
 - `packages[""].name` is still not used; the root stays `root` in the graph, as
   its existing tests require.
 - No other ecosystem's reader was changed. pnpm, yarn and bun keys were read
