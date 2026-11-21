@@ -6,8 +6,15 @@
 #
 # Grouping covers minor and patch only. Majors stay ungrouped so a breaking
 # upgrade arrives as its own reviewable pull request instead of hiding inside
-# a batch. Security advisories are exempt from `open-pull-requests-limit` and
-# are still raised as soon as Dependabot sees them.
+# a batch.
+#
+# Dependabot's security updates are exempt from `open-pull-requests-limit`,
+# but only when they are enabled for the repository and the advisory names an
+# affected range Dependabot can resolve. Do not read that exemption as
+# coverage: no pull request was ever opened for the wasmtime 49.0.5 and 49.0.6
+# security releases, so #379 had to take thirteen advisories by hand. The gate
+# that is guaranteed to look is the daily `cargo deny check advisories` run in
+# .github/workflows/supply-chain.yml.
 version: 2
 updates:
   - package-ecosystem: cargo

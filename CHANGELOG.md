@@ -45,6 +45,22 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Security:**
 
+- The dependency policy now runs daily instead of at most monthly, and behind
+  nothing. `cargo deny check advisories licenses bans sources` lived only in
+  `ci-full.yml`, whose only automatic trigger is the first of the month, and
+  its job was `needs: quality-gauntlet` -- so when that fail-fast gate failed
+  on an unrelated quality baseline on 2026-11-01, the policy was skipped
+  outright and `main` carried no advisory, license, ban, or source verdict
+  between 2026-10-01 and the next monthly cron. A new
+  `.github/workflows/supply-chain.yml` runs the identical action pin and
+  command on a daily cron, on manual dispatch, and on any pull request that
+  moves a `Cargo.toml`, `Cargo.lock`, `deny.toml`, or the workflow itself;
+  Full CI's copy loses its `needs`. Contract checks in
+  `check-port-contract.mjs` and `workflow-semantics.test.mjs` refuse a
+  `needs`-gated or monthly dependency policy in either workflow. No policy
+  decision changed -- only how often, and how reliably, it is asked. See
+  [docs/assessments/dependency-advisory-gate-reachability-2026-11-21.md](./docs/assessments/dependency-advisory-gate-reachability-2026-11-21.md).
+
 - The locked dependency graph carries the published fixes for 24 RustSec
   advisories it was still exposed to. `wasmtime` 49.0.2 -> 49.0.4 closes
   fourteen advisories in the engine that executes third-party WASM plugins
