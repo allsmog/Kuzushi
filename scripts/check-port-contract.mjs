@@ -194,6 +194,19 @@ const releaseCandidateRequirements = [
   "moonrepo/setup-rust@abb2d32350334249b178c401e5ec5836e0cd88d3",
 ];
 
+// The dependency policy runs on its own schedule, with its own workflow, and
+// behind nothing: `needs:` here would reopen the hole that skipped Full CI's
+// `cargo-deny` on 2026-11-01. The command and action pin must stay identical
+// to ci-full.yml's copy so the two never disagree about what the policy is.
+const supplyChainRequirements = [
+  "name: Supply chain",
+  "schedule:",
+  "workflow_dispatch:",
+  "cargo-deny:",
+  "EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25",
+  "command: check advisories licenses bans sources",
+];
+
 const heavyCiJobs = [
   "rust-core",
   "windows-compile",
@@ -229,6 +242,8 @@ const failures = [
   ...rustArtifactSpecChecks.flatMap(checkFileNeedles),
   ...checkNeedles(".github/workflows/ci.yml", quickCiRequirements),
   ...checkNeedles(".github/workflows/ci-full.yml", fullCiRequirements),
+  ...checkNeedles(".github/workflows/supply-chain.yml", supplyChainRequirements),
+  ...checkForbiddenNeedles(".github/workflows/supply-chain.yml", ["needs:"]),
   ...checkNeedles(".github/workflows/release.yml", releaseRequirements),
   ...checkNeedles(".github/workflows/release-candidate.yml", releaseCandidateRequirements),
   ...checkForbiddenNeedles(".github/workflows/ci.yml", [

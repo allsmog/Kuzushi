@@ -144,7 +144,10 @@ Setup, threat model, and teardown for the runner live in
 2. Make your changes
 3. Run `pnpm verify:quick`, the focused tests for your change, and
    `cargo deny check advisories licenses bans sources`. Use `pnpm verify:ci`
-   before release-bound changes.
+   before release-bound changes. CI runs that same dependency policy daily in
+   `.github/workflows/supply-chain.yml`, and on any pull request that touches a
+   `Cargo.toml`, `Cargo.lock`, or `deny.toml`; an advisory published after your
+   branch was green turns that scheduled run red with no diff to review.
 4. Open a pull request against `main`
 
 Keep PRs focused — one feature or fix per PR.
