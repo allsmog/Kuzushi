@@ -77,9 +77,5 @@ fn is_floating_gem_constraint(constraint: &str) -> bool {
 }
 
 fn is_floor_only_gem_constraint(constraint: &str) -> bool {
-    is_floor_only_nonempty_range(&compact_gem_constraint(constraint))
-}
-
-fn compact_gem_constraint(constraint: &str) -> String {
-    constraint.split_whitespace().collect()
+    is_floor_only_nonempty_range(&compact_constraint(constraint))
 }
