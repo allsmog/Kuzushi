@@ -10,7 +10,8 @@ mod tests {
     const CARGO_TOML: &str =
         include_str!("../../../../../../tests/fixtures/dep-hygiene/rust/Cargo.toml");
     const GO_MOD: &str = include_str!("../../../../../../tests/fixtures/dep-hygiene/go/go.mod");
-    const REQUIREMENTS_TXT: &str = "flask\nrequests>=2.0\nsafe-lib>=1,<2\n-r dev.txt\n";
+    const REQUIREMENTS_TXT: &str =
+        "flask\nrequests>=2.0\nsafe-lib>=1,<2\nhttpx[http2]\nboto3 >= 1.34\n-r dev.txt\n";
     const PIPFILE: &str = r#"[packages]
 flask = "*"
 requests = ">=2.0"
@@ -288,6 +289,8 @@ SafePkg = "1, < 2"
         assert_eq!(by_package["flask"].severity, DepHygieneSeverity::High);
         assert_eq!(by_package["loguru"].severity, DepHygieneSeverity::High);
         assert_eq!(by_package["httpx"].severity, DepHygieneSeverity::Medium);
+        assert_eq!(by_package["uvicorn"].severity, DepHygieneSeverity::High);
+        assert_eq!(by_package["celery"].severity, DepHygieneSeverity::Medium);
         assert!(!by_package.contains_key("django"));
         assert!(!by_package.contains_key("pydantic"));
         assert!(!by_package.contains_key("sqlalchemy"));
@@ -305,6 +308,8 @@ SafePkg = "1, < 2"
 
         assert_eq!(by_package["flask"].severity, DepHygieneSeverity::High);
         assert_eq!(by_package["requests"].severity, DepHygieneSeverity::Medium);
+        assert_eq!(by_package["httpx"].severity, DepHygieneSeverity::High);
+        assert_eq!(by_package["boto3"].severity, DepHygieneSeverity::Medium);
         assert!(!by_package.contains_key("safe-lib"));
         assert!(!by_package.contains_key("-r"));
         assert!(findings
@@ -841,8 +846,8 @@ SafePkg = "1, < 2"
 
         let report = check_dependency_hygiene(tmp.path()).unwrap();
 
-        assert_eq!(report.count, 86);
-        assert!(report.output().contains("dep-hygiene: 86 risky specifiers"));
+        assert_eq!(report.count, 90);
+        assert!(report.output().contains("dep-hygiene: 90 risky specifiers"));
     }
 
     #[cfg(unix)]

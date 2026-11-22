@@ -28,3 +28,10 @@ pub(in crate::scan::engines::dep_hygiene) fn is_go_pseudo_version(version: &str)
         && hash.len() == 12
         && hash.chars().all(|ch| ch.is_ascii_hexdigit())
 }
+
+/// A constraint with its whitespace removed, for the range predicates above.
+/// PEP 508 and Gemfile specifiers may be written `>= 2.0`, while
+/// [`is_floor_only_nonempty_range`] reads one whitespace-free token.
+pub(in crate::scan::engines::dep_hygiene) fn compact_constraint(constraint: &str) -> String {
+    constraint.split_whitespace().collect()
+}
