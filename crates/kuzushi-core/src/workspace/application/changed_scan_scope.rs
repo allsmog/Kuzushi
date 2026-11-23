@@ -140,6 +140,37 @@ mod tests {
         assert_eq!(scope.paths, vec![PathBuf::from("keep.rs")]);
     }
 
+    /// A target below the repository root: git names changed files against the
+    /// repository wherever it runs, so without `--relative` every path joined
+    /// onto the target named nothing and the scope read as "nothing to scan".
+    #[cfg(unix)]
+    #[test]
+    fn changed_scan_input_names_a_nested_targets_files_against_that_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path();
+        fs::create_dir_all(repo.join("app/src")).unwrap();
+        fs::create_dir_all(repo.join("tools")).unwrap();
+        fs::write(repo.join("app/src/main.rs"), "fn main() {}\n").unwrap();
+        fs::write(repo.join("tools/helper.rs"), "fn helper() {}\n").unwrap();
+        git(repo, &["init", "-q"]);
+        git(repo, &["config", "user.email", "tests@example.com"]);
+        git(repo, &["config", "user.name", "Kuzushi Tests"]);
+        commit_all(repo, "base");
+        let base = git(repo, &["rev-parse", "HEAD"]);
+
+        fs::write(repo.join("app/src/main.rs"), "fn main() { work() }\n").unwrap();
+        fs::write(repo.join("tools/helper.rs"), "fn helper2() {}\n").unwrap();
+        commit_all(repo, "edit inside and outside the target");
+
+        let scope = changed_scan_input(&repo.join("app"), &base, false)
+            .unwrap()
+            .unwrap();
+
+        // Target-relative, and the sibling change no scan of `app` could reach
+        // is not claimed as scope.
+        assert_eq!(scope.paths, vec![PathBuf::from("src/main.rs")]);
+    }
+
     #[cfg(unix)]
     #[test]
     fn changed_scan_input_reports_nothing_to_scan_without_changes() {

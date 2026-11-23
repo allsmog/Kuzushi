@@ -38,12 +38,31 @@ pub fn build_whitebox_diff_scope_report(
     })
 }
 
+/// The files `diff_base...HEAD` changed, each named against `root`.
+///
+/// `--relative` is what puts the names in that domain. Git reports
+/// repository-relative names wherever it is invoked from, so a scan of `app/`
+/// inside a larger repository was handed `app/src/main.rs` while its findings,
+/// its attack-surface map and `root.join(...)` all name `src/main.rs`. Nothing
+/// lined up: every finding tagged `Existing` ("outside changed files"), no
+/// previous finding could be read as not seen, and no changed file could be
+/// opened for caller/callee context. The flag also drops changes outside
+/// `root`, which no scan of `root` could reach, and passing it explicitly
+/// overrides a host's `diff.relative` setting, which the report's
+/// `deterministic` claim depends on.
 pub(crate) fn collect_changed_files(root: &Path, diff_base: &str) -> Result<Vec<ChangedFile>> {
     verify_diff_base(root, diff_base)?;
     let range = format!("{diff_base}...HEAD");
     let mut files = parse_name_status(&git_stdout(
         root,
-        &["diff", "--name-status", "-z", "--find-renames", &range],
+        &[
+            "diff",
+            "--name-status",
+            "-z",
+            "--find-renames",
+            "--relative",
+            &range,
+        ],
     )?)?;
     parse_unified_diff_ranges(
         &git_output(
@@ -54,6 +73,7 @@ pub(crate) fn collect_changed_files(root: &Path, diff_base: &str) -> Result<Vec<
                 "--no-color",
                 "--no-ext-diff",
                 "--find-renames",
+                "--relative",
                 &range,
             ],
         )?,

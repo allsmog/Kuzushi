@@ -565,4 +565,76 @@ mod quoted_name_tests {
             .iter()
             .any(|item| item.kind == DiffContextKind::Caller && item.path == "café.rs"));
     }
+
+    /// A target below the repository root. Git names changed files against the
+    /// repository wherever it runs, so the report was handed `app/src/app.js`
+    /// while the finding, the attack-surface map and `root.join(...)` all name
+    /// `src/app.js`.
+    #[cfg(unix)]
+    #[test]
+    fn a_nested_targets_report_names_its_files_against_the_target() {
+        let temp = tempdir().unwrap();
+        let repo = temp.path();
+        fs::create_dir_all(repo.join("app/src")).unwrap();
+        fs::create_dir_all(repo.join("tools")).unwrap();
+        fs::write(repo.join("app/src/app.js"), "function users() {}\n").unwrap();
+        fs::write(repo.join("tools/helper.js"), "function helper() {}\n").unwrap();
+        git(repo, &["init"]);
+        git(repo, &["add", "."]);
+        git(repo, &["commit", "-m", "base"]);
+
+        fs::write(
+            repo.join("app/src/app.js"),
+            "function users() {}\ndb.query(input);\n",
+        )
+        .unwrap();
+        fs::write(repo.join("tools/helper.js"), "function helper2() {}\n").unwrap();
+        git(repo, &["add", "-A"]);
+        git(repo, &["commit", "-m", "pr"]);
+
+        let finding = Finding::new_tool(
+            "codeql",
+            "js/sql-injection",
+            "src/app.js",
+            2,
+            Some(2),
+            Severity::High,
+            "Request input reaches a query",
+        );
+
+        let report =
+            build_whitebox_diff_scope_report(repo.join("app"), "HEAD~1", &[finding.clone()], &[])
+                .unwrap();
+
+        // Only the target's own file, named the way the target names it.
+        assert_eq!(
+            report
+                .changed_files
+                .iter()
+                .map(|file| file.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["src/app.js"]
+        );
+
+        // The finding sits on the line the pull request added, so the gate has
+        // to read it as new rather than pre-existing.
+        assert_eq!(
+            report
+                .finding_tags
+                .iter()
+                .find(|tag| tag.fingerprint == finding.fingerprint)
+                .map(|tag| tag.status),
+            Some(DiffFindingStatus::New)
+        );
+        assert_eq!(report.summary.new_findings, 1);
+        assert_eq!(report.summary.existing_findings, 0);
+
+        // Context expansion opens the changed file under the target root, so a
+        // path from the wrong domain left this empty.
+        assert!(report.context.iter().any(|item| {
+            item.kind == DiffContextKind::Callee
+                && item.path == "src/app.js"
+                && item.detail.contains("db.query")
+        }));
+    }
 }
