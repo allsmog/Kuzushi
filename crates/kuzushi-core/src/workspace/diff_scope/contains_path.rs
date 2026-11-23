@@ -3,6 +3,8 @@ use super::*;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DiffScope {
+    /// Paths named against the target the diff was taken in, sorted and
+    /// deduped.
     pub files: Vec<PathBuf>,
     pub since_ref: String,
     pub include_worktree: bool,
@@ -18,28 +20,52 @@ impl DiffScope {
     }
 }
 
-pub fn git_diff_files(target: &Path, since_ref: &str, include_worktree: bool) -> Result<DiffScope> {
-    let trimmed = since_ref.trim();
-    // Leading '-' would be parsed as a git option (e.g. --output=<path>
-    // becomes an arbitrary-path write); the metacharacter check is defense
-    // in depth for values echoed into diagnostics.
+/// Refuse a reference git would read as something other than a revision.
+///
+/// A leading `-` is parsed as an option (`--output=<path>` becomes an
+/// arbitrary-path write); the metacharacter check is defense in depth for
+/// values echoed into diagnostics.
+fn ensure_safe_since_ref(trimmed: &str) -> Result<()> {
     crate::git_rev::ensure_safe_git_rev(trimmed, "diff_scope since_ref")?;
     anyhow::ensure!(
         !trimmed.chars().any(|c| matches!(c, ';' | '|' | '`')),
         "diff_scope: since_ref contains forbidden characters"
     );
+    Ok(())
+}
 
+/// `git diff` listing the names `trimmed` changed, framed so every name
+/// arrives as the bytes that open the file and named against `target`.
+///
+/// `-z` prints each name's raw bytes followed by NUL. Without it git quotes any
+/// name holding a non-ASCII byte, a quote, a backslash or a control character,
+/// and a quoted name names no file on disk.
+///
+/// `--relative` names each file against `target` rather than the enclosing
+/// repository root, which is the domain [`DiffScope::files`] declares and the
+/// one its caller joins onto. It also drops changes outside `target`, which no
+/// scan of `target` could reach.
+fn changed_name_listing_command(target: &Path, trimmed: &str, include_worktree: bool) -> Command {
     let mut cmd = Command::new("git");
-    // -z prints each name's raw bytes followed by NUL. Without it git quotes
-    // any name holding a non-ASCII byte, a quote, a backslash or a control
-    // character, and a quoted name names no file on disk.
-    cmd.arg("-C").arg(target).arg("diff").arg("--name-only").arg("-z");
+    cmd.arg("-C")
+        .arg(target)
+        .arg("diff")
+        .arg("--name-only")
+        .arg("-z")
+        .arg("--relative");
     if include_worktree {
         cmd.arg(trimmed);
     } else {
         cmd.arg(format!("{trimmed}...HEAD"));
     }
+    cmd
+}
 
+pub fn git_diff_files(target: &Path, since_ref: &str, include_worktree: bool) -> Result<DiffScope> {
+    let trimmed = since_ref.trim();
+    ensure_safe_since_ref(trimmed)?;
+
+    let mut cmd = changed_name_listing_command(target, trimmed, include_worktree);
     let output = crate::bounded_subprocess::output(&mut cmd, "git diff")
         .with_context(|| format!("diff_scope: could not invoke git in {}", target.display()))?;
     if !output.status.success() {
