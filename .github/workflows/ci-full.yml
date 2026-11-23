@@ -145,9 +145,15 @@ jobs:
       - run: cargo check --workspace --all-targets --locked
       - run: "cargo test -p kuzushi-core worker_protocol::jsonl:: --locked"
 
+  # Deliberately outside the fail-fast fan-out gate. The dependency policy is
+  # cheap (no compile) and its verdict depends on the advisory feed rather than
+  # on this tree, so a red `quality-gauntlet` must not take it down with it:
+  # on 2026-11-01 the gauntlet failed resolving an unrelated quality baseline
+  # and this job was skipped, costing main its only monthly advisory verdict.
+  # supply-chain.yml runs the same policy daily; this copy keeps the release
+  # path (release-candidate.yml calls this workflow) gated on it directly.
   cargo-deny:
     name: cargo-deny
-    needs: quality-gauntlet
     runs-on: ${{ fromJSON(inputs.self_hosted && '["self-hosted","macOS","ARM64","kuzushi-mac"]' || '["ubuntu-latest"]') }}
     timeout-minutes: 10
     steps:

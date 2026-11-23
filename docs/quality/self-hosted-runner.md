@@ -17,6 +17,7 @@ This page records what the arrangement means for reading a CI result.
 | `ci.yml` | `quality-gauntlet` (every ready-PR push), `rust-tests` (clippy + `cargo test`, including the tmux BDD journeys, once per ready PR and in the merge queue) | `ubuntu-latest`; `self_hosted: true` opts into the Mac |
 | `ci-full.yml` | `quality-gauntlet`, `rust-core`, `cargo-deny`, `rust-cli`, `coverage`, `mutation`, `node22-compat`, `verify-pack`, `e2e` | `ubuntu-latest`; `self_hosted: true` opts into the Mac |
 | `ci-full.yml` | `windows-compile` | `windows-latest` (hosted) |
+| `supply-chain.yml` | `cargo-deny` (daily, plus any PR that moves a manifest, lockfile, or `deny.toml`) | `ubuntu-latest` (hosted, no opt-in) |
 | `release-candidate.yml`, `published-release-smoke.yml` | darwin legs | hosted macOS; `hosted: false` or `KUZUSHI_RELEASE_SELF_HOSTED=true` opts into the Mac |
 | `release-candidate.yml`, `release.yml`, `published-release-smoke.yml` | every other job | hosted |
 

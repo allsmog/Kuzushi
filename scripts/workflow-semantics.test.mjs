@@ -382,3 +382,61 @@ test("every native-artifact job restores the executable bit before running the C
     assert.throws(() => requireExecutableBitRestored(stripped, name));
   }
 });
+
+// The dependency policy is the only gate whose verdict changes without the
+// tree changing, so it must not be reachable only through another job's
+// success. Full CI's 2026-11-01 run skipped `cargo-deny` outright because
+// `quality-gauntlet` failed resolving an unrelated quality baseline, and main
+// went two monthly windows with no advisory, license, ban, or source verdict.
+function requireUngatedDependencyPolicy(document, name) {
+  const job = document.jobs["cargo-deny"];
+  assert.ok(job, `${name} must define a cargo-deny job`);
+  assert.equal(job.needs, undefined, `${name} cargo-deny must depend on no other job`);
+  assert.ok(!job.if, `${name} cargo-deny must not be conditional`);
+  assert.ok(
+    job.steps.some((step) => step.with?.command === "check advisories licenses bans sources"),
+    `${name} cargo-deny must run the complete dependency policy`,
+  );
+}
+
+test("the dependency policy gate depends on no other job", () => {
+  for (const name of ["ci-full", "supply-chain"]) {
+    const document = workflow(name);
+    requireUngatedDependencyPolicy(document, name);
+    const gated = structuredClone(document);
+    gated.jobs["cargo-deny"].needs = ["quality-gauntlet"];
+    assert.throws(() => requireUngatedDependencyPolicy(gated, name));
+    const narrowed = structuredClone(document);
+    narrowed.jobs["cargo-deny"].steps = narrowed.jobs["cargo-deny"].steps.map((step) =>
+      step.with?.command ? { ...step, with: { command: "check advisories" } } : step,
+    );
+    assert.throws(() => requireUngatedDependencyPolicy(narrowed, name));
+  }
+});
+
+// A monthly cron is the cadence that let thirteen Wasmtime advisories sit for
+// 21 days in the component that executes untrusted plugin modules (#379). The
+// minute and hour are free to move; the day fields are the contract.
+test("the dependency policy runs daily, not on a monthly cron", () => {
+  const schedule = workflow("supply-chain").on.schedule;
+  assert.ok(schedule?.length > 0, "supply-chain must run on a schedule");
+  for (const { cron } of schedule) {
+    const [, , dayOfMonth, month, dayOfWeek] = cron.trim().split(/\s+/);
+    assert.deepEqual([dayOfMonth, month, dayOfWeek], ["*", "*", "*"], `${cron} is not daily`);
+  }
+});
+
+// The pull-request `paths` allow-list skips by default, so it must still cover
+// every file that can change the dependency graph or the policy applied to it,
+// including this workflow.
+test("the dependency policy covers every manifest a pull request can move", () => {
+  const paths = workflow("supply-chain").on.pull_request.paths;
+  for (const needle of [
+    "**/Cargo.toml",
+    "Cargo.lock",
+    "deny.toml",
+    ".github/workflows/supply-chain.yml",
+  ]) {
+    assert.ok(paths.includes(needle), `supply-chain pull_request paths must include ${needle}`);
+  }
+});
